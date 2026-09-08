@@ -3,6 +3,7 @@ package sourceartifact
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,12 +23,13 @@ type RuntimeProjection struct {
 }
 
 type runtimeProjectionState struct {
-	mu         sync.Mutex
-	bundleHash string
-	identity   string
-	root       string
-	refs       int
-	removed    bool
+	mu          sync.Mutex
+	bundleHash  string
+	identity    string
+	root        string
+	storageRoot string
+	refs        int
+	removed     bool
 }
 
 func MaterializeRuntimeProjection(artifact *AdmittedSourceArtifact) (*RuntimeProjection, error) {
@@ -41,12 +43,24 @@ func MaterializeRuntimeProjection(artifact *AdmittedSourceArtifact) (*RuntimePro
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.MkdirTemp("", "swarm-source-")
+	storageRoot, err := os.MkdirTemp("", "swarm-source-")
 	if err != nil {
 		return nil, fmt.Errorf("create runtime source projection: %w", err)
 	}
 	cleanup := func(cause error) (*RuntimeProjection, error) {
-		return nil, errors.Join(cause, removeProjectionTree(root))
+		return nil, errors.Join(cause, removeProjectionTree(storageRoot))
+	}
+	root := filepath.Join(storageRoot, "source")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		return cleanup(err)
+	}
+	intent := RuntimeProjectionCleanup{BundleHash: artifact.BundleHash(), Identity: identity, Root: storageRoot}
+	marker, err := json.Marshal(intent)
+	if err != nil {
+		return cleanup(err)
+	}
+	if err := os.WriteFile(filepath.Join(storageRoot, "identity.json"), marker, 0o400); err != nil {
+		return cleanup(err)
 	}
 	for _, entry := range artifact.Entries() {
 		target := filepath.Join(root, filepath.FromSlash(entry.Label()))
@@ -66,7 +80,7 @@ func MaterializeRuntimeProjection(artifact *AdmittedSourceArtifact) (*RuntimePro
 	if err := sealProjectionTree(root); err != nil {
 		return cleanup(err)
 	}
-	return &RuntimeProjection{state: &runtimeProjectionState{bundleHash: artifact.BundleHash(), identity: identity, root: root, refs: 1}}, nil
+	return &RuntimeProjection{state: &runtimeProjectionState{bundleHash: artifact.BundleHash(), identity: identity, root: root, storageRoot: storageRoot, refs: 1}}, nil
 }
 
 // Identity is the process-local identity of one materialized projection. It is
@@ -139,7 +153,9 @@ func (p *RuntimeProjection) Release() error {
 	}
 	// Release permanently fences the handle, but failed deletion must remain
 	// retryable by that owner without decrementing its reference a second time.
-	if err := removeProjectionTree(p.state.root); err != nil {
+	if err := SettleRuntimeProjectionCleanup(RuntimeProjectionCleanup{
+		BundleHash: p.state.bundleHash, Identity: p.state.identity, Root: p.state.storageRoot,
+	}); err != nil {
 		return err
 	}
 	p.state.removed = true

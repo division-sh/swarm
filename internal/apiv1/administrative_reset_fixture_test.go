@@ -9,6 +9,12 @@ import (
 	"github.com/google/uuid"
 )
 
+func (emptyAdministrativeResetLifecycle) SettleResources(context.Context) error { return nil }
+
+func (emptyAdministrativeResetLifecycle) ResetSourceProjections(context.Context) ([]destructivereset.SourceProjection, error) {
+	return nil, nil
+}
+
 func acquireAdministrativeResetCapability(t *testing.T, selected startupownership.Store) startupownership.ProcessCapability {
 	t.Helper()
 	cap, err := selected.AcquireProcessCapability(context.Background(), startupownership.AcquireRequest{OwnerID: "administrative-layering", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()})

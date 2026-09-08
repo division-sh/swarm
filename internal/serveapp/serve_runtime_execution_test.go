@@ -51,6 +51,21 @@ func TestSupervisorReleasesConstructedProjectionOnlyAfterSuccessfulJoin(t *testi
 	}
 }
 
+func TestServeUnloadedResetRegistersExecutionWithoutRuntime(t *testing.T) {
+	supervisor := newProcessLifecycleSupervisor(nil, nil)
+	handlers := supervisor.executionDispatch()
+	if len(handlers) != len(serveRuntimeExecutionMethods) {
+		t.Fatal("unloaded execution registration is incomplete or contains duplicates")
+	}
+	for _, method := range serveRuntimeExecutionMethods {
+		_, err := handlers[method](context.Background(), apiv1.Request{Method: method})
+		var application *apiv1.ApplicationError
+		if !errors.As(err, &application) || application.Code != apiv1.BundleUnavailableCode {
+			t.Errorf("%s: %v, want BUNDLE_UNAVAILABLE", method, err)
+		}
+	}
+}
+
 func TestSupervisorDelegatesRegisteredResetContextShutdownOnlyToManager(t *testing.T) {
 	hash := runtimeContextTestHash("a")
 	owner := newSupervisorTestRuntimeOccurrence(t, hash)

@@ -3,7 +3,9 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -63,6 +65,11 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts}),
 		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts}),
 	)
+	for method := range handlers {
+		if !slices.Contains(serveRuntimeExecutionMethods, method) {
+			return nil, fmt.Errorf("runtime execution method %q lacks unloaded reset registration", method)
+		}
+	}
 	// These three consumers use the retained primary manager, fork workspace,
 	// or source-admission bus directly. The other execution methods select and
 	// own their target occurrence through RuntimeContextManager themselves.
@@ -79,6 +86,16 @@ func (s *processLifecycleSupervisor) executionDispatch() map[string]apiv1.Method
 	defer s.mu.RUnlock()
 	handlers := make(map[string]apiv1.MethodHandler, len(s.execution))
 	for method := range s.execution {
+		handlers[method] = nil
+	}
+	// The control API survives a source-clearing reset, including process death
+	// before the final receipt. Registration must not require a live predecessor.
+	if s.currentRT == nil {
+		for _, method := range serveRuntimeExecutionMethods {
+			handlers[method] = nil
+		}
+	}
+	for method := range handlers {
 		handlers[method] = func(ctx context.Context, req apiv1.Request) (any, error) {
 			s.mu.RLock()
 			handler := s.execution[method]
@@ -91,6 +108,16 @@ func (s *processLifecycleSupervisor) executionDispatch() map[string]apiv1.Method
 		}
 	}
 	return handlers
+}
+
+// Kept exhaustive against the real composed handlers by the served reset proof.
+var serveRuntimeExecutionMethods = []string{
+	"agent.frame", "agent.replay", "conversation.fork", "conversation.fork_chat",
+	"conversation.fork_delete", "conversation.fork_list", "conversation.fork_view",
+	"event.publish", "event.replay", "mailbox.acknowledge", "mailbox.begin_input",
+	"mailbox.cancel_input", "mailbox.decide", "mailbox.defer", "mailbox.get", "mailbox.list",
+	"run.continue", "run.fork", "run.pause", "run.start", "run.stop",
+	"runtime.pause", "runtime.resume", "test.setup_entities",
 }
 
 func (s *processLifecycleSupervisor) bindPrimaryExecution(expected *runtime.Runtime, handler apiv1.MethodHandler) apiv1.MethodHandler {

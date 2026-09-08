@@ -69,16 +69,8 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 		caps.ConversationForks = family.Reader()
 		caps.ConversationForkLifecycle = family.Lifecycle()
 	}
-	if family, available := owner.DestructiveReset(); available {
-		planner := runtimedestructivereset.InventoryPlanner{Reader: runtimedestructivereset.CompositeInventoryReader{
-			Reader: family.Inventory(), Containers: req.RuntimeSupervisor,
-		}}
-		caps.ResetCoordinator = &runtimedestructivereset.Coordinator{
-			Operations: req.ProcessCapability,
-			Planner:    planner, Locks: family.Locks(), Quiescer: runtimedestructivereset.Quiescer{Store: family.Quiescence()},
-			Cleaner:    runtimedestructivereset.Cleaner{Store: processOwnedDestructiveResetStore{capability: req.ProcessCapability}},
-			Containers: runtimedestructivereset.ManagedContainerStopper{Runtime: req.RuntimeSupervisor}, RuntimeContexts: req.RuntimeSupervisor,
-		}
+	if _, available := owner.DestructiveReset(); available {
+		caps.ResetCoordinator = buildSelectedResetCoordinator(owner, req.ProcessCapability, req.RuntimeSupervisor)
 	}
 	if family, available := owner.RunFork(); available {
 		artifactStore := owner.SourceArtifactStore()
@@ -109,4 +101,20 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 		caps.RunForkSelector = executor
 	}
 	return caps, nil
+}
+
+func buildSelectedResetCoordinator(owner *storeselected.Owner, capability runtimestartupownership.ProcessCapability, supervisor *processLifecycleSupervisor) *runtimedestructivereset.Coordinator {
+	family, available := owner.DestructiveReset()
+	if !available {
+		return nil
+	}
+	return &runtimedestructivereset.Coordinator{
+		Operations: capability,
+		Planner: runtimedestructivereset.InventoryPlanner{Reader: runtimedestructivereset.CompositeInventoryReader{
+			Reader: family.Inventory(), Containers: supervisor,
+		}},
+		Locks: family.Locks(), Quiescer: runtimedestructivereset.Quiescer{Store: family.Quiescence()},
+		Cleaner:    runtimedestructivereset.Cleaner{Store: processOwnedDestructiveResetStore{capability: capability}},
+		Containers: runtimedestructivereset.ManagedContainerStopper{Runtime: supervisor}, RuntimeContexts: supervisor,
+	}
 }

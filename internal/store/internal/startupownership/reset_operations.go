@@ -11,6 +11,24 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 )
 
+func (s *postgresSession) LookupResetOperation(ctx context.Context, req destructivereset.Request) (out *destructivereset.Operation, err error) {
+	err = s.lease.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var e error
+		out, e = adminpersistence.LookupResetOperationTx(ctx, tx, req)
+		return e
+	})
+	return
+}
+
+func (s *sqliteSession) LookupResetOperation(ctx context.Context, req destructivereset.Request) (out *destructivereset.Operation, err error) {
+	err = s.owner.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var e error
+		out, e = adminpersistence.LookupResetOperationTx(ctx, tx, req)
+		return e
+	})
+	return
+}
+
 func (s *postgresSession) AdmitResetOperation(ctx context.Context, req destructivereset.Request) (out destructivereset.Operation, err error) {
 	err = s.lease.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var e error

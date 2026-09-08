@@ -267,20 +267,18 @@ func guardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []strin
 }
 
 func guardDestructiveResetDirectiveAuthority(ctx context.Context, tx *sql.Tx, runIDs []string, now time.Time, sqlite bool) error {
-	expired := "expires_at <= $2"
-	if sqlite {
-		expired = "julianday(expires_at) <= julianday($2)"
-	}
 	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
 	if len(runIDs) == 0 {
 		return nil
 	}
+	// The directive owner stores canonical UTC time values on both backends.
+	// SQLite's date functions do not parse the driver's Go timestamp encoding.
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		DELETE FROM agent_directive_operations
 		WHERE resolved_run_id IN %[1]s
 		  AND state IN ('succeeded', 'failed')
-		  AND %[2]s
-	`, runSet, expired), runArg, now.UTC()); err != nil {
+		  AND expires_at <= $2
+	`, runSet), runArg, now.UTC()); err != nil {
 		return fmt.Errorf("expire terminal directive authority before destructive reset: %w", err)
 	}
 	var operationID, state string

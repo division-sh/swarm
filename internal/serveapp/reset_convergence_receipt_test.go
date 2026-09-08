@@ -4,18 +4,30 @@ import (
 	"context"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
-func TestRunServeResetFinalReceiptFailureRetryPreservesLiveSuccessorPostgres(t *testing.T) {
-	proof := startServedSessionCleanupProof(t)
-	if _, err := proof.DB.Exec(`CREATE FUNCTION reset_final_receipt_fault() RETURNS trigger LANGUAGE plpgsql AS $$
-	BEGIN IF NEW.phase = 'completed' THEN RAISE EXCEPTION 'reset final receipt fault'; END IF; RETURN NEW; END $$;
-	CREATE TRIGGER reset_final_receipt_fault BEFORE UPDATE ON runtime_reset_operations FOR EACH ROW EXECUTE FUNCTION reset_final_receipt_fault()`); err != nil {
+func TestRunServeResetFinalReceiptFailureRetryPreservesLiveSuccessorBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			proveServedResetFinalReceiptFailure(t, startServedControlProofRuntime(t, backend))
+		})
+	}
+}
+
+func proveServedResetFinalReceiptFailure(t *testing.T, proof servedControlProofRuntime) {
+	t.Helper()
+	var selected any = proof.Postgres
+	if proof.Backend == "sqlite" {
+		selected = proof.SQLite
+	}
+	if err := storetest.SetResetFinalReceiptFault(context.Background(), selected, true); err != nil {
 		t.Fatal(err)
 	}
 	params := map[string]any{"include_source_artifacts": false, "idempotency_key": "final-receipt-" + uuid.NewString()}
-	response := requestServedSessionCleanupMutation(t, proof, "runtime.nuke", params)
+	response := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params)
 	if response.Error == nil {
 		t.Fatal("final receipt failure was reported as success")
 	}
@@ -23,7 +35,7 @@ func TestRunServeResetFinalReceiptFailureRetryPreservesLiveSuccessorPostgres(t *
 	if err := proof.DB.QueryRow("SELECT phase FROM runtime_reset_operations").Scan(&phase); err != nil || phase != "containers_settled" {
 		t.Fatalf("pending phase = %s, %v", phase, err)
 	}
-	if _, err := proof.DB.Exec("DROP TRIGGER reset_final_receipt_fault ON runtime_reset_operations; DROP FUNCTION reset_final_receipt_fault()"); err != nil {
+	if err := storetest.SetResetFinalReceiptFault(context.Background(), selected, false); err != nil {
 		t.Fatal(err)
 	}
 	use, _, err := proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
@@ -43,7 +55,7 @@ func TestRunServeResetFinalReceiptFailureRetryPreservesLiveSuccessorPostgres(t *
 		"event_name": "item.received", "bundle_hash": proof.BundleHash,
 		"payload": map[string]any{"item_id": "after-uncertain-final-receipt"}, "idempotency_key": uuid.NewString(),
 	})
-	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, "postgres", later.RunID, later.EventID, proof.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, later.RunID, later.EventID, proof.Probe)
 	for i := 0; i < 2; i++ {
 		retry := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params)
 		if retry.Error != nil {

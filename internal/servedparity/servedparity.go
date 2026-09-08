@@ -38,6 +38,7 @@ const (
 	ScenarioStandingServiceSuspendLifecycle          = "standing_service_suspend_lifecycle"
 	ScenarioStandingServiceResumeLifecycle           = "standing_service_resume_lifecycle"
 	ScenarioStandingServiceResetLifecycle            = "standing_service_reset_lifecycle"
+	ScenarioDestructiveResetLifecycle                = "destructive_reset_lifecycle"
 	ScenarioMailboxNoticeAcknowledgmentLifecycle     = "mailbox_notice_acknowledgment_lifecycle"
 	ScenarioMailboxBeginInputLifecycle               = "mailbox_begin_input_lifecycle"
 	ScenarioMailboxCancelInputLifecycle              = "mailbox_cancel_input_lifecycle"
@@ -97,6 +98,7 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioStandingServiceSuspendLifecycle, "standing.suspend", "TestServedParityHarnessStandingServiceLifecycle"),
 		servedControlScenario(ScenarioStandingServiceResumeLifecycle, "standing.resume", "TestServedParityHarnessStandingServiceLifecycle"),
 		servedControlScenario(ScenarioStandingServiceResetLifecycle, "standing.reset", "TestServedParityHarnessStandingServiceLifecycle"),
+		servedControlScenario(ScenarioDestructiveResetLifecycle, "runtime.nuke", "TestServedResetRetainClearAndHistoricalReplayBothStores"),
 		servedMailboxDecisionScenario(ScenarioMailboxNoticeAcknowledgmentLifecycle, "mailbox.acknowledge"),
 		servedMailboxDecisionScenario(ScenarioMailboxBeginInputLifecycle, "mailbox.begin_input"),
 		servedMailboxDecisionScenario(ScenarioMailboxCancelInputLifecycle, "mailbox.cancel_input"),

@@ -368,6 +368,7 @@ type RuntimeContextManager struct {
 	nextPublicationGeneration  uint64
 	suppressedStandingServices map[string]struct{}
 	pendingSourceSetTransition *runtimeSourceSetTransitionAdmission
+	resetExecutionFenced       bool
 }
 
 // RuntimeContextPublicationSnapshot is the current public identity of the
@@ -540,6 +541,9 @@ func (m *RuntimeContextManager) BeginStandingRunRecovery(
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.resetExecutionFenced {
+		return nil, worklifetime.ErrAdmissionFenced
+	}
 	var selected *worklifetime.StandingOccurrence
 	for _, entry := range m.contexts {
 		if !runtimeContextEntryLoaded(entry) || entry.standing == nil {
@@ -1220,6 +1224,9 @@ func (m *RuntimeContextManager) ReplaceChannelActivationsContext(ctx context.Con
 }
 
 func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *runtimeContextEntry) (*RuntimeContextUse, error) {
+	if m.resetExecutionFenced {
+		return nil, worklifetime.ErrAdmissionFenced
+	}
 	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.workOwner == nil {
 		return nil, fmt.Errorf("runtime context is unavailable")
 	}

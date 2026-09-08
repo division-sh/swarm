@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 type delayedSubscriptionBackgroundNode struct {
@@ -129,6 +131,111 @@ func TestRuntimeStartWaitsForSystemNodeSubscriptionReadiness(t *testing.T) {
 	}
 	if err := rt.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+func TestPreparedRuntimeStartupKeepsFirstCandidateUnadmittedWhileSecondBlocksOrFails(t *testing.T) {
+	for _, failSecond := range []bool{false, true} {
+		t.Run(fmt.Sprint(failSecond), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+			defer cancel()
+			first := newStartupReadinessTestRuntime(t)
+			firstStart, err := first.PrepareStart(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := first.Shutdown(); err != nil {
+					t.Error(err)
+				}
+			})
+			node := newDelayedSubscriptionBackgroundNode()
+			second := newStartupReadinessTestRuntime(t, node)
+			t.Cleanup(func() {
+				if err := second.Shutdown(); err != nil {
+					t.Error(err)
+				}
+			})
+			type preparedResult struct {
+				start *PreparedStartup
+				err   error
+			}
+			done := make(chan preparedResult, 1)
+			go func() { start, err := second.PrepareStart(ctx); done <- preparedResult{start, err} }()
+			select {
+			case <-node.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("second candidate did not reach subscription barrier")
+			}
+			grant, err := first.CurrentStartupGrantEvidence()
+			if err != nil || grant.State != startupownership.GrantPrepared {
+				t.Fatalf("first candidate escaped before complete-set preparation: %+v, %v", grant, err)
+			}
+			if failSecond {
+				cancel()
+			} else {
+				close(node.release)
+			}
+			var result preparedResult
+			select {
+			case result = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("second preparation did not settle")
+			}
+			if failSecond {
+				if !errors.Is(result.err, context.Canceled) {
+					t.Fatalf("second failure = %v", result.err)
+				}
+				if err := first.Shutdown(); err != nil {
+					t.Fatal(err)
+				}
+				if err := firstStart.Start(); err == nil {
+					t.Fatal("retired prepared runtime reopened execution")
+				}
+				return
+			}
+			if result.err != nil {
+				t.Fatal(result.err)
+			}
+			for _, start := range []*PreparedStartup{firstStart, result.start} {
+				if err := start.Start(); err != nil {
+					t.Fatal(err)
+				}
+				if err := start.Start(); err == nil {
+					t.Fatal("prepared startup released execution twice")
+				}
+			}
+			grant, err = first.CurrentStartupGrantEvidence()
+			if err != nil || grant.State != startupownership.GrantAdmitted {
+				t.Fatalf("converged startup = %+v, %v", grant, err)
+			}
+		})
+	}
+}
+
+func TestPreparedRuntimeStartupRejectsCancellationBeforeExecutionRelease(t *testing.T) {
+	rt := newStartupReadinessTestRuntime(t)
+	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+	defer cancel()
+	t.Cleanup(func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Error(err)
+		}
+	})
+	prepared, err := rt.PrepareStart(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := prepared.Start(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled preparation execution release = %v", err)
+	}
+	grant, err := rt.CurrentStartupGrantEvidence()
+	if err == nil && grant.State == startupownership.GrantAdmitted {
+		t.Fatalf("canceled preparation admitted execution: %+v", grant)
+	}
+	if err := prepared.Start(); err == nil {
+		t.Fatal("canceled preparation can be retried")
 	}
 }
 

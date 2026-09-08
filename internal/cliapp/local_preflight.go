@@ -82,6 +82,7 @@ type LocalPreflightReport struct {
 
 type localPreflightRequest struct {
 	Mode                   string
+	AdmittedSource         semanticview.Source
 	SourceFree             bool
 	RepoRoot               string
 	Config                 *config.Config
@@ -277,7 +278,14 @@ func WriteWorkspacePrerequisiteFailure(out io.Writer, location string, err error
 
 func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightRequest, report *LocalPreflightReport) (semanticview.Source, string, bool) {
 	appendProviderTriggerCapabilitySubjects(report, req.ProviderTriggerPacks)
-	source, sourceRoot, err := loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths, req.PlatformPackBase)
+	source := req.AdmittedSource
+	sourceRoot := ""
+	var err error
+	if source == nil {
+		// Standalone doctor has no admitted serve generation. Serve supplies
+		// its exact source and never reinterprets the mutable input directory.
+		source, sourceRoot, err = loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths, req.PlatformPackBase)
+	}
 	if err != nil {
 		message := err.Error()
 		remediation := "fix the selected source directory or platform configuration"
@@ -711,10 +719,16 @@ func serveLocalPreflightMode(opts ServeOptions) string {
 	return "serve"
 }
 
-func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad) LocalPreflightReport {
+func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad, source semanticview.Source) LocalPreflightReport {
 	mode := serveLocalPreflightMode(opts)
+	if source == nil {
+		report := LocalPreflightReport{Mode: mode, Owner: localPreflightOwner}
+		report.add(localPreflightWorkspacePrerequisite, "admitted_source_missing", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, "serve preflight requires its admitted source", "load the exact source before preflight")
+		return report.finalize()
+	}
 	return runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
 		Mode:                   mode,
+		AdmittedSource:         source,
 		RepoRoot:               repo,
 		Config:                 cfg,
 		ResolvedPaths:          resolvedPaths,
