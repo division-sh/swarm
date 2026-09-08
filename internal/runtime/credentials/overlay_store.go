@@ -139,15 +139,15 @@ func (s *OverlayStore) Delete(ctx context.Context, key string) error {
 	return s.writable.Delete(ctx, key)
 }
 
-func (s *OverlayStore) DeleteWithReceipt(ctx context.Context, key, receipt string) (bool, error) {
+func (s *OverlayStore) DeleteWithReceiptAndSeal(ctx context.Context, key, receipt string, seal ValueSeal) (bool, error) {
 	if s == nil || s.writable == nil {
 		return false, ErrNotWritable
 	}
 	deleter, ok := s.writable.(ReceiptDeleter)
 	if !ok || deleter == nil {
-		return false, fmt.Errorf("writable credential store does not support receipt-fenced deletion")
+		return false, fmt.Errorf("writable credential store does not support receipt-and-value-seal-fenced deletion")
 	}
-	return deleter.DeleteWithReceipt(ctx, key, receipt)
+	return deleter.DeleteWithReceiptAndSeal(ctx, key, receipt, seal)
 }
 
 func (s *OverlayStore) hasDurableValueSealKeyHome() bool {

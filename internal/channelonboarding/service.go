@@ -1383,7 +1383,9 @@ func (s *Service) releaseSupersededCredentials(ctx context.Context, current Oper
 	return nil
 }
 
-func credentialCleanupIdentity(admission CredentialAdmission) string {
+// credentialCleanupReceiptIdentity makes a checkpointed admission win over a
+// later recovery observation that reused the same deterministic retry receipt.
+func credentialCleanupReceiptIdentity(admission CredentialAdmission) string {
 	return admission.StoreKey + "\x00" + admission.Receipt
 }
 
