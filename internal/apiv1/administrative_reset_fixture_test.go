@@ -35,7 +35,7 @@ func (s administrativeResetCleanup) ApplyDestructiveResetCleanup(ctx context.Con
 // proof of actual execution withdrawal, joining and reconstruction.
 type emptyAdministrativeResetLifecycle struct{}
 
-func (emptyAdministrativeResetLifecycle) BeginDestructiveReset(context.Context) (destructivereset.RuntimeReset, error) {
+func (emptyAdministrativeResetLifecycle) BeginDestructiveReset(context.Context, string) (destructivereset.RuntimeReset, error) {
 	return emptyAdministrativeResetLifecycle{}, nil
 }
 func (emptyAdministrativeResetLifecycle) Complete(context.Context, bool) error { return nil }

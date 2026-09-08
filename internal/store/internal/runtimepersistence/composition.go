@@ -318,6 +318,11 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		nowFn:                  time.Now,
 	}
 	store.timerObligationSQLiteReader = timerObligations
+	destructiveReset, err := storeadmin.NewDestructiveResetSQLite(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.destructiveResetSQLiteOwner = destructiveReset
 	genericSchedules, err := storegenericschedule.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err

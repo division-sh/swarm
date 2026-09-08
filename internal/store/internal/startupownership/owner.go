@@ -258,6 +258,9 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 				result = *previous
 				return nil
 			}
+			if err := validateResetSourceSetTx(txctx, tx, req, topology, false); err != nil {
+				return err
+			}
 		}
 		if topology != nil {
 			if _, err := commitSourceSetTx(txctx, tx, *topology, false); err != nil {
@@ -435,6 +438,9 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req ru
 			if previous != nil {
 				result = *previous
 				return nil
+			}
+			if err := validateResetSourceSetTx(txctx, tx, req, topology, true); err != nil {
+				return err
 			}
 		}
 		if topology != nil {

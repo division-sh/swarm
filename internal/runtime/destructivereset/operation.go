@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 )
 
 // OperationPhase records durable effects, not the availability of a runtime in
@@ -35,14 +37,15 @@ func (e *OperationConflictError) Error() string { return ErrOperationConflict.Er
 func (e *OperationConflictError) Unwrap() error { return ErrOperationConflict }
 
 type Operation struct {
-	Request    Request               `json:"request"`
-	Revision   int64                 `json:"revision"`
-	Phase      OperationPhase        `json:"phase"`
-	Plan       *Result               `json:"plan,omitempty"`
-	Quiescence *QuiescenceResult     `json:"quiescence,omitempty"`
-	Cleanup    *CleanupResult        `json:"cleanup,omitempty"`
-	Containers *ContainerResetResult `json:"containers,omitempty"`
-	Response   *ExecutionResult      `json:"response,omitempty"`
+	Request    Request                      `json:"request"`
+	Revision   int64                        `json:"revision"`
+	Phase      OperationPhase               `json:"phase"`
+	SourceSet  *agenttopology.SourceSetPlan `json:"source_set"`
+	Plan       *Result                      `json:"plan,omitempty"`
+	Quiescence *QuiescenceResult            `json:"quiescence,omitempty"`
+	Cleanup    *CleanupResult               `json:"cleanup,omitempty"`
+	Containers *ContainerResetResult        `json:"containers,omitempty"`
+	Response   *ExecutionResult             `json:"response,omitempty"`
 }
 
 // OperationStore is reset-family authority retained independently of the API
@@ -82,6 +85,15 @@ func (o Operation) Validate() error {
 	}
 	if !reflect.DeepEqual(initial.Request, o.Request) || o.Revision < 1 {
 		return errors.New("invalid reset operation identity or revision")
+	}
+	if o.SourceSet != nil {
+		canonical, err := agenttopology.NewSourceSetPlan(o.SourceSet.Sources, o.SourceSet.Agents)
+		if err != nil {
+			return fmt.Errorf("invalid reset source-set snapshot: %w", err)
+		}
+		if !reflect.DeepEqual(&canonical, o.SourceSet) {
+			return errors.New("reset source-set snapshot is not canonical")
+		}
 	}
 	phase := map[OperationPhase]int{PhaseAdmitted: 0, PhasePlanned: 1, PhaseQuiesced: 2, PhaseCleanupCommitted: 3, PhaseContainersSettled: 4, PhaseCompleted: 5}
 	step, ok := phase[o.Phase]
@@ -150,6 +162,7 @@ func ValidateOperationTransition(before, after Operation) error {
 	recordPartialResponse := before.Phase == PhaseCleanupCommitted && after.Phase == before.Phase && before.Response == nil && after.Response != nil
 	if (!recordPartialResponse && next[before.Phase] != after.Phase) || after.Revision != before.Revision+1 ||
 		!reflect.DeepEqual(before.Request, after.Request) ||
+		!reflect.DeepEqual(before.SourceSet, after.SourceSet) ||
 		(before.Plan != nil && !reflect.DeepEqual(before.Plan, after.Plan)) ||
 		(before.Quiescence != nil && !reflect.DeepEqual(before.Quiescence, after.Quiescence)) ||
 		(before.Cleanup != nil && !reflect.DeepEqual(before.Cleanup, after.Cleanup)) ||

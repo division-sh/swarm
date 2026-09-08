@@ -11,27 +11,41 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/google/uuid"
 )
 
 type serveRuntimeReset struct {
-	supervisor *processLifecycleSupervisor
-	release    sync.Once
-	completed  bool
+	supervisor  *processLifecycleSupervisor
+	operationID string
+	release     sync.Once
 }
 
-func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context) (destructivereset.RuntimeReset, error) {
+func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context, operationID string) (destructivereset.RuntimeReset, error) {
 	if s == nil {
 		return nil, errors.New("reset requires process lifecycle supervisor")
+	}
+	if id, err := uuid.Parse(operationID); err != nil || id == uuid.Nil || id.String() != operationID {
+		return nil, errors.New("reset requires its canonical durable operation ID")
 	}
 	s.operationMu.Lock()
 	if err := ctx.Err(); err != nil {
 		s.operationMu.Unlock()
 		return nil, err
 	}
+	if s.resetOperationID == operationID && s.resetConverged {
+		// Publication may precede an uncertain final journal acknowledgment.
+		// The same operation must not withdraw its own successor execution.
+		return &serveRuntimeReset{supervisor: s, operationID: operationID}, nil
+	}
 	if s.resetBuildExecution == nil || len(s.resetRequests) == 0 {
 		s.operationMu.Unlock()
 		return nil, errors.New("reset requires admitted-source reconstruction inputs")
 	}
+	if s.resetOperationID != operationID && s.resetOperationID != "" && !s.resetConverged {
+		s.operationMu.Unlock()
+		return nil, destructivereset.ErrOperationInProgress
+	}
+	s.resetOperationID, s.resetConverged = operationID, false
 	s.mu.Lock()
 	s.resetting = true
 	if s.ready != nil {
@@ -46,7 +60,7 @@ func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context) 
 		s.stopRunStalled()
 		s.stopRunStalled = nil
 	}
-	return &serveRuntimeReset{supervisor: s}, nil
+	return &serveRuntimeReset{supervisor: s, operationID: operationID}, nil
 }
 
 func (r *serveRuntimeReset) Release() {
@@ -54,10 +68,13 @@ func (r *serveRuntimeReset) Release() {
 }
 
 func (r *serveRuntimeReset) Complete(ctx context.Context, retainSources bool) error {
-	if r.completed {
+	s := r.supervisor
+	if s.resetOperationID != r.operationID {
+		return errors.New("reset lifecycle operation identity changed")
+	}
+	if s.resetConverged {
 		return nil
 	}
-	s := r.supervisor
 	if err := s.releaseResetProjections(ctx); err != nil {
 		return err
 	}
@@ -74,7 +91,7 @@ func (r *serveRuntimeReset) Complete(ctx context.Context, retainSources bool) er
 		s.resetting = false
 		s.mu.Unlock()
 	}
-	r.completed = true
+	s.resetConverged = true
 	return nil
 }
 

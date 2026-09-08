@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 )
 
@@ -15,10 +16,10 @@ const resetOperationColumns = "operation_id, actor_token_id, idempotency_key, re
 
 // These functions run inside the selected retained process transaction. The
 // reset family, not a backend adapter, validates identities and transitions.
-func AdmitResetOperationTx(ctx context.Context, tx *sql.Tx, req destructivereset.Request, sqlite bool) (destructivereset.Operation, error) {
+func LookupResetOperationTx(ctx context.Context, tx *sql.Tx, req destructivereset.Request) (*destructivereset.Operation, error) {
 	initial, err := destructivereset.NewOperation(req)
 	if err != nil {
-		return destructivereset.Operation{}, err
+		return nil, err
 	}
 	req = initial.Request
 	query := `SELECT ` + resetOperationColumns + ` FROM runtime_reset_operations WHERE operation_id = $1`
@@ -29,27 +30,40 @@ func AdmitResetOperationTx(ctx context.Context, tx *sql.Tx, req destructivereset
 	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return destructivereset.Operation{}, err
+		return nil, err
 	}
 	var found *destructivereset.Operation
 	for rows.Next() {
 		op, err := scanResetOperation(rows)
 		if err != nil {
 			rows.Close()
-			return destructivereset.Operation{}, err
+			return nil, err
 		}
 		if found != nil || !op.Matches(req) {
 			rows.Close()
-			return destructivereset.Operation{}, &destructivereset.OperationConflictError{OperationID: op.Request.OperationID, OriginalRequestHash: op.Request.RequestHash, ConflictingRequestHash: req.RequestHash}
+			return nil, &destructivereset.OperationConflictError{OperationID: op.Request.OperationID, OriginalRequestHash: op.Request.RequestHash, ConflictingRequestHash: req.RequestHash}
 		}
 		found = &op
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return destructivereset.Operation{}, err
+		return nil, err
 	}
 	if found != nil {
-		return *found, nil
+		return found, nil
 	}
+	return nil, nil
+}
+
+func AdmitResetOperationTx(ctx context.Context, tx *sql.Tx, req destructivereset.Request, sourceSet *agenttopology.SourceSetPlan, sqlite bool) (destructivereset.Operation, error) {
+	initial, err := destructivereset.NewOperation(req)
+	if err != nil {
+		return destructivereset.Operation{}, err
+	}
+	initial.SourceSet = sourceSet
+	if err := initial.Validate(); err != nil {
+		return destructivereset.Operation{}, err
+	}
+	req = initial.Request
 	var pending string
 	err = tx.QueryRowContext(ctx, `SELECT operation_id FROM runtime_reset_operations WHERE active_slot = 1`).Scan(&pending)
 	if err == nil {
@@ -66,7 +80,7 @@ func AdmitResetOperationTx(ctx context.Context, tx *sql.Tx, req destructivereset
 	if req.IdempotencyKey != "" {
 		key = req.IdempotencyKey
 	}
-	query = `INSERT INTO runtime_reset_operations (operation_id, actor_token_id, idempotency_key, revision, phase, active_slot, record) VALUES ($1, $2, $3, 1, $4, 1, $5::jsonb)`
+	query := `INSERT INTO runtime_reset_operations (operation_id, actor_token_id, idempotency_key, revision, phase, active_slot, record) VALUES ($1, $2, $3, 1, $4, 1, $5::jsonb)`
 	if sqlite {
 		query = `INSERT INTO runtime_reset_operations (operation_id, actor_token_id, idempotency_key, revision, phase, active_slot, record) VALUES ($1, $2, $3, 1, $4, 1, $5)`
 	}

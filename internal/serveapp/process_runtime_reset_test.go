@@ -4,11 +4,39 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/google/uuid"
 )
+
+func TestResetConvergedOperationRetryDoesNotWithdrawSuccessor(t *testing.T) {
+	id := uuid.NewString()
+	ready := &atomic.Bool{}
+	ready.Store(true)
+	releases := 0
+	s := &processLifecycleSupervisor{
+		resetOperationID: id, resetConverged: true, ready: ready,
+		resetContexts: []serveRuntimeBundleContext{{
+			loaded: serveRuntimeBundle{cleanup: func() error { releases++; return nil }},
+		}},
+	}
+	// A converged operation must not need construction inputs or a manager.
+	// Touching withdrawal/reconstruction would fail, not silently pass this test.
+	for i := 0; i < 2; i++ {
+		reset, err := s.BeginDestructiveReset(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = reset.Complete(context.Background(), true)
+		reset.Release()
+		if err != nil || !ready.Load() || s.resetting || releases != 0 {
+			t.Fatalf("retry touched successor: err=%v ready=%v resetting=%v releases=%d", err, ready.Load(), s.resetting, releases)
+		}
+	}
+}
 
 func TestResetInventoryExcludesForeignAndSuccessorProjections(t *testing.T) {
 	root := t.TempDir()

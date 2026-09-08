@@ -76,7 +76,7 @@ func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testi
 
 type countingAdministrativeResetLifecycle struct{ begins int }
 
-func (l *countingAdministrativeResetLifecycle) BeginDestructiveReset(context.Context) (destructivereset.RuntimeReset, error) {
+func (l *countingAdministrativeResetLifecycle) BeginDestructiveReset(context.Context, string) (destructivereset.RuntimeReset, error) {
 	l.begins++
 	return emptyAdministrativeResetLifecycle{}, nil
 }

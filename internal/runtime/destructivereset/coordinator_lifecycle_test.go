@@ -19,7 +19,7 @@ func TestCoordinatorReconstructsOnlyAfterKnownSafeBoundary(t *testing.T) {
 		{name: "retained", wantRetain: []bool{true}},
 		{name: "deleted", include: true, wantRetain: []bool{false}},
 		{name: "dry run", dry: true},
-		{name: "planning failure compensation", failStage: "plan", wantRetain: []bool{true}, wantError: true},
+		{name: "pending planning failure stays fenced", failStage: "plan", wantError: true},
 		{name: "uncertain quiescence stays fenced", failStage: "quiescence", wantError: true},
 		{name: "uncertain cleanup stays fenced", failStage: "cleanup", wantError: true},
 		{name: "uncertain container stays fenced", failStage: "containers", wantError: true},
@@ -77,7 +77,7 @@ type recordingResetLifecycle struct {
 	retained         []bool
 }
 
-func (l *recordingResetLifecycle) BeginDestructiveReset(context.Context) (RuntimeReset, error) {
+func (l *recordingResetLifecycle) BeginDestructiveReset(context.Context, string) (RuntimeReset, error) {
 	l.begins++
 	return l, nil
 }

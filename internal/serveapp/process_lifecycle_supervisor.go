@@ -34,6 +34,8 @@ type processLifecycleSupervisor struct {
 	resetBuildExecution       func(serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error)
 	resetRefresh              func(context.Context) error
 	resetGeneration           uint64
+	resetOperationID          string
+	resetConverged            bool
 	stopRunStalled            func()
 }
 
