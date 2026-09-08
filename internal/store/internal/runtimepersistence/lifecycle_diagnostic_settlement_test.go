@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,11 +15,13 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -378,6 +381,120 @@ func newIndependentLifecycleDiagnosticStores(t *testing.T, sqlite bool) (lifecyc
 	}
 }
 
+type diagnosticSelectionBarrier struct {
+	runtimemanager.AgentLifecycleDiagnosticPersistence
+	arrived chan<- struct{}
+	release <-chan struct{}
+}
+
+type diagnosticRuntimeLoggerHook struct {
+	*runtimepkg.RuntimeLogger
+}
+
+func (h diagnosticRuntimeLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
+	return h.RuntimeLogger.Log(ctx, runtimepkg.RuntimeLogEntry{
+		Level: level, Message: message, Component: component, Action: action,
+		EventID: eventID, EventType: eventType, AgentID: agentID, EntityID: entityID,
+		SessionID: sessionID, Correlation: correlation, Detail: detail,
+		Failure: failure, DurationUS: durationUS,
+	})
+}
+
+func (s diagnosticSelectionBarrier) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]diaglog.LifecycleDiagnostic, error) {
+	rows, err := s.AgentLifecycleDiagnosticPersistence.ListPendingAgentLifecycleDiagnostics(ctx, limit)
+	if err != nil || len(rows) == 0 {
+		return rows, err
+	}
+	select {
+	case s.arrived <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-s.release:
+		return rows, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Diagnostic recovery precedes static admission. Even two real managers stopped
+// at that later gate must settle their identical SQL selections exactly once.
+// Successful complete startup is covered by the served crash/recovery proof.
+func TestLifecycleDiagnosticCompetingStartupManagersBeforeAdmission(t *testing.T) {
+	for _, sqlite := range []bool{true, false} {
+		for _, sameManager := range []bool{true, false} {
+			t.Run(fmt.Sprintf("sqlite=%t/same_manager=%t", sqlite, sameManager), func(t *testing.T) {
+				store, db, reopen := newIndependentLifecycleDiagnosticStores(t, sqlite)
+				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+				defer cancel()
+				item := createLifecycleDiagnostic(t, ctx, store)
+				other, closeOther := reopen()
+				defer closeOther()
+				arrived, release := make(chan struct{}, 2), make(chan struct{})
+				var releaseOnce sync.Once
+				unblock := func() { releaseOnce.Do(func() { close(release) }) }
+				defer unblock()
+				makeManager := func(selected lifecycleDiagnosticTestStore) *runtimemanager.AgentManager {
+					t.Helper()
+					bus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), runtimebus.EventBusOptions{
+						Logger: diagnosticRuntimeLoggerHook{runtimepkg.NewRuntimeLogger(selected, executionposture.Live)},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					return ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+						BaseContext: ctx, ExecutionPosture: executionposture.Live,
+						ReceiverExecution: eventreceiver.NormalExecution(),
+						WorkOwner:         storeTestWorkOwner(t),
+						PersistenceRoles: runtimemanager.PersistenceRoles{
+							LifecycleDiagnostics: diagnosticSelectionBarrier{selected, arrived, release},
+						},
+					}, selected.(runtimemanager.ManagerPersistence)))
+				}
+				first := makeManager(store)
+				second := first
+				if !sameManager {
+					second = makeManager(other)
+				}
+				results := make(chan error, 2)
+				var workers sync.WaitGroup
+				defer workers.Wait()
+				defer unblock()
+				for _, manager := range []*runtimemanager.AgentManager{first, second} {
+					workers.Add(1)
+					go func() {
+						defer workers.Done()
+						_, err := manager.HydrateForStartup(runtimecorrelation.WithRunID(ctx, uuid.NewString()))
+						results <- err
+					}()
+				}
+				for i := 0; i < 2; i++ {
+					select {
+					case <-arrived:
+					case <-ctx.Done():
+						t.Fatal("both real manager readers did not reach the selected row")
+					}
+				}
+				unblock()
+				for i := 0; i < 2; i++ {
+					if err := <-results; err == nil || !strings.Contains(err.Error(), "static declaration reconciliation must hydrate agents") {
+						t.Fatalf("startup must settle diagnostics then fail closed at unprepared static admission: %v", err)
+					}
+				}
+				pending, err := store.ListPendingAgentLifecycleDiagnostics(ctx, 100)
+				if err != nil || len(pending) != 0 || diagnosticLogCount(t, db, item.OutboxID) != 1 {
+					t.Fatalf("competing manager settlement: pending=%d err=%v", len(pending), err)
+				}
+				var transitions int
+				if err := db.QueryRow("SELECT count(*) FROM agent_lifecycle_transition_facts").Scan(&transitions); err != nil || transitions != 1 {
+					t.Fatalf("diagnostic recovery repeated lifecycle work: transitions=%d err=%v", transitions, err)
+				}
+			})
+		}
+	}
+}
+
 func TestLifecycleDiagnosticDurablePageBoundaryAndReopen(t *testing.T) {
 	for _, sqlite := range []bool{true, false} {
 		t.Run(fmt.Sprintf("sqlite=%t", sqlite), func(t *testing.T) {
@@ -415,7 +532,22 @@ func TestLifecycleDiagnosticDurablePageBoundaryAndReopen(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			remaining, err := projector.ListPendingAgentLifecycleDiagnostics(ctx, 100)
+			if err != nil || len(remaining) != 1 {
+				closeProjector()
+				t.Fatalf("second page=%d err=%v", len(remaining), err)
+			}
+			removeFault := installLifecycleDiagnosticFailure(t, db, sqlite, "acknowledgment")
+			if err := logger.ProjectLifecycleDiagnostic(ctx, remaining[0]); err == nil {
+				closeProjector()
+				t.Fatal("second-page acknowledgment fault was hidden")
+			}
+			if got := diagnosticLogCount(t, db, remaining[0].OutboxID); got != 0 {
+				closeProjector()
+				t.Fatalf("failed second-page transaction retained %d logs", got)
+			}
 			closeProjector()
+			removeFault()
 			// Reopen, not just reallocate a logger: durable receipt and pending selection
 			// must survive loss of the complete projecting handle.
 			next, closeNext := reopen()

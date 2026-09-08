@@ -536,7 +536,7 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 	}
 	if result.Jobs != nil {
 		jobs := result.Jobs
-		if _, err := fmt.Fprintf(w, "\n## Whole Proof Jobs\n\nProfile `%s`, run %d attempt %d: %d jobs, %.2f runner-minutes, %.0fs makespan, %.0fs aggregate queue time, peak concurrency %d. Whole-job improvement target: <=180s; command budgets above remain separately evaluated. Step-level setup/cache/proof/upload evidence is retained in the JSON report.\n\n| Surface | Whole job | Queue | Outside primary command |\n| --- | ---: | ---: | ---: |\n", jobs.Profile, jobs.RunID, jobs.RunAttempt, jobs.UnitCount, jobs.RunnerMinutes, jobs.MakespanSeconds, jobs.QueueSeconds, jobs.PeakConcurrency); err != nil {
+		if _, err := fmt.Fprintf(w, "\n## Whole Proof Jobs\n\nProfile `%s`, run %d attempt %d: %d jobs, %.2f runner-minutes, %.0fs makespan, %.0fs aggregate admission/start lag, peak concurrency %d. Start lag is job created-to-started time, not an isolated measurement of runner queueing. Whole-job improvement target: <=180s; command budgets above remain separately evaluated. Step-level setup/cache/proof/upload evidence is retained in the JSON report.\n\n| Surface | Whole job | Start lag | Outside primary command |\n| --- | ---: | ---: | ---: |\n", jobs.Profile, jobs.RunID, jobs.RunAttempt, jobs.UnitCount, jobs.RunnerMinutes, jobs.MakespanSeconds, jobs.StartLagSeconds, jobs.PeakConcurrency); err != nil {
 			return err
 		}
 		for _, surface := range result.Surfaces {
@@ -547,7 +547,7 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 			if surface.PrimarySeconds != nil {
 				overhead -= *surface.PrimarySeconds
 			}
-			if _, err := fmt.Fprintf(w, "| `%s` | %.0fs | %.0fs | %.0fs |\n", surface.Surface, surface.Job.ElapsedSeconds, surface.Job.QueueSeconds, overhead); err != nil {
+			if _, err := fmt.Fprintf(w, "| `%s` | %.0fs | %.0fs | %.0fs |\n", surface.Surface, surface.Job.ElapsedSeconds, surface.Job.StartLagSeconds, overhead); err != nil {
 				return err
 			}
 		}

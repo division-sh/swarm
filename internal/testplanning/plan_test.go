@@ -205,7 +205,11 @@ unknown: true
 }
 
 func TestMatrixContainsOnlyPlanUnitIDs(t *testing.T) {
-	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfilePRCommon, "common", "abc")
+	plan, err := BuildPlan(testPolicy(), WeightModel{Version: WeightModelVersion, SourceRunID: "run", Packages: map[string]float64{"module/a": 1}}, []string{"module/a", "module/catalog"}, ProfilePRCommon, "common", "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := json.Marshal(plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,10 +226,26 @@ func TestMatrixContainsOnlyPlanUnitIDs(t *testing.T) {
 	if len(matrix.Include) != len(plan.Units) {
 		t.Fatalf("matrix rows = %d, want %d", len(matrix.Include), len(plan.Units))
 	}
-	for _, row := range matrix.Include {
+	seen := make(map[string]bool)
+	for i, row := range matrix.Include {
 		if len(row) != 1 || row["unit"] == "" {
 			t.Fatalf("matrix leaks a second authority: %v", row)
 		}
+		unit, err := plan.Unit(row["unit"])
+		if err != nil || seen[unit.ID] {
+			t.Fatalf("unknown or repeated matrix unit: %v", row)
+		}
+		seen[unit.ID] = true
+		if i > 0 {
+			prior, _ := plan.Unit(matrix.Include[i-1]["unit"])
+			if prior.WeightSeconds < unit.WeightSeconds || (prior.WeightSeconds == unit.WeightSeconds && prior.ID > unit.ID) {
+				t.Fatalf("matrix is not longest-first with stable ID ties: %v", matrix.Include)
+			}
+		}
+	}
+	after, err := json.Marshal(plan)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("matrix generation mutated the digest-bound plan: %v", err)
 	}
 }
 

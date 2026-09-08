@@ -37,9 +37,9 @@ type ActionStep struct {
 }
 
 type JobTiming struct {
-	Job            ActionJob `json:"job"`
-	ElapsedSeconds float64   `json:"elapsed_seconds"`
-	QueueSeconds   float64   `json:"queue_seconds"`
+	Job             ActionJob `json:"job"`
+	ElapsedSeconds  float64   `json:"elapsed_seconds"`
+	StartLagSeconds float64   `json:"start_lag_seconds"`
 }
 
 type JobSummary struct {
@@ -48,7 +48,7 @@ type JobSummary struct {
 	RunAttempt      int     `json:"run_attempt"`
 	UnitCount       int     `json:"unit_count"`
 	RunnerMinutes   float64 `json:"runner_minutes"`
-	QueueSeconds    float64 `json:"queue_seconds"`
+	StartLagSeconds float64 `json:"start_lag_seconds"`
 	MakespanSeconds float64 `json:"makespan_seconds"`
 	PeakConcurrency int     `json:"peak_concurrency"`
 }
@@ -123,7 +123,7 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 		if job.Conclusion != "success" {
 			problem("proof job did not succeed: " + job.Name)
 		}
-		timing := &JobTiming{Job: job, ElapsedSeconds: job.CompletedAt.Sub(job.StartedAt).Seconds(), QueueSeconds: job.StartedAt.Sub(job.CreatedAt).Seconds()}
+		timing := &JobTiming{Job: job, ElapsedSeconds: job.CompletedAt.Sub(job.StartedAt).Seconds(), StartLagSeconds: job.StartedAt.Sub(job.CreatedAt).Seconds()}
 		result.Surfaces[index].Job = timing
 		if command := result.Surfaces[index].PrimarySeconds; command != nil && *command > timing.ElapsedSeconds+1 {
 			problem("primary command exceeds its whole job: " + job.Name)
@@ -148,7 +148,7 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 		}
 		summary.UnitCount++
 		summary.RunnerMinutes += timing.ElapsedSeconds / 60
-		summary.QueueSeconds += timing.QueueSeconds
+		summary.StartLagSeconds += timing.StartLagSeconds
 		if first.IsZero() || job.StartedAt.Before(first) {
 			first = job.StartedAt
 		}
