@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestReleaseDockerImmutableTargetCannotSelectSameNameSuccessor(t *testing.T) {
@@ -33,6 +31,9 @@ func TestReleaseDockerImmutableTargetCannotSelectSameNameSuccessor(t *testing.T)
 
 func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "fake-docker-state")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	releaseRoot := filepath.Dir(root)
 	admittedRoot := filepath.Join(releaseRoot, "contracts")
 	writeReleaseFile(t, filepath.Join(admittedRoot, "schema.yaml"), "stages: {}\n")
@@ -43,7 +44,7 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(envelope) })
 	projectionRoot := filepath.Join(envelope, "source")
 	copyReleaseTree(t, admittedRoot, projectionRoot)
-	intent := sourceartifact.RuntimeProjectionCleanup{Root: envelope, BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), Identity: releaseE2EProjectionID}
+	intent := releaseSourceProjectionMarker{Root: envelope, BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), Identity: releaseE2EProjectionID}
 	marker, err := json.Marshal(intent)
 	if err != nil {
 		t.Fatal(err)
