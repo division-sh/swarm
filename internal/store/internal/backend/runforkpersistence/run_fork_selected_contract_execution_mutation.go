@@ -863,21 +863,11 @@ func (s *RunForkPostgresOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarker
 	if err := runforkrevision.ValidateCompletePostgres(ctx, tx, sourceRunID); err != nil {
 		return err
 	}
-	var revision int64
-	if err := tx.QueryRowContext(ctx, `
-		SELECT MIN(revision)
-		FROM run_fork_fact_revisions
-		WHERE run_id = $1::uuid
-		  AND family = 'events'
-		  AND fact_key = $2
-		  AND present
-	`, sourceRunID, forkEventID).Scan(&revision); err != nil {
+	point, err := resolveRunForkRevisionPoint(ctx, tx, sourceRunID, forkEventID)
+	if err != nil {
 		return fmt.Errorf("resolve committed replay-scope fork revision: %w", err)
 	}
-	if revision <= 0 {
-		return fmt.Errorf("committed replay-scope fork event is not revisioned; recreate the store and retry")
-	}
-	return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx, tx, sourceRunID, revision)
+	return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx, tx, sourceRunID, point.Revision)
 }
 
 type selectedContractExecutionQueryer interface {

@@ -16390,6 +16390,9 @@ run_model:
         identity, agent identity, target ownership, delivery context, payload projection, and connect_execution_claim.
         Stored connect execution evidence is part of route identity and is captured in the same revision as the delivery;
         it is not a live worker claim token. Historical projection excludes live worker tokens and execution capabilities.
+        Fact keys are constructed by the same closed family identity owner used for historical admission, with unchanged
+        key bytes. Fan-out intent, outcome and barrier keys use their exact typed coordinates and outcome ordinal;
+        readers do not parse or infer a new composite-key grammar.
       read_contract: >-
         PostgreSQL and SQLite private adapters validate and decode the same thirteen-family historical projection.
         PlanRunFork exposes the same selected-store consumer on both backends: it resolves the event UUID to its first revision
@@ -16406,6 +16409,17 @@ run_model:
         missing or contradictory evidence for a connected route cannot be repaired from current delivery or topology rows.
         Planning and stamped frontier/history recipient consumers retain that validated evidence. Historical evidence never
         grants a live delivery lease or permits copying a source worker capability into a new fork-local delivery.
+        Every surviving present fact retains its ledger run, family, key and revision context until typed admission.
+        Admission requires the selected run, a known family, the canonical key matching the body's primary identity,
+        and positive ordered first/fact revisions no later than R. Embedded owning run IDs in deliveries, committed
+        replay scopes and timers must match the ledger run; a delivery's nested agent identity must obey the same
+        owning-run invariant as a live delivery. Timer fork lineage and fan-out source lineage are not owning-run fields.
+        Explicit/default event cursors and activation event-point readers consume this same contextual admission before
+        exposing the selected event or reaching downstream event preparation, materialization or activation writes.
+        Readers fold all facts at or before R before filtering absence and decoding surviving present payloads. They
+        do not decode discarded payloads, resurrect tombstoned facts from current rows, or reject lawful later
+        reappearance. Existing family-specific membership and lineage owners remain authoritative; contextual identity
+        does not introduce global foreign-key requirements or authenticate coherently rewritten historical evidence.
       route_projection: >-
         Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
         projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
@@ -16886,7 +16900,7 @@ run_model:
       source event UUID to that event''s first persisted commit-ordered run revision. Occurrence and lifecycle
       timestamps remain diagnostics and are never a fallback selector or historical membership predicate.'
     semantics:
-      1_reconstruct_state: 'Resolve the source event UUID to revision R, load the twelve-family projection at
+      1_reconstruct_state: 'Resolve the source event UUID to revision R, load the thirteen-family projection at
         revision <= R in one repeatable-read snapshot, and forward-apply revisioned entity_mutations in deterministic
         revision/fact order. A reconstructed entity is materializable only after
         runtime.run_fork.materialized_entity_snapshot_metadata authorizes flow_instance/entity_type metadata present

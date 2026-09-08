@@ -151,18 +151,11 @@ func (s *RunForkSQLiteOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(
 		if err := runforkrevision.ValidateCompleteSQLite(txctx, tx, sourceRunID); err != nil {
 			return err
 		}
-		var revision int64
-		if err := tx.QueryRowContext(txctx, `
-			SELECT MIN(revision)
-			FROM run_fork_fact_revisions
-			WHERE run_id = $1 AND family = 'events' AND fact_key = $2 AND present
-		`, sourceRunID, forkEventID).Scan(&revision); err != nil {
+		point, err := resolveRunForkRevisionPoint(txctx, tx, sourceRunID, forkEventID)
+		if err != nil {
 			return fmt.Errorf("resolve committed replay-scope fork revision: %w", err)
 		}
-		if revision <= 0 {
-			return fmt.Errorf("committed replay-scope fork event is not revisioned; recreate the store and retry")
-		}
-		return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(txctx, tx, sourceRunID, revision)
+		return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(txctx, tx, sourceRunID, point.Revision)
 	})
 }
 
