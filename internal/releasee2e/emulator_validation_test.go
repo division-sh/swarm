@@ -6,23 +6,82 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
+
+func TestReleaseDockerImmutableTargetCannotSelectSameNameSuccessor(t *testing.T) {
+	root := t.TempDir()
+	oldID, newID := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	withFakeDockerState(root, func(state *fakeDockerState) {
+		state.ContainerIDs = map[string]string{oldID: releaseE2EFixtureAgent, newID: releaseE2EFixtureAgent}
+		state.Containers[releaseE2EFixtureAgent] = fakeDockerContainer{ID: newID, Running: true}
+		if name := releaseDockerTargetName(state, oldID); name != "" {
+			t.Fatalf("predecessor object selected successor %q", name)
+		}
+		if name := releaseDockerTargetName(state, newID); name != releaseE2EFixtureAgent {
+			t.Fatalf("exact successor object failed to resolve: %q", name)
+		}
+	})
+	if !releaseDockerKnownTarget(root, oldID) || !releaseDockerKnownTarget(root, newID) {
+		t.Fatal("fixture lost historical Docker object identity")
+	}
+	if releaseDockerKnownTarget(root, strings.Repeat("c", 64)) {
+		t.Fatal("unissued Docker object identity was accepted")
+	}
+}
 
 func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "fake-docker-state")
 	releaseRoot := filepath.Dir(root)
 	admittedRoot := filepath.Join(releaseRoot, "contracts")
 	writeReleaseFile(t, filepath.Join(admittedRoot, "schema.yaml"), "stages: {}\n")
-	projectionRoot, err := os.MkdirTemp("", "swarm-source-")
+	envelope, err := os.MkdirTemp("", "swarm-source-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(projectionRoot) })
+	t.Cleanup(func() { _ = os.RemoveAll(envelope) })
+	projectionRoot := filepath.Join(envelope, "source")
 	copyReleaseTree(t, admittedRoot, projectionRoot)
+	intent := sourceartifact.RuntimeProjectionCleanup{Root: envelope, BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), Identity: releaseE2EProjectionID}
+	marker, err := json.Marshal(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(envelope, "identity.json")
+	writeReleaseFile(t, markerPath, string(marker))
 	validCreate := validReleaseScaffoldCreateArgs(projectionRoot)
 	if err := validateReleaseDockerCommand(root, validCreate); err != nil {
 		t.Fatalf("valid fixture create rejected: %v", err)
 	}
+	t.Run("missing source identity", func(t *testing.T) {
+		if err := os.Remove(markerPath); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { writeReleaseFile(t, markerPath, string(marker)) })
+		if err := validateReleaseDockerCommand(root, validCreate); err == nil {
+			t.Fatal("unmarked source projection accepted")
+		}
+	})
+	t.Run("different source identity", func(t *testing.T) {
+		changed := intent
+		changed.Identity = "runtime-projection-v1:" + strings.Repeat("c", 32)
+		raw, err := json.Marshal(changed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeReleaseFile(t, markerPath, string(raw))
+		t.Cleanup(func() { writeReleaseFile(t, markerPath, string(marker)) })
+		if err := validateReleaseDockerCommand(root, validCreate); err == nil || !strings.Contains(err.Error(), "projection marker does not match") {
+			t.Fatalf("wrong projection identity not rejected: %v", err)
+		}
+	})
+	t.Run("envelope mounted instead of source", func(t *testing.T) {
+		args := replaceReleaseCreateMount(append([]string(nil), validCreate...), "/opt/swarm/source", envelope+":/opt/swarm/source:ro")
+		if err := validateReleaseDockerCommand(root, args); err == nil {
+			t.Fatal("projection disposal envelope exposed inside container")
+		}
+	})
 	validAdmissionAgent := validReleaseAgentCreateArgs(projectionRoot, false)
 	if err := validateReleaseDockerCommand(root, validAdmissionAgent); err != nil {
 		t.Fatalf("valid run-independent agent create rejected: %v", err)

@@ -2,6 +2,7 @@ package releasee2e
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -19,6 +20,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 const (
@@ -65,12 +68,14 @@ func mustReleaseE2EDurableBackingKey(kind, semanticIdentity string) string {
 }
 
 type fakeDockerContainer struct {
+	ID      string            `json:"id"`
 	Running bool              `json:"running"`
 	Labels  map[string]string `json:"labels,omitempty"`
 }
 
 type fakeDockerState struct {
-	Containers map[string]fakeDockerContainer `json:"containers"`
+	Containers   map[string]fakeDockerContainer `json:"containers"`
+	ContainerIDs map[string]string              `json:"container_ids"`
 }
 
 type fakeDockerRecord struct {
@@ -296,7 +301,7 @@ func validateReleaseDockerCommand(root string, args []string) error {
 			return fmt.Errorf("unsupported Claude CLI preflight shape")
 		}
 	case "inspect":
-		if len(args) != 4 || args[1] != "--format" || !releaseE2EContainerName(args[3]) {
+		if len(args) != 4 || args[1] != "--format" || !releaseDockerKnownTarget(root, args[3]) {
 			return fmt.Errorf("unsupported Docker inspect shape")
 		}
 		switch args[2] {
@@ -309,11 +314,11 @@ func validateReleaseDockerCommand(root string, args []string) error {
 			return err
 		}
 	case "start", "stop":
-		if len(args) != 2 || !releaseE2EContainerName(args[1]) {
+		if len(args) != 2 || !releaseDockerKnownTarget(root, args[1]) {
 			return fmt.Errorf("unsupported Docker container lifecycle shape")
 		}
 	case "rm":
-		if len(args) != 3 || args[1] != "--force" || !releaseE2EContainerName(args[2]) {
+		if len(args) != 3 || args[1] != "--force" || !releaseDockerKnownTarget(root, args[2]) {
 			return fmt.Errorf("unsupported Docker container removal shape")
 		}
 	case "container":
@@ -409,7 +414,7 @@ func validateReleaseDockerCreate(root string, args []string) error {
 	if create.workdir != expected.workdir || create.privileged != expected.privileged {
 		return fmt.Errorf("unexpected create workdir or privilege for %s", create.name)
 	}
-	if err := validateReleaseDockerMounts(root, create.mounts, expected.requiredMount, create.labels["dev.swarm.data_projection_id"]); err != nil {
+	if err := validateReleaseDockerMounts(root, create.mounts, expected.requiredMount, create.labels); err != nil {
 		return fmt.Errorf("create %s mounts: %w", create.name, err)
 	}
 	if err := validateReleaseDockerLabels(create, processScope, expected.kind, expected.resetEligible, expected.source, expected.scope); err != nil {
@@ -490,7 +495,8 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 	return create, nil
 }
 
-func validateReleaseDockerMounts(root string, raw []string, required map[string]string, dataProjectionID string) error {
+func validateReleaseDockerMounts(root string, raw []string, required, labels map[string]string) error {
+	dataProjectionID := labels["dev.swarm.data_projection_id"]
 	releaseRoot := filepath.Dir(filepath.Clean(root))
 	requiredSourceMounts := map[string]string{
 		"/opt/swarm/source": filepath.Join(releaseRoot, "contracts"),
@@ -515,7 +521,7 @@ func validateReleaseDockerMounts(root string, raw []string, required map[string]
 			if mode != "ro" || !filepath.IsAbs(source) {
 				return fmt.Errorf("runtime source projection mount %q must be absolute and read-only", mount)
 			}
-			if err := validateReleaseSourceProjection(source, wantSource); err != nil {
+			if err := validateReleaseSourceProjection(source, wantSource, labels["dev.swarm.bundle_hash"], labels["dev.swarm.source_projection"]); err != nil {
 				return fmt.Errorf("runtime source projection mount %q: %w", mount, err)
 			}
 		case "/data":
@@ -565,13 +571,37 @@ func releasePathsEqual(left, right string) bool {
 	return leftErr == nil && rightErr == nil && filepath.Clean(resolvedLeft) == filepath.Clean(resolvedRight)
 }
 
-func validateReleaseSourceProjection(projectionRoot, admittedRoot string) error {
+func validateReleaseSourceProjection(projectionRoot, admittedRoot, bundleHash, projectionID string) error {
 	if releasePathsEqual(projectionRoot, admittedRoot) {
 		return fmt.Errorf("uses ambient source directory %s", admittedRoot)
 	}
-	if filepath.Dir(filepath.Clean(projectionRoot)) != filepath.Clean(os.TempDir()) ||
-		!strings.HasPrefix(filepath.Base(filepath.Clean(projectionRoot)), "swarm-source-") {
+	envelope := filepath.Dir(projectionRoot)
+	if filepath.Clean(projectionRoot) != projectionRoot || filepath.Base(projectionRoot) != "source" ||
+		filepath.Dir(envelope) != filepath.Clean(os.TempDir()) || !strings.HasPrefix(filepath.Base(envelope), "swarm-source-") {
 		return fmt.Errorf("path %s is not a typed runtime source projection", projectionRoot)
+	}
+	for _, path := range []string{envelope, projectionRoot, filepath.Join(envelope, "identity.json")} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("projection ownership path %s is a symlink", path)
+		}
+	}
+	marker, err := os.ReadFile(filepath.Join(envelope, "identity.json"))
+	if err != nil {
+		return err
+	}
+	var intent sourceartifact.RuntimeProjectionCleanup
+	if err := json.Unmarshal(marker, &intent); err != nil {
+		return err
+	}
+	if err := intent.Validate(); err != nil {
+		return err
+	}
+	if intent.Root != envelope || intent.BundleHash != bundleHash || intent.Identity != projectionID {
+		return errors.New("projection marker does not match mounted source identity")
 	}
 	projected, err := releaseSourceTree(projectionRoot, false)
 	if err != nil {
@@ -798,6 +828,27 @@ func equalStrings(got, want []string) bool {
 	return true
 }
 
+func releaseDockerKnownTarget(root, target string) bool {
+	if releaseE2EContainerName(target) {
+		return true
+	}
+	var known bool
+	withFakeDockerState(root, func(state *fakeDockerState) {
+		_, known = state.ContainerIDs[target]
+	})
+	return known
+}
+
+func releaseDockerTargetName(state *fakeDockerState, target string) string {
+	if name, ok := state.ContainerIDs[target]; ok {
+		if state.Containers[name].ID != target {
+			return ""
+		}
+		return name
+	}
+	return target
+}
+
 func fakeDockerInspect(root string, args []string) int {
 	if len(args) != 4 || args[1] != "--format" {
 		return fakeDockerUnexpected(root, args, "unsupported inspect shape")
@@ -806,7 +857,7 @@ func fakeDockerInspect(root string, args []string) int {
 	var container fakeDockerContainer
 	var exists bool
 	withFakeDockerState(root, func(state *fakeDockerState) {
-		container, exists = state.Containers[name]
+		container, exists = state.Containers[releaseDockerTargetName(state, name)]
 	})
 	recordFakeDocker(root, fakeDockerRecord{Class: "container_inspect", Args: redactDockerArgs(args)})
 	if !exists {
@@ -820,6 +871,7 @@ func fakeDockerInspect(root string, args []string) int {
 		_ = json.NewEncoder(os.Stdout).Encode(container.Labels)
 	case "{{json .}}":
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"Id":     container.ID,
 			"State":  map[string]any{"Running": container.Running},
 			"Config": map[string]any{"Labels": container.Labels},
 		})
@@ -847,11 +899,20 @@ func fakeDockerCreate(root string, args []string) int {
 		}
 		i++
 	}
+	var identity [32]byte
+	if _, err := rand.Read(identity[:]); err != nil {
+		panic(err)
+	}
+	id := hex.EncodeToString(identity[:])
 	withFakeDockerState(root, func(state *fakeDockerState) {
-		state.Containers[name] = fakeDockerContainer{Labels: labels}
+		if state.ContainerIDs == nil {
+			state.ContainerIDs = map[string]string{}
+		}
+		state.ContainerIDs[id] = name
+		state.Containers[name] = fakeDockerContainer{ID: id, Labels: labels}
 	})
 	recordFakeDocker(root, fakeDockerRecord{Class: "container_create", Args: redactDockerArgs(args)})
-	fmt.Fprintln(os.Stdout, "release-e2e-container")
+	fmt.Fprintln(os.Stdout, id)
 	return 0
 }
 
@@ -862,6 +923,7 @@ func fakeDockerSetRunning(root string, args []string, running bool) int {
 	name := args[1]
 	var exists bool
 	withFakeDockerState(root, func(state *fakeDockerState) {
+		name = releaseDockerTargetName(state, name)
 		container, ok := state.Containers[name]
 		exists = ok
 		if ok {
@@ -888,6 +950,7 @@ func fakeDockerRemove(root string, args []string) int {
 	name := args[2]
 	var exists bool
 	withFakeDockerState(root, func(state *fakeDockerState) {
+		name = releaseDockerTargetName(state, name)
 		_, exists = state.Containers[name]
 		delete(state.Containers, name)
 	})

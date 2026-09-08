@@ -1031,6 +1031,7 @@ func TestStopManagedContainerUsesExactDockerObjectAndReconcilesAcknowledgment(t 
 				SourceProjection: "runtime-projection-v1:" + strings.Repeat("a", 32),
 				AgentIdentity:    runtimeagentidentitytest.RootDeclared(t, "worker", "test/agents.yaml"),
 			}
+			expected.RunID = expected.AgentIdentity.RunID
 			var stops, readbacks, inspections int
 			manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 				switch args[0] {

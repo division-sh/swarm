@@ -899,6 +899,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	var processCapability runtimestartupownership.ProcessCapability
 	cancelOwnershipWatch := func() {}
 	var apiServer, mcpServer *http.Server
+	var apiListener, mcpListener net.Listener
+	httpServersStarted := false
 	var publicExposure *runtimepublicingress.Controller
 	var storyFollower *serveAuthorActivityFollower
 	defer func() {
@@ -915,6 +917,16 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "api", apiServer))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
+		if !httpServersStarted {
+			// Before Serve owns the listeners, startup failure still needs to
+			// release them. Active listeners belong exclusively to HTTP shutdown.
+			if apiListener != nil {
+				shutdownErr = errors.Join(shutdownErr, apiListener.Close())
+			}
+			if mcpListener != nil {
+				shutdownErr = errors.Join(shutdownErr, mcpListener.Close())
+			}
+		}
 		shutdownErr = errors.Join(shutdownErr, resetRecovery.Close(shutdownCtx))
 		if supervisor != nil {
 			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
@@ -1084,23 +1096,18 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(5, "credentials", err)
 		return 1
 	}
-	apiListener, err := cliapp.ListenServeHTTPListener("api", opts.APIListenAddr)
+	apiListener, err = cliapp.ListenServeHTTPListener("api", opts.APIListenAddr)
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", err)
 		return 3
 	}
-	defer apiListener.Close()
-	mcpListener, err := cliapp.ListenServeHTTPListener("mcp", opts.MCPListenAddr)
+	mcpListener, err = cliapp.ListenServeHTTPListener("mcp", opts.MCPListenAddr)
 	if err != nil {
-		_ = apiListener.Close()
 		presenter.fail(20, "http_listener_bind", err)
 		return 3
 	}
-	defer mcpListener.Close()
 	toolGatewayBinding, err := createServeToolGatewayBinding(mcpListener.Addr())
 	if err != nil {
-		_ = mcpListener.Close()
-		_ = apiListener.Close()
 		presenter.fail(20, "http_listener_bind", err)
 		return 3
 	}
@@ -1520,6 +1527,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			_ = apiServerLease.Done()
 			return fmt.Errorf("admit mcp server: %w", err)
 		}
+		httpServersStarted = true
 		go func() {
 			defer func() { _ = apiServerLease.Done() }()
 			serveHTTPServer("api", apiServer, apiListener, runtimeFailure)

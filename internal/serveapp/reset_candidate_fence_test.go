@@ -3,9 +3,11 @@ package serveapp
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,8 +17,12 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -30,6 +36,60 @@ type resetCandidateSubscriptionBarrier struct {
 	release chan struct{}
 	mu      sync.Mutex
 	hooks   []func()
+}
+
+// Exercise typed transport routing independently of provider cost. This does
+// not widen the explicit unsupported multi-context Claude CLI posture.
+func assertResetCandidateStartupMCP(t *testing.T, supervisor *processLifecycleSupervisor, rt *runtime.Runtime, auth string, grant startupownership.GrantEvidence) {
+	t.Helper()
+	identity := agentidentitytest.RootDeclared(t, "probe-agent", "reset-mcp-test")
+	plan, err := identity.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeID := uuid.NewString()
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorPlan: plan, RuntimeMode: "startup_probe", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude-cli-test",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityStartupProbe, ID: probeID, ExecutionKind: managedcapabilities.ExecutionNormalAgent,
+			ExecutionAuthorityID: grant.GrantID, StartupOwnerID: grant.ProcessOwnerID, StartupGeneration: grant.RuntimeGeneration,
+		},
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := actors.WithActor(context.Background(), actors.AgentConfig{ID: plan.AgentID(), FlowPath: plan.FlowInstance()})
+	ctx = effects.WithAuthority(ctx, effects.Authority{
+		Kind: effects.AuthorityStartupProbe, ID: probeID, ExecutionMode: effects.ExecutionModeLive,
+		ExecutionOwner: grant.ProcessOwnerID, LeaseExpiresAt: time.Now().Add(time.Minute), FenceGeneration: grant.RuntimeGeneration,
+		StartupProbe: effects.StartupProbeAuthority{
+			ProbeID: probeID, ActorID: plan.AgentID(), StartupAuthorityID: grant.GrantID, StartupStateVersion: grant.StateVersion,
+			ExecutionKind: string(managedcapabilities.ExecutionNormalAgent), ExecutionAuthorityID: grant.GrantID,
+		},
+	})
+	token := rt.MCPTurns.RegisterTurnContextWithCapabilitySurface(ctx, time.Minute, surface)
+	if token == "" {
+		t.Fatal("failed to register typed startup probe")
+	}
+	defer rt.MCPTurns.UnregisterTurnContext(token)
+	request := func() *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+		r.Header.Set("Authorization", "Bearer "+auth)
+		r.Header.Set("X-SWARM-Context-Token", token)
+		return r
+	}
+	response := httptest.NewRecorder()
+	supervisor.serveMCP(response, request())
+	if response.Code != http.StatusOK {
+		t.Fatalf("candidate startup probe rejected before convergence: %d %s", response.Code, response.Body.String())
+	}
+	rt.MCPTurns.UnregisterTurnContext(token)
+	response = httptest.NewRecorder()
+	supervisor.serveMCP(response, request())
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unregistered candidate probe escaped the execution fence: %d", response.Code)
+	}
 }
 
 func (b *resetCandidateSubscriptionBarrier) String() string { return "reset-candidate-barrier" }
@@ -109,6 +169,10 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				})
 				credentials := processIngressCredentialStore{"telegram_bot_token": "reset-test-token", "webhook_signing.telegram": "reset-test-secret"}
 				probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+				binding, err := createServeToolGatewayBinding(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8081})
+				if err != nil {
+					t.Fatal(err)
+				}
 				for _, root := range []string{writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), writeServedEventPublishFollowUpFixture(t)} {
 					loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePlatformSpecPaths{
 						SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
@@ -119,6 +183,8 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					candidate, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 						Ctx: ctx, Stores: projectServeRuntimePersistence(stores), Config: cfg, Loaded: loaded,
 						WorkspaceBackend:       cliapp.WorkspaceBackendSelection{Backend: "host"},
+						EnableToolGateway:      true,
+						ToolGatewayBinding:     binding,
 						ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process, RuntimeInstanceID: instance,
 						Credentials: credentials, ProviderCredentials: credentials,
 						Options: cliapp.ServeOptions{TestLLMRuntime: servedNoopLLMRuntime{}, TestLifecycleProbe: probe, ShutdownGrace: 5 * time.Second},
@@ -164,6 +230,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				managed = true
 				supervisor := newProcessLifecycleSupervisor(nil, candidates[0].runtime)
 				supervisor.SetRuntimeContextManager(manager, candidates[0].sourceArtifactFact)
+				supervisor.resetContexts = candidates
 				supervisor.resetting = true
 				primary := candidates[0].runtime
 				supervisor.execution = apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: apiv1.EventPublicationOptions{
@@ -219,6 +286,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					if err != nil || grant.State != startupownership.GrantPrepared {
 						t.Fatalf("candidate admitted before complete-set convergence: %+v, %v", grant, err)
 					}
+					assertResetCandidateStartupMCP(t, supervisor, candidate.runtime, binding.AuthToken(), grant)
 					use, lookup, err := manager.AcquireBundleHash(ctx, candidate.sourceArtifactFact.BundleHash())
 					if use != nil {
 						_ = use.Done()

@@ -145,6 +145,22 @@ func (s *processLifecycleSupervisor) bindPrimaryExecution(expected *runtime.Runt
 
 func (s *processLifecycleSupervisor) serveMCP(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
+	// All candidates may need MCP preflight before the complete set is
+	// executable. Their runtime/grant owner admits only exact startup tokens.
+	for _, candidate := range s.resetContexts {
+		handler, lease, err := candidate.runtime.AcquireStartupMCPRequest(r)
+		if err != nil {
+			s.mu.RUnlock()
+			http.Error(w, "runtime startup is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if handler != nil {
+			s.mu.RUnlock()
+			defer lease.Done()
+			handler.ServeHTTP(w, r.WithContext(lease.Context()))
+			return
+		}
+	}
 	if s.resetting || s.currentRT == nil || s.currentRT.ToolGateway == nil || s.runtimeContexts == nil {
 		s.mu.RUnlock()
 		http.Error(w, "runtime execution is unavailable", http.StatusServiceUnavailable)
