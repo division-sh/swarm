@@ -34,12 +34,13 @@ func TestResetContainerIntentRealDocker(t *testing.T) {
 				t.Fatalf("real Docker test requires local image %s: %v", image, err)
 			}
 			projection, _ := testRuntimeSourceProjection(t)
+			agent := runtimeagentidentitytest.RootDeclared(t, "reset-proof", "test/agents.yaml")
 			identity := containeridentity.Identity{
 				Owner: containeridentity.OwnerRuntime, Kind: containeridentity.KindAgent,
 				ResetEligible: true, CreationSource: "workspace.ResolveWorkspace",
 				ContainerName: "swarm-reset-proof-" + uuid.NewString(),
 				BundleHash:    projection.BundleHash(), SourceProjection: projection.Identity(),
-				AgentIdentity: runtimeagentidentitytest.RootDeclared(t, "reset-proof", "test/agents.yaml"),
+				AgentIdentity: agent, RunID: agent.RunID,
 			}
 			if err := identity.Validate(); err != nil {
 				t.Fatal(err)
