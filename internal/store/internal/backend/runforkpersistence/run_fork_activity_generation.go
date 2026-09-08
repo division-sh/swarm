@@ -361,12 +361,12 @@ func remintRunForkPayload(raw json.RawMessage, generations []attemptgeneration.G
 func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, requestEventID string) (runForkActivityAttemptEvidence, error) {
 	var evidence runForkActivityAttemptEvidence
 	var resultPayload, failure []byte
-	var completedAt sql.NullTime
+	var startedRaw, completedRaw, updatedRaw any
 	err := tx.QueryRowContext(ctx, `
 		SELECT status, execution_mode, COALESCE(result_event_type, ''), COALESCE(result_payload, '{}'),
 		       COALESCE(failure, 'null'), input_hash, started_at, completed_at, updated_at
 		FROM activity_attempts WHERE request_event_id = $1
-	`, requestEventID).Scan(&evidence.Status, &evidence.ExecutionMode, &evidence.ResultEventType, &resultPayload, &failure, &evidence.InputHash, &evidence.StartedAt, &completedAt, &evidence.UpdatedAt)
+	`, requestEventID).Scan(&evidence.Status, &evidence.ExecutionMode, &evidence.ResultEventType, &resultPayload, &failure, &evidence.InputHash, &startedRaw, &completedRaw, &updatedRaw)
 	if err == sql.ErrNoRows {
 		return evidence, fmt.Errorf("activity request %s has no recorded attempt evidence for fork reuse", requestEventID)
 	}
@@ -379,10 +379,27 @@ func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, request
 	if !evidence.ExecutionMode.Valid() {
 		return evidence, fmt.Errorf("activity request %s recorded evidence has invalid execution mode %q", requestEventID, evidence.ExecutionMode)
 	}
-	if !completedAt.Valid || strings.TrimSpace(evidence.ResultEventType) == "" {
+	if strings.TrimSpace(evidence.ResultEventType) == "" {
 		return evidence, fmt.Errorf("activity request %s recorded evidence is incomplete", requestEventID)
 	}
-	evidence.CompletedAt = completedAt.Time
+	for _, field := range []struct {
+		name string
+		raw  any
+		dest *time.Time
+	}{
+		{"started_at", startedRaw, &evidence.StartedAt},
+		{"completed_at", completedRaw, &evidence.CompletedAt},
+		{"updated_at", updatedRaw, &evidence.UpdatedAt},
+	} {
+		value, present, err := sqliteTimeValue(field.raw)
+		if err != nil {
+			return evidence, fmt.Errorf("decode activity request %s recorded %s: %w", requestEventID, field.name, err)
+		}
+		if !present || value.IsZero() {
+			return evidence, fmt.Errorf("activity request %s recorded evidence is incomplete: %s is required", requestEventID, field.name)
+		}
+		*field.dest = value
+	}
 	evidence.ResultPayload = append(json.RawMessage(nil), resultPayload...)
 	evidence.Failure = append(json.RawMessage(nil), failure...)
 	return evidence, nil
