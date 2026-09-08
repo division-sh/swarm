@@ -173,7 +173,7 @@ func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 			},
 		},
 	}
-	return &WorkflowContractBundle{
+	bundle := &WorkflowContractBundle{
 		RootSchema: &rootSchema,
 		RootEntities: EntityContractsDocument{
 			"account": {
@@ -185,6 +185,9 @@ func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 		},
 		Events: events,
 	}
+	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Path: ".", Schema: rootSchema, Events: events}
+	bundle.FlowTree = FlowTree{Root: root, ByID: map[string]*FlowContractView{".": root}, ByPath: map[string]*FlowContractView{".": root}}
+	return bundle
 }
 
 func assertEmitCEL(t *testing.T, fields map[string]ExpressionValue, field, want string) {

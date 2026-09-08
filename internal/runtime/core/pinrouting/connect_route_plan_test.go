@@ -886,7 +886,7 @@ func TestCompileConnectPlansRejectsAddresslessImplicitInstanceKey(t *testing.T) 
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none without receiver resolution", plans)
 	}
-	if len(issues) != 2 {
+	if len(issues) != 1 {
 		t.Fatalf("issues = %#v, want one missing-resolution issue per connected input", issues)
 	}
 	for _, issue := range issues {
@@ -1020,8 +1020,8 @@ func TestLowerCompositionConnectRoutePlanWithLocationDerivesRenamedPayloadSource
 		t.Fatalf("renamed source fixture pins = %#v, want account_ready from payload.external_account_id", pins)
 	}
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
-	if len(issues) != 0 || len(plans) != 2 {
-		t.Fatalf("plans/issues = %#v/%#v, want both canonical fixture edges", plans, issues)
+	if len(issues) != 0 || len(plans) != 1 {
+		t.Fatalf("plans/issues = %#v/%#v, want the sole select fixture edge", plans, issues)
 	}
 	plan := requireReceiverPinRoutePlan(t, plans, "account.ready")
 	if plan.instanceKey == nil {
@@ -1311,8 +1311,8 @@ func TestCompileConnectPlansUsesSelectInputResolution(t *testing.T) {
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
-	if len(plans) != 2 {
-		t.Fatalf("plans = %#v, want both canonical fixture edges", plans)
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want the sole select fixture edge", plans)
 	}
 	plan := requireReceiverPinRoutePlan(t, plans, "account.ready")
 	if plan.instanceKey == nil {
@@ -1386,8 +1386,8 @@ func TestCompileConnectPlansUsesSelectOrCreateInputResolution(t *testing.T) {
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
-	if len(plans) != 2 {
-		t.Fatalf("plans = %#v, want both canonical fixture edges", plans)
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want the sole select fixture edge", plans)
 	}
 	plan := requireReceiverPinRoutePlan(t, plans, "account.ready")
 	if plan.instanceKey == nil {
@@ -1473,7 +1473,7 @@ func TestCompileConnectPlansRejectsSelectCarryTypeMismatch(t *testing.T) {
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none for invalid select resolution", plans)
 	}
-	if len(issues) != 2 {
+	if len(issues) != 1 {
 		t.Fatalf("issues = %#v, want one fail-closed issue per connected input", issues)
 	}
 	for _, issue := range issues {
@@ -1503,7 +1503,7 @@ func TestCompileConnectPlansRejectsSelectOrCreateCarryTypeMismatch(t *testing.T)
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none for invalid select-or-create resolution", plans)
 	}
-	if len(issues) != 2 {
+	if len(issues) != 1 {
 		t.Fatalf("issues = %#v, want one fail-closed issue per connected input", issues)
 	}
 	for _, issue := range issues {

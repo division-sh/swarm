@@ -535,6 +535,7 @@ type recordingStateRepo struct {
 	saves int
 }
 type stubEntityCollectionReader struct {
+	runID      string
 	entityType string
 	flowID     string
 	rows       []map[string]any
@@ -542,8 +543,9 @@ type stubEntityCollectionReader struct {
 	err        error
 }
 
-func (r *stubEntityCollectionReader) QueryEntityCollection(_ context.Context, flowID, entityType string) ([]map[string]any, error) {
+func (r *stubEntityCollectionReader) QueryEntityCollection(_ context.Context, runID, flowID, entityType string) ([]map[string]any, error) {
 	r.calls++
+	r.runID = runID
 	r.flowID = flowID
 	r.entityType = entityType
 	return r.rows, r.err
@@ -690,14 +692,14 @@ func (o *recordingPublicationCommitter) CommitPublications(_ context.Context, in
 	return nil
 }
 func (stubDispatcher) DispatchPostCommit(context.Context, []EmitIntent) error { return nil }
-func (s stubEvaluator) EvalBool(expression string, _ BaseContext) (bool, error) {
+func (s stubEvaluator) EvalBool(expression string, _ BaseContext, _ *runtimecontracts.ResolvedCatalogType) (bool, error) {
 	if err := s.errs[expression]; err != nil {
 		return false, err
 	}
 	return s.bools[expression], nil
 }
 func (s stubEvaluator) EvalValue(string, BaseContext) (any, error) { return nil, ErrNotImplemented }
-func (s contextualBoolEvaluator) EvalBool(expression string, base BaseContext) (bool, error) {
+func (s contextualBoolEvaluator) EvalBool(expression string, base BaseContext, _ *runtimecontracts.ResolvedCatalogType) (bool, error) {
 	if fn, ok := s.bools[expression]; ok {
 		return fn(base)
 	}
@@ -3521,6 +3523,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 }
 
 func TestExecutor_QueryEntityTableUsesAdmittedSourceExactlyOnce(t *testing.T) {
+	runID := eventtest.UUID("entity-collection-execution-run")
 	reader := &stubEntityCollectionReader{rows: []map[string]any{
 		{"id": "a", "status": "queued"},
 		{"id": "b", "status": "queued"},
@@ -3534,8 +3537,8 @@ func TestExecutor_QueryEntityTableUsesAdmittedSourceExactlyOnce(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1", ExecutionFlowID: identity.NormalizeFlowID("root"), Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
-		Event: eventtest.RunCreatingRootIngress("evt-query-entities", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		EntityID: "entity-1", ExecutionFlowID: identity.NormalizeFlowID("."), Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+		Event: eventtest.ExistingRunRootIngress("evt-query-entities", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, runID, events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 			Entities: "items", Filter: `item.status != "done"`, GroupBy: "status", Count: true,
 		}},
@@ -3544,8 +3547,8 @@ func TestExecutor_QueryEntityTableUsesAdmittedSourceExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if reader.calls != 1 || reader.flowID != "root" || reader.entityType != "items" {
-		t.Fatalf("entity reader = calls %d flow %q type %q", reader.calls, reader.flowID, reader.entityType)
+	if reader.calls != 1 || reader.runID != runID || reader.flowID != "." || reader.entityType != "items" {
+		t.Fatalf("entity reader = calls %d run %q flow %q type %q", reader.calls, reader.runID, reader.flowID, reader.entityType)
 	}
 	grouped, ok := result.Computed["query"].(map[string]any)
 	if !ok || grouped["queued"] != 2 || len(grouped) != 1 {

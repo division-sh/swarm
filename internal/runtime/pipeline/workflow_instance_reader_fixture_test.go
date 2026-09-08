@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"strings"
 	"time"
 
@@ -202,10 +201,7 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx
 }
 
 func (r pipelineTestWorkflowInstanceReader) QueryWorkflowEntityCollection(ctx context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return nil, err
-	}
+	runID := owner.RunID()
 	activeStates := runtimerunlifecycle.ActiveStates()
 	query := `SELECT es.entity_id, es.flow_instance, es.entity_type, es.slug, es.name, es.current_state, es.revision, es.entered_state_at, es.gates, es.fields, es.bookkeeping, es.accumulator, es.created_at, es.updated_at
 		FROM entity_state es

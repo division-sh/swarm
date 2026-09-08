@@ -2148,7 +2148,7 @@ func (e *Executor) collectionItems(frame *executionFrame, source runtimecontract
 		if flowID == "" {
 			flowID = strings.TrimSpace(frame.state.State.WorkflowName)
 		}
-		rows, err := e.deps.EntityCollections.QueryEntityCollection(frame.ctx, flowID, source.EntityType)
+		rows, err := e.deps.EntityCollections.QueryEntityCollection(frame.ctx, frame.req.Event.RunID(), flowID, source.EntityType)
 		if err != nil {
 			return nil, fmt.Errorf("query entities %q: %w", source.EntityType, err)
 		}
@@ -3104,7 +3104,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 	id = strings.TrimSpace(id)
 	check = strings.TrimSpace(check)
 	if check != "" {
-		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame), frame.payloadType)
 		if err == nil {
 			evaluated := []string{check}
 			if id != "" {
@@ -3128,7 +3128,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 		return false, []string{id}, fmt.Errorf("guard %q is not executable", id)
 	}
 	if strings.TrimSpace(entry.Check) != "" {
-		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame), frame.payloadType)
 		if err == nil {
 			return passed, []string{id}, nil
 		}
@@ -3160,7 +3160,7 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 		if condition == "" || strings.EqualFold(condition, "else") {
 			return rule, idx, nil
 		}
-		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame), frame.payloadType)
 		if err != nil {
 			context, contextErr := handlerSelectionContext(source)
 			if contextErr != nil {

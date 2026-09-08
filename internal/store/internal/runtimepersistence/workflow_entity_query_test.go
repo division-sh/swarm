@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -90,7 +91,7 @@ func TestWorkflowEntityCollectionIncludesStateOnlyRowsOnBothStores(t *testing.T)
 			// A sibling run's lifecycle must not hide this run's state-only row.
 			seedStateOnlyAcquisitionLifecycle(t, backend, db, wrongRunID, "child/state-only", "terminated")
 
-			records, err := reader.QueryWorkflowEntityCollection(ctx, owner)
+			records, err := reader.QueryWorkflowEntityCollection(runtimecorrelation.WithRunID(ctx, wrongRunID), owner)
 			if err != nil {
 				t.Fatalf("query workflow entity collection: %v", err)
 			}

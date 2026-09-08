@@ -10,7 +10,6 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/lib/pq"
@@ -113,10 +112,7 @@ func (s *PipelinePostgresOwner) QueryWorkflowEntityCollection(ctx context.Contex
 	if !owner.Valid() {
 		return nil, fmt.Errorf("postgres workflow entity collection requires an admitted owner")
 	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return nil, err
-	}
+	runID := owner.RunID()
 	activeStates := runtimerunlifecycle.ActiveStates()
 	rows, err := s.backend.QueryContext(ctx, postgresWorkflowEntityStateSelect+`
 		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
@@ -557,10 +553,7 @@ func (s *PipelineSQLiteOwner) QueryWorkflowEntityCollection(ctx context.Context,
 	if !owner.Valid() {
 		return nil, fmt.Errorf("sqlite workflow entity collection requires an admitted owner")
 	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return nil, err
-	}
+	runID := owner.RunID()
 	activeStates := runtimerunlifecycle.ActiveStates()
 	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowEntityStateSelect+`
 		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance

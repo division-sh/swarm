@@ -3576,55 +3576,13 @@ emit:
 
 func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
-fan_out:
-  items_from: payload.industries
-  as: industry
-  identity: industry
-  emit:
-    event: market_research.industry_assigned
-    fields:
-      industry: industry
-      taxonomy_categories: "[industry]"
-`), &handler); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+	root := canonicalrouting.CopyScalarFanOutPayloadReader(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatal(err)
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{
-			PlatformSpecFile: filepath.Join(repoRoot, "platform-spec.yaml"),
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"scan.requested": {
-				Payload: runtimecontracts.EventPayloadSpec{
-					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"industries": {Type: "text[]"},
-					},
-					Required: []string{"industries"},
-				},
-			},
-			"market_research.industry_assigned": {
-				Payload: runtimecontracts.EventPayloadSpec{
-					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"industry":            {Type: "text"},
-						"taxonomy_categories": {Type: "text[]"},
-					},
-					Required: []string{"industry", "taxonomy_categories"},
-				},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"scan.requested": handler,
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if reportContains(report.Errors(), "emit_field_expression_validation", "industry") {
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if len(report.Errors()) != 0 {
 		t.Fatalf("unexpected fan_out alias expression validation error, got %#v", report.Errors())
 	}
 }

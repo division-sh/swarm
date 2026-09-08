@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -33,7 +32,7 @@ type pipelineEngineEvaluator struct {
 	coordinator *PipelineCoordinator
 }
 
-func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext) (bool, error) {
+func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext, payloadType *runtimecontracts.ResolvedCatalogType) (bool, error) {
 	if e.evaluator == nil {
 		return false, runtimeengine.ErrNotImplemented
 	}
@@ -55,13 +54,10 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 	}
 	options := workflowexpr.ValueExpressionOptions{AllowAccumulated: true}
 	if workflowexpr.ExpressionReferencesRoot(expression, "payload") {
-		eventType := strings.TrimSpace(asString(queryCtx.Event["trigger_event_type"]))
-		resolution := semanticview.ResolveEventSchema(e.coordinator.SemanticSource(), ctx.FlowID, eventType)
-		if !resolution.HasStructural {
-			return false, fmt.Errorf("workflow payload expression for %s has no exact structural schema", eventType)
+		if payloadType == nil {
+			return false, fmt.Errorf("workflow payload expression has no exact structural schema")
 		}
-		payloadType := resolution.StructuralType.Clone()
-		options.PayloadType = &payloadType
+		options.PayloadType = payloadType
 	}
 	return e.evaluator.EvalBoolWithOptions(expression, queryCtx, options)
 }
@@ -532,15 +528,11 @@ type pipelineEngineEntityCollectionReader struct {
 	coordinator *PipelineCoordinator
 }
 
-func (r pipelineEngineEntityCollectionReader) QueryEntityCollection(ctx context.Context, flowID, entityType string) ([]map[string]any, error) {
+func (r pipelineEngineEntityCollectionReader) QueryEntityCollection(ctx context.Context, runID, flowID, entityType string) ([]map[string]any, error) {
 	flowID = strings.TrimSpace(flowID)
 	entityType = strings.TrimSpace(entityType)
 	if r.coordinator == nil || r.coordinator.workflowStore == nil || r.coordinator.workflowStore.entityCollectionReader == nil {
 		return nil, fmt.Errorf("workflow entity collection reader is required")
-	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return nil, err
 	}
 	owner, err := AdmitWorkflowEntityCollectionOwner(r.coordinator.SemanticSource(), flowID, entityType, runID)
 	if err != nil {
