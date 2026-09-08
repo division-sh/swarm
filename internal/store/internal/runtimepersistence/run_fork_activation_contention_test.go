@@ -97,7 +97,7 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 							result, err := f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(ctx, selectedRequest)
 							return forkContentionResult{activation: result, err: err}
 						}
-						result, err := f.store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true})
+						result, err := f.store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 						return forkContentionResult{activation: result, err: err}
 					}
 					second := "writer"
@@ -319,7 +319,7 @@ func TestRunForkActivationContentionFixtureControlBothStores(t *testing.T) {
 				if selected {
 					activation, err = f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(f.ctx, req)
 				} else {
-					activation, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true})
+					activation, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 				}
 				if err != nil || !activation.Activated || !activation.SourceFrozen {
 					t.Fatalf("uncontended canonical activation: %v; result=%+v", err, activation)
@@ -400,7 +400,7 @@ func stageForkContentionFixture(t *testing.T, f snapshotOwnershipFixture, select
 	if err != nil {
 		t.Fatal(err)
 	}
-	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
+	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
 		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning}
 }
 

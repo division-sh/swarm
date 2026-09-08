@@ -166,9 +166,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	if err != nil {
 		return result, err
 	}
-	if err := handoff.Commit(); err != nil {
-		return result, err
-	}
+	// Submission failure cannot undo the committed activation or authorize discard.
 	result.ForkRunStatus = runfork.RunForkActivatedStatus
 	result.Activated = true
 	if divergence != nil {
@@ -179,7 +177,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		result.SourceRunStatus = runfork.RunForkSourceFrozenStatus
 		result.SourceFrozen = true
 	}
-	return result, nil
+	return result, handoff.Commit()
 }
 
 func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runForkSelectedContractActivationPort {

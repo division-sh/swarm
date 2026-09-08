@@ -33,6 +33,9 @@ func TestSelectedContractOperationLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
+	if !errors.Is(operation.PreparationContext().Err(), context.Canceled) {
+		t.Fatal("preparation did not preserve client cancellation")
+	}
 	if err := operation.Context().Err(); err != nil {
 		t.Fatalf("client cancellation retired accepted work: %v", err)
 	}
@@ -59,6 +62,10 @@ func TestSelectedContractOperationShutdownBeforeBinding(t *testing.T) {
 	operation := selectedContractOperationForTest(t, ctx)
 	process, _ := worklifetime.ProcessFromContext(ctx)
 	process.Retire()
+	<-operation.PreparationContext().Done()
+	if !errors.Is(context.Cause(operation.PreparationContext()), worklifetime.ErrRetired) {
+		t.Fatalf("preparation ignored process retirement: %v", context.Cause(operation.PreparationContext()))
+	}
 	if err := operation.Bind(worklifetime.SelectedForkIdentity{ExecutionID: "execution", RunID: "fork", Generation: 1}); !errors.Is(err, worklifetime.ErrRetired) {
 		t.Fatalf("binding after shutdown: %v", err)
 	}

@@ -16,13 +16,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
 func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
-		for _, change := range []string{"valid", "runtime_replacement", "reconstructed_store", "terminal_run", "inactive", "termination_time", "wrong_entity", "wrong_type", "wrong_workflow", "wrong_mode", "wrong_version", "config", "missing_readiness", "readiness_run", "readiness_mode", "agent_revision"} {
+		for _, change := range []string{"valid", "runtime_replacement", "submission_failure", "reconstructed_store", "terminal_run", "inactive", "termination_time", "wrong_entity", "wrong_type", "wrong_workflow", "wrong_mode", "wrong_version", "config", "missing_readiness", "readiness_run", "readiness_mode", "agent_revision"} {
 			t.Run(string(backend)+"/"+change, func(t *testing.T) {
 				root := selectedForkReadinessCatalogFixture(t, 1, "agent")
 				h := newRuntimeHarnessForBackend(t, root, backend, true)
@@ -70,7 +71,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						h.pg = storetest.AdmitPostgresRuntimeStore(t, h.db)
 					}
 					selected = runScopedCatalogStore(t, h)
-				} else if change == "runtime_replacement" {
+				} else if change == "runtime_replacement" || change == "submission_failure" {
 					if err := h.rt.Shutdown(); err != nil {
 						t.Fatalf("retire loaded runtime before selected recovery: %v", err)
 					}
@@ -82,18 +83,40 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 					if err != nil || !found || readiness.Eligible() {
 						t.Fatalf("canonical terminal child retained readiness eligibility: %#v, %t, %v", readiness, found, err)
 					}
-				} else if change != "valid" {
+				} else if change != "valid" && change != "submission_failure" {
 					corruptSelectedForkRecoveredReadiness(t, ctx, h, child, path, change)
 				}
 				before := selectedForkRecoveredPhysicalSnapshot(t, ctx, h, child)
+				executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h)
+				var submission *selectedRecoverySubmissionFailure
+				if change == "submission_failure" {
+					submission = &selectedRecoverySubmissionFailure{
+						SelectedContractForkLifecycle: forkStore,
+						registrar:                     forkStore.(runlifecycle.CandidateRegistrar),
+						bundleHash:                    loaded.SourceArtifactFact.BundleHash(),
+						failure:                       errors.New("injected recovered activation submission failure"),
+					}
+					executionOwner = selectedContractExecutionOwnerForCatalogHarness(t, h, submission)
+				}
 				activated, err := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
 					ForkRunID: child, AllowSourceFreeze: true, Store: selected,
-					ExecutionOwner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, AgentRuntime: options,
+					ExecutionOwner: executionOwner, SourceLoader: loader, AgentRuntime: options,
 				})
-				if change == "valid" || change == "reconstructed_store" || change == "runtime_replacement" {
-					if err != nil || !activated.Activated || activated.ExecutedEventCount != 1 {
+				if change == "valid" || change == "reconstructed_store" || change == "runtime_replacement" || change == "submission_failure" {
+					if submission != nil {
+						if !errors.Is(err, submission.failure) || submission.submitted == 0 || submission.discards != 0 {
+							t.Fatalf("recovered post-commit disposition: submitted=%d discards=%d err=%v", submission.submitted, submission.discards, err)
+						}
+						var status, executionState string
+						if readErr := h.db.QueryRowContext(ctx, `SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, child).Scan(&status, &executionState); readErr != nil || status != "running" || executionState != "closed" {
+							t.Fatalf("recovered committed activation/execution = %s/%s: %v", status, executionState, readErr)
+						}
+					} else if err != nil {
 						logSelectedForkRecoveryFailure(t, ctx, h, child, err)
 						t.Fatalf("lawful persisted recovery: %#v, %v", activated, err)
+					}
+					if !activated.Activated || activated.ExecutedEventCount != 1 {
+						t.Fatalf("lost recovered commit evidence: %#v", activated)
 					}
 					owner, err := flowidentity.NewRunScopedFlowInstance(child, flowidentity.RouteForInstancePath(path))
 					if err != nil {
@@ -119,6 +142,52 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 		}
 	}
 }
+
+type selectedRecoverySubmissionFailure struct {
+	forkexecution.SelectedContractForkLifecycle
+	registrar           runlifecycle.CandidateRegistrar
+	bundleHash          string
+	failure             error
+	submitted, discards int
+}
+
+func (p *selectedRecoverySubmissionFailure) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	registration, err := p.registrar.RegisterCompletionCandidateSink(ctx, runlifecycle.CandidateScope{BundleHash: p.bundleHash}, p)
+	if err != nil {
+		return runfork.RunForkActivation{}, err
+	}
+	defer registration.Release()
+	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
+}
+
+func (p *selectedRecoverySubmissionFailure) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, runID string) error {
+	p.discards++
+	return p.SelectedContractForkLifecycle.DiscardMaterializedSelectedContractExecutionFork(ctx, runID)
+}
+
+func (p *selectedRecoverySubmissionFailure) ReserveCompletionCandidate(ctx context.Context) (runlifecycle.CandidateAdmission, error) {
+	owner, ok := worklifetime.OccurrenceFromContext(ctx)
+	if !ok {
+		return nil, errors.New("recovered candidate lost occurrence")
+	}
+	lease, err := owner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &selectedRecoveryCandidateAdmission{owner: p, lease: lease}, nil
+}
+
+type selectedRecoveryCandidateAdmission struct {
+	owner *selectedRecoverySubmissionFailure
+	lease *worklifetime.Lease
+}
+
+func (a *selectedRecoveryCandidateAdmission) Submit(runlifecycle.Candidate) error {
+	a.owner.submitted++
+	return errors.Join(a.lease.Done(), a.owner.failure)
+}
+
+func (a *selectedRecoveryCandidateAdmission) Cancel() error { return a.lease.Done() }
 
 // Capture durable facts before harness cleanup without repairing state or changing
 // the timing of a successful execution. Joined errors retain every typed cause.

@@ -66,7 +66,7 @@ func TestRunForkHistoricalIdentityGenericExecutionBothStores(t *testing.T) {
 			write(corrupt)
 			before = snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
 			for attempt := 0; attempt < 2; attempt++ {
-				activation, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true})
+				activation, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 				requireForkHistoricalMetadataRefusal(t, err)
 				if activation.Activated || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
 					t.Fatalf("generic activation attempt %d changed lawful staged child/source rows", attempt)
@@ -79,7 +79,7 @@ func TestRunForkHistoricalIdentityGenericExecutionBothStores(t *testing.T) {
 			}
 			// Restoring R restores the separate, legitimate source-advanced
 			// policy refusal. It must not be confused with historical corruption.
-			_, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true})
+			_, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 			if _, fact, ok := runForkReplayResumeBlockerFromError(err); !ok || fact != runfork.RunForkReplayResumeFactSourceAdvanced {
 				t.Fatalf("restored ordinary source-advanced policy: %v", err)
 			}

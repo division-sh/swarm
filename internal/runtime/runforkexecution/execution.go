@@ -124,6 +124,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{}, err
 	}
 	defer func() { finalErr = errors.Join(finalErr, operation.Finish()) }()
+	ctx = operation.PreparationContext()
 	plan, err := ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(req.SourceRunID),
 		At:          strings.TrimSpace(req.At),
@@ -298,7 +299,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		if closeErr := container.Close(ctx); closeErr != nil {
 			err = errors.Join(err, closeErr)
-		} else {
+		} else if !activation.Activated {
 			err = cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 		}
 		return SelectedContractExecutionResult{

@@ -30,8 +30,14 @@ import (
 
 type selectedOperationActivationProbe struct {
 	SelectedContractForkLifecycle
-	before func(context.Context)
-	fail   error
+	before   func(context.Context)
+	fail     error
+	discards *int
+}
+
+func (p selectedOperationActivationProbe) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, runID string) error {
+	*p.discards++
+	return p.SelectedContractForkLifecycle.DiscardMaterializedSelectedContractExecutionFork(ctx, runID)
 }
 
 func (p selectedOperationActivationProbe) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
@@ -50,7 +56,9 @@ type selectedOperationPublicationProbe struct {
 type selectedOperationCandidateSink struct {
 	reserved, submitted, cancelled int
 	fail                           error
+	submitErr                      error
 	afterReserve                   func()
+	beforeSubmit                   func()
 }
 
 func (s *selectedOperationCandidateSink) ReserveCompletionCandidate(ctx context.Context) (runlifecycle.CandidateAdmission, error) {
@@ -79,8 +87,12 @@ type selectedOperationCandidateAdmission struct {
 }
 
 func (a *selectedOperationCandidateAdmission) Submit(runlifecycle.Candidate) error {
+	if a.sink.beforeSubmit != nil {
+		a.sink.beforeSubmit()
+		a.sink.beforeSubmit = nil
+	}
 	a.sink.submitted++
-	return a.lease.Done()
+	return errors.Join(a.lease.Done(), a.sink.submitErr)
 }
 
 func (a *selectedOperationCandidateAdmission) Cancel() error {
@@ -98,7 +110,7 @@ func (p selectedOperationPublicationProbe) CommitSelectedForkEvent(ctx context.C
 
 func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, point := range []string{"before_execution", "after_event_commit", "before_activation", "activation_failure", "client_cancellation", "registered_sink", "retiring_sink", "sink_refusal", "process_shutdown"} {
+		for _, point := range []string{"before_execution", "after_event_commit", "before_activation", "activation_failure", "client_cancellation", "registered_sink", "retiring_sink", "sink_refusal", "submission_failure", "delayed_submission", "process_shutdown"} {
 			t.Run(backend+"/"+point, func(t *testing.T) {
 				var db *sql.DB
 				var selected any
@@ -137,7 +149,9 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				var bound *worklifetime.SelectedForkOccurrence
 				failure := errors.New("injected activation failure")
 				var sink, successor *selectedOperationCandidateSink
-				activation := selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, before: func(ctx context.Context) {
+				var discards int
+				submitting, releaseSubmission := make(chan struct{}), make(chan struct{})
+				activation := selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
 					if point == "process_shutdown" {
 						t.Fatal("process shutdown reached activation")
 					}
@@ -155,7 +169,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 							t.Fatalf("committed work inherited client cancellation: %v", err)
 						}
 					}
-					if point == "registered_sink" || point == "retiring_sink" || point == "sink_refusal" {
+					if point == "registered_sink" || point == "retiring_sink" || point == "sink_refusal" || point == "submission_failure" || point == "delayed_submission" {
 						sink = &selectedOperationCandidateSink{}
 						registrar := selected.(runlifecycle.CandidateRegistrar)
 						scope := runlifecycle.CandidateScope{BundleHash: loaded.SourceArtifactFact.BundleHash()}
@@ -166,6 +180,12 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 						t.Cleanup(registration.Release)
 						if point == "sink_refusal" {
 							sink.fail = failure
+						}
+						if point == "submission_failure" {
+							sink.submitErr = failure
+						}
+						if point == "delayed_submission" {
+							sink.beforeSubmit = func() { close(submitting); <-releaseSubmission }
 						}
 						if point == "retiring_sink" {
 							sink.afterReserve = func() {
@@ -196,11 +216,43 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 						<-ctx.Done()
 					}}
 				}
-				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+				request := SelectedContractExecutionRequest{
 					SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
-				})
+				}
+				var result SelectedContractExecutionResult
+				if point == "delayed_submission" {
+					driver, driverErr := process.Begin(ctx)
+					if driverErr != nil {
+						t.Fatal(driverErr)
+					}
+					type executionOutcome struct {
+						result SelectedContractExecutionResult
+						err    error
+					}
+					finished := make(chan executionOutcome, 1)
+					go func() {
+						result, err := ExecuteSelectedContractRunFork(ctx, request)
+						finished <- executionOutcome{result, errors.Join(err, driver.Done())}
+					}()
+					select {
+					case <-submitting:
+					case outcome := <-finished:
+						t.Fatalf("execution returned before candidate submission: %v", outcome.err)
+					}
+					var status, executionState string
+					readErr := db.QueryRow(`SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.forked_from_run_id=$1`, sourceID).Scan(&status, &executionState)
+					active := process.ActiveCount()
+					close(releaseSubmission)
+					outcome := <-finished
+					result, err = outcome.result, outcome.err
+					if readErr != nil || status != "running" || executionState != "quiesced" || active < 3 {
+						t.Fatalf("handoff lost committed state/operation ownership: %s/%s active=%d err=%v", status, executionState, active, readErr)
+					}
+				} else {
+					result, err = ExecuteSelectedContractRunFork(ctx, request)
+				}
 				if point == "activation_failure" || point == "sink_refusal" || point == "process_shutdown" {
 					if (point != "process_shutdown" && !errors.Is(err, failure)) || err == nil {
 						t.Fatalf("activation failure: %v", err)
@@ -216,7 +268,14 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 						}
 					}
 				} else {
-					if err != nil || result.ExecutedEventCount != 1 || result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus {
+					if point == "submission_failure" {
+						if !errors.Is(err, failure) || !result.Activation.Activated || discards != 0 {
+							t.Fatalf("post-commit failure lost activation or attempted discard: activated=%v discards=%d err=%v", result.Activation.Activated, discards, err)
+						}
+					} else if err != nil {
+						t.Fatal(err)
+					}
+					if result.ExecutedEventCount != 1 || result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus {
 						t.Fatalf("selected execution count=%d activation=%s: %v", result.ExecutedEventCount, result.Activation.ForkRunStatus, err)
 					}
 					var status, executionStatus string

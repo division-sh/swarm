@@ -14,6 +14,9 @@ import (
 type selectedContractOperation struct {
 	process     *worklifetime.Process
 	preparation *worklifetime.Lease
+	preparing   context.Context
+	cancel      context.CancelCauseFunc
+	stop        func() bool
 	selected    *worklifetime.SelectedForkOccurrence
 	use         *worklifetime.Lease
 }
@@ -32,8 +35,12 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 	if err != nil {
 		return nil, fmt.Errorf("admit selected-contract operation: %w", err)
 	}
-	return &selectedContractOperation{process: process, preparation: lease}, nil
+	preparing, cancel := context.WithCancelCause(ctx)
+	stop := context.AfterFunc(lease.Context(), func() { cancel(context.Cause(lease.Context())) })
+	return &selectedContractOperation{process: process, preparation: lease, preparing: preparing, cancel: cancel, stop: stop}, nil
 }
+
+func (o *selectedContractOperation) PreparationContext() context.Context { return o.preparing }
 
 func (o *selectedContractOperation) Context() context.Context {
 	if o.use != nil {
@@ -63,6 +70,11 @@ func (o *selectedContractOperation) Bind(identity worklifetime.SelectedForkIdent
 func (o *selectedContractOperation) Finish() error {
 	if o == nil {
 		return nil
+	}
+	if o.stop != nil {
+		o.stop()
+		o.stop = nil
+		o.cancel(nil)
 	}
 	var err error
 	if o.use != nil {

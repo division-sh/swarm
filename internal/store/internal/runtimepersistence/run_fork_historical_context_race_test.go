@@ -40,7 +40,7 @@ func TestRunForkHistoricalIdentityQueuedCancellationBothStores(t *testing.T) {
 							_, err := f.store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID, At: f.eventID})
 							done <- err
 						} else {
-							_, err := f.store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true})
+							_, err := f.store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 							done <- err
 						}
 					}()
@@ -79,7 +79,7 @@ func TestRunForkHistoricalIdentityQueuedCancellationBothStores(t *testing.T) {
 			// activation head/safety owner must still refuse, never freeze it.
 			f.advance(t)
 			advanced := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
-			activation, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, ConfirmSourceFreeze: true})
+			activation, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 			if _, fact, ok := runForkReplayResumeBlockerFromError(err); !ok || fact != runfork.RunForkReplayResumeFactSourceAdvanced || activation.Activated {
 				t.Fatalf("stale activation=%#v err=%v", activation, err)
 			}

@@ -254,6 +254,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			return result, err
 		}
 		defer func() { finalErr = errors.Join(finalErr, operation.Finish()) }()
+		ctx = operation.PreparationContext()
 		if req.AgentRuntime.ProcessCapability == nil {
 			return result, errors.New("selected-contract activation requires process capability before readiness binding")
 		}
@@ -330,8 +331,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			if closeErr := container.Close(ctx); closeErr != nil {
 				err = errors.Join(err, closeErr)
+			} else if !activation.Activated {
+				err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
+			return result, err
 		}
 		if err := container.Close(ctx); err != nil {
 			return result, err
