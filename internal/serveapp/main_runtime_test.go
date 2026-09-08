@@ -8784,6 +8784,10 @@ func (serveRuntimeWorkspaceStub) InspectManagedContainer(context.Context, string
 	return runtimedestructivereset.ManagedContainerInspection{}, nil
 }
 
+func (serveRuntimeWorkspaceStub) DisposeProjectionContainers(context.Context, sourceartifact.RuntimeProjectionCleanup) error {
+	return fmt.Errorf("inventory-only workspace fixture cannot dispose projection resources")
+}
+
 func (s serveRuntimeWorkspaceStub) StopManagedContainer(_ context.Context, target runtimedestructivereset.ContainerRef) error {
 	if s.stoppedContainers != nil {
 		*s.stoppedContainers = append(*s.stoppedContainers, target.Name)

@@ -11,12 +11,13 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
-func loadServeRecoveredResetSources(ctx context.Context, repo string, artifacts sourceArtifactReader, recovery *destructivereset.PendingRecovery, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
+func loadServeRecoveredResetSources(ctx context.Context, repo string, artifacts sourceArtifactReader, recovery *destructivereset.PendingRecovery, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) ([]serveRuntimeBundle, error) {
 	plan, err := recovery.SourceSet()
 	if err != nil {
 		return nil, err
@@ -30,7 +31,7 @@ func loadServeRecoveredResetSources(ctx context.Context, repo string, artifacts 
 	}
 	var loaded []serveRuntimeBundle
 	for _, source := range plan.Sources {
-		bundle, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, source.BundleHash, spec, packBases)
+		bundle, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, source.BundleHash, spec, packBases, materialize)
 		if err != nil {
 			for _, prior := range loaded {
 				err = errors.Join(err, prior.cleanup())
@@ -89,9 +90,16 @@ func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context, 
 		return &serveRuntimeReset{supervisor: s, operationID: operationID}, nil
 	}
 	if s.resetBuildExecution == nil || len(s.resetRequests) == 0 {
-		if !s.resetStartup || s.processCapability == nil || s.runtimeContexts == nil || s.currentRT != nil {
+		if s.processCapability == nil || s.runtimeContexts == nil || s.currentRT != nil {
 			s.operationMu.Unlock()
 			return nil, errors.New("reset requires admitted-source reconstruction inputs")
+		}
+		if !s.resetStartup {
+			plan, exists, err := s.processCapability.CurrentSourceSet(ctx)
+			if err != nil || !exists || len(plan.Sources) != 0 {
+				s.operationMu.Unlock()
+				return nil, errors.Join(err, errors.New("reset without constructors requires authoritative empty topology"))
+			}
 		}
 	}
 	if s.resetOperationID != operationID && s.resetOperationID != "" && !s.resetConverged {
@@ -104,7 +112,7 @@ func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context, 
 			s.operationMu.Unlock()
 			return nil, err
 		}
-		s.resetRecoveredProjections = append([]destructivereset.SourceProjection(nil), operation.Request.SourceProjections...)
+		s.resetRecoveredProjections = append(append([]destructivereset.SourceProjection(nil), operation.Request.SourceProjections...), operation.Allocations...)
 	}
 	s.resetOperationID, s.resetConverged = operationID, false
 	s.mu.Lock()
@@ -136,18 +144,34 @@ func (r *serveRuntimeReset) SettleResources(ctx context.Context) error {
 	if s.resetConverged {
 		return nil
 	}
-	if s.resetStartup {
-		for _, intent := range s.resetRecoveredProjections {
-			if err := ctx.Err(); err != nil {
-				return err
+	intents := s.resetRecoveredProjections
+	if !s.resetStartup {
+		if err := s.releaseResetProjections(ctx); err != nil {
+			return err
+		}
+		operation, err := s.processCapability.ReadResetOperation(ctx, r.operationID)
+		if err != nil {
+			return err
+		}
+		intents = append(append([]destructivereset.SourceProjection(nil), operation.Request.SourceProjections...), operation.Allocations...)
+	}
+	for _, intent := range intents {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if intent.ManagedContainers {
+			if s.resetContainerRuntime == nil {
+				return errors.New("reset projection disposal requires its container owner")
 			}
-			if err := sourceartifact.SettleRuntimeProjectionCleanup(intent.Cleanup); err != nil {
+			if err := s.resetContainerRuntime.DisposeProjectionContainers(ctx, intent.Cleanup); err != nil {
 				return err
 			}
 		}
-		return nil
+		if err := sourceartifact.SettleRuntimeProjectionCleanup(intent.Cleanup); err != nil {
+			return err
+		}
 	}
-	return s.releaseResetProjections(ctx)
+	return nil
 }
 
 func (r *serveRuntimeReset) Complete(ctx context.Context, retainSources bool) error {
@@ -277,7 +301,7 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 		if request.Loaded.bundle == nil || request.Loaded.bundle.SourceArtifact == nil {
 			return errors.New("reset reconstruction requires identical admitted source artifact")
 		}
-		projection, err := sourceartifact.MaterializeRuntimeProjection(request.Loaded.bundle.SourceArtifact)
+		projection, err := s.materializeResetProjection(ctx, request.Loaded.bundle.SourceArtifact, request.WorkspaceBackend.Backend == "docker")
 		if err != nil {
 			return err
 		}
@@ -365,6 +389,18 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 	}
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *processLifecycleSupervisor) materializeResetProjection(ctx context.Context, artifact *sourceartifact.AdmittedSourceArtifact, managed bool) (*sourceartifact.RuntimeProjection, error) {
+	intent, err := sourceartifact.PlanRuntimeProjection(artifact)
+	if err != nil {
+		return nil, err
+	}
+	if err := destructivereset.RecordProjectionAllocation(ctx, s.processCapability, s.resetOperationID,
+		destructivereset.SourceProjection{Cleanup: intent, ManagedContainers: managed}); err != nil {
+		return nil, err
+	}
+	return sourceartifact.MaterializePlannedRuntimeProjection(artifact, intent)
 }
 
 func (s *processLifecycleSupervisor) ManagedResetContainerInventory(ctx context.Context) ([]destructivereset.ContainerRef, error) {

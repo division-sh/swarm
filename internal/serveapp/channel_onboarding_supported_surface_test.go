@@ -415,6 +415,13 @@ func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOpti
 
 func startServedCrashProcess(t *testing.T, helper string, environment []string) *channelOnboardingCrashServeProcess {
 	t.Helper()
+	process := startServedCrashProcessBeforeReadiness(t, helper, environment)
+	process.endpoint(t)
+	return process
+}
+
+func startServedCrashProcessBeforeReadiness(t *testing.T, helper string, environment []string) *channelOnboardingCrashServeProcess {
+	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -437,7 +444,6 @@ func startServedCrashProcess(t *testing.T, helper string, environment []string) 
 		close(process.exited)
 	}()
 	t.Cleanup(func() { _ = process.stop() })
-	process.endpoint(t)
 	return process
 }
 

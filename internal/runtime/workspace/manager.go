@@ -498,7 +498,14 @@ func (m *DockerManager) ReleaseSourceProjection(ctx context.Context) error {
 	if releaseErr == nil {
 		m.projectionMu.Lock()
 		if m.ownedProjection != nil {
-			releaseErr = m.ownedProjection.Release()
+			intent, err := m.ownedProjection.CleanupIntent()
+			releaseErr = err
+			if releaseErr == nil {
+				releaseErr = m.DisposeProjectionContainers(ctx, intent)
+			}
+			if releaseErr == nil {
+				releaseErr = m.ownedProjection.Release()
+			}
 			if releaseErr == nil {
 				m.ownedProjection = nil
 			}
@@ -516,6 +523,45 @@ func (m *DockerManager) removeProjectionContainer(ctx context.Context, expected 
 	if !inspection.HasIdentity || !inspection.Identity.Equal(expected) {
 		return fmt.Errorf("container ownership no longer matches the admitted projection")
 	}
+	return m.removeInspectedProjectionContainer(ctx, inspection)
+}
+
+// DisposeProjectionContainers is full projection retirement, not the narrower
+// runtime.nuke stop selector. Retained process authority must have joined all
+// creators before calling it. It includes stopped and scaffold/system objects.
+func (m *DockerManager) DisposeProjectionContainers(ctx context.Context, intent sourceartifact.RuntimeProjectionCleanup) error {
+	if err := intent.Validate(); err != nil {
+		return err
+	}
+	out, err := m.RunDocker(ctx, "container", "ls", "--all",
+		"--filter", "label="+runtimecontaineridentity.LabelOwner+"="+runtimecontaineridentity.OwnerRuntime,
+		"--filter", "label="+runtimecontaineridentity.LabelBundleHash+"="+intent.BundleHash,
+		"--filter", "label="+runtimecontaineridentity.LabelSourceProjection+"="+intent.Identity,
+		"--format", "{{.ID}}", "--no-trunc")
+	if err != nil {
+		return fmt.Errorf("inventory exact projection disposal: %w", err)
+	}
+	for _, id := range strings.Fields(out) {
+		inspection, err := m.InspectManagedContainer(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !inspection.Exists {
+			continue
+		}
+		if !inspection.HasIdentity || inspection.RuntimeID != id || inspection.Identity.Validate() != nil ||
+			inspection.Identity.Owner != runtimecontaineridentity.OwnerRuntime ||
+			inspection.Identity.BundleHash != intent.BundleHash || inspection.Identity.SourceProjection != intent.Identity {
+			return errors.New("projection disposal inventory identity changed")
+		}
+		if err := m.removeInspectedProjectionContainer(ctx, inspection); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *DockerManager) removeInspectedProjectionContainer(ctx context.Context, inspection runtimedestructivereset.ManagedContainerInspection) error {
 	if inspection.RuntimeID == "" {
 		return fmt.Errorf("container has no immutable Docker ID")
 	}

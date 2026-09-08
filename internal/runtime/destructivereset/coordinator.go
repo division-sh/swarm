@@ -236,7 +236,7 @@ func (c *Coordinator) continueEffects(ctx context.Context, req Request, operatio
 		var err error
 		cleanup, err = c.Cleaner.Apply(ctx, CleanupRequest{
 			OperationID: req.OperationID, Result: result, Quiescence: quiescence,
-			ActorTokenID: req.ActorTokenID, RequestedAt: req.RequestedAt,
+			ActorTokenID: req.ActorTokenID, RequestedAt: c.now(),
 		})
 		if !req.DryRun {
 			operation, err = c.readEffectReceipt(ctx, operation, PhaseCleanupCommitted, err)
@@ -296,6 +296,16 @@ func (c *Coordinator) completeOperation(ctx context.Context, operation Operation
 	if err := runtimeReset.Complete(ctx, !operation.Request.IncludeSourceArtifacts); err != nil {
 		return ExecutionResult{}, err
 	}
+	// Reconstruction appends durable allocation intents without changing the
+	// immutable request or effect receipts. Finalize that exact current revision.
+	current, err := c.Operations.ReadResetOperation(ctx, operation.Request.OperationID)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if err := validateReconstructionEvidence(operation, current); err != nil {
+		return ExecutionResult{}, err
+	}
+	operation = current
 	next := operation
 	next.Phase, next.Revision = PhaseCompleted, operation.Revision+1
 	if next.Response == nil {

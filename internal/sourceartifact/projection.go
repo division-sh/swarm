@@ -33,33 +33,57 @@ type runtimeProjectionState struct {
 }
 
 func MaterializeRuntimeProjection(artifact *AdmittedSourceArtifact) (*RuntimeProjection, error) {
-	if artifact == nil {
-		return nil, errors.New("runtime source projection requires an admitted source artifact")
-	}
-	if err := ValidateHash(artifact.BundleHash()); err != nil {
-		return nil, fmt.Errorf("runtime source projection bundle_hash: %w", err)
-	}
-	identity, err := newRuntimeProjectionIdentity()
+	intent, err := PlanRuntimeProjection(artifact)
 	if err != nil {
 		return nil, err
 	}
-	storageRoot, err := os.MkdirTemp("", "swarm-source-")
+	return MaterializePlannedRuntimeProjection(artifact, intent)
+}
+
+// PlanRuntimeProjection allocates identity only. Recoverable callers persist
+// this intent before materialization creates any filesystem or container state.
+func PlanRuntimeProjection(artifact *AdmittedSourceArtifact) (RuntimeProjectionCleanup, error) {
+	if artifact == nil {
+		return RuntimeProjectionCleanup{}, errors.New("runtime source projection requires an admitted source artifact")
+	}
+	if err := ValidateHash(artifact.BundleHash()); err != nil {
+		return RuntimeProjectionCleanup{}, fmt.Errorf("runtime source projection bundle_hash: %w", err)
+	}
+	identity, err := newRuntimeProjectionIdentity()
 	if err != nil {
-		return nil, fmt.Errorf("create runtime source projection: %w", err)
+		return RuntimeProjectionCleanup{}, err
+	}
+	parent, err := filepath.Abs(os.TempDir())
+	if err != nil {
+		return RuntimeProjectionCleanup{}, err
+	}
+	return RuntimeProjectionCleanup{BundleHash: artifact.BundleHash(), Identity: identity,
+		Root: filepath.Join(parent, "swarm-source-"+strings.TrimPrefix(identity, RuntimeProjectionIdentityPrefix))}, nil
+}
+
+func MaterializePlannedRuntimeProjection(artifact *AdmittedSourceArtifact, intent RuntimeProjectionCleanup) (*RuntimeProjection, error) {
+	if err := intent.Validate(); err != nil {
+		return nil, err
+	}
+	if artifact == nil || artifact.BundleHash() != intent.BundleHash {
+		return nil, errors.New("planned projection does not match admitted artifact")
+	}
+	storageRoot, identity := intent.Root, intent.Identity
+	if err := os.Mkdir(storageRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("create exact runtime source projection: %w", err)
 	}
 	cleanup := func(cause error) (*RuntimeProjection, error) {
 		return nil, errors.Join(cause, removeProjectionTree(storageRoot))
 	}
 	root := filepath.Join(storageRoot, "source")
-	if err := os.Mkdir(root, 0o700); err != nil {
-		return cleanup(err)
-	}
-	intent := RuntimeProjectionCleanup{BundleHash: artifact.BundleHash(), Identity: identity, Root: storageRoot}
 	marker, err := json.Marshal(intent)
 	if err != nil {
 		return cleanup(err)
 	}
 	if err := os.WriteFile(filepath.Join(storageRoot, "identity.json"), marker, 0o400); err != nil {
+		return cleanup(err)
+	}
+	if err := os.Mkdir(root, 0o700); err != nil {
 		return cleanup(err)
 	}
 	for _, entry := range artifact.Entries() {

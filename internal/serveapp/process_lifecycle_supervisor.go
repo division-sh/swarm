@@ -11,6 +11,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 // processLifecycleSupervisor owns only serve-process runtime attachment and
@@ -42,6 +43,7 @@ type processLifecycleSupervisor struct {
 	resetContainerRuntime     interface {
 		destructivereset.ManagedContainerRuntime
 		destructivereset.ManagedContainerInventoryReader
+		DisposeProjectionContainers(context.Context, sourceartifact.RuntimeProjectionCleanup) error
 	}
 	stopRunStalled func()
 }

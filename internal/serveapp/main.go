@@ -298,7 +298,7 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceA
 			return nil, fmt.Errorf("resolve embedded platform spec for source artifact admission: %w", err)
 		}
 		for _, hash := range hashes {
-			loaded, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, hash, runningPlatformSpecPath, packBases)
+			loaded, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, hash, runningPlatformSpecPath, packBases, materializeServeSourceProjection)
 			if err != nil {
 				for _, prior := range out {
 					if prior.cleanup != nil {
@@ -331,7 +331,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 		if err != nil {
 			return serveRuntimeBundle{}, fmt.Errorf("resolve embedded platform spec for source artifact admission: %w", err)
 		}
-		return loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, hashes[0], runningPlatformSpecPath, packBases)
+		return loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, hashes[0], runningPlatformSpecPath, packBases, materializeServeSourceProjection)
 	}
 	sourceRoot, err := cliapp.NormalizeSourceRoot(resolvedPaths.SourceRoot)
 	if err != nil {
@@ -366,7 +366,11 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 	}, nil
 }
 
-func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
+func materializeServeSourceProjection(artifact *sourceartifact.AdmittedSourceArtifact, _ semanticview.Source) (*sourceartifact.RuntimeProjection, error) {
+	return sourceartifact.MaterializeRuntimeProjection(artifact)
+}
+
+func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
 	if artifacts == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected source artifact store")
 	}
@@ -399,7 +403,7 @@ func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifa
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("compute DB-loaded boot bundle identity: %w", err)
 	}
-	sourceProjection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
+	sourceProjection, err := materialize(artifact, source)
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("materialize DB-loaded runtime source projection: %w", err)
 	}
@@ -995,7 +999,14 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}
 	if resetRecovery != nil {
-		loadedBundles, err = loadServeRecoveredResetSources(ctx, repo, stores.SourceArtifactStore(), resetRecovery, platformPackBases)
+		loadedBundles, err = loadServeRecoveredResetSources(ctx, repo, stores.SourceArtifactStore(), resetRecovery, platformPackBases,
+			func(artifact *sourceartifact.AdmittedSourceArtifact, source semanticview.Source) (*sourceartifact.RuntimeProjection, error) {
+				backend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+				if err != nil {
+					return nil, err
+				}
+				return supervisor.materializeResetProjection(ctx, artifact, backend.Backend == "docker")
+			})
 	} else {
 		supervisor.resetStartup = false
 		loadedBundles, err = loadServeRuntimeBundles(ctx, repo, stores.SourceArtifactStore(), resolvedPaths, opts, platformPackBases)
