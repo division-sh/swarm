@@ -3224,7 +3224,11 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, testGatewayWorkOwner(t), nil)
+	work, err := testGatewayWorkOwner(t).Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil)
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
 	}
@@ -3275,7 +3279,11 @@ func TestStartSelectedContractAgentRuntimeGatewayRejectsRetiredTokenEnv(t *testi
 
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, testGatewayWorkOwner(t), nil)
+	work, err := testGatewayWorkOwner(t).Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil)
 	if err == nil || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_TOKEN is retired") || !strings.Contains(err.Error(), "ToolGatewayBinding") {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway error = %v, want retired token env rejection", err)
 	}

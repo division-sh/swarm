@@ -116,6 +116,22 @@ func newPreparedProviderTestPlans(t *testing.T) (startupownership.ProcessCapabil
 	return process, probes
 }
 
+func preparedProviderTestCatalog(t *testing.T, runtimes *llm.AgentRuntimeSet, tools claudeStartupToolSource, probes []PreparedSelectedForkProviderProbe) *PreparedSelectedForkProviderCatalog {
+	t.Helper()
+	blueprints := make([]manager.AgentMaterializationBlueprint, len(probes))
+	for i, probe := range probes {
+		blueprints[i] = probe.Agent
+	}
+	catalog, err := PrepareSelectedForkProviderCatalog(testAuthorActivityContext(context.Background()), runtimes, tools, blueprints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range probes {
+		probes[i].Authority.CatalogFingerprint = catalog.Fingerprint()
+	}
+	return catalog
+}
+
 func TestPreparedProviderPreflightUsesRunlessPlansWithoutManager(t *testing.T) {
 	process, plans := newPreparedProviderTestPlans(t)
 	exec := &startupProbeToolExecutor{defs: startupProbeDefs(), caps: startupProbeCaps()}
@@ -138,7 +154,8 @@ func TestPreparedProviderPreflightUsesRunlessPlansWithoutManager(t *testing.T) {
 	}
 	store := &startupCapabilityStore{}
 	preparationID := uuid.NewString()
-	ids, err := ValidatePreparedSelectedForkProviderPreflight(testAuthorActivityContext(context.Background()), cfg, binding, runtimes, turns, exec, preparationID, process, plans, liveTestEffectController(&startupEffectStore{}), store)
+	catalog := preparedProviderTestCatalog(t, runtimes, exec, plans)
+	ids, err := ValidatePreparedSelectedForkProviderPreflight(testAuthorActivityContext(context.Background()), cfg, binding, catalog, turns, preparationID, process, plans, liveTestEffectController(&startupEffectStore{}), store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +170,40 @@ func TestPreparedProviderPreflightUsesRunlessPlansWithoutManager(t *testing.T) {
 		if err := validateEffectiveManagedCapabilitySurface(surface); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestPreparedProviderPreflightRejectsChangedGatewayCatalog(t *testing.T) {
+	process, plans := newPreparedProviderTestPlans(t)
+	plans = plans[:1]
+	exec := &startupProbeToolExecutor{defs: startupProbeDefs(), caps: startupProbeCaps()}
+	turns := mcp.NewTurnContextRegistry(actors.ActorFromContext)
+	server := httptest.NewServer(mcp.NewGateway(exec, "probe-token", RuntimeMCPGatewayHooks(nil, nil, nil, nil, turns)).Handler())
+	t.Cleanup(server.Close)
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	cfg := &config.Config{LLM: config.LLMConfig{Backend: "claude_cli"}}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := &preparedProtocolProbe{}
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, startupProbeRuntime{ClaudeCLIRuntime: &llm.ClaudeCLIRuntime{}, probe: probe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := preparedProviderTestCatalog(t, runtimes, exec, plans)
+	for i := range exec.defs {
+		if exec.defs[i].Name == "health_check" {
+			exec.defs[i].Description += " changed after preparation"
+		}
+	}
+	store := &startupCapabilityStore{}
+	ids, err := ValidatePreparedSelectedForkProviderPreflight(testAuthorActivityContext(context.Background()), cfg, testToolGatewayBinding(server.URL, server.URL, "probe-token"), catalog, turns, uuid.NewString(), process, plans, liveTestEffectController(&startupEffectStore{}), store)
+	if err == nil || len(ids) != 0 || len(probe.calls) != 1 || len(exec.executed) != 0 {
+		t.Fatalf("changed gateway catalog admitted: ids=%v err=%v probes=%d executions=%v", ids, err, len(probe.calls), exec.executed)
+	}
+	if !strings.Contains(err.Error(), "mcp tools/list") {
+		t.Fatalf("refusal did not reach authenticated catalog comparison: %v", err)
 	}
 }
 
@@ -180,7 +231,7 @@ func TestPreparedProviderPreflightRejectsCensusBeforeProviderResolution(t *testi
 					t.Fatal(err)
 				}
 			}
-			_, err := ValidatePreparedSelectedForkProviderPreflight(context.Background(), nil, toolgateway.Binding{}, nil, nil, nil, uuid.NewString(), process, plans, liveTestEffectController(&startupEffectStore{}), &startupCapabilityStore{})
+			_, err := ValidatePreparedSelectedForkProviderPreflight(context.Background(), nil, toolgateway.Binding{}, nil, nil, uuid.NewString(), process, plans, liveTestEffectController(&startupEffectStore{}), &startupCapabilityStore{})
 			if err == nil || strings.Contains(err.Error(), "runtime resolver") {
 				t.Fatalf("census reached provider resolution: %v", err)
 			}
@@ -216,9 +267,10 @@ func TestPreparedProviderPreflightFailureDoesNotReturnReceipts(t *testing.T) {
 				t.Fatal(err)
 			}
 			store := &startupCapabilityStore{}
+			catalog := preparedProviderTestCatalog(t, runtimes, &startupProbeToolExecutor{}, plans)
 			// Empty tools keep this proof at the provider boundary. The positive
 			// matrix above independently exercises the real MCP HTTP protocol.
-			ids, err := ValidatePreparedSelectedForkProviderPreflight(ctx, cfg, testToolGatewayBinding("http://127.0.0.1:1", "http://127.0.0.1:1", "probe-token"), runtimes, mcp.NewTurnContextRegistry(actors.ActorFromContext), &startupProbeToolExecutor{}, uuid.NewString(), process, plans, liveTestEffectController(&startupEffectStore{}), store)
+			ids, err := ValidatePreparedSelectedForkProviderPreflight(ctx, cfg, testToolGatewayBinding("http://127.0.0.1:1", "http://127.0.0.1:1", "probe-token"), catalog, mcp.NewTurnContextRegistry(actors.ActorFromContext), uuid.NewString(), process, plans, liveTestEffectController(&startupEffectStore{}), store)
 			if err == nil || len(ids) != 0 {
 				t.Fatalf("failed preparation returned receipts: %v %v", ids, err)
 			}

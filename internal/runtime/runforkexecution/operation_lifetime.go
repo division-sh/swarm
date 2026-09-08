@@ -16,7 +16,7 @@ type selectedContractOperation struct {
 	preparation *worklifetime.Lease
 	preparing   context.Context
 	cancel      context.CancelCauseFunc
-	stop        func() bool
+	stop        func()
 	selected    *worklifetime.SelectedForkOccurrence
 	use         *worklifetime.Lease
 }
@@ -36,8 +36,17 @@ func beginSelectedContractOperation(ctx context.Context) (*selectedContractOpera
 		return nil, fmt.Errorf("admit selected-contract operation: %w", err)
 	}
 	preparing, cancel := context.WithCancelCause(ctx)
-	stop := context.AfterFunc(lease.Context(), func() { cancel(context.Cause(lease.Context())) })
-	return &selectedContractOperation{process: process, preparation: lease, preparing: preparing, cancel: cancel, stop: stop}, nil
+	bridgeDone := make(chan struct{})
+	stop := context.AfterFunc(lease.Context(), func() {
+		defer close(bridgeDone)
+		cancel(context.Cause(lease.Context()))
+	})
+	stopAndJoin := func() {
+		if !stop() {
+			<-bridgeDone
+		}
+	}
+	return &selectedContractOperation{process: process, preparation: lease, preparing: preparing, cancel: cancel, stop: stopAndJoin}, nil
 }
 
 func (o *selectedContractOperation) PreparationContext() context.Context { return o.preparing }

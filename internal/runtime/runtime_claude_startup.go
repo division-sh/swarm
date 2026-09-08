@@ -450,6 +450,7 @@ func (a ManagedProviderPreflightAuthority) validate() error {
 type preparedProviderPreflightAuthority struct {
 	process startupownership.ProcessCapability
 	plans   map[runtimeagentidentity.Plan]managedcapabilities.PreparedSelectedForkProbeAuthority
+	catalog *PreparedSelectedForkProviderCatalog
 }
 
 // PreparedSelectedForkProviderProbe carries a prospective actor, never a live
@@ -459,11 +460,11 @@ type PreparedSelectedForkProviderProbe struct {
 	Authority managedcapabilities.PreparedSelectedForkProbeAuthority
 }
 
-func ValidatePreparedSelectedForkProviderPreflight(ctx context.Context, cfg *config.Config, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, preparationID string, process startupownership.ProcessCapability, probes []PreparedSelectedForkProviderProbe, controller *runtimeeffects.Controller, persistence managedcapabilities.Persistence) ([]string, error) {
+func ValidatePreparedSelectedForkProviderPreflight(ctx context.Context, cfg *config.Config, gatewayBinding toolgateway.Binding, catalog *PreparedSelectedForkProviderCatalog, turnStore llm.MCPTurnContextStore, preparationID string, process startupownership.ProcessCapability, probes []PreparedSelectedForkProviderProbe, controller *runtimeeffects.Controller, persistence managedcapabilities.Persistence) ([]string, error) {
 	authority := ManagedProviderPreflightAuthority{
 		ExecutionKind: managedcapabilities.ExecutionSelectedForkPreparation, ExecutionAuthorityID: preparationID,
 		EffectController: controller, CapabilityStore: persistence,
-		prepared: &preparedProviderPreflightAuthority{process: process, plans: make(map[runtimeagentidentity.Plan]managedcapabilities.PreparedSelectedForkProbeAuthority, len(probes))},
+		prepared: &preparedProviderPreflightAuthority{process: process, plans: make(map[runtimeagentidentity.Plan]managedcapabilities.PreparedSelectedForkProbeAuthority, len(probes)), catalog: catalog},
 	}
 	if err := authority.validate(); err != nil {
 		return nil, err
@@ -478,6 +479,9 @@ func ValidatePreparedSelectedForkProviderPreflight(ctx context.Context, cfg *con
 	configs := make([]managedProviderPreflightAgent, 0, len(probes))
 	for _, probe := range probes {
 		plan := probe.Agent.Identity
+		if plan != plan.Normalize() {
+			return nil, fmt.Errorf("prepared provider preflight requires a canonical actor plan")
+		}
 		if err := probe.Authority.Validate(); err != nil {
 			return nil, err
 		}
@@ -502,8 +506,22 @@ func ValidatePreparedSelectedForkProviderPreflight(ctx context.Context, cfg *con
 		authority.prepared.plans[plan] = probe.Authority
 		configs = append(configs, managedProviderPreflightAgent{config: probe.Agent.Config, plan: plan})
 	}
+	if catalog == nil || catalog.Fingerprint() == "" || len(catalog.targets) != len(probes) {
+		return nil, fmt.Errorf("prepared provider preflight requires its exact frozen catalog")
+	}
+	for _, probe := range probes {
+		target, ok := catalog.targets[probe.Agent.Identity]
+		revision, err := runtimemanager.AgentConfigPlanRevision(probe.Agent.Config, probe.Agent.Identity)
+		if !ok || err != nil || target.revision != revision || probe.Authority.CatalogFingerprint != catalog.Fingerprint() {
+			return nil, fmt.Errorf("prepared provider preflight catalog or configuration changed")
+		}
+		prompt, err := preparedProviderPrompt(probe.Agent.Config)
+		if err != nil || prompt != target.prompt {
+			return nil, fmt.Errorf("prepared provider preflight prompt changed")
+		}
+	}
 	sort.Slice(configs, func(i, j int) bool { return runtimeagentidentity.LessPlan(configs[i].plan, configs[j].plan) })
-	ids, err := validateManagedProviderPreflightConfigs(ctx, cfg, gatewayBinding, runtimes, turnStore, tools, configs, authority)
+	ids, err := validateManagedProviderPreflightConfigs(ctx, cfg, gatewayBinding, nil, turnStore, nil, configs, authority)
 	if err != nil {
 		return nil, err
 	}
@@ -570,7 +588,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 	if len(preflightConfigs) == 0 {
 		return nil, nil
 	}
-	if runtimes == nil {
+	if runtimes == nil && authority.prepared == nil {
 		return nil, fmt.Errorf("managed provider preflight requires the agent runtime resolver")
 	}
 	type preflightTarget struct {
@@ -578,6 +596,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 		plan    runtimeagentidentity.Plan
 		runtime llm.Runtime
 		probe   llm.StartupVisibleToolSurfaceProber
+		catalog preparedProviderCatalogTarget
 	}
 	targets := make([]preflightTarget, 0)
 	for _, candidate := range preflightConfigs {
@@ -591,7 +610,15 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 				return nil, fmt.Errorf("selected-fork preflight agent run does not match execution authority")
 			}
 		}
-		resolved, resolveErr := runtimes.ResolveAgentRuntime(agentCfg)
+		var resolved llm.AgentRuntimeResolution
+		var resolveErr error
+		var catalogTarget preparedProviderCatalogTarget
+		if authority.prepared != nil {
+			catalogTarget, resolveErr = authority.prepared.catalog.targets[candidate.plan].snapshot()
+			resolved = catalogTarget.resolved
+		} else {
+			resolved, resolveErr = runtimes.ResolveAgentRuntime(agentCfg)
+		}
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve managed provider runtime for agent %s: %w", strings.TrimSpace(agentCfg.ID), resolveErr)
 		}
@@ -605,7 +632,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 		if !ok {
 			return nil, fmt.Errorf("managed provider startup probe is required for agent %s", strings.TrimSpace(resolved.Actor.ID))
 		}
-		targets = append(targets, preflightTarget{config: resolved.Actor, plan: candidate.plan, runtime: resolved.Runtime, probe: startupProbe})
+		targets = append(targets, preflightTarget{config: resolved.Actor, plan: candidate.plan, runtime: resolved.Runtime, probe: startupProbe, catalog: catalogTarget})
 	}
 	if len(targets) == 0 {
 		return nil, nil
@@ -616,7 +643,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 	if turnStore == nil {
 		return nil, fmt.Errorf("mcp turn context store is required for claude cli runtime")
 	}
-	if tools == nil {
+	if tools == nil && authority.prepared == nil {
 		return nil, fmt.Errorf("tool executor is required for claude cli runtime")
 	}
 	if err := gatewayBinding.Validate(); err != nil {
@@ -636,7 +663,15 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			continue
 		}
 		agentCtx := runtimeactors.WithActor(ctx, agentCfg)
-		sessionTools, capabilities, err := startupToolPlan(agentCtx, agentCfg, modelRuntime, tools)
+		var sessionTools []llm.ToolDefinition
+		var capabilities toolcapabilities.Set
+		var err error
+		if authority.prepared != nil {
+			frozen := target.catalog
+			sessionTools, capabilities = frozen.tools, frozen.capabilities
+		} else {
+			sessionTools, capabilities, err = startupToolPlan(agentCtx, agentCfg, modelRuntime, tools)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("build managed capability startup inputs for agent %s: %w", agentID, err)
 		}

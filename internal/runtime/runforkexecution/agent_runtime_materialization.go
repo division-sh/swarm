@@ -731,33 +731,19 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		return selectedContractAgentRuntimeFactory{}, selectedContractAgentRuntimeUnsupportedError(req.AgentRuntime.Proof.AgentRecipients, "missing selected-fork agent factory/runtime configuration")
 	}
 
-	authority := runtimeauthority.NewSourceProvider(source)
-	emitRegistry := runtimetools.NewEmitRegistry(source, authority)
 	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	credentials := options.Credentials
-	if credentials == nil {
-		credentials = runtimecredentials.NewEnvStore()
-	}
 	var managerRef runtimetools.Manager
-	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
-		Config:             options.Config,
-		Credentials:        credentials,
-		ManagedCredentials: options.ManagedCredentials,
-		MailboxStore:       options.MailboxStore,
-		NoticePresentation: options.NoticePresentation,
-		MCPClient:          options.MCPClient,
-		EntityStore:        options.EntityStore,
-		HumanTaskStore:     options.HumanTaskStore,
-		WorkflowInstances:  pipeline,
-		WorkflowSource:     source,
-		WorkspaceResolver:  options.Workspace,
-		AuthorityProvider:  authority,
-		EmitRegistry:       emitRegistry,
-		ManagerProvider: func() runtimetools.Manager {
-			return managerRef
-		},
+	exec := newSelectedContractToolExecutor(options, source, bus, pipeline, func() runtimetools.Manager {
+		return managerRef
 	})
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, mcpTurns, managerOptions.WorkOwner, func(identity agentidentity.Identity) (runtimeactors.AgentConfig, bool) {
+	if managerOptions.WorkOwner == nil {
+		return selectedContractAgentRuntimeFactory{}, errors.New("selected-fork gateway requires work occurrence")
+	}
+	gatewayWork, err := managerOptions.WorkOwner.Begin(context.Background())
+	if err != nil {
+		return selectedContractAgentRuntimeFactory{}, err
+	}
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, mcpTurns, gatewayWork, func(identity agentidentity.Identity) (runtimeactors.AgentConfig, bool) {
 		if managerRef == nil {
 			return runtimeactors.AgentConfig{}, false
 		}
@@ -805,9 +791,45 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}, nil
 }
 
-func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTurns *runtimemcp.TurnContextRegistry, owner worklifetime.Occurrence, resolveActorConfig func(agentidentity.Identity) (runtimeactors.AgentConfig, bool)) (toolgateway.Binding, func(), error) {
+func newSelectedContractToolExecutor(options SelectedContractAgentRuntimeOptions, source semanticview.Source, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator, managerProvider func() runtimetools.Manager) *runtimetools.Executor {
+	authority := runtimeauthority.NewSourceProvider(source)
+	credentials := options.Credentials
+	if credentials == nil {
+		credentials = runtimecredentials.NewEnvStore()
+	}
+	return runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
+		Config:             options.Config,
+		Credentials:        credentials,
+		ManagedCredentials: options.ManagedCredentials,
+		MailboxStore:       options.MailboxStore,
+		NoticePresentation: options.NoticePresentation,
+		MCPClient:          options.MCPClient,
+		EntityStore:        options.EntityStore,
+		HumanTaskStore:     options.HumanTaskStore,
+		WorkflowInstances:  pipeline,
+		WorkflowSource:     source,
+		WorkspaceResolver:  options.Workspace,
+		AuthorityProvider:  authority,
+		EmitRegistry:       runtimetools.NewEmitRegistry(source, authority),
+		ManagerProvider:    managerProvider,
+	})
+}
+
+func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTurns *runtimemcp.TurnContextRegistry, lease *worklifetime.Lease, resolveActorConfig func(agentidentity.Identity) (runtimeactors.AgentConfig, bool)) (_ toolgateway.Binding, _ func(), finalErr error) {
+	if lease == nil {
+		return toolgateway.Binding{}, nil, errors.New("selected-fork gateway requires admitted work")
+	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			finalErr = errors.Join(finalErr, lease.Done())
+		}
+	}()
+	if err := lease.Context().Err(); err != nil {
+		return toolgateway.Binding{}, nil, err
+	}
 	if exec == nil {
-		return toolgateway.Binding{}, nil, nil
+		return toolgateway.Binding{}, nil, errors.New("selected-fork gateway requires tool executor")
 	}
 
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
@@ -840,30 +862,37 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTu
 	}
 
 	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, mcpTurns))
-	server := &http.Server{Handler: gateway.Handler()}
-	if owner == nil {
-		_ = ln.Close()
-		return toolgateway.Binding{}, nil, fmt.Errorf("selected-fork gateway requires work occurrence")
-	}
-	lease, err := owner.Begin(context.Background())
-	if err != nil {
-		_ = ln.Close()
-		return toolgateway.Binding{}, nil, fmt.Errorf("admit selected-fork gateway: %w", err)
-	}
-	done := make(chan struct{})
+	server := serveSelectedContractGateway(ln, gateway.Handler(), lease)
+	transferred = true
+	return binding, server.Close, nil
+}
+
+type selectedContractGatewayServer struct {
+	server    *http.Server
+	stopped   chan struct{}
+	lease     *worklifetime.Lease
+	closeOnce sync.Once
+}
+
+func serveSelectedContractGateway(listener net.Listener, handler http.Handler, lease *worklifetime.Lease) *selectedContractGatewayServer {
+	server := &selectedContractGatewayServer{server: &http.Server{Handler: handler}, stopped: make(chan struct{}), lease: lease}
 	go func() {
-		defer close(done)
-		defer func() { _ = lease.Done() }()
-		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			_ = server.Close()
-		}
+		defer close(server.stopped)
+		// Even on a listener failure, Shutdown must retain accepted connections
+		// until their handlers return. Close would erase that join accounting.
+		_ = server.server.Serve(listener)
 	}()
-	return binding, func() {
-		if err := server.Shutdown(context.Background()); err != nil {
-			_ = server.Close()
-		}
-		<-done
-	}, nil
+	return server
+}
+
+func (s *selectedContractGatewayServer) Close() {
+	s.closeOnce.Do(func() {
+		// Serve returning does not join accepted HTTP handlers. The owner
+		// releases its work only after Shutdown and the serving loop join.
+		defer func() { _ = s.lease.Done() }()
+		_ = s.server.Shutdown(context.Background())
+		<-s.stopped
+	})
 }
 
 func (r *selectedContractAgentRuntime) Shutdown() error {
