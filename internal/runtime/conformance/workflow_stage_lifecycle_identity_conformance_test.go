@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -207,7 +208,8 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 	base := runtimepkg.RuntimeDeps{
 		Config: cfg,
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-			SelfCheck: false, WorkflowModule: module, LLMRuntime: conformanceNoopLLMRuntime{},
+			ExecutionPosture: executionposture.Live,
+			SelfCheck:        false, WorkflowModule: module, LLMRuntime: conformanceNoopLLMRuntime{},
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: sourceArtifactFact,
 		}),
 	}

@@ -94,8 +94,12 @@ Large/whole suites use go run ./cmd/swarm-test; targeted tests use ordinary go t
 The first unfiltered whole suite failed in nine packages. In-scope fixture/guard
 repairs are committed in 009e18c34 and pass targeted checks, including Claude
 retry/restart, directive acknowledgment/rollback, private-runtime isolation and
-exact descriptor consumption. A second unfiltered run is queued. No whole-suite
-success is claimed. The complete 29-row development checklist and explicit proof
+exact descriptor consumption. The second unfiltered run completed with two failing
+packages (conformance and serveapp). The remaining fixture repairs pass targeted
+startup, decoder, abandonment and complete dual-store mock emission checks. New
+dual-store persisted descriptor corruption/read-only proof also passes. The next
+unfiltered run will enable the full proof profile, including retained lifecycle
+journeys. No whole-suite success is claimed. The complete 29-row checklist and proof
 gaps are recorded in issue-2321-proof-accounting.md; it is not a final proof audit.
 
 ## Remaining Work And Acceptance

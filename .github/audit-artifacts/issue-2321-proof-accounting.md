@@ -62,12 +62,12 @@ must be rebound to the final integrated head before the final audit is posted.
 | M6 | `TestCredentialChecksCensusScopedAgentsHiddenByAmbiguousAlias`, `TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias`, `TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock`; retain exact scoped identities in H. |
 | M7 | `TestCredentialChecksUseTypedSelectionAndExactResponseAuthority`, `TestCredentialChecksRetainAgentFreeToolRequirement`, `TestCredentialChecksRetainNonToolRequirementsSharingAKey`, live/mock startup credential negatives. |
 | M8 | `TestCommandWorkspaceSelectionIgnoresLiveSourceDoubles`, `TestCommandPurposeControlsClaudeStartupRequirements`, `TestValidateNativeToolBootConfig_CommandPurposeOwnsNativeAdmission`, managed Claude capability/probe matrix. |
-| M9 | Descriptor source/selection and corruption tests; H selected-store reopen. Check final dual-store coverage explicitly, not only encoder unit results. |
+| M9 | `TestCommandDescriptorBothStoresPreserveSelectionAndRefuseCorruption` executes Live/MockOnly on SQLite/PostgreSQL, preserves custom write-time model and exact double bytes, and rejects repeated reads with missing model/provider/transport without changing persisted bytes. H separately proves retained reopen. |
 | M10 | `TestAuthoredMockSelectionSurvivesReconfigureAndRestart`, `TestAgentRuntimeSetRecoveryRejectsBackendDriftWithoutRewritingDescriptor`, `TestCommandRecoveryNeverSelectsAnIncompleteStoredDescriptor`, H J1-J4; L restart pending. |
 | M11 | `TestSelectedContractContainerValidatesStoredSelectionsWithoutRepair`, `TestSelectedContractContainerRejectsIncompleteStoredDescriptor`, `TestLLMForkChatExecutorRefusesConflictingStoredBackendWithoutReselection`, served selected-fork and fork-chat positives. |
 | M12 | `TestPrivateTestDoesNotSelectConcurrentLiveRuntime`, `TestPrivateTestAdmissionPrecedesResourceAcquisition`; private API shared-client boundary guard. |
 | M13 | `TestServedParityHarnessDerivedScenarioLifecycle`, `TestServedParityHarnessGeneratedInputFixtureLifecycle`, `TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsAndModes`; public fresh authored/derived proof must remain separately credited. |
-| M14 | `TestPrivateTestSessionJoinedCleanupAndPrivateTransport` covers success, failure, cancellation and scenario deadline; `TestPrivateTestStartupFailureUnwindsAcquiredResources`, `TestPrivateTestRootCleanupRemovesImmutableProjectionsWithoutFollowingLinks`; shared composition listener, late-readiness, projection and ownership failure tests. Final resource-by-resource failure map still required. |
+| M14 | `TestPrivateTestSessionJoinedCleanupAndPrivateTransport` covers success, failure, cancellation and scenario deadline; `TestPrivateTestStartupFailureUnwindsAcquiredResources`, `TestPrivateTestRootCleanupRemovesImmutableProjectionsWithoutFollowingLinks`; resource-by-resource mapping and executed listener, late-readiness, projection and ownership failures are tabulated below. |
 | M15 | Private transport test proves auth and absent ingress; `TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP`, controlled provider capability matrix, H exact connector/timer/card outcomes. Final no-external-effect counter map still required. |
 | M16 | `TestCommandConfigRecoveryDefaultsAndExplicitFalse`, H J1-J4 and exact startup refusal tests; provisioned L retained-recovery parity pending. |
 | M17 | `TestGoldenInvocationRootDevReadiness` L and `TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch` H, existing scratch-path/borrowed-store refusals. L repeated epoch/retained sentinel proof pending. |
@@ -130,10 +130,22 @@ The first unfiltered swarm-test run failed in nine packages. No runtime blocker 
 established by those failures: they included old descriptor fixtures, retired
 selector assertions, structural-reader/import guards, an unused import, a removed
 empty fixture directory, an invalid model alias and a nil-vs-empty persisted
-configuration revision. Bounded fixes have targeted passing proofs. The second
-unfiltered run is queued/running; no integrated pass is claimed yet.
+configuration revision. The second unfiltered run completed with failures in two
+packages: conformance and serveapp. Its remaining packages passed, including
+runtimepersistence, releasee2e, runtime, apiv1, cataloge2e and cliapp.
 
-Remaining independent work includes the second-suite result, the explicit M14/M15/
+The remaining fixtures now have targeted passing proof: conformance startup and
+decoder inventory (4.827s), serve abandonment (1.493s), and the complete real mock
+emission matrix (37.306s: both stores, both naming forms, cardinality 1/2/3). The
+mock fixture explicitly selects MockOnly with a configured live profile, uses the
+canonical runtime set, and carries mock mode through root events and maintenance
+context. No production mode fence was relaxed. An earlier obsolete matrix run was
+cancelled after the live-context fixture mismatch was reproduced and classified;
+it is not passing evidence. The new dual-store descriptor proof passed (1.807s).
+Another integrated run with the full proof profile is required; no whole-suite
+pass is claimed yet.
+
+Remaining independent work includes the next integrated result, the explicit M15/
 M25 accounting/proof gaps above and final-head verification. External acceptance
 still requires the provisioned L environment and #2319 proof. No final audit or
 review-ready PR exists. This checklist must not be submitted as proof of closure.

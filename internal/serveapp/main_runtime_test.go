@@ -8580,7 +8580,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
 	requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
-		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
+		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Authored(true),
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,

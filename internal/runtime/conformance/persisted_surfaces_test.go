@@ -1022,6 +1022,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		TimerObligationReader:       pg,
 		PipelineObligations:         pg.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
 			WorkflowModule:     loadConformanceRuntimeWorkflowModule(t),
 			LLMRuntime:         conformanceNoopLLMRuntime{},
@@ -1117,6 +1118,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		DeliveryStore:               pg,
 		PipelineObligations:         eventStore.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         conformanceNoopLLMRuntime{},
@@ -1358,6 +1360,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		DeliveryStore:               pg,
 		PipelineObligations:         pg.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         conformanceNoopLLMRuntime{},
