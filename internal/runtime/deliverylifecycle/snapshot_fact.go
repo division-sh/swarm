@@ -13,8 +13,8 @@ import (
 )
 
 // DecodeHistoricalSnapshot validates the canonical persisted delivery fact
-// captured by run-fork revisioning. It deliberately excludes claim tokens;
-// historical readback is evidence, never a capability.
+// captured by run-fork revisioning, including persisted connect-route evidence.
+// It excludes live worker claim tokens; historical readback is never a capability.
 func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	var fact struct {
 		DeliveryID                string                           `json:"delivery_id"`
@@ -27,6 +27,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		DeliveryTargetOwnership   events.DeliveryTargetOwnership   `json:"delivery_target_ownership"`
 		DeliveryContext           events.DeliveryContext           `json:"delivery_context"`
 		DeliveryPayloadProjection events.DeliveryPayloadProjection `json:"delivery_payload_projection"`
+		ConnectClaim              events.ConnectExecutionClaim     `json:"connect_execution_claim"`
 		Status                    string                           `json:"status"`
 		RetryCount                int                              `json:"retry_count"`
 		MaxRetries                int                              `json:"max_retries"`
@@ -77,6 +78,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		Recipient:     recipient,
 		AgentIdentity: fact.AgentIdentity, Target: fact.DeliveryTargetOwnership, Context: fact.DeliveryContext,
 		PayloadProjection: fact.DeliveryPayloadProjection,
+		ConnectClaim:      fact.ConnectClaim,
 	}.Normalized()
 	derived, err := route.Identity()
 	if err != nil || derived != identity {

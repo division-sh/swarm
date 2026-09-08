@@ -16330,6 +16330,10 @@ run_model:
         one run shares one revision; exact no-change emits no revision; rollback publishes neither domain facts nor
         revision facts. Multi-run finalization locks parent runs in deterministic run-ID order. No revision lock spans
         external work. Retained-run deletion emits present=false for every removed fact in the same transaction.
+        The event_deliveries projection captures every coordinate of the canonical DeliveryRoute: recipient class and
+        identity, agent identity, target ownership, delivery context, payload projection, and connect_execution_claim.
+        Stored connect execution evidence is part of route identity and is captured in the same revision as the delivery;
+        it is not a live worker claim token. Historical projection excludes live worker tokens and execution capabilities.
       read_contract: >-
         PostgreSQL and SQLite private adapters validate and decode the same thirteen-family historical projection.
         PlanRunFork exposes the same selected-store consumer on both backends: it resolves the event UUID to its first revision
@@ -16341,6 +16345,11 @@ run_model:
         they MUST NOT recover it from an event name, current route state, receiver flow_instance, or a synthetic delivery.
         Missing, ambiguous, lineage-invalid, partially deleted, or unrevisioned facts fail closed; old stores are unsupported
         and must be recreated.
+        Historical delivery hydration uses the existing closed route and connect-claim codecs and requires the complete
+        reconstructed route identity to equal the captured route hash. A non-connect route has empty connect evidence;
+        missing or contradictory evidence for a connected route cannot be repaired from current delivery or topology rows.
+        Planning and stamped frontier/history recipient consumers retain that validated evidence. Historical evidence never
+        grants a live delivery lease or permits copying a source worker capability into a new fork-local delivery.
       route_projection: >-
         Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
         projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
