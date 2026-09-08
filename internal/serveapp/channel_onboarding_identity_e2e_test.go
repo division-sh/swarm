@@ -35,13 +35,15 @@ func TestChannelOnboardingE2E07ClaimTimeoutResume(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
+			var admittedID string
+			ctx := channelClaimDeadlineAtReadback(t, func(result channelonboarding.Result) {
+				admittedID = result.Operation.OperationID
+			})
 			harness := newChannelOnboardingE2EHarness(t, backend, true)
 			harness.start(t)
 
 			input := installChannelOnboardingCLIInput(t, "timeout-token\n")
 			defer input()
-			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-			defer cancel()
 			stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
 			code := executeCLI(ctx, []string{
 				"--config", harness.opts.ConfigPath, "channel", "connect", "telegram", "--yes", "--api-server", harness.endpoint,
@@ -49,8 +51,12 @@ func TestChannelOnboardingE2E07ClaimTimeoutResume(t *testing.T) {
 			surface := stdout.String() + "\n" + stderr.String()
 			operationID := channelOnboardingOperationIDPattern.FindString(surface)
 			resumeCommand := "swarm channel resume " + operationID
-			if code == 0 || operationID == "" || !strings.Contains(surface, resumeCommand) {
+			if code == 0 || admittedID == "" || operationID != admittedID || !strings.Contains(surface, resumeCommand) ||
+				!strings.Contains(surface, "context deadline exceeded: channel claim wait stopped") {
 				t.Fatalf("%s E2E-07 timeout code=%d lacks exact resume\nstdout:\n%s\nstderr:\n%s", backend, code, stdout.String(), stderr.String())
+			}
+			if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 0 {
+				t.Fatalf("%s E2E-07 timeout provider effects = %d/%d, want real registration without delivery", backend, registrations, deliveries)
 			}
 			row := requireChannelOnboardingOperationRow(t, harness, operationID)
 			if row.Operation.Phase != string(channelonboarding.PhaseAwaitingExternalIdentity) || row.Recovery == nil || len(row.Recovery.Commands) != 1 || row.Recovery.Commands[0] != resumeCommand {
