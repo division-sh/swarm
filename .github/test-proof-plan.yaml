@@ -39,7 +39,10 @@ profiles:
       - catalog-required-smoke
       - hitl-llm-full
       - hitl-releasee2e-rest
-      - hitl-releasee2e-burst
+      - hitl-releasee2e-burst-1
+      - hitl-releasee2e-burst-2
+      - hitl-releasee2e-golden
+      - hitl-releasee2e-journeys
       - hitl-releasee2e-invocation
       - runtime-full
       - serveapp-channel
@@ -65,7 +68,10 @@ profiles:
       - catalog-runtime
       - hitl-llm-full
       - hitl-releasee2e-rest
-      - hitl-releasee2e-burst
+      - hitl-releasee2e-burst-1
+      - hitl-releasee2e-burst-2
+      - hitl-releasee2e-golden
+      - hitl-releasee2e-journeys
       - hitl-releasee2e-invocation
       - runtime-full
       - serveapp-channel
@@ -91,7 +97,10 @@ profiles:
       - catalog-runtime
       - hitl-llm-full
       - hitl-releasee2e-rest
-      - hitl-releasee2e-burst
+      - hitl-releasee2e-burst-1
+      - hitl-releasee2e-burst-2
+      - hitl-releasee2e-golden
+      - hitl-releasee2e-journeys
       - hitl-releasee2e-invocation
       - runtime-full
       - serveapp-channel
@@ -117,7 +126,10 @@ profiles:
       - catalog-runtime
       - hitl-llm-full
       - hitl-releasee2e-rest
-      - hitl-releasee2e-burst
+      - hitl-releasee2e-burst-1
+      - hitl-releasee2e-burst-2
+      - hitl-releasee2e-golden
+      - hitl-releasee2e-journeys
       - hitl-releasee2e-invocation
       - runtime-full
       - serveapp-channel
@@ -183,14 +195,35 @@ units:
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^(Test($|[^DG].*|Golden($|[^A].*|AgentWorkload($|[^B].*)))|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CDG].*)|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
-  hitl-releasee2e-burst:
+  hitl-releasee2e-burst-1:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^TestGoldenAgentWorkloadB.*$'
+    run: '^TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  hitl-releasee2e-burst-2:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  hitl-releasee2e-golden:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^TestGolden($|[^A].*|AgentWorkload($|[^B].*))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  hitl-releasee2e-journeys:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^TestC.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

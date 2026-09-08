@@ -73,6 +73,7 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 					if err := json.Unmarshal([]byte(verified.output), &result); verified.err != nil || err != nil || !result.OK {
 						t.Fatalf("verify: %v; decode: %v\n%s", verified.err, err, verified.output)
 					}
+					serveStarted := time.Now()
 					process := startReleaseServe(t, releaseProcessSpec{
 						BinaryPath: binary, WorkingDir: cell.cwd, Source: cell.operand, ConfigPath: config,
 						Store: backend, APIPort: freeReleaseTCPPort(t), MCPPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env,
@@ -82,6 +83,7 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 					if err := process.waitReady(ctx); err != nil {
 						t.Fatal(err)
 					}
+					t.Logf("invocation serve ready after %s", time.Since(serveStarted))
 					hash := goldenServedBundleHash(t, process.rpc)
 					var identity struct {
 						SourceArtifacts []struct {
@@ -103,7 +105,9 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 					if hash != wantHash {
 						t.Fatalf("hash = %s, want %s", hash, wantHash)
 					}
+					readStarted := time.Now()
 					observed := runStaticDataRead(t, process, hash, cell.name, "")
+					t.Logf("invocation admitted static-data read after %s", time.Since(readStarted))
 					baselineMu.Lock()
 					if baseline == nil {
 						baseline = observed
@@ -125,9 +129,11 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 						}
 						foreignProven = true
 					}
+					stopStarted := time.Now()
 					if err := process.stopAndWait(10 * time.Second); err != nil {
 						t.Fatalf("stop: %v\n%s", err, process.output.String())
 					}
+					t.Logf("invocation shutdown=%s process wall=%s user=%s system=%s", time.Since(stopStarted), time.Since(serveStarted), process.cmd.ProcessState.UserTime(), process.cmd.ProcessState.SystemTime())
 				})
 			}
 			// Every geometry also rejects a referenced file that no longer exists.
