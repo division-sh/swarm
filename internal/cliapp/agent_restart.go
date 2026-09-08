@@ -22,6 +22,7 @@ const (
 
 type agentRestartCommandOptions struct {
 	apiOptions     rootCommandOptions
+	runID          string
 	flowInstance   string
 	idempotencyKey string
 }
@@ -41,6 +42,8 @@ func newAgentRestartCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
+	cmd.Flags().StringVar(&restartOpts.runID, "run-id", "", "Exact run owning the agent")
+	_ = cmd.MarkFlagRequired("run-id")
 	cmd.Flags().StringVar(&restartOpts.flowInstance, "flow-instance", "", "Select the exact concrete agent flow instance")
 	cmd.Flags().StringVar(&restartOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -86,7 +89,7 @@ func validateAgentRestartArgs(args []string) (string, error) {
 }
 
 func (opts agentRestartCommandOptions) params(agentID string) map[string]any {
-	params := map[string]any{"agent_id": agentID}
+	params := map[string]any{"agent_id": agentID, "run_id": strings.TrimSpace(opts.runID)}
 	if flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/"); flowInstance != "" {
 		params["flow_instance"] = flowInstance
 	}

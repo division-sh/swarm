@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -487,7 +488,7 @@ func testCapabilitySurfaceForDefinitions(t testing.TB, actor models.AgentConfig,
 	}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
 		ActorIdentity: actor.Identity, RuntimeMode: "task", Provider: "test", Transport: "cli", ProviderContract: "test-contract",
-		Authority: managedcapabilities.Authority{Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: actor.ID, RunID: uuid.NewString(), SessionID: uuid.NewString(), TurnOrdinal: 1},
+		Authority: managedcapabilities.Authority{Kind: managedcapabilities.AuthorityProviderTurn, ID: uuid.NewString(), ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: actor.ID, RunID: actor.Identity.RunID, SessionID: uuid.NewString(), TurnOrdinal: 1},
 		Tools:     planned,
 	})
 	if err != nil {
@@ -638,8 +639,9 @@ func TestGatewayRejectsSameSlugSiblingCapabilityPrincipalBeforeToolExecution(t *
 	if !ok {
 		t.Fatal("resolve exact managed provider turn")
 	}
-	siblingIdentity := agentidentitytest.Runtime(
+	siblingIdentity := agentidentitytest.RuntimeForRun(
 		t,
+		surface.Authority.RunID,
 		surface.ActorID,
 		"mcp-managed-turn-test",
 		"claude",
@@ -1027,7 +1029,8 @@ func runGatewayTransportPair(t *testing.T, reqCtx context.Context) (gatewayCtxOb
 
 func TestGatewayHydrateActor_PrefersResolvedRuntimeConfig(t *testing.T) {
 	g := NewGateway(nil, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+		ResolveActorConfig: func(identity agentidentity.Identity) (models.AgentConfig, bool) {
+			agentID := identity.AgentID()
 			if agentID != "market-research-agent" {
 				return models.AgentConfig{}, false
 			}
@@ -1046,6 +1049,7 @@ func TestGatewayHydrateActor_PrefersResolvedRuntimeConfig(t *testing.T) {
 	hydrated := g.hydrateActor(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
+		Identity:      agentidentitytest.RootRuntime(t, "market-research-agent", "mcp.gateway_test"),
 		Role:          "spoofed_role",
 		FlowID:        "spoofed_mode",
 	})
@@ -1103,7 +1107,8 @@ func TestParseToolListHeaderCanonicalizesAliases(t *testing.T) {
 func TestGatewayMCPToolsForRequest_UsesHydratedActorWithCanonicalExecutorCatalog(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	g := NewGateway(&actorAwareToolExecutorStub{}, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+		ResolveActorConfig: func(identity agentidentity.Identity) (models.AgentConfig, bool) {
+			agentID := identity.AgentID()
 			if agentID != "campaign-coordinator" {
 				return models.AgentConfig{}, false
 			}
@@ -1140,7 +1145,8 @@ func TestGatewayMCPToolsForRequest_UsesActorScopedToolDefinitions(t *testing.T) 
 			{Name: "query_entities", Description: "actor scoped", Usage: "Use CEL equality with ==."},
 		},
 	}, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+		ResolveActorConfig: func(identity agentidentity.Identity) (models.AgentConfig, bool) {
+			agentID := identity.AgentID()
 			return models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agentID,
@@ -1303,7 +1309,8 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 			{Name: "read_flow_data", Description: "actor declared flow data", GeneratedSchema: true},
 		},
 	}, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+		ResolveActorConfig: func(identity agentidentity.Identity) (models.AgentConfig, bool) {
+			agentID := identity.AgentID()
 			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "analysis"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
@@ -1320,7 +1327,8 @@ func TestGatewayMCPToolsForRequest_ExposesFlowDataOnlyFromActorScopedCatalog(t *
 	undeclaredGateway := NewGateway(actorScopedToolExecutorStub{
 		actorDefs: nil,
 	}, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+		ResolveActorConfig: func(identity agentidentity.Identity) (models.AgentConfig, bool) {
+			agentID := identity.AgentID()
 			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "analysis"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
@@ -1351,7 +1359,8 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		actorDefs: generatedDefs,
 		callCount: &executeCount,
 	}, testGatewayToken, GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+		ResolveActorConfig: func(identity agentidentity.Identity) (models.AgentConfig, bool) {
+			agentID := identity.AgentID()
 			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "validation_orchestrator"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
@@ -1554,7 +1563,8 @@ func TestGatewayMCPToolsForRequest_IgnoresCallerAllowlist(t *testing.T) {
 			{Name: "read_file", Description: "reader"},
 		},
 	}, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+		ResolveActorConfig: func(identity agentidentity.Identity) (models.AgentConfig, bool) {
+			agentID := identity.AgentID()
 			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "analysis"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,
@@ -1586,7 +1596,8 @@ func TestGatewayMCPToolsForRequest_DoesNotTrustUnknownCallerAllowlist(t *testing
 			{Name: "query_entities", Description: "actor scoped"},
 		},
 	}, "", GatewayHooks{
-		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+		ResolveActorConfig: func(identity agentidentity.Identity) (models.AgentConfig, bool) {
+			agentID := identity.AgentID()
 			return models.AgentConfig{ExecutionMode: "live", ID: agentID, Role: "analysis"}, true
 		},
 		ResolveTurnContext: registry.ResolveTurnContext,

@@ -34,9 +34,9 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 			FROM agents
 			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
 			  AND agent_route_presence=$4 AND flow_scope_key=$5
-			  AND flow_instance_id=$6 AND flow_instance=$7
+			  AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
 		if err == sql.ErrNoRows {
 			return false, nil
 		}
@@ -98,9 +98,9 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 			FROM agents
 			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
 			  AND agent_route_presence=? AND flow_scope_key=?
-			  AND flow_instance_id=? AND flow_instance=?
+			  AND flow_instance_id=? AND flow_instance=? AND run_id=?
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
 		if err == sql.ErrNoRows {
 			return false, nil
 		}
@@ -261,10 +261,10 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
 			  AND agent_route_presence=$4 AND flow_scope_key=$5
 			  AND flow_instance_id=$6 AND flow_instance=$7
-			  AND lifecycle_runtime_epoch=$8 AND lifecycle_generation=$9 AND lifecycle_phase='running'
+			  AND lifecycle_runtime_epoch=$8 AND lifecycle_generation=$9 AND run_id=$10::uuid AND lifecycle_phase='running'
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			authority.Normal.RuntimeEpoch, authority.Normal.Generation)
+			authority.Normal.RuntimeEpoch, authority.Normal.Generation, fields.RunID)
 	case runtimeeffects.AuthoritySelectedContractFork:
 		selected := authority.SelectedFork
 		res, err = tx.ExecContext(ctx, `
@@ -354,10 +354,10 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
 			  AND agent_route_presence=? AND flow_scope_key=?
 			  AND flow_instance_id=? AND flow_instance=?
-			  AND lifecycle_runtime_epoch=? AND lifecycle_generation=? AND lifecycle_phase='running'
+			  AND lifecycle_runtime_epoch=? AND lifecycle_generation=? AND run_id=? AND lifecycle_phase='running'
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			authority.Normal.RuntimeEpoch, authority.Normal.Generation)
+			authority.Normal.RuntimeEpoch, authority.Normal.Generation, fields.RunID)
 	case runtimeeffects.AuthoritySelectedContractFork:
 		selected := authority.SelectedFork
 		res, err = tx.ExecContext(ctx, `
@@ -678,38 +678,50 @@ func selectedRuntimeAuthorityMatches(authority runtimeeffects.Authority, current
 }
 
 func forkChatAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
-	var forkID, bundleHash, actor, occurrence, hash, state, owner string
+	var forkID, sourceRunID, bundleHash, actor, occurrence, hash, state, owner string
 	var leaseCurrent bool
 	var fence uint64
-	err := q.QueryRowContext(ctx, `SELECT fork_id::text, bundle_hash, actor_token_id, request_occurrence_id::text, request_hash, state, COALESCE(execution_owner,''), lease_expires_at > CURRENT_TIMESTAMP, fence_generation FROM conversation_fork_turns WHERE fork_turn_id=$1::uuid`, authority.ForkChat.ForkTurnID).
-		Scan(&forkID, &bundleHash, &actor, &occurrence, &hash, &state, &owner, &leaseCurrent, &fence)
+	err := q.QueryRowContext(ctx, `
+		SELECT t.fork_id::text, f.source_run_id::text, t.bundle_hash, t.actor_token_id,
+		       t.request_occurrence_id::text, t.request_hash, t.state,
+		       COALESCE(t.execution_owner,''), t.lease_expires_at > CURRENT_TIMESTAMP, t.fence_generation
+		FROM conversation_fork_turns t
+		JOIN conversation_forks f ON f.fork_id=t.fork_id
+		WHERE t.fork_turn_id=$1::uuid
+	`, authority.ForkChat.ForkTurnID).Scan(&forkID, &sourceRunID, &bundleHash, &actor, &occurrence, &hash, &state, &owner, &leaseCurrent, &fence)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return forkChatAuthorityMatches(authority, forkID, bundleHash, actor, occurrence, hash, state, owner, leaseCurrent, fence), nil
+	return forkChatAuthorityMatches(authority, forkID, sourceRunID, bundleHash, actor, occurrence, hash, state, owner, leaseCurrent, fence), nil
 }
 
 func forkChatAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
-	var forkID, bundleHash, actor, occurrence, hash, state, owner string
+	var forkID, sourceRunID, bundleHash, actor, occurrence, hash, state, owner string
 	var leaseCurrent bool
 	var fence uint64
-	err := q.QueryRowContext(ctx, `SELECT fork_id, bundle_hash, actor_token_id, request_occurrence_id, request_hash, state, COALESCE(execution_owner,''), `+sqliteCurrentLeaseSQL+`, fence_generation FROM conversation_fork_turns WHERE fork_turn_id=?`, authority.ForkChat.ForkTurnID).
-		Scan(&forkID, &bundleHash, &actor, &occurrence, &hash, &state, &owner, &leaseCurrent, &fence)
+	err := q.QueryRowContext(ctx, `
+		SELECT t.fork_id, f.source_run_id, t.bundle_hash, t.actor_token_id,
+		       t.request_occurrence_id, t.request_hash, t.state,
+		       COALESCE(t.execution_owner,''), `+sqliteCurrentLeaseSQL+`, t.fence_generation
+		FROM conversation_fork_turns t
+		JOIN conversation_forks f ON f.fork_id=t.fork_id
+		WHERE t.fork_turn_id=?
+	`, authority.ForkChat.ForkTurnID).Scan(&forkID, &sourceRunID, &bundleHash, &actor, &occurrence, &hash, &state, &owner, &leaseCurrent, &fence)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return forkChatAuthorityMatches(authority, forkID, bundleHash, actor, occurrence, hash, state, owner, leaseCurrent, fence), nil
+	return forkChatAuthorityMatches(authority, forkID, sourceRunID, bundleHash, actor, occurrence, hash, state, owner, leaseCurrent, fence), nil
 }
 
-func forkChatAuthorityMatches(authority runtimeeffects.Authority, forkID, bundleHash, actor, occurrence, hash, state, owner string, leaseCurrent bool, fence uint64) bool {
+func forkChatAuthorityMatches(authority runtimeeffects.Authority, forkID, sourceRunID, bundleHash, actor, occurrence, hash, state, owner string, leaseCurrent bool, fence uint64) bool {
 	forkchat := authority.ForkChat
-	return forkID == forkchat.ForkID && bundleHash == forkchat.BundleHash && actor == forkchat.ActorTokenID && occurrence == forkchat.RequestOccurrenceID && hash == forkchat.RequestHash &&
+	return forkID == forkchat.ForkID && sourceRunID == forkchat.SourceRunID && bundleHash == forkchat.BundleHash && actor == forkchat.ActorTokenID && occurrence == forkchat.RequestOccurrenceID && hash == forkchat.RequestHash &&
 		state == "executing" && owner == authority.ExecutionOwner && fence == authority.FenceGeneration && leaseCurrent
 }
 
@@ -722,9 +734,10 @@ func claimOrValidateForkChatAuthorityPostgres(ctx context.Context, tx *sql.Tx, a
 		WHERE fork_turn_id=$1::uuid AND fork_id=$6::uuid AND actor_token_id=$7
 		  AND request_occurrence_id=$8::uuid AND request_hash=$9 AND bundle_hash=$10 AND state IN ('prepared','executing')
 		  AND execution_owner=$2 AND fence_generation=$3 AND lease_expires_at>CURRENT_TIMESTAMP
+		  AND EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id=conversation_fork_turns.fork_id AND f.source_run_id=$11::uuid)
 	`, authority.ForkChat.ForkTurnID, authority.ExecutionOwner, authority.FenceGeneration, expires, now,
 		authority.ForkChat.ForkID, authority.ForkChat.ActorTokenID, authority.ForkChat.RequestOccurrenceID, authority.ForkChat.RequestHash,
-		authority.ForkChat.BundleHash)
+		authority.ForkChat.BundleHash, authority.ForkChat.SourceRunID)
 	if err != nil {
 		return fmt.Errorf("claim forkchat authority: %w", err)
 	}
@@ -747,9 +760,10 @@ func claimOrValidateForkChatAuthoritySQLite(ctx context.Context, tx *sql.Tx, aut
 		WHERE fork_turn_id=? AND fork_id=? AND actor_token_id=?
 		  AND request_occurrence_id=? AND request_hash=? AND bundle_hash=? AND state IN ('prepared','executing')
 		  AND execution_owner=? AND fence_generation=? AND `+sqliteCurrentLeaseSQL+`
+		  AND EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id=conversation_fork_turns.fork_id AND f.source_run_id=?)
 	`, expires, expires, now, authority.ForkChat.ForkTurnID, authority.ForkChat.ForkID, authority.ForkChat.ActorTokenID,
 		authority.ForkChat.RequestOccurrenceID, authority.ForkChat.RequestHash, authority.ForkChat.BundleHash, authority.ExecutionOwner,
-		authority.FenceGeneration)
+		authority.FenceGeneration, authority.ForkChat.SourceRunID)
 	if err != nil {
 		return fmt.Errorf("claim sqlite forkchat authority: %w", err)
 	}

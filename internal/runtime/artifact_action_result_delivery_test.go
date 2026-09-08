@@ -90,10 +90,14 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				},
 			})
 
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+			instance := artifactActionResultWorkflowInstance()
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
-			if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1")}); err != nil {
+			if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+				RunID: templateInstanceDeliveryRunID,
+				Route: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"),
+			}}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
 
@@ -242,7 +246,8 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				},
 			})
 
-			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), artifactActionResultStaticWorkflowInstance(), time.Now().UTC()); err != nil {
+			instance := artifactActionResultStaticWorkflowInstance()
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 

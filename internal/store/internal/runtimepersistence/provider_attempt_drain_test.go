@@ -1065,7 +1065,7 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 	t.Helper()
 	sibling := fixture
 	sibling.sessionID = uuid.NewString()
-	sibling.authority.Normal.Identity = testAgentIdentity(t, fixture.agentID, "sibling")
+	sibling.authority.Normal.Identity = mustTestAgentIdentityForRun(fixture.authority.Target.RunID, fixture.agentID, "sibling")
 	sibling.authority.Normal.Generation = fixture.authority.Normal.Generation
 	sibling.authority.Normal.RuntimeEpoch = fixture.authority.Normal.RuntimeEpoch
 	sibling.authority.FenceGeneration = sibling.authority.Normal.Generation

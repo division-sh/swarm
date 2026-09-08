@@ -27,9 +27,9 @@ type finalFlowInstanceAuthoringLifecycleStore struct {
 	workflowVersion             string
 }
 
-func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
+func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptors(_ context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
 	s.flowInstanceDescriptorCalls++
-	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact), nil
+	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), nil
 }
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
@@ -41,6 +41,7 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context,
 	s.activations = append(s.activations, req)
 	accountID, _ := req.Fields[finalflowinstanceauthoring.TemplateInstanceBy].(string)
 	s.flowInstances = append(s.flowInstances, ActiveFlowInstanceDescriptor{
+		RunID:         req.TriggerEvent.RunID(),
 		InstanceID:    req.Instance.InstanceID,
 		EntityID:      req.Instance.EntityID,
 		FlowInstance:  req.Instance.InstancePath,
@@ -51,7 +52,7 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context,
 		return nil
 	}
 	return s.bus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
-		Identity: req.Instance.Route(),
+		Identity: testRunScopedFlowRouteForRun(req.TriggerEvent.RunID(), req.Instance.Route()),
 	})
 }
 
@@ -88,7 +89,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if preview.FlowID != finalflowinstanceauthoring.TemplateFlowID || preview.FlowInstance == "" || preview.EntityID == "" {
 		t.Fatalf("preflight target = %#v, want %s template route", preview, finalflowinstanceauthoring.TemplateFlowID)
 	}
-	if routes := eb.RouteTable().MaterializedRoutes(runtimeflowidentity.StoredRoute(finalflowinstanceauthoring.TemplateFlowID, runtimeflowidentity.LogicalInstanceID(preview.FlowInstance), preview.FlowInstance)); len(routes) != 0 {
+	if routes := eb.RouteTable().MaterializedRoutes(testRunScopedFlowRouteForRun(evt.RunID(), runtimeflowidentity.StoredRoute(finalflowinstanceauthoring.TemplateFlowID, runtimeflowidentity.LogicalInstanceID(preview.FlowInstance), preview.FlowInstance))); len(routes) != 0 {
 		t.Fatalf("preflight leaked materialized route table state: %#v", routes)
 	}
 
@@ -154,7 +155,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	}}
 	store.flowInstanceDescriptorCalls = 0
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
-		Identity: runtimeflowidentity.DeriveRoute(finalflowinstanceauthoring.TemplateFlowID, "drift"),
+		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute(finalflowinstanceauthoring.TemplateFlowID, "drift")),
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}

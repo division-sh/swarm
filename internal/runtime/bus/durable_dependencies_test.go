@@ -89,46 +89,46 @@ func (unexpectedDurableTestRoles) TerminalizeRun(context.Context, string, string
 func (unexpectedDurableTestRoles) UpsertFlowInstanceRoute(context.Context, FlowInstanceRouteRecord) error {
 	return errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+func (unexpectedDurableTestRoles) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+func (unexpectedDurableTestRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route, []FlowInstanceRouteRecord) error {
+func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance, []FlowInstanceRouteRecord) error {
 	return errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteTopology(context.Context, []FlowInstanceRouteRecordSet) error {
 	return errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route) ([]FlowInstanceRouteRecord, error) {
+func (unexpectedDurableTestRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+func (unexpectedDurableTestRoles) RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ListActiveAgentDescriptors(context.Context) ([]ActiveAgentDescriptor, error) {
+func (unexpectedDurableTestRoles) ListActiveAgentDescriptors(context.Context, string) ([]ActiveAgentDescriptor, error) {
 	return nil, nil
 }
-func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
+func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
 	return nil, nil
 }
-func (unexpectedDurableTestRoles) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
+func (unexpectedDurableTestRoles) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
 	return nil, nil
 }
-func (unexpectedDurableTestRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+func (unexpectedDurableTestRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
 	return runtimepipeline.WorkflowInstance{}, false, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error) {
+func (unexpectedDurableTestRoles) ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) SelectActiveWorkflowInstances(context.Context, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowInstance, error) {
+func (unexpectedDurableTestRoles) SelectActiveWorkflowInstances(context.Context, string, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowInstance, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+func (unexpectedDurableTestRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
 	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) SelectActiveWorkflowEntityStates(context.Context, runtimepipeline.WorkflowEntityStateSelectionOwner, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+func (unexpectedDurableTestRoles) SelectActiveWorkflowEntityStates(context.Context, string, runtimepipeline.WorkflowEntityStateSelectionOwner, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
 	return nil, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error) {

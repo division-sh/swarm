@@ -33,7 +33,7 @@ func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *te
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
-			identity := testAgentIdentity(t, "retry-agent", "delivery-projection/retry")
+			identity := mustTestAgentIdentityForRun(runID, "retry-agent", "delivery-projection/retry")
 			event := eventtest.PersistedProjection(
 				uuid.NewString(), "projection.retry", "gateway", "", json.RawMessage(`{}`), 0,
 				runID, "", events.EventEnvelope{}, time.Now().UTC(),
@@ -106,7 +106,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 				runID, "", events.EventEnvelope{}, base,
 			)
 			pageAgent := "page-agent"
-			pageIdentity := testAgentIdentity(t, pageAgent, "delivery-projection/page")
+			pageIdentity := mustTestAgentIdentityForRun(runID, pageAgent, "delivery-projection/page")
 			siblingRoutes := []events.DeliveryRoute{
 				{Recipient: events.MustAgentDeliveryRecipient(pageAgent), AgentIdentity: pageIdentity,
 					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "projection-page-one"}},
@@ -168,7 +168,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			}
 
 			currentAgent := "current-agent"
-			currentIdentity := testAgentIdentity(t, currentAgent, "delivery-projection/current")
+			currentIdentity := mustTestAgentIdentityForRun(runID, currentAgent, "delivery-projection/current")
 			currentEvent := eventtest.PersistedProjection(
 				uuid.NewString(), "projection.current", "gateway", "", json.RawMessage(`{"kind":"current"}`), 0,
 				runID, "", events.EventEnvelope{}, base.Add(2*time.Minute),

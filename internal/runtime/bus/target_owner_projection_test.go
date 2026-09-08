@@ -389,7 +389,7 @@ func TestPendingAgentLifecycleConsumesExactMaterializingOwner(t *testing.T) {
 	}
 	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
-		TargetBlueprint: target, PendingAgentLifecycle: true, Persist: true,
+		TargetBlueprint: target, AgentLifecycle: agentLifecycleAdmissionMaterializingFlow, Persist: true,
 	}}}.Normalized()
 	projection := selectedRunTargetOwnerProjection{
 		agentsAvailable: true,
@@ -415,6 +415,30 @@ func TestPendingAgentLifecycleConsumesExactMaterializingOwner(t *testing.T) {
 	}
 }
 
+func TestStaticAgentLifecycleConsumesExistingOwnerButConnectLifecycleDoesNot(t *testing.T) {
+	identity := agentidentitytest.Declared(t, "reviewer", "static-owner", "review", "one", "review/one")
+	target := events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one-owner"),
+	}
+	owner := events.MustExistingEntityTarget(target)
+	base := RoutePlanDeliveryIntent{
+		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
+		TargetBlueprint: target, TargetOwnership: owner, Persist: true,
+	}
+
+	static := base
+	static.AgentLifecycle = agentLifecycleAdmissionStaticDeclaration
+	if _, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{static}}); err != nil {
+		t.Fatalf("resolve static lifecycle against existing owner: %v", err)
+	}
+
+	connect := base
+	connect.AgentLifecycle = agentLifecycleAdmissionMaterializingFlow
+	if _, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{connect}}); err == nil || !strings.Contains(err.Error(), "requires materializing_entity ownership") {
+		t.Fatalf("connect lifecycle existing-owner error = %v, want materializing owner rejection", err)
+	}
+}
+
 func TestSpeculativeNodeOwnerCannotAuthorizePendingAgent(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "reviewer", "speculative-owner", "review", "one", "review/one")
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("future-node-owner")}
@@ -422,7 +446,7 @@ func TestSpeculativeNodeOwnerCannotAuthorizePendingAgent(t *testing.T) {
 	for _, agentFirst := range []bool{false, true} {
 		intents := []RoutePlanDeliveryIntent{
 			{Recipient: events.MustNodeDeliveryRecipient(node), TargetBlueprint: target, TargetOwnership: events.MustMaterializingEntityTarget(target), Persist: true},
-			{Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity, TargetBlueprint: target, PendingAgentLifecycle: true, Persist: true},
+			{Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity, TargetBlueprint: target, AgentLifecycle: agentLifecycleAdmissionMaterializingFlow, Persist: true},
 		}
 		if agentFirst {
 			intents[0], intents[1] = intents[1], intents[0]

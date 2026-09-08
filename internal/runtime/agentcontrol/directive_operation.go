@@ -98,6 +98,12 @@ func ValidateDirectiveOperationEvidence(op DirectiveOperation) error {
 	if err := op.AgentIdentity.Validate(); err != nil {
 		return fmt.Errorf("directive operation agent identity is invalid: %w", err)
 	}
+	if op.RequestedRunID != "" && op.RequestedRunID != op.AgentIdentity.RunID {
+		return fmt.Errorf("directive operation requested run does not match concrete agent identity")
+	}
+	if op.ResolvedRunID != "" && op.ResolvedRunID != op.AgentIdentity.RunID {
+		return fmt.Errorf("directive operation resolved run does not match concrete agent identity")
+	}
 	hasResponse := len(bytes.TrimSpace(op.Response)) > 0
 	hasFailure := op.Failure != nil
 	wantsResponse := op.State == DirectiveOperationExecuted || op.State == DirectiveOperationSucceeded

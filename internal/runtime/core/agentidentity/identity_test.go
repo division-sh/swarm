@@ -4,15 +4,17 @@ import (
 	"testing"
 )
 
+const testRunID = "00000000-0000-0000-0000-000000000001"
+
 func TestIdentityRequiresExplicitRoutePresence(t *testing.T) {
 	name, err := DeclaredName("reviewer", "swarm://review/reviewer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(name, Route{}); err == nil {
+	if _, err := New(testRunID, name, Route{}); err == nil {
 		t.Fatal("missing route presence accepted")
 	}
-	root, err := New(name, RootRoute())
+	root, err := New(testRunID, name, RootRoute())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +25,7 @@ func TestIdentityRequiresExplicitRoutePresence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, err := New(name, present)
+	identity, err := New(testRunID, name, present)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,11 +47,11 @@ func TestIdentityKeepsNameProvenanceSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	left, err := New(declared, route)
+	left, err := New(testRunID, declared, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	right, err := New(runtimeCreated, route)
+	right, err := New(testRunID, runtimeCreated, route)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,15 +73,15 @@ func TestEqualRequiresCompleteIdentityAndEveryAxis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	left, err := New(name, routeA)
+	left, err := New(testRunID, name, routeA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	replay, err := New(name, routeA)
+	replay, err := New(testRunID, name, routeA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sibling, err := New(name, routeB)
+	sibling, err := New(testRunID, name, routeB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +90,13 @@ func TestEqualRequiresCompleteIdentityAndEveryAxis(t *testing.T) {
 	}
 	if equal, err := Equal(left, sibling); err != nil || equal {
 		t.Fatalf("same-slug sibling equality = %t, %v", equal, err)
+	}
+	otherRun, err := New("00000000-0000-0000-0000-000000000002", name, routeA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if equal, err := Equal(left, otherRun); err != nil || equal {
+		t.Fatalf("cross-run identity equality = %t, %v", equal, err)
 	}
 	if _, err := Equal(left, Identity{}); err == nil {
 		t.Fatal("malformed identity participated in equality")

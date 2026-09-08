@@ -99,7 +99,7 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 		})
 	}
 
-	runID := managedNormalEffectStoreTestRunID("sibling-worker")
+	runID := identities[0].identity.RunID
 	if sqlite {
 		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	} else {
@@ -189,7 +189,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	if err != nil || !replayed.Replayed || replayed.Generation != started.Generation {
 		t.Fatalf("lifecycle replay = %#v err=%v", replayed, err)
 	}
-	runID := managedNormalEffectStoreTestRunID(started.AgentID)
+	runID := identity.RunID
 	if sqlite {
 		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	} else {

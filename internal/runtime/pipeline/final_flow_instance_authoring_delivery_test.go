@@ -69,7 +69,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	if !handled {
 		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want account_case handler delivery")
 	}
-	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(flowInstance))
+	loaded, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, flowInstance))
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}

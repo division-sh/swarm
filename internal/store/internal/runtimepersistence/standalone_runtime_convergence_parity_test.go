@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"testing"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -46,21 +46,28 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 					t.Fatalf("NewEventBus: %v", err)
 				}
 				agentID := "standalone-convergence-agent"
-				agentIdentity := runtimebustest.Identity(t, agentID, "")
-				if routed {
-					seedStandaloneConvergenceAgent(t, fixture.store, ctx, agentIdentity)
-				}
 				for index, test := range tests {
 					test := test
 					t.Run(test.name, func(t *testing.T) {
-						event := test.make(uuid.NewString(), time.Date(2026, 7, 14, 10, index, 0, 0, time.UTC))
+						candidate := test.make(uuid.NewString(), time.Date(2026, 7, 14, 10, index, 0, 0, time.UTC))
+						admitted, err := events.AdmitForPublish(candidate, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+						if err != nil {
+							t.Fatalf("admit standalone event: %v", err)
+						}
+						event := admitted.Event()
+						agentIdentity := runtimebustest.IdentityForRun(t, event.RunID(), agentID, "")
 						var delivery <-chan *runtimebus.LocalDelivery
 						if routed {
-							delivery = runtimebustest.Subscribe(t, eventBus, agentID, event.Type())
+							requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
+								Origin: semanticEventRunOriginForTest(t, event.ID(), string(event.Type())),
+								RunID:  event.RunID(), StartedAt: event.CreatedAt(),
+							})
+							seedStandaloneConvergenceAgent(t, fixture.store, ctx, agentIdentity)
+							delivery = runtimebustest.SubscribeForRun(t, eventBus, event.RunID(), agentID, event.Type())
 							if delivery == nil {
 								t.Fatal("Subscribe returned nil")
 							}
-							defer runtimebustest.Unsubscribe(eventBus, agentID)
+							defer runtimebustest.UnsubscribeIdentity(eventBus, agentIdentity)
 						}
 						if err := eventBus.Publish(ctx, event); err != nil {
 							t.Fatalf("Publish: %v", err)
@@ -240,8 +247,8 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	}
 	agents := []string{"standalone-agent-a", "standalone-agent-b"}
 	routes := []events.DeliveryRoute{
-		testAgentDeliveryRoute(t, agents[0], ""),
-		testAgentDeliveryRoute(t, agents[1], ""),
+		testAgentDeliveryRoute(t, admitted.Event().RunID(), agents[0], ""),
+		testAgentDeliveryRoute(t, admitted.Event().RunID(), agents[1], ""),
 	}
 	outcome, err := commitAdmittedSemanticEventFixtureOutcome(ctx, pg, admitted, routes, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil || outcome != runtimebus.EventAppendInserted {
@@ -357,14 +364,28 @@ func executeStandaloneCompletionCandidateWithCatalog(t *testing.T, ctx context.C
 
 func newRunConvergenceEventBus(t *testing.T, selected any) (*runtimebus.EventBus, error) {
 	t.Helper()
+	var bus *runtimebus.EventBus
+	var err error
 	switch store := selected.(type) {
 	case *PostgresStore:
-		return newStoreTestEventBus(t, store)
+		bus, err = newStoreTestEventBus(t, store)
 	case *SQLiteRuntimeStore:
-		return newStoreTestEventBus(t, store)
+		bus, err = newStoreTestEventBus(t, store)
 	default:
 		return nil, fmt.Errorf("unsupported run convergence store %T", selected)
 	}
+	if err != nil {
+		return nil, err
+	}
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		for _, route := range routes {
+			if route.Recipient.IsAgent() && route.AgentIdentity.RunID != event.RunID() {
+				return fmt.Errorf("committed route run %s disagrees with event run %s", route.AgentIdentity.RunID, event.RunID())
+			}
+		}
+		return nil
+	}))
+	return bus, nil
 }
 
 func loadRunConvergenceFacts(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, eventID string) (status, runID, triggerID, triggerType string) {

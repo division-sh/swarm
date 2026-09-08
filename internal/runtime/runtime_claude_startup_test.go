@@ -14,9 +14,13 @@ import (
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -28,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/google/uuid"
 )
 
 func testToolGatewayBinding(hostURL, workspaceURL, token string) toolgateway.Binding {
@@ -122,7 +127,16 @@ func claudeStartupAgentSource(ids ...string) semanticview.Source {
 		if id == "" {
 			continue
 		}
-		agents[id] = runtimecontracts.AgentRegistryEntry{ID: id, Role: id}
+		intent, err := runtimeagentintent.Resolve(
+			runtimeagentintent.SourceInline,
+			"inline",
+			"agents.yaml#agents."+id+".intent",
+			"Exercise managed provider startup validation.",
+		)
+		if err != nil {
+			panic(err)
+		}
+		agents[id] = runtimecontracts.AgentRegistryEntry{ID: id, Role: id, ResolvedIntent: intent}
 	}
 	return semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{Agents: agents})
 }
@@ -338,10 +352,11 @@ func startupProbeCapabilitySet(names []string, source map[string]toolcapabilitie
 }
 
 type startupVisibleSurfaceProbeStub struct {
-	resp    *llm.Response
-	err     error
-	calls   []string
-	prompts []string
+	resp     *llm.Response
+	err      error
+	calls    []string
+	prompts  []string
+	surfaces []managedcapabilities.Surface
 }
 
 func (s *startupVisibleSurfaceProbeStub) ProbeStartupVisibleToolSurface(ctx context.Context, actor runtimeactors.AgentConfig, systemPrompt string, _ []llm.ToolDefinition) (*llm.Response, error) {
@@ -354,6 +369,7 @@ func (s *startupVisibleSurfaceProbeStub) ProbeStartupVisibleToolSurface(ctx cont
 	if !ok {
 		return nil, errors.New("startup probe capability surface missing")
 	}
+	s.surfaces = append(s.surfaces, surface.Clone())
 	resp := s.resp
 	if resp == nil {
 		resp = &llm.Response{
@@ -436,8 +452,8 @@ func startupProbeCaps() map[string]toolcapabilities.Capability {
 func setupStartupProbeTransport(t *testing.T, manager *runtimemanager.AgentManager, exec *startupProbeToolExecutor, gatewayToken string) (*runtimemcp.TurnContextRegistry, toolgateway.Binding) {
 	t.Helper()
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
-	gateway := runtimemcp.NewGateway(exec, gatewayToken, RuntimeMCPGatewayHooks(nil, nil, func(agentID string) (runtimeactors.AgentConfig, bool) {
-		cfg, err := manager.ResolveAgentConfig(agentID, "")
+	gateway := runtimemcp.NewGateway(exec, gatewayToken, RuntimeMCPGatewayHooks(nil, nil, func(identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool) {
+		cfg, err := manager.ResolveAgentConfig(identity.RunID, identity.AgentID(), identity.FlowInstance())
 		return cfg, err == nil
 	}, nil, turns))
 	server := httptest.NewServer(gateway.Handler())
@@ -551,6 +567,130 @@ func TestValidateClaudeMCPToolsForManagedAgents_StartupPromptMatchesCanonicalNor
 	}
 }
 
+func TestValidateManagedProviderPreflightConsumesRunlessBlueprintBeforeLiveAdmission(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.Backend = llmselection.BackendClaudeCLI
+	source := claudeStartupAgentSource()
+	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
+		LLMBackend:        llmselection.BackendClaudeCLI,
+		SemanticSource:    source,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	if configs := manager.ListAgentConfigs(); len(configs) != 0 {
+		t.Fatalf("live agent configs before admission = %#v, want none", configs)
+	}
+	exec := &startupProbeToolExecutor{defs: startupProbeDefs(), caps: startupProbeCaps()}
+	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
+
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, source, binding, probe, turns, exec, manager); err != nil {
+		t.Fatalf("validate runless managed provider preflight blueprint: %v", err)
+	}
+	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
+		t.Fatalf("runless preflight probe calls = %#v, want campaign-coordinator", probe.calls)
+	}
+	if len(probe.surfaces) != 1 || !probe.surfaces[0].ActorIdentity.IsZero() || probe.surfaces[0].ActorPlan.IsZero() {
+		t.Fatalf("normal preflight actor owner = %#v, want one runless plan", probe.surfaces)
+	}
+}
+
+func TestManagedProviderPreflightKeepsSamePlanLiveRunsDistinct(t *testing.T) {
+	manager := newClaudeStartupManager()
+	const wantCandidateCount = 2
+	name, err := runtimeagentidentity.DeclaredName("campaign-coordinator", "workflow:campaign")
+	if err != nil {
+		t.Fatalf("DeclaredName: %v", err)
+	}
+	route, err := runtimeagentidentity.PresentRoute("campaign", "campaign-instance", "campaign/main")
+	if err != nil {
+		t.Fatalf("PresentRoute: %v", err)
+	}
+	wantRuns := map[string]string{}
+	for _, tc := range []struct {
+		runID    string
+		entityID string
+	}{
+		{runID: uuid.NewString(), entityID: "campaign-a"},
+		{runID: uuid.NewString(), entityID: "campaign-b"},
+	} {
+		identity, identityErr := runtimeagentidentity.New(tc.runID, name, route)
+		if identityErr != nil {
+			t.Fatalf("agentidentity.New: %v", identityErr)
+		}
+		cfg := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+			ID:            "campaign-coordinator",
+			Identity:      identity,
+			Role:          "campaign_coordinator",
+			FlowPath:      "campaign/main",
+			EntityID:      tc.entityID,
+			LLMBackend:    llmselection.BackendClaudeCLI,
+			Config:        json.RawMessage(`{}`),
+			ExecutionMode: runtimeeffects.ExecutionModeLive,
+		})
+		if registerErr := registerRuntimeTestAgent(manager, cfg); registerErr != nil {
+			t.Fatalf("register live run %s: %v", tc.runID, registerErr)
+		}
+		wantRuns[tc.runID] = tc.entityID
+	}
+
+	candidates, err := managedProviderPreflightAgentConfigs(manager)
+	if err != nil {
+		t.Fatalf("managedProviderPreflightAgentConfigs: %v", err)
+	}
+	if len(candidates) != wantCandidateCount {
+		t.Fatalf("preflight candidates = %#v, want one per live run", candidates)
+	}
+	for _, candidate := range candidates {
+		identity, identityErr := candidate.config.ConcreteIdentity()
+		if identityErr != nil {
+			t.Fatalf("candidate concrete identity: %v", identityErr)
+		}
+		wantEntity, ok := wantRuns[identity.RunID]
+		if !ok {
+			t.Fatalf("candidate run = %q, want one of %#v", identity.RunID, wantRuns)
+		}
+		if candidate.config.EntityID != wantEntity {
+			t.Fatalf("candidate %s entity = %q, want %q", identity.Description(), candidate.config.EntityID, wantEntity)
+		}
+		if gotPlan, planErr := identity.Plan(); planErr != nil || gotPlan.Normalize() != candidate.plan.Normalize() {
+			t.Fatalf("candidate %s plan = %#v err=%v, want %#v", identity.Description(), candidate.plan, planErr, gotPlan)
+		}
+		delete(wantRuns, identity.RunID)
+	}
+	if len(wantRuns) != 0 {
+		t.Fatalf("unexamined live runs = %#v", wantRuns)
+	}
+
+	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
+	regularWorkspaceCalls := 0
+	admissionWorkspaceCalls := 0
+	workspaces := claudeStartupCapabilityWorkspaceStub{
+		regularCalls: &regularWorkspaceCalls, admissionCalls: &admissionWorkspaceCalls,
+	}
+	if err := validateClaudeManagedAgentWorkspaces(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentFreeSource(), workspaces, manager); err != nil {
+		t.Fatalf("validate live-run workspaces: %v", err)
+	}
+	if regularWorkspaceCalls != 0 || admissionWorkspaceCalls != wantCandidateCount {
+		t.Fatalf("workspace resolutions = regular:%d admission:%d, want 0/%d", regularWorkspaceCalls, admissionWorkspaceCalls, wantCandidateCount)
+	}
+
+	exec := &startupProbeToolExecutor{defs: startupProbeDefs(), caps: startupProbeCaps()}
+	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
+	probe := &startupVisibleSurfaceProbeStub{}
+	if err := validateClaudeMCPToolsForManagedAgents(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentFreeSource(), binding, probe, turns, exec, manager); err != nil {
+		t.Fatalf("validate live-run managed provider preflight: %v", err)
+	}
+	if len(probe.calls) != wantCandidateCount || len(probe.surfaces) != wantCandidateCount {
+		t.Fatalf("provider preflight calls/surfaces = %d/%d, want %d/%d", len(probe.calls), len(probe.surfaces), wantCandidateCount, wantCandidateCount)
+	}
+	for _, surface := range probe.surfaces {
+		if !surface.ActorIdentity.IsZero() || surface.ActorPlan.IsZero() {
+			t.Fatalf("normal startup surface actor owner = %#v, want runless plan projection after run-scoped candidate census", surface)
+		}
+	}
+}
+
 func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnlySurface(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
@@ -575,6 +715,34 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnl
 	}
 	if len(exec.executed) != 0 {
 		t.Fatalf("executed = %#v, want no MCP tools/call before CLI startup proof", exec.executed)
+	}
+}
+
+func TestManagedProviderPreflightRejectsForeignForkRunBeforeProviderResolution(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.Backend = llmselection.BackendClaudeCLI
+	manager := newClaudeStartupManager()
+	agent := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"})
+	if err := registerRuntimeTestAgent(manager, agent); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This runtime cannot probe startup. Foreign-run rejection must precede that error.
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, llm.NewNoopRuntime(llm.ClaudeCLIProviderContract()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ValidateManagedProviderPreflight(
+		testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentFreeSource(), toolgateway.Binding{},
+		runtimes, nil, nil, manager, ManagedProviderPreflightAuthority{
+			ExecutionKind: managedcapabilities.ExecutionSelectedContractFork, RunID: uuid.NewString(),
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "agent run does not match execution authority") {
+		t.Fatalf("foreign-run preflight error = %v, want run ownership rejection before provider resolution", err)
 	}
 }
 

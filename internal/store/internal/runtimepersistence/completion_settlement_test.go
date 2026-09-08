@@ -1113,7 +1113,7 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	runID := uuid.NewString()
 	flowInstance := "global"
 	leaseHolder := "completion-worker"
-	identity := testAgentIdentity(t, agentID, flowInstance)
+	identity := mustTestAgentIdentityForRun(runID, agentID, flowInstance)
 	identityFields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatalf("completion agent identity: %v", err)

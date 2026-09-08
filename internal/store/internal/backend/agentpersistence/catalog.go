@@ -46,6 +46,7 @@ func LoadPostgresAgentsTx(ctx context.Context, tx *sql.Tx) ([]runtimemanager.Per
 
 const postgresAgentRegistryQuery = `
 		SELECT
+			run_id::text,
 			agent_id,
 			agent_name_owner,
 			agent_name_source,
@@ -76,7 +77,7 @@ const postgresAgentRegistryQuery = `
 				topology_admission
 		FROM agents
 		WHERE status NOT IN ('terminated', 'ephemeral')
-		ORDER BY created_at ASC, agent_id ASC
+		ORDER BY created_at ASC, run_id ASC, agent_id ASC
 	`
 
 func scanPostgresAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error) {
@@ -89,6 +90,7 @@ func scanPostgresAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error)
 		var lifecycleGeneration int64
 		var topologyRaw []byte
 		if err := rows.Scan(
+			&row.Identity.RunID,
 			&row.AgentID,
 			&row.Identity.NameOwner,
 			&row.Identity.NameSource,

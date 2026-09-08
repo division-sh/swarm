@@ -59,7 +59,7 @@ func managedProviderTestContext(t *testing.T, ctx context.Context, runtime Runti
 		t.Fatal("managed provider test context requires actor")
 	}
 	if actor.Identity.IsZero() {
-		actor.Identity = session.MemoryIdentity.Agent
+		actor.Identity = session.MemoryIdentity
 		if actor.Identity.IsZero() {
 			if token, hasToken := runtimeeffects.LifecycleTokenFromContext(ctx); hasToken {
 				actor.Identity = token.Identity

@@ -163,7 +163,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresStoreEvent(t, ctx, pg, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", time.Now().UTC())
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
-	route := testAgentDeliveryRoute(t, "agent-1", "fixture/agent-1")
+	route := testAgentDeliveryRoute(t, runID, "agent-1", "fixture/agent-1")
 	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, route)
 	if err := acknowledgePipelineEventFixture(ctx, pg, eventID); err != nil {
 		t.Fatalf("seed pipeline receipt: %v", err)
@@ -425,7 +425,7 @@ func TestPostgresStore_AgentSessionsPartialUniquenessAllowsTerminatedHistoryButR
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "a1", "global"))
+	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(specEntityStateRunID, "a1", "global"))
 
 	sessionA := uuid.NewString()
 	sessionB := uuid.NewString()
@@ -478,7 +478,7 @@ func TestPostgresRegistry_AcquireFailsClosedOnSuspendedResumableOwner(t *testing
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "a1", "global"))
+	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(specEntityStateRunID, "a1", "global"))
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -554,7 +554,7 @@ func TestPostgresStore_AgentSessionSuccessorInvariantsRejectInvalidCanonicalWrit
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	seedSpecMemoryRun(t, ctx, db)
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "a1", "global"))
+	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(specEntityStateRunID, "a1", "global"))
 
 	oldID := uuid.NewString()
 	goodSuccessorID := uuid.NewString()
@@ -627,10 +627,10 @@ func seedSpecEntityState(t *testing.T, ctx context.Context, db *sql.DB, entityID
 		state = "operating"
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ($1, 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
-		ON CONFLICT (instance_id) DO NOTHING
-	`, flowInstance); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES ($1::uuid, $2, 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
+		ON CONFLICT (run_id, instance_path) DO NOTHING
+	`, specEntityStateRunID, flowInstance); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -660,7 +660,7 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 		EntityID:      strings.TrimSpace(entityID),
 		Subscriptions: subscriptions,
 		Config:        []byte(`{}`),
-		Identity:      specMemoryIdentity(agentID, "global").Agent,
+		Identity:      specMemoryIdentity(agentID, "global"),
 	})
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    cfg,
@@ -1310,10 +1310,6 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 	if len(rules) != 1 || rules[0].EventPattern != "x.*" {
 		t.Fatalf("expected only active/proposed rules, got %#v", rules)
 	}
-	if err := pg.DeactivateRoutingRulesByEntity(ctx, ""); err == nil {
-		t.Fatalf("expected entity_id required")
-	}
-
 	if _, err := agentfixture.CommitExact(t, ctx, pg, runtimemanager.AgentLifecycleTransition{}); err == nil {
 		t.Fatalf("expected lifecycle transition fields required")
 	}
@@ -1400,9 +1396,6 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 		t.Fatalf("expected inactive status, got %q", status)
 	}
 
-	if err := pg.DeactivateRoutingRulesByEntity(ctx, entityID); err != nil {
-		t.Fatalf("DeactivateRoutingRulesByEntity: %v", err)
-	}
 }
 
 func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
@@ -1483,10 +1476,10 @@ func TestManagerStore_ConversationPersistenceUsesExactFlowInstanceIdentity(t *te
 	resetAgentSessionsSpecTable(t, baseCtx, pg)
 	entityID := uuid.NewString()
 	identity := specMemoryIdentity("entity-agent", "review/inst-1")
-	seedTestAgentRow(t, baseCtx, db, true, identity.Agent, "active")
+	seedTestAgentRow(t, baseCtx, db, true, identity, "active")
 
 	ctx := runtimeactors.WithActor(baseCtx, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "entity-agent",
-		Identity: identity.Agent,
+		Identity: identity,
 		FlowPath: "review/inst-1",
 		EntityID: entityID,
 	})
@@ -1894,11 +1887,10 @@ func TestManagerStore_AppendStatelessAgentTurnPersistsTurnBlocks(t *testing.T) {
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
-	seedSpecAgent(t, ctx, pg, "a1", "", "")
-
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "a1", "global")
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
@@ -1930,11 +1922,10 @@ func TestManagerStore_AppendStatelessAgentTurnCanonicalizesTurnBlocksThroughSing
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
-	seedSpecAgent(t, ctx, pg, "a1", "", "")
-
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "a1", "global")
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
@@ -2078,12 +2069,12 @@ func TestManagerStore_ManagedTurnReadbackFixtureRollsBackStatelessAuditAndTurnWh
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	resetAgentSessionsSpecTable(t, ctx, pg)
-	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	installFailAgentTurnInsertTrigger(t, ctx, db)
 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "a1", "global")
 	err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          runID,
@@ -2120,11 +2111,10 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	resetAgentSessionsSpecTable(t, ctx, pg)
-	seedSpecAgent(t, ctx, pg, "a1", "", "")
-
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "a1", "global")
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          runID,
@@ -2224,11 +2214,10 @@ func TestManagerStore_AppendStatelessTurnCreatesCanonicalAuditRow(t *testing.T) 
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	resetAgentSessionsSpecTable(t, ctx, pg)
-	seedSpecAgent(t, ctx, pg, "a1", "", "")
-
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "a1", "global")
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
@@ -2266,7 +2255,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	entityID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	seedManagedTurnFixtureAgent(t, ctx, pg, "a1", "")
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "a1", "")
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		SessionID:      sessionID,
@@ -2338,7 +2327,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	flowInstance := "review/inst-1"
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	seedManagedTurnFixtureAgent(t, ctx, pg, "a1", flowInstance)
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "a1", flowInstance)
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		SessionID:      sessionID,
@@ -2756,7 +2745,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	entityID := uuid.NewString()
 	seedSpecEntityState(t, ctx, db, entityID, "testco", "testco", "TestCo", "operating")
-	a1Identity := testAgentIdentity(t, "a1", "")
+	a1Identity := mustTestAgentIdentityForRun(specEntityStateRunID, "a1", "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "a1",
 			Identity: a1Identity,
@@ -2787,7 +2776,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 
 	ceoID := "operator-" + entityID
-	ceoIdentity := testAgentIdentity(t, ceoID, "operating/global")
+	ceoIdentity := mustTestAgentIdentityForRun(specEntityStateRunID, ceoID, "operating/global")
 	_ = agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
 			Identity: ceoIdentity,
@@ -2816,10 +2805,6 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertRoutingRule: %v", err)
 	}
-	if err := pg.DeactivateRoutingRulesByEntity(ctx, entityID); err != nil {
-		t.Fatalf("DeactivateRoutingRulesByEntity: %v", err)
-	}
-
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"review.requested",
@@ -2836,7 +2821,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, evt, []string{ceoID}); err != nil {
 		t.Fatalf("AppendEvent with exact delivery: %v", err)
 	}
-	deliveryIdentity := testAgentIdentity(t, ceoID, "fixture/"+ceoID)
+	deliveryIdentity := mustTestAgentIdentityForRun(evt.RunID(), ceoID, "fixture/"+ceoID)
 	pending, err := pg.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 		AgentIdentity: deliveryIdentity,
 		Since:         time.Now().Add(-24 * time.Hour),
@@ -2941,7 +2926,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
-			Identity: testAgentIdentity(t, "agent-cleanup-1", "global"),
+			Identity: mustTestAgentIdentityForRun(specEntityStateRunID, "agent-cleanup-1", "global"),
 			Role:     "worker",
 			FlowID:   "worker",
 			Type:     "sonnet",
@@ -2983,7 +2968,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	}); err != nil {
 		t.Fatalf("seed stateless audit: %v", err)
 	}
-	terminateSpecAgentViaLifecycle(t, ctx, pg, testAgentIdentity(t, "agent-cleanup-1", "global"))
+	terminateSpecAgentViaLifecycle(t, ctx, pg, mustTestAgentIdentityForRun(specEntityStateRunID, "agent-cleanup-1", "global"))
 
 	var (
 		agentStatus      string

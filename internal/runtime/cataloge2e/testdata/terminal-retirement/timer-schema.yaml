@@ -1,0 +1,17 @@
+mode: template
+instance: worker_id
+stages:
+  idle:
+    initial: true
+    timers:
+      - after: 20ms
+        advances_to: complete
+  complete:
+    terminal: true
+pins:
+  inputs:
+    events:
+      - event: worker.ready
+        source: external
+  outputs:
+    events: [worker.observed]

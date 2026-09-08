@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -372,7 +373,11 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 	if err != nil {
 		return gateruntime.Route{}, err
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, anchor.Route)
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(card.RunID, anchor.Route)
+	if err != nil {
+		return gateruntime.Route{}, err
+	}
+	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
 		return gateruntime.Route{}, err
 	}
@@ -510,7 +515,11 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		return fmt.Errorf("gate route requires the selected workflow engine mutation owner")
 	}
 	instanceRoute := anchor.Route
-	instance, found, err := pc.workflowStore.Load(ctx, instanceRoute)
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(card.RunID, instanceRoute)
+	if err != nil {
+		return err
+	}
+	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
 		return err
 	}
@@ -546,8 +555,9 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		return err
 	}
 	address := runtimeengine.StateAddress{
-		FlowID: identity.NormalizeFlowID(anchor.FlowID), Route: instanceRoute,
-		EntityID: identity.NormalizeEntityID(anchor.EntityID),
+		FlowID:       identity.NormalizeFlowID(anchor.FlowID),
+		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{RunID: evt.RunID(), Route: instanceRoute}.Normalize(),
+		EntityID:     identity.NormalizeEntityID(anchor.EntityID),
 	}
 	preparedState, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, address, runtimeengine.StateMutation{
 		NextState: nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
@@ -560,7 +570,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	if err != nil {
 		return err
 	}
-	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, &preparedState.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
+	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, address.FlowInstance, &preparedState.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
 	if err != nil {
 		return err
 	}

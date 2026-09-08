@@ -147,7 +147,7 @@ func validateDecisionCardGateState(state *runtimepipeline.WorkflowEngineStateRec
 		return err
 	}
 	exactRoute := runtimeflowidentity.StoredRoute(anchor.Route.ScopeKey, anchor.Route.InstanceID, anchor.Route.InstancePath)
-	if strings.TrimSpace(state.RunID) != strings.TrimSpace(card.RunID) || state.Route != exactRoute {
+	if strings.TrimSpace(state.Identity.RunID) != strings.TrimSpace(card.RunID) || state.Identity.Route != exactRoute {
 		return fmt.Errorf("decision-card gate state does not match the authoritative card scope")
 	}
 	return nil
@@ -166,7 +166,7 @@ func commitDecisionCardGateState(
 	if err != nil {
 		return err
 	}
-	if err := commitWorkflowEngineState(ctx, tx, postgres, effects, record, false); err != nil {
+	if err := commitWorkflowEngineState(ctx, tx, postgres, effects, record); err != nil {
 		return err
 	}
 	before, err = commitWorkflowEngineInitialValues(ctx, tx, story, store, postgres, effects, record, before)

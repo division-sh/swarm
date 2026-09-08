@@ -51,6 +51,8 @@ func TestPlatformSpecPromotesVersionedRoutingTopologyArtifact(t *testing.T) {
 	} {
 		assertScalarContains(t, typedPubSubRule, want)
 	}
+	assertScalarContains(t, typedPubSubRule, "canonical flowidentity.RunScopedFlowInstance")
+	assertScalarContains(t, typedPubSubRule, "Another run at the same path is an independent owner")
 	assertScalarContains(t, mustMappingValue(t, routing, "typed_pubsub_rule"), "low-level event.publish")
 
 	assertScalarContains(t, mustMappingValue(t, routing, "connect_source_rule"), "connect_source_location_missing")

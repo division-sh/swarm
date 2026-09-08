@@ -27,9 +27,9 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ('testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
-	`); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES ($1::uuid, 'testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
+	`, runID); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -45,7 +45,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Upsert agent + load agents.
-	controlPlaneIdentity := testAgentIdentity(t, "control-plane", "")
+	controlPlaneIdentity := mustTestAgentIdentityForRun(runID, "control-plane", "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "control-plane",
@@ -70,7 +70,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Seed an operating agent id so routing_rules FK constraints are satisfied.
 	ceoID := "operator-" + entityID
-	ceoIdentity := testAgentIdentity(t, ceoID, "")
+	ceoIdentity := mustTestAgentIdentityForRun(runID, ceoID, "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            ceoID,
@@ -108,15 +108,14 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Events + deliveries + receipts.
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("review.requested"),
 		"dashboard",
 		"",
 		json.RawMessage(`{"message":"hi"}`),
 		0,
-		eventtest.UUID("persisted-projection-run"),
-		"",
+		runID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now(),
 	)

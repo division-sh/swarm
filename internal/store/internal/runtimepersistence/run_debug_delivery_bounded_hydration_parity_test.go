@@ -106,7 +106,7 @@ func seedBoundedRunDebugDelivery(
 		uuid.NewString(), events.EventType(eventName), "runtime", "", json.RawMessage(`{"bounded":true}`), 0,
 		runID, "", events.EventEnvelope{}, occurredAt.Add(-time.Minute),
 	)
-	route := testAgentDeliveryRoute(t, subscriberID, "fixture/"+subscriberID)
+	route := testAgentDeliveryRoute(t, runID, subscriberID, "fixture/"+subscriberID)
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("commit bounded run-debug event %s: %v", eventName, err)
 	}

@@ -122,7 +122,8 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
-	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), route); ok {
+	reason, quiesced, quiescenceErr := am.activeRunDeliveryQuiesced(ctx, evt.ID(), route)
+	if quiescenceErr == nil && quiesced {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
 		return eventProcessResult{record: record}
@@ -137,6 +138,14 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	}
 	defer func() { _ = heartbeat.Stop() }()
 	attemptCtx := heartbeat.Context()
+	if quiescenceErr != nil {
+		failure := failureEnvelope(quiescenceErr, "agent-manager", "check_active_run_quiescence")
+		_, settleErr := am.writeReceipt(attemptCtx, evt, receiptStatusForAgentFailure(quiescenceErr), failure, heartbeat)
+		record.Outcome = startupManagerReplayOutcomeDropped
+		record.ReasonCode = startupManagerReplayReasonProcessFailed
+		record.Failure = failure
+		return eventProcessResult{record: record, err: errors.Join(quiescenceErr, settleErr)}
+	}
 	if suppress, _ := am.shouldSuppressForBudget(route.AgentIdentity, evt); suppress {
 		budgetFailure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassBudgetExhausted, "spend_budget_emergency", "agent-manager", "delivery_budget_admission", map[string]any{
 			"budget_kind": "spend", "agent_id": agent.ID(), "entity_id": evt.EntityID(),
@@ -219,7 +228,9 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 		record.ReasonCode = startupManagerReplayReasonReplayed
 		return eventProcessResult{record: record}
 	}
-	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), route); ok {
+	if reason, quiesced, readErr := am.activeRunDeliveryQuiesced(ctx, evt.ID(), route); readErr != nil {
+		err = errors.Join(err, readErr)
+	} else if quiesced {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason
 		return eventProcessResult{record: record}
@@ -292,16 +303,16 @@ func receiptStatusForAgentFailure(err error) ReceiptStatus {
 	}
 }
 
-func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (startupManagerReplayReasonCode, bool) {
+func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (startupManagerReplayReasonCode, bool, error) {
 	reader := am.roles.DeliveryQuiescence
 	if reader == nil {
-		return "", false
+		return "", false, nil
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
-		return "", false
+		return "", false, nil
 	}
 	route = route.Normalized()
-	reason, ok, err := reader.ActiveRunDeliveryQuiesced(ctx, eventID, route)
+	reason, ok, err := reader.ActiveRunDeliveryQuiesced(context.WithoutCancel(ctx), eventID, route)
 	if err != nil {
 		if am.bus != nil {
 			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
@@ -313,9 +324,9 @@ func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID s
 				Failure:   failureEnvelope(err, "agent-manager", "check_active_run_quiescence"),
 			})
 		}
-		return "active_run_quiescence_check_failed", true
+		return "", false, err
 	}
-	return startupManagerReplayReasonCode(strings.TrimSpace(reason)), ok
+	return startupManagerReplayReasonCode(strings.TrimSpace(reason)), ok, nil
 }
 
 func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Event) bool {
@@ -497,7 +508,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 		return runtimedelivery.Snapshot{}, err
 	}
 	var snapshot runtimedelivery.Snapshot
-	writeCtx := heartbeat.Context()
+	writeCtx := settlementGuard.Context()
 	if admission, ok := managedexecution.FromContext(writeCtx); ok && admission.Kind == managedexecution.KindSelectedContractFork && status == ReceiptStatusError {
 		// A bounded selected-fork runtime cannot hand retry ownership to the
 		// store-wide manager backlog after it retires. Preserve the failure as a

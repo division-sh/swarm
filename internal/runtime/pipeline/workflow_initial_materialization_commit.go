@@ -50,7 +50,7 @@ func (c WorkflowInitialMaterializationCommand) Validate() error {
 	if err := c.Record.Validate(); err != nil {
 		return err
 	}
-	if err := c.Lifecycle.Validate(c.Record.State.RunID, c.Record.State.Route, c.Record.State.EntityID); err != nil {
+	if err := c.Lifecycle.Validate(c.Record.State.Identity.RunID, c.Record.State.Identity.Route, c.Record.State.EntityID); err != nil {
 		return fmt.Errorf("workflow initial materialization lifecycle: %w", err)
 	}
 	if c.Lifecycle.RequestCompletionCandidate {
@@ -92,7 +92,6 @@ type WorkflowInitialMaterializationCommitOwner interface {
 }
 
 func workflowInitialMaterializationRecord(
-	runID string,
 	state WorkflowEngineStateRecord,
 	projection workflowInitialMaterializationProjection,
 	readiness *DynamicFlowRuntimeReadinessPlan,
@@ -119,7 +118,7 @@ func workflowInitialMaterializationRecord(
 		OccurredAt:        canonicalWorkflowInstancePersistedTime(projection.OccurredAt),
 		Readiness:         readinessJSON,
 	}
-	if strings.TrimSpace(runID) == "" || state.RunID != strings.TrimSpace(runID) {
+	if strings.TrimSpace(projection.RunID) == "" || state.Identity.RunID != strings.TrimSpace(projection.RunID) {
 		return WorkflowInitialMaterializationRecord{}, fmt.Errorf("workflow initial materialization run identity disagrees with state")
 	}
 	if err := record.Validate(); err != nil {

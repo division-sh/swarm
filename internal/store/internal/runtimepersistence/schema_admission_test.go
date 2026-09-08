@@ -24,13 +24,13 @@ func TestUnacceptedSelectedStoreRuntimeCallsFailBeforeSQL(t *testing.T) {
 			if backend == "postgres" {
 				store := newPostgresStoreWithBackend(mustPostgresBackend(db))
 				call = func() error {
-					_, err := store.ListActiveAgentDescriptors(context.Background())
+					_, err := store.ListActiveAgentDescriptors(context.Background(), unacceptedAdmissionEventID)
 					return err
 				}
 			} else {
 				store := NewSQLiteRuntimeStoreForTest(db)
 				call = func() error {
-					_, err := store.ListActiveAgentDescriptors(context.Background())
+					_, err := store.ListActiveAgentDescriptors(context.Background(), unacceptedAdmissionEventID)
 					return err
 				}
 			}

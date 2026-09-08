@@ -75,7 +75,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	bus.SetRuntimeIngressDispatchGate(controller)
 
 	eventType := events.EventType(providerEventName)
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, eventType)
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, eventType)
 
 	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
@@ -146,7 +146,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
-	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID, flowInstance)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
 }
 
 func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
@@ -178,7 +178,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	bus.SetRuntimeIngressDispatchGate(controller)
 
 	eventType := events.EventType(providerEventName)
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, eventType)
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, eventType)
 
 	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
@@ -249,7 +249,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
-	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID, flowInstance)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
 }
 
 func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
@@ -281,7 +281,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	bus.SetRuntimeIngressDispatchGate(controller)
 
 	eventType := events.EventType(providerEventName)
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, eventType)
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, eventType)
 
 	if _, err := controller.Pause(context.Background(), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
@@ -354,7 +354,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
-	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID, flowInstance)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
 }
 
 func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -377,7 +377,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, events.EventType(providerEventName))
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, events.EventType(providerEventName))
 
 	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
@@ -413,7 +413,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stripe SQLite post-commit dispatch did not arrive")
 	}
-	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID, flowInstance)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
 }
 
 func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
@@ -439,7 +439,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, events.EventType(providerEventName))
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, events.EventType(providerEventName))
 
 	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
@@ -479,7 +479,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	case <-time.After(5 * time.Second):
 		t.Fatal("Twilio PostgreSQL post-commit dispatch did not arrive")
 	}
-	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID, flowInstance)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
 }
 
 func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -502,7 +502,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, events.EventType(providerEventName))
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, events.EventType(providerEventName))
 
 	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
@@ -542,7 +542,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	case <-time.After(5 * time.Second):
 		t.Fatal("Twilio SQLite post-commit dispatch did not arrive")
 	}
-	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID, flowInstance)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
 }
 
 func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
@@ -568,7 +568,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, events.EventType(providerEventName))
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, events.EventType(providerEventName))
 
 	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
@@ -604,7 +604,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	case <-time.After(5 * time.Second):
 		t.Fatal("Shopify PostgreSQL post-commit dispatch did not arrive")
 	}
-	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID, flowInstance)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
 }
 
 func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -627,7 +627,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, events.EventType(providerEventName))
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, events.EventType(providerEventName))
 
 	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
@@ -663,7 +663,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	case <-time.After(5 * time.Second):
 		t.Fatal("Shopify SQLite post-commit dispatch did not arrive")
 	}
-	unsubscribeAndWaitForInboundBusQuiescence(t, bus, agentID, flowInstance)
+	unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, flowInstance)
 }
 
 func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
@@ -689,7 +689,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, events.EventType(providerEventName))
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, events.EventType(providerEventName))
 
 	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
@@ -758,7 +758,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := subscribeInboundGatewayAgent(t, bus, agentID, flowInstance, events.EventType(providerEventName))
+	ch := subscribeInboundGatewayAgent(t, bus, runID, agentID, flowInstance, events.EventType(providerEventName))
 
 	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
@@ -949,7 +949,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
-			ch := subscribeInboundGatewayAgent(t, bus, tc.agentID, tc.flowInstance, events.EventType(tc.providerEventName))
+			ch := subscribeInboundGatewayAgent(t, bus, tc.runID, tc.agentID, tc.flowInstance, events.EventType(tc.providerEventName))
 			defer runtimebustest.Unsubscribe(bus, tc.agentID)
 
 			g := newTestInboundGateway(t, bus, nil, nil, pg)
@@ -983,7 +983,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			case <-time.After(5 * time.Second):
 				t.Fatalf("%s PostgreSQL post-commit dispatch did not arrive", tc.provider)
 			}
-			unsubscribeAndWaitForInboundBusQuiescence(t, bus, tc.agentID, tc.flowInstance)
+			unsubscribeAndWaitForInboundBusQuiescence(t, bus, tc.runID, tc.agentID, tc.flowInstance)
 		})
 	}
 }
@@ -1041,7 +1041,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
-			ch := subscribeInboundGatewayAgent(t, bus, tc.agentID, tc.flowInstance, events.EventType(tc.providerEventName))
+			ch := subscribeInboundGatewayAgent(t, bus, tc.runID, tc.agentID, tc.flowInstance, events.EventType(tc.providerEventName))
 			defer runtimebustest.Unsubscribe(bus, tc.agentID)
 
 			g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
@@ -1075,7 +1075,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			case <-time.After(5 * time.Second):
 				t.Fatalf("%s SQLite post-commit dispatch did not arrive", tc.provider)
 			}
-			unsubscribeAndWaitForInboundBusQuiescence(t, bus, tc.agentID, tc.flowInstance)
+			unsubscribeAndWaitForInboundBusQuiescence(t, bus, tc.runID, tc.agentID, tc.flowInstance)
 		})
 	}
 }
@@ -1112,10 +1112,10 @@ func seedPostgresInboundGatewayRuntime(
 		t.Fatalf("marshal flow config: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ($1, $2, 'static', $3::jsonb, 'active', now())
-		ON CONFLICT (instance_id) DO UPDATE SET config = EXCLUDED.config, status = EXCLUDED.status
-	`, flowInstance, boundedProviderFlowID, string(configBytes)); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES ($1::uuid, $2, $3, 'static', $4::jsonb, 'active', now())
+		ON CONFLICT (run_id, instance_path) DO UPDATE SET config = EXCLUDED.config, status = EXCLUDED.status
+	`, runID, flowInstance, boundedProviderFlowID, string(configBytes)); err != nil {
 		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1136,7 +1136,7 @@ func seedPostgresInboundGatewayRuntime(
 				ExecutionMode:      "live",
 				ResolvedLLMBackend: "anthropic",
 				ID:                 agentID,
-				Identity:           inboundGatewayAgentIdentity(t, agentID, flowInstance),
+				Identity:           inboundGatewayAgentIdentity(t, runID, agentID, flowInstance),
 				Role:               "observer",
 				FlowID:             boundedProviderFlowID,
 				Type:               "stub",
@@ -1156,10 +1156,11 @@ func seedPostgresInboundGatewayRuntime(
 	return seedBoundedStandingTarget(t, ctx, pg, runID, entityID, flowInstance, provider)
 }
 
-func inboundGatewayAgentIdentity(t testing.TB, agentID, flowInstance string) runtimeagentidentity.Identity {
+func inboundGatewayAgentIdentity(t testing.TB, runID, agentID, flowInstance string) runtimeagentidentity.Identity {
 	t.Helper()
-	return runtimeagentidentitytest.Runtime(
+	return runtimeagentidentitytest.RuntimeForRun(
 		t,
+		runID,
 		agentID,
 		"runtime-test/inbound-gateway",
 		boundedProviderFlowID,
@@ -1171,11 +1172,13 @@ func inboundGatewayAgentIdentity(t testing.TB, agentID, flowInstance string) run
 func subscribeInboundGatewayAgent(
 	t testing.TB,
 	bus *runtimebus.EventBus,
+	runID,
 	agentID,
 	flowInstance string,
 	eventTypes ...events.EventType,
 ) <-chan *runtimebus.LocalDelivery {
 	t.Helper()
+	bindInboundGatewayAgentReadinessFinalizer(bus, runID)
 	subscriptions := make([]string, 0, len(eventTypes))
 	for _, eventType := range eventTypes {
 		subscriptions = append(subscriptions, string(eventType))
@@ -1205,7 +1208,27 @@ func subscribeInboundGatewayAgent(
 	if err != nil {
 		t.Fatalf("admit inbound gateway test agent route: %v", err)
 	}
-	return runtimebustest.SubscribeIdentity(t, bus, inboundGatewayAgentIdentity(t, agentID, flowInstance), admission)
+	return runtimebustest.SubscribeIdentity(t, bus, inboundGatewayAgentIdentity(t, runID, agentID, flowInstance), admission)
+}
+
+func bindInboundGatewayAgentReadinessFinalizer(bus *runtimebus.EventBus, runID string) {
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
+		if event.RunID() != runID {
+			return errors.New("inbound test event escaped its admitted run")
+		}
+		for _, route := range routes {
+			if !route.Recipient.IsAgent() {
+				continue
+			}
+			if err := route.AgentIdentity.Validate(); err != nil {
+				return err
+			}
+			if route.AgentIdentity.RunID != runID {
+				return errors.New("inbound test agent route escaped its admitted run")
+			}
+		}
+		return nil
+	}))
 }
 
 func seedSQLiteInboundGatewayRuntime(
@@ -1241,9 +1264,9 @@ func seedSQLiteInboundGatewayRuntime(
 		t.Fatalf("marshal sqlite flow config: %v", err)
 	}
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES (?, ?, 'static', ?, 'active', ?)
-	`, flowInstance, boundedProviderFlowID, string(configBytes), now); err != nil {
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES (?, ?, ?, 'static', ?, 'active', ?)
+	`, runID, flowInstance, boundedProviderFlowID, string(configBytes), now); err != nil {
 		t.Fatalf("seed sqlite flow instance: %v", err)
 	}
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
@@ -1261,7 +1284,7 @@ func seedSQLiteInboundGatewayRuntime(
 				ExecutionMode:      "live",
 				ResolvedLLMBackend: "anthropic",
 				ID:                 agentID,
-				Identity:           inboundGatewayAgentIdentity(t, agentID, flowInstance),
+				Identity:           inboundGatewayAgentIdentity(t, runID, agentID, flowInstance),
 				Role:               "observer",
 				FlowID:             boundedProviderFlowID,
 				Type:               "stub",
@@ -1572,9 +1595,9 @@ func requireNoInboundBusEvent(t testing.TB, ch <-chan *runtimebus.LocalDelivery,
 	}
 }
 
-func unsubscribeAndWaitForInboundBusQuiescence(t testing.TB, bus *runtimebus.EventBus, agentID, flowInstance string) {
+func unsubscribeAndWaitForInboundBusQuiescence(t testing.TB, bus *runtimebus.EventBus, runID, agentID, flowInstance string) {
 	t.Helper()
-	runtimebustest.UnsubscribeIdentity(bus, inboundGatewayAgentIdentity(t, agentID, flowInstance))
+	runtimebustest.UnsubscribeIdentity(bus, inboundGatewayAgentIdentity(t, runID, agentID, flowInstance))
 	waitForInboundBusQuiescence(t, bus)
 }
 

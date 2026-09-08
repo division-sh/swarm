@@ -76,15 +76,15 @@ func (s *BudgetPostgresOwner) RecordSpend(ctx context.Context, rec budgetspend.S
 		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO spend_ledger (
-				execution_mode, entity_id, flow_instance, agent_id, agent_name_owner, agent_name_source,
+				execution_mode, run_id, entity_id, flow_instance, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 				model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
 			) VALUES (
-				$1, NULLIF($2,'')::uuid, $3, $4, $5, $6, $7, $8, $9,
-				$10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+				$1, $2::uuid, NULLIF($3,'')::uuid, $4, $5, $6, $7, $8, $9, $10,
+				$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
 			)
-		`, rec.ExecutionMode, rec.EntityID, identityFields.FlowInstancePath, identityFields.AgentID,
+		`, rec.ExecutionMode, identityFields.RunID, rec.EntityID, identityFields.FlowInstancePath, identityFields.AgentID,
 			identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 			identityFields.FlowScopeKey, identityFields.FlowInstanceID,
 			rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel,
@@ -212,12 +212,12 @@ func (s *BudgetSQLiteOwner) RecordSpend(ctx context.Context, rec budgetspend.Spe
 		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO spend_ledger (
-				execution_mode, entity_id, flow_instance, agent_id, agent_name_owner, agent_name_source,
+				execution_mode, run_id, entity_id, flow_instance, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 				model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, rec.ExecutionMode, nullUUID(rec.EntityID), identityFields.FlowInstancePath, identityFields.AgentID,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, rec.ExecutionMode, identityFields.RunID, nullUUID(rec.EntityID), identityFields.FlowInstancePath, identityFields.AgentID,
 			identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 			identityFields.FlowScopeKey, identityFields.FlowInstanceID,
 			rec.Model, rec.ModelAlias, rec.BackendProfile, rec.Provider, rec.Transport, rec.ResolvedModel,

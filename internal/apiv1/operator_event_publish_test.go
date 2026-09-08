@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -149,11 +150,11 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	_, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, "scan-orchestrator")
+	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
-	body := eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish")
+	body := eventPublishBody(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish")
 
 	published := rpcCall(t, handler, body)
 	if published.Error != nil {
@@ -168,8 +169,8 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if _, err := uuid.Parse(runID); err != nil {
 		t.Fatalf("run_id = %q, want UUID", runID)
 	}
-	if result["new_run_created"] != true {
-		t.Fatalf("new_run_created = %#v, want true", result["new_run_created"])
+	if runID != targetRunID || result["new_run_created"] != false {
+		t.Fatalf("event.publish run = %s created=%#v, want existing %s", runID, result["new_run_created"], targetRunID)
 	}
 	deliveries := asSlice(t, result["deliveries"])
 	if len(deliveries) != 2 {
@@ -180,7 +181,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
-	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
@@ -235,12 +236,11 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx := context.Background()
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, "scan-orchestrator")
+	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
-	body := eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-quick-ack-publish")
+	body := eventPublishBody(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-quick-ack-publish")
 
 	respCh := make(chan rpcResponse, 1)
 	go func() {
@@ -266,7 +266,7 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	deliveries := asSlice(t, result["deliveries"])
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
-	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows before dispatch release = %d, want 1", count)
 	}
@@ -409,8 +409,9 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx := context.Background()
-	seedActiveAPIV1RuntimeBusAgentAt(t, ctx, pg, "repo-observer", "repo-scaffold")
+	ctx := testAuthorActivityContextForSource(context.Background(), runStartTestSourceArtifactFact())
+	runID := uuid.NewString()
+	seedActiveAPIV1RuntimeBusAgentForRun(t, ctx, pg, runID, "repo-observer", "repo-scaffold")
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       "repo-observer",
 		FlowID:        "repo-scaffold",
@@ -420,13 +421,13 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdmitFlowOwnedAgentSubscriptions: %v", err)
 	}
-	ch := runtimebustest.SubscribeAdmission(t, bus, admission)
+	ch := runtimebustest.SubscribeIdentity(t, bus, runtimebustest.IdentityForRun(t, runID, "repo-observer", "repo-scaffold"), admission)
 	if ch == nil {
 		t.Fatal("SubscribeAgent returned nil admitted carrier")
 	}
 	defer runtimebustest.Unsubscribe(bus, "repo-observer")
 	handler := eventPublishTestHandler(t, pg, bus, source)
-	body := eventPublishBody("", runStartTestBundleHash, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "", "idem-flow-scoped")
+	body := eventPublishBody(runID, runStartTestBundleHash, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "", "idem-flow-scoped")
 
 	published := rpcCall(t, handler, body)
 	if published.Error != nil {
@@ -434,11 +435,13 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
-	runID := stringValue(t, result["run_id"], "run_id")
+	if gotRunID := stringValue(t, result["run_id"], "run_id"); gotRunID != runID || result["new_run_created"] != false {
+		t.Fatalf("event.publish run = %s created=%#v, want existing %s", gotRunID, result["new_run_created"], runID)
+	}
 	if got := countEventsByName(t, db, canonicalEventName); got != 1 {
 		t.Fatalf("%s event count = %d, want 1", canonicalEventName, got)
 	}
-	assertEventPublishPersistence(t, db, runID, eventID, canonicalEventName, "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	deliveries := asSlice(t, result["deliveries"])
 	if len(deliveries) != 2 {
 		t.Fatalf("deliveries = %#v, want typed agent and node deliveries", deliveries)
@@ -631,19 +634,19 @@ func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	_, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, "scan-orchestrator")
+	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
-	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-no-bundle"))
+	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle(targetRunID, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-no-bundle"))
 	if published.Error != nil {
 		t.Fatalf("event.publish active ephemeral bundle scope error = %#v", published.Error)
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
 	runID := stringValue(t, result["run_id"], "run_id")
-	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	if got := countEventsByName(t, db, "scan.requested"); got != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", got)
 	}
@@ -652,14 +655,14 @@ func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 
-	explicit := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-explicit-bundle"))
+	explicit := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-explicit-bundle"))
 	if explicit.Error != nil {
 		t.Fatalf("event.publish explicit active bundle scope error = %#v", explicit.Error)
 	}
 	explicitResult := asMap(t, explicit.Result)
 	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
 	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
-	assertEventPublishPersistence(t, db, explicitRunID, explicitEventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, db, explicitRunID, explicitEventID, "cli-publish:"+actorTokenID(testToken))
 	explicitEvent := requireAPIV1RuntimeBusEventID(t, ch, explicitEventID, "explicit-bundle event.publish delivery")
 	if explicitEvent.ID() != explicitEventID {
 		t.Fatalf("explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
@@ -674,32 +677,32 @@ func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, sqliteStore, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, ctx, sqliteStore, "scan-orchestrator")
+	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
 
-	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle("", "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-publish-no-bundle"))
+	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle(targetRunID, "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-publish-no-bundle"))
 	if published.Error != nil {
 		t.Fatalf("sqlite event.publish active ephemeral bundle scope error = %#v", published.Error)
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
 	runID := stringValue(t, result["run_id"], "run_id")
-	assertSQLiteEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertSQLiteExistingRunEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	got := requireAPIV1RuntimeBusEvent(t, ch, "sqlite event.publish delivery")
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 
-	explicit := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-publish-explicit-bundle"))
+	explicit := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-sqlite-publish-explicit-bundle"))
 	if explicit.Error != nil {
 		t.Fatalf("sqlite event.publish explicit active bundle scope error = %#v", explicit.Error)
 	}
 	explicitResult := asMap(t, explicit.Result)
 	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
 	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
-	assertSQLiteEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), explicitRunID, explicitEventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertSQLiteExistingRunEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), explicitRunID, explicitEventID, "cli-publish:"+actorTokenID(testToken))
 	explicitEvent := requireAPIV1RuntimeBusEventID(t, ch, explicitEventID, "sqlite explicit-bundle event.publish delivery")
 	if explicitEvent.ID() != explicitEventID {
 		t.Fatalf("sqlite explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
@@ -730,15 +733,15 @@ func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t 
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	_, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, "scan-orchestrator")
+	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	observability := &failOnceEventReadStore{
 		ObservabilityReadStore: pg,
 		err:                    errors.New("transient event readback failure"),
 	}
 	handler := eventPublishTestHandlerWithObservability(t, pg, bus, source, observability)
-	body := eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-readback")
+	body := eventPublishBody(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-readback")
 
 	first := rpcCall(t, handler, body)
 	if first.Error != nil {
@@ -820,12 +823,11 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx := context.Background()
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, "scan-orchestrator")
+	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
-	body := eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-receipt")
+	body := eventPublishBody(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-receipt")
 
 	published := rpcCall(t, handler, body)
 	if published.Error != nil {
@@ -888,12 +890,11 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx := context.Background()
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
+	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, "scan-orchestrator")
+	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
-	body := eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-completion")
+	body := eventPublishBody(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-post-commit-completion")
 
 	published := rpcCall(t, handler, body)
 	if published.Error != nil {
@@ -945,7 +946,6 @@ func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *tes
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ctx := context.Background()
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
 	body := eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-pre-commit")
 
@@ -1007,9 +1007,6 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, context.Background(), pg, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
-	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"first"}`, "", "idem-new-run"))
@@ -1017,7 +1014,9 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	requireAPIV1RuntimeBusEvent(t, ch, "initial explicit-run target delivery")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(context.Background()), pg, runID, "scan-orchestrator", "")
+	ch := runtimebustest.SubscribeForRun(t, bus, runID, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 
 	targeted := rpcCall(t, handler, eventPublishBody(runID, runStartTestBundleHash, "scan.requested", `{"topic":"second"}`, "operator-test", "idem-existing-run"))
 	if targeted.Error != nil {
@@ -1090,10 +1089,6 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ctx := context.Background()
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	initialCh := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"), events.EventType("scan.followup"))
-	followUpCh := initialCh
-	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"first"}`, "", "idem-followup-initial"))
@@ -1105,7 +1100,9 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	if initialResult["new_run_created"] != true {
 		t.Fatalf("initial result = %#v, want new run", initialResult)
 	}
-	requireAPIV1RuntimeBusEvent(t, initialCh, "initial delivery")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, runID, "scan-orchestrator", "")
+	followUpCh := runtimebustest.SubscribeForRun(t, bus, runID, "scan-orchestrator", events.EventType("scan.followup"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 
 	followUp := rpcCall(t, handler, eventPublishBody(runID, runStartTestBundleHash, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-followup-existing"))
 	if followUp.Error != nil {
@@ -1173,9 +1170,6 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "bootstrap-node")
-	initialCh := runtimebustest.Subscribe(t, bus, "bootstrap-node", events.EventType("bootstrap.requested"))
-	defer runtimebustest.Unsubscribe(bus, "bootstrap-node")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", bundleHash, "bootstrap.requested", `{"topic":"first"}`, "", "idem-target-route-initial"))
@@ -1183,11 +1177,13 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	requireAPIV1RuntimeBusEvent(t, initialCh, "initial delivery")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, runID, "bootstrap-node", "")
+	runtimebustest.SubscribeForRun(t, bus, runID, "bootstrap-node", events.EventType("bootstrap.requested"))
+	defer runtimebustest.Unsubscribe(bus, "bootstrap-node")
 
 	targetFlowInstance := "operating/inst-1"
 	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
-	seedEventPublishEntityState(t, db, runID, targetEntityID, targetFlowInstance, "waiting")
+	seedEventPublishEntityState(t, db, source, runID, targetEntityID, targetFlowInstance, "waiting")
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
 		SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb,
@@ -1196,7 +1192,10 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 	`, runID, targetEntityID); err != nil {
 		t.Fatalf("seed hostile entity value-map identity lookalikes: %v", err)
 	}
-	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runID,
+		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
+	}}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 
@@ -1241,9 +1240,6 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "workflow-runtime")
-	ch := runtimebustest.Subscribe(t, bus, "workflow-runtime", events.EventType("review.requested"))
-	defer runtimebustest.Unsubscribe(bus, "workflow-runtime")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", bundleHash, "review.requested", `{"topic":"first"}`, "", "idem-root-template-collision-initial"))
@@ -1251,11 +1247,13 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	requireAPIV1RuntimeBusEvent(t, ch, "initial root/template collision delivery")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, runID, "root-orchestrator", "")
+	ch := runtimebustest.SubscribeForRun(t, bus, runID, "root-orchestrator", events.EventType("review.requested"))
+	defer runtimebustest.Unsubscribe(bus, "root-orchestrator")
 
 	flowInstance := "operating/inst-1"
 	entityID := runtimeflowidentity.EntityID(flowInstance)
-	seedEventPublishEntityState(t, db, runID, entityID, flowInstance, "waiting")
+	seedEventPublishEntityState(t, db, source, runID, entityID, flowInstance, "waiting")
 
 	followUp := rpcCall(t, handler, eventPublishBody(runID, bundleHash, "review.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"root-follow-up"}`, entityID), "operator-test", "idem-root-template-collision-follow-up"))
 	if followUp.Error != nil {
@@ -1473,9 +1471,6 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "bootstrap-node")
-	initialCh := runtimebustest.Subscribe(t, bus, "bootstrap-node", events.EventType("bootstrap.requested"))
-	defer runtimebustest.Unsubscribe(bus, "bootstrap-node")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", bundleHash, "bootstrap.requested", `{"topic":"first"}`, "", "idem-target-route-invalid-initial"))
@@ -1483,18 +1478,23 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	requireAPIV1RuntimeBusEvent(t, initialCh, "initial delivery")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, runID, "bootstrap-node", "")
+	runtimebustest.SubscribeForRun(t, bus, runID, "bootstrap-node", events.EventType("bootstrap.requested"))
+	defer runtimebustest.Unsubscribe(bus, "bootstrap-node")
 
 	targetFlowInstance := "operating/inst-1"
 	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
-	seedEventPublishEntityState(t, db, runID, targetEntityID, targetFlowInstance, "waiting")
-	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
+	seedEventPublishEntityState(t, db, source, runID, targetEntityID, targetFlowInstance, "waiting")
+	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runID,
+		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
+	}}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	mismatchEntityID := uuid.NewString()
-	seedEventPublishEntityState(t, db, runID, mismatchEntityID, "operating/other", "waiting")
+	seedEventPublishEntityState(t, db, source, runID, mismatchEntityID, "operating/other", "waiting")
 	unroutableEntityID := uuid.NewString()
-	seedEventPublishEntityState(t, db, runID, unroutableEntityID, "orphan/inst-1", "waiting")
+	seedEventPublishEntityState(t, db, source, runID, unroutableEntityID, "orphan/inst-1", "waiting")
 
 	tests := []struct {
 		name       string
@@ -1582,9 +1582,6 @@ func TestOperatorEventPublishExplicitRunIsUnavailableWithoutRecipientPlanChecker
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	initialCh := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
-	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"first"}`, "", "idem-followup-missing-plan-initial"))
@@ -1592,7 +1589,7 @@ func TestOperatorEventPublishExplicitRunIsUnavailableWithoutRecipientPlanChecker
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	requireAPIV1RuntimeBusEvent(t, initialCh, "initial delivery")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, runID, "scan-orchestrator", "")
 
 	noCheckerHandler := eventPublishTestHandlerWithStores(t, pg, pg, pg, failingRunStartPublisher{}, source)
 	rejected := rpcCall(t, noCheckerHandler, eventPublishBody(runID, runStartTestBundleHash, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-followup-missing-plan"))
@@ -1626,10 +1623,6 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, sqliteStore, "scan-orchestrator")
-	initialCh := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"), events.EventType("scan.followup"))
-	followUpCh := initialCh
-	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
 
 	initial := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"first"}`, "", "idem-sqlite-followup-initial"))
@@ -1637,7 +1630,9 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 		t.Fatalf("sqlite initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	requireAPIV1RuntimeBusEvent(t, initialCh, "sqlite initial delivery")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), sqliteStore, runID, "scan-orchestrator", "")
+	followUpCh := runtimebustest.SubscribeForRun(t, bus, runID, "scan-orchestrator", events.EventType("scan.followup"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 
 	followUp := rpcCall(t, handler, eventPublishBody(runID, runStartTestBundleHash, "scan.followup", `{"topic":"second"}`, "operator-test", "idem-sqlite-followup-existing"))
 	if followUp.Error != nil {
@@ -1751,9 +1746,6 @@ func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *test
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ctx := context.Background()
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, "scan-orchestrator")
-	ch := runtimebustest.Subscribe(t, bus, "scan-orchestrator", events.EventType("scan.requested"))
-	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	parent := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-source-parent"))
@@ -1763,7 +1755,9 @@ func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *test
 	parentResult := asMap(t, parent.Result)
 	parentEventID := stringValue(t, parentResult["event_id"], "event_id")
 	parentRunID := stringValue(t, parentResult["run_id"], "run_id")
-	requireAPIV1RuntimeBusEvent(t, ch, "referenced event delivery")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, parentRunID, "scan-orchestrator", "")
+	ch := runtimebustest.SubscribeForRun(t, bus, parentRunID, "scan-orchestrator", events.EventType("scan.requested"))
+	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 
 	child := rpcCall(t, handler, eventPublishBodyWithSource(parentRunID, parentEventID, runStartTestBundleHash, "scan.requested", `{"topic":"checkpoint"}`, "operator-test", "idem-source-child"))
 	if child.Error != nil {
@@ -2045,10 +2039,9 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
 
-	ctx := context.Background()
 	agentID := "scan-orchestrator"
-	seedActiveAPIV1RuntimeBusAgent(t, ctx, pg, agentID)
-	ch := runtimebustest.Subscribe(t, bus, agentID, events.EventType("scan.requested"))
+	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, agentID)
+	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, agentID, events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, agentID)
 
 	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
@@ -2060,7 +2053,7 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	}
 
 	handler := eventPublishTestHandler(t, pg, bus, source)
-	published := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"paused"}`, "", "idem-paused-publish"))
+	published := rpcCall(t, handler, eventPublishBody(targetRunID, runStartTestBundleHash, "scan.requested", `{"topic":"paused"}`, "", "idem-paused-publish"))
 	if published.Error != nil {
 		t.Fatalf("paused event.publish error = %#v", published.Error)
 	}
@@ -2653,8 +2646,47 @@ func mustCompileEventPublishTestBundle(bundle *runtimecontracts.WorkflowContract
 	return bundle
 }
 
-func seedEventPublishEntityState(t *testing.T, db *sql.DB, runID, entityID, flowInstance, currentState string) {
+func seedEventPublishEntityState(t *testing.T, db *sql.DB, source semanticview.Source, runID, entityID, flowInstance, currentState string) {
 	t.Helper()
+	var bundleHash string
+	if err := db.QueryRow(`SELECT bundle_hash FROM runs WHERE run_id = $1::uuid`, runID).Scan(&bundleHash); err != nil {
+		t.Fatalf("read flow readiness source for run %s: %v", runID, err)
+	}
+	if bundleHash != runStartTestBundleHashForSource(source) {
+		t.Fatal("flow readiness fixture source differs from the run's admitted artifact")
+	}
+	flowTemplate := strings.SplitN(strings.TrimSpace(flowInstance), "/", 2)[0]
+	readiness, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity: runtimeflowidentity.Instance{
+			TemplateID: flowTemplate,
+			ScopeKey:   flowTemplate,
+			InstanceID: runtimeflowidentity.LogicalInstanceID(flowInstance), InstancePath: flowInstance,
+			EntityID: entityID, HasStoredPath: true,
+		},
+		RunID: runID, BundleHash: bundleHash,
+		WorkflowVersion: source.WorkflowVersion(), ExecutionMode: "live",
+	}).Normalized()
+	if err != nil {
+		t.Fatalf("normalize exact flow readiness fixture: %v", err)
+	}
+	readinessJSON, err := json.Marshal(readiness)
+	if err != nil {
+		t.Fatalf("marshal exact flow readiness fixture: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES ($1::uuid, $2, $3, 'template', '{}'::jsonb, 'active', now())
+		ON CONFLICT (run_id, instance_path) DO NOTHING
+	`, runID, flowInstance, flowTemplate); err != nil {
+		t.Fatalf("seed exact flow instance lifecycle: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3::jsonb, now(), now())
+		ON CONFLICT (run_id, instance_path) DO UPDATE SET plan = EXCLUDED.plan, updated_at = EXCLUDED.updated_at
+	`, runID, flowInstance, readinessJSON); err != nil {
+		t.Fatalf("seed exact flow instance readiness: %v", err)
+	}
 	if _, err := db.Exec(`
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, current_state,
@@ -2747,6 +2779,30 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	if bundleHash != runStartTestBundleHash {
 		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, runStartTestBundleHash)
 	}
+	assertPostgresEventPublishRows(t, db, runID, eventID, producedBy)
+}
+
+func assertExistingRunEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, producedBy string) {
+	t.Helper()
+	var runStatus, triggerType, triggerID, bundleHash string
+	if err := db.QueryRow(`
+		SELECT status, COALESCE(trigger_event_type, ''), COALESCE(trigger_event_id::text, ''), bundle_hash
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&runStatus, &triggerType, &triggerID, &bundleHash); err != nil {
+		t.Fatalf("load existing event.publish run row: %v", err)
+	}
+	if runStatus != "running" || triggerType != "" || triggerID != "" {
+		t.Fatalf("existing run row status=%q trigger=%q/%q, want running with no creation trigger", runStatus, triggerType, triggerID)
+	}
+	if bundleHash != runStartTestBundleHash {
+		t.Fatalf("existing run source artifact = %q, want %s", bundleHash, runStartTestBundleHash)
+	}
+	assertPostgresEventPublishRows(t, db, runID, eventID, producedBy)
+}
+
+func assertPostgresEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, producedBy string) {
+	t.Helper()
 	var entityID, flowInstance, gotProducedBy, targetRoute, targetSet string
 	var payload json.RawMessage
 	if err := db.QueryRow(`
@@ -2785,6 +2841,27 @@ func assertSQLiteEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, even
 	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
 		t.Fatalf("sqlite run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
+	assertSQLiteEventPublishEventRow(t, db, runID, eventID, producedBy)
+}
+
+func assertSQLiteExistingRunEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, producedBy string) {
+	t.Helper()
+	var runStatus, triggerType, triggerID string
+	if err := db.QueryRow(`
+		SELECT status, COALESCE(trigger_event_type, ''), COALESCE(trigger_event_id, '')
+		FROM runs
+		WHERE run_id = ?
+	`, runID).Scan(&runStatus, &triggerType, &triggerID); err != nil {
+		t.Fatalf("load existing sqlite event.publish run row: %v", err)
+	}
+	if runStatus != "running" || triggerType != "" || triggerID != "" {
+		t.Fatalf("existing sqlite run row status=%q trigger=%q/%q, want running with no creation trigger", runStatus, triggerType, triggerID)
+	}
+	assertSQLiteEventPublishEventRow(t, db, runID, eventID, producedBy)
+}
+
+func assertSQLiteEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, producedBy string) {
+	t.Helper()
 	var entityID, flowInstance, gotProducedBy, targetRoute, targetSet, payloadText string
 	if err := db.QueryRow(`
 		SELECT COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(produced_by, ''), COALESCE(target_route, '{}'), COALESCE(target_set, '[]'), payload

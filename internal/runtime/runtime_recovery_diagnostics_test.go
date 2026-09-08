@@ -400,6 +400,7 @@ type startupReadinessFinalizationStore struct {
 
 func (*startupReadinessFinalizationStore) MaterializeInitialEntry(
 	context.Context,
+	runtimeflowidentity.RunScopedFlowInstance,
 	runtimepipeline.WorkflowInstance,
 	time.Time,
 ) (runtimepipeline.WorkflowInitialMaterializationResult, error) {
@@ -408,6 +409,7 @@ func (*startupReadinessFinalizationStore) MaterializeInitialEntry(
 
 func (*startupReadinessFinalizationStore) PrepareInitialEntryLifecycle(
 	context.Context,
+	runtimeflowidentity.RunScopedFlowInstance,
 	runtimepipeline.WorkflowInstance,
 	time.Time,
 ) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error) {
@@ -421,15 +423,15 @@ func (*startupReadinessFinalizationStore) FinalizeInitialEntryLifecycle(
 	return errors.New("unexpected readiness lifecycle finalization")
 }
 
-func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
+func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return errors.New("unexpected readiness timer arm")
 }
 
-func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
+func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return errors.New("unexpected readiness timer reconciliation")
 }
 
-func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
+func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return errors.New("unexpected readiness timer retirement")
 }
 
@@ -503,17 +505,17 @@ func (*startupReadinessFinalizationStore) CommitDynamicFlowRuntimeCreationOccurr
 	return errors.New("unexpected readiness creation completion")
 }
 
-func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, runtimeflowidentity.Route, identity.EntityID, time.Time) error {
+func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, runtimeflowidentity.RunScopedFlowInstance, identity.EntityID, time.Time) error {
 	return errors.New("unexpected readiness termination")
 }
 
-func (*startupReadinessFinalizationStore) Load(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+func (*startupReadinessFinalizationStore) Load(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
 	return runtimepipeline.WorkflowInstance{}, false, errors.New("unexpected readiness workflow load")
 }
 
 func (*startupReadinessFinalizationStore) LoadRouteRecoveryProjection(
 	context.Context,
-	runtimeflowidentity.Route,
+	runtimeflowidentity.RunScopedFlowInstance,
 ) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error) {
 	return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, errors.New("unexpected readiness route projection")
 }
@@ -556,7 +558,7 @@ func (startupRecoveryMinimalEventStore) SupportsPersistedReplay() bool { return 
 
 type startupRecoveryEventStore struct {
 	missing     []events.PersistedReplayEvent
-	routes      []runtimeflowidentity.Route
+	routes      []runtimeflowidentity.RunScopedFlowInstance
 	claimErr    error
 	obligations *startupRecoveryPipelineOwner
 }
@@ -584,12 +586,12 @@ func (startupRecoveryEventStore) UpsertFlowInstanceRoute(context.Context, runtim
 	return nil
 }
 
-func (startupRecoveryEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+func (startupRecoveryEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
 }
 
-func (s startupRecoveryEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
-	return append([]runtimeflowidentity.Route(nil), s.routes...), nil
+func (s startupRecoveryEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
+	return append([]runtimeflowidentity.RunScopedFlowInstance(nil), s.routes...), nil
 }
 
 func testRecoveryDiagnosticsConfig(recoveryOnStartup bool) *config.Config {
@@ -878,8 +880,11 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-manager-work"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
-		routes: []runtimeflowidentity.Route{
-			runtimeflowidentity.DeriveRoute("child", "inst-1"),
+		routes: []runtimeflowidentity.RunScopedFlowInstance{
+			{
+				RunID: eventtest.UUID("startup-recovery-manager-run"),
+				Route: runtimeflowidentity.DeriveRoute("child", "inst-1"),
+			},
 		},
 	}
 	managerIdentity := agentidentitytest.RootRuntime(t, "persisted-agent", "startup-recovery-manager-work")

@@ -14,10 +14,7 @@ import (
 
 func testIdentity(t testing.TB, agentID, runID, instanceID string) agentmemory.Identity {
 	t.Helper()
-	return agentmemory.Identity{
-		RunID: runID,
-		Agent: agentidentitytest.Runtime(t, agentID, "test-fixture", "support", instanceID, "support/"+instanceID),
-	}
+	return agentidentitytest.RuntimeForRun(t, runID, agentID, "test-fixture", "support", instanceID, "support/"+instanceID)
 }
 
 func TestInMemoryRegistryLeaseConflictAndRelease(t *testing.T) {
@@ -91,13 +88,13 @@ func TestInMemoryRegistryLifecycleProjectionOwnsCompleteSet(t *testing.T) {
 	sr.byKey[registryKey(active)] = &Record{SessionID: "session-a", Identity: active, Status: "active"}
 	sr.byKey[registryKey(suspended)] = &Record{SessionID: "session-b", Identity: suspended, Status: "suspended"}
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	initial := runtimeeffects.LifecycleToken{Identity: active.Agent, RuntimeEpoch: 11, AgentID: "agent-a", Generation: 1}
+	initial := runtimeeffects.LifecycleToken{Identity: active, RuntimeEpoch: 11, AgentID: "agent-a", Generation: 1}
 	if _, replayed, err := sr.ApplyLifecycleProjection(context.Background(), LifecycleProjectionRequest{
 		OperationID: "op-register", RequestHash: "register", Target: initial, TargetPhase: "running", Now: now,
 	}); err != nil || replayed {
 		t.Fatalf("register replayed=%v err=%v", replayed, err)
 	}
-	target := runtimeeffects.LifecycleToken{Identity: active.Agent, RuntimeEpoch: 11, AgentID: "agent-a", Generation: 2}
+	target := runtimeeffects.LifecycleToken{Identity: active, RuntimeEpoch: 11, AgentID: "agent-a", Generation: 2}
 	outcome, replayed, err := sr.ApplyLifecycleProjection(context.Background(), LifecycleProjectionRequest{
 		OperationID: "op-rotate", RequestHash: "rotate", Expected: initial, Target: target,
 		TargetPhase: "running", Plan: LifecycleMutationPlan{Action: LifecycleMutationRotateCurrentSet, TerminationReason: TerminationReasonNormal}, Now: now.Add(time.Second),

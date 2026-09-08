@@ -77,7 +77,7 @@ func TestGeneratePlatformTableDDLs(t *testing.T) {
 			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY,\n    entity_id UUID NOT NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_entity (entity_id, created_at)\n);",
 		},
 		"flow_instances": {
-			DDL: "CREATE TABLE flow_instances (\n    instance_id TEXT PRIMARY KEY,\n    flow_template TEXT NOT NULL\n);",
+			DDL: "CREATE TABLE flow_instances (\n    run_id UUID NOT NULL,\n    instance_path TEXT NOT NULL,\n    flow_template TEXT NOT NULL,\n    PRIMARY KEY (run_id, instance_path)\n);",
 		},
 	}
 

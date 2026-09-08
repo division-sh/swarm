@@ -360,7 +360,7 @@ func budgetAccountingSettlement(target runtimeeffects.UsageTarget, exactness run
 		Usage:      usage,
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
-			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Identity: target.AgentIdentity,
 			Memory:   target.Memory, FlowInstance: target.FlowInstance, ParseOK: state == runtimeeffects.StateSettled,
 		},
 		Spend: runtimeeffects.CompletionSpend{

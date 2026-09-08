@@ -425,7 +425,7 @@ func TestMixedPubsubConnectCompositionReplayUsesCommittedRoutes(t *testing.T) {
 	wantEvent := store.events[evt.ID()]
 
 	routeTable.mu.Lock()
-	routeTable.routes = map[string][]Subscriber{}
+	routeTable.routes = map[routeResolutionKey][]Subscriber{}
 	routeTable.rootInputRoutes = map[string][]Subscriber{}
 	routeTable.patterns = nil
 	routeTable.connectGraph = runtimepinrouting.CompiledConnectGraph{}

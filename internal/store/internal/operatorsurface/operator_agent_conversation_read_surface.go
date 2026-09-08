@@ -326,6 +326,7 @@ func (r *AgentPostgres) loadAgentOperatorProjectionsTx(ctx context.Context, tx *
 	}
 	rows, err := tx.QueryContext(ctx, `
 			SELECT
+			a.run_id::text,
 			a.agent_id,
 			a.agent_name_owner,
 			a.agent_name_source,
@@ -352,7 +353,8 @@ func (r *AgentPostgres) loadAgentOperatorProjectionsTx(ctx context.Context, tx *
 				lease_expires_at,
 				runtime_state
 			FROM agent_sessions
-			WHERE agent_id = a.agent_id
+			WHERE run_id = a.run_id
+			  AND agent_id = a.agent_id
 			  AND agent_name_owner = a.agent_name_owner
 			  AND agent_name_source = a.agent_name_source
 			  AND agent_route_presence = a.agent_route_presence
@@ -365,7 +367,7 @@ func (r *AgentPostgres) loadAgentOperatorProjectionsTx(ctx context.Context, tx *
 			LIMIT 1
 		) sess ON true
 			WHERE a.status NOT IN ('terminated', 'ephemeral')
-			ORDER BY a.created_at ASC, a.agent_id ASC
+			ORDER BY a.run_id ASC, a.created_at ASC, a.agent_id ASC
 		`)
 	if err != nil {
 		return nil, fmt.Errorf("query agent operator projections: %w", err)
@@ -383,6 +385,7 @@ func (r *AgentPostgres) loadAgentOperatorProjectionsTx(ctx context.Context, tx *
 			runtimeStateRaw  []byte
 		)
 		if err := rows.Scan(
+			&fields.RunID,
 			&fields.AgentID,
 			&fields.NameOwner,
 			&fields.NameSource,

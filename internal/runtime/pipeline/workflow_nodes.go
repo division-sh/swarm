@@ -463,11 +463,11 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 	for _, node := range pc.WorkflowNodes() {
 		if exactNodeRoute && node.Node.Equal(deliveryNode) {
 			nodeFound = true
-			if pc.workflowNodeMatchesDeliveryTarget(node.Node, deliveryRoute.Target.Route()) {
+			if pc.workflowNodeMatchesDeliveryTarget(node.Node, evt.RunID(), deliveryRoute.Target.Route()) {
 				targetMatched = true
 			}
 		}
-		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.TargetRoute()) {
+		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.RunID(), evt.TargetRoute()) {
 			continue
 		}
 		var (
@@ -530,7 +530,7 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(c
 	}
 	handledAny := false
 	for _, node := range pc.WorkflowNodes() {
-		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.TargetRoute()) {
+		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.RunID(), evt.TargetRoute()) {
 			continue
 		}
 		handled, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node.Node, evt, emissions)
@@ -544,18 +544,18 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(c
 	return handledAny, nil
 }
 
-func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Context, node runtimeidentity.ExecutableNode, eventTarget events.RouteIdentity) bool {
+func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Context, node runtimeidentity.ExecutableNode, runID string, eventTarget events.RouteIdentity) bool {
 	if route, ok := workflowNodeDeliveryRoute(ctx); ok {
 		recipient, exact := route.Recipient.Node()
 		if !exact || !recipient.Equal(node) {
 			return false
 		}
-		return pc.workflowNodeMatchesDeliveryTarget(node, route.Target.Route())
+		return pc.workflowNodeMatchesDeliveryTarget(node, runID, route.Target.Route())
 	}
 	return false
 }
 
-func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(node runtimeidentity.ExecutableNode, target events.RouteIdentity) bool {
+func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(node runtimeidentity.ExecutableNode, runID string, target events.RouteIdentity) bool {
 	target = target.Normalized()
 	if target.Empty() {
 		return true
@@ -572,7 +572,7 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(node runtimeide
 		flowID = semanticview.RootExecutionFlowID(source)
 	}
 	if target.FlowID != "" {
-		return target.FlowID == flowID && pc.workflowNodeDeliveryTargetFlowInstanceMatches(source, flowID, target.FlowInstance)
+		return target.FlowID == flowID && pc.workflowNodeDeliveryTargetFlowInstanceMatches(source, runID, flowID, target.FlowInstance)
 	}
 	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
 	if flowPath == "" {
@@ -580,43 +580,48 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(node runtimeide
 	}
 	targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
 	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
-		return targetPath == flowPath || targetPath == flowID || pc.hasMaterializedFlowInstanceRoute(source, flowID, targetPath)
+		return targetPath == flowPath || targetPath == flowID || pc.hasMaterializedFlowInstanceRoute(source, runID, flowID, targetPath)
 	}
 	return workflowNodeDeliveryTargetPathMatches(flowPath, targetPath)
 }
 
-func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, flowID, flowInstance string) bool {
+func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, runID, flowID, flowInstance string) bool {
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	if flowInstance == "" {
 		return true
+	}
+	if flowID == semanticview.RootExecutionFlowID(source) {
+		root, err := semanticview.AdmitRootExecutionCoordinate(source, runID)
+		return err == nil && root.Matches(flowID, flowInstance)
 	}
 	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
 	if flowPath == "" {
 		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
 	}
 	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
-		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/") || pc.hasMaterializedFlowInstanceRoute(source, flowID, flowInstance)
+		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/") || pc.hasMaterializedFlowInstanceRoute(source, runID, flowID, flowInstance)
 	}
 	return true
 }
 
 type FlowInstanceRouteOwner interface {
-	HasFlowInstanceRoute(runtimeflowidentity.Route) bool
-	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.Route) error
-	RetireCommittedFlowInstanceRoute(runtimeflowidentity.Route) error
+	HasFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) bool
+	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
+	RetireCommittedFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) error
 }
 
-func (pc *PipelineCoordinator) hasMaterializedFlowInstanceRoute(source semanticview.Source, flowID, instancePath string) bool {
+func (pc *PipelineCoordinator) hasMaterializedFlowInstanceRoute(source semanticview.Source, runID, flowID, instancePath string) bool {
 	owner := pc.flowRoutes
 	if owner == nil {
 		return false
 	}
-	identity := runtimeflowidentity.StoredRoute(
+	route := runtimeflowidentity.StoredRoute(
 		runtimeflowidentity.ScopeKey(source, flowID),
 		runtimeflowidentity.LogicalInstanceID(instancePath),
 		instancePath,
 	)
-	return identity.Valid() && owner.HasFlowInstanceRoute(identity)
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, route)
+	return err == nil && owner.HasFlowInstanceRoute(identity)
 }
 
 func workflowNodeDeliveryTargetPathMatches(flowPath, targetPath string) bool {

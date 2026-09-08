@@ -379,6 +379,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"RunLifecycleCandidateOwner":                 operationRetained,
 		"SetDeliveryAuthority":                       operationRetained,
 		"SetDeliveryContinuationOwner":               operationRetained,
+		"SetCommittedAgentReadinessFinalizer":        operationRetained,
 		"SetInterceptors":                            operationRetained,
 		"SetLoggerHook":                              operationRetained,
 		"SetProviderOutputAuthorizationVerifier":     operationRetained,

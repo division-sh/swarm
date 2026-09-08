@@ -9,14 +9,13 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 )
 
 func (pc *PipelineCoordinator) prepareWorkflowTermination(
 	ctx context.Context,
-	route runtimeflowidentity.Route,
+	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
 	entityID identity.EntityID,
 	instance *WorkflowInstance,
 	reason string,
@@ -37,11 +36,15 @@ func (pc *PipelineCoordinator) prepareWorkflowTermination(
 	if err != nil {
 		return prepared, err
 	}
+	flowIdentity = flowIdentity.Normalize()
+	if err := flowIdentity.Validate(); err != nil {
+		return prepared, err
+	}
+	route := flowIdentity.Route
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
 		return prepared, fmt.Errorf("validate workflow termination owner: %w", err)
 	}
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if runID == "" || entityID.IsZero() {
+	if entityID.IsZero() {
 		return prepared, fmt.Errorf("workflow termination requires exact run and persisted entity identity")
 	}
 	for _, activation := range activations {
@@ -82,20 +85,26 @@ func (pc *PipelineCoordinator) prepareWorkflowTermination(
 
 func (pc *PipelineCoordinator) commitWorkflowTermination(
 	ctx context.Context,
-	route runtimeflowidentity.Route,
+	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
 	entityID identity.EntityID,
 	terminatedAt time.Time,
 	retireRoute bool,
-) (WorkflowInstance, error) {
+) (result WorkflowInstance, resultErr error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("workflow termination panic: %v", recovered))
+		}
+	}()
 	if pc == nil || pc.workflowStore == nil || pc.workflowStore.engineMutations == nil {
 		return WorkflowInstance{}, fmt.Errorf("workflow termination requires the selected workflow engine mutation owner")
 	}
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	flowIdentity = flowIdentity.Normalize()
+	route := flowIdentity.Route
 	entityID = identity.NormalizeEntityID(entityID.String())
-	if !route.Valid() || entityID.IsZero() || terminatedAt.IsZero() {
+	if err := flowIdentity.Validate(); err != nil || entityID.IsZero() || terminatedAt.IsZero() {
 		return WorkflowInstance{}, fmt.Errorf("workflow termination requires exact route, entity, and occurrence time")
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, route)
+	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
@@ -113,7 +122,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	}
 	expectedState := strings.TrimSpace(instance.CurrentState)
 	expectedRevision := instance.Revision
-	prepared, err := pc.prepareWorkflowTermination(ctx, route, entityID, &instance, "flow_terminated", terminatedAt.UTC())
+	prepared, err := pc.prepareWorkflowTermination(ctx, flowIdentity, entityID, &instance, "flow_terminated", terminatedAt.UTC())
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
@@ -123,8 +132,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	if updatedAt.Before(instance.CreatedAt) {
 		return WorkflowInstance{}, fmt.Errorf("workflow termination time cannot precede creation time")
 	}
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, updatedAt)
+	state, err := workflowEngineStateRecord(flowIdentity, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, updatedAt)
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
@@ -144,50 +152,65 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 		}
 	}
 	command := WorkflowEngineMutationCommand{State: state, Lifecycle: prepared.Commit, Publications: publications}
+	command.PostCommit.FlowDeactivation = &WorkflowEngineFlowDeactivation{
+		Identity: flowIdentity, EntityID: entityID.String(), NextState: instance.CurrentState,
+	}
 	if retireRoute {
-		command.RouteRetirement = &WorkflowEngineRouteRetirement{Route: route}
+		command.RouteRetirement = &WorkflowEngineRouteRetirement{Identity: state.Identity}
 	}
 	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, command)
-	if err != nil {
+	if err != nil && committed.PostCommit.FlowDeactivation == nil {
 		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
 			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
 		}
 		return WorkflowInstance{}, err
 	}
-	if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
-		if err := planner.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
-			return WorkflowInstance{}, err
+	// Once committed, auxiliary unwind must still return terminal authority
+	// to the Manager which owns whole-set fencing and retirement.
+	result = instance
+	resultErr = err
+	pendingRoute := committed.RouteRetirement
+	retireCommittedRoute := func() (retireErr error) {
+		if pendingRoute == nil {
+			return nil
 		}
-	}
-	if err := pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
-		return WorkflowInstance{}, err
-	}
-	if committed.RouteRetirement != nil {
+		retiring := pendingRoute.Identity
+		pendingRoute = nil
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				retireErr = fmt.Errorf("committed flow route retirement panic: %v", recovered)
+			}
+		}()
 		if pc.flowRoutes == nil {
-			return WorkflowInstance{}, fmt.Errorf("committed flow route retirement requires process route owner")
+			return fmt.Errorf("committed flow route retirement requires process route owner")
 		}
-		if err := pc.flowRoutes.RetireCommittedFlowInstanceRoute(committed.RouteRetirement.Route); err != nil {
-			return WorkflowInstance{}, err
-		}
+		return pc.flowRoutes.RetireCommittedFlowInstanceRoute(retiring)
 	}
+	defer func() { resultErr = errors.Join(resultErr, retireCommittedRoute()) }()
+	pc.notifyTestFlowTerminationCommitted(ctx)
+	postCommitErr := err
+	if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
+		postCommitErr = errors.Join(postCommitErr, planner.FinalizeEnginePublications(ctx, committed.Publications))
+	}
+	postCommitErr = errors.Join(postCommitErr, pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle))
+	postCommitErr = errors.Join(postCommitErr, retireCommittedRoute())
 	if len(prepared.Emissions) > 0 {
 		dispatcher := pc.bus.EngineDispatcher()
 		if dispatcher == nil {
-			return WorkflowInstance{}, fmt.Errorf("workflow termination requires the post-commit dispatcher")
-		}
-		if err := dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), prepared.Emissions); err != nil {
-			return WorkflowInstance{}, err
+			postCommitErr = errors.Join(postCommitErr, fmt.Errorf("workflow termination requires the post-commit dispatcher"))
+		} else {
+			postCommitErr = errors.Join(postCommitErr, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), prepared.Emissions))
 		}
 	}
-	persisted, found, err := pc.workflowStore.Load(ctx, route)
+	persisted, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
-		return WorkflowInstance{}, err
+		return instance, errors.Join(postCommitErr, err)
 	}
 	if !found || strings.TrimSpace(persisted.Status) != "terminated" || persisted.TerminatedAt.IsZero() {
-		return WorkflowInstance{}, fmt.Errorf("canonical terminal flow instance %s was not persisted", route.InstancePath)
+		return instance, errors.Join(postCommitErr, fmt.Errorf("canonical terminal flow instance %s was not persisted", route.InstancePath))
 	}
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, persisted); err != nil {
-		return WorkflowInstance{}, fmt.Errorf("validate persisted terminal workflow owner: %w", err)
+		return instance, errors.Join(postCommitErr, fmt.Errorf("validate persisted terminal workflow owner: %w", err))
 	}
-	return persisted, nil
+	return persisted, postCommitErr
 }

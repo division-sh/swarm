@@ -193,16 +193,19 @@ type runtimeHarness struct {
 }
 
 type catalogWorkflowPersistence interface {
-	Load(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
-	ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error)
-	MaterializeInitialEntry(context.Context, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
+	Load(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
+	ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error)
+	MaterializeInitialEntry(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
 }
 
-func catalogExactWorkflowRoute(instancePath string) runtimeflowidentity.Route {
-	return runtimeflowidentity.RouteForInstancePath(instancePath)
+func catalogExactWorkflowRoute(instancePath string) runtimeflowidentity.RunScopedFlowInstance {
+	return runtimeflowidentity.RunScopedFlowInstance{
+		RunID: catalogRuntimeRunID,
+		Route: runtimeflowidentity.RouteForInstancePath(instancePath),
+	}
 }
 
-func catalogRootWorkflowRoute() runtimeflowidentity.Route {
+func catalogRootWorkflowRoute() runtimeflowidentity.RunScopedFlowInstance {
 	return catalogExactWorkflowRoute(catalogRuntimeRunID)
 }
 
@@ -229,6 +232,10 @@ func newRuntimeHarnessForBackend(t *testing.T, fixtureRoot string, backend catal
 }
 
 func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript) *runtimeHarness {
+	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, transcript, nil)
+}
+
+func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe) *runtimeHarness {
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
@@ -294,6 +301,14 @@ func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend c
 		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner, sourceArtifactFact)
 	}
 
+	if provider != nil {
+		posture, err := cfg.ProcessExecutionPosture()
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps.Options.LLMRuntime = &terminalManagedProvider{scriptedLLMRuntime: llmRuntime, probe: provider,
+			controller: runtimeeffects.NewCompletionController(deps.EffectsStore, deps.CompletionStore, deps.CompletionHeartbeatStore, nil).WithExecutionPosture(posture)}
+	}
 	rt, err := runtime.NewValidationHarnessRuntime(ctx, deps)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -718,7 +733,7 @@ func loadAgentFixtures(t testing.TB, fixtureRoot string, llmRuntime *scriptedLLM
 	if llmRuntime == nil {
 		return
 	}
-	path := filepath.Join(fixtureRoot, "fixtures.yaml")
+	path := filepath.Join(fixtureRoot, "tests", "fixtures.yaml")
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return
@@ -1275,7 +1290,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	entityType := h.requireRootEntityType()
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-	if _, err := h.workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := h.workflow.MaterializeInitialEntry(ctx, catalogRootWorkflowRoute(), runtimepipeline.WorkflowInstance{
 		InstanceID:      catalogRuntimeRunID,
 		StorageRef:      catalogRuntimeRunID,
 		EntityID:        entityID,
@@ -1413,7 +1428,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	}
 	materializeCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	materializeCtx = runtimeeffects.WithExecutionMode(materializeCtx, executionmode.Live)
-	if _, err := h.workflow.MaterializeInitialEntry(materializeCtx, instance, h.startedAt); err != nil {
+	if _, err := h.workflow.MaterializeInitialEntry(materializeCtx, catalogExactWorkflowRoute(instance.StorageRef), instance, h.startedAt); err != nil {
 		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
 	}
 }

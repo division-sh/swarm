@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -22,7 +21,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	defer cancel()
 
 	fixture := seedNormalRunCompletionFixture(t, db, "active", "lock-order/instance", "lock-order")
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("lock-order-agent")}
+	route := testAgentDeliveryRoute(t, fixture.RunID, "lock-order-agent", "fixture/lock-order-agent")
 	event := commitPostgresDeliveryFixture(t, ctx, db, fixture.EventID, route)
 	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, route)
 	settlementStore := postgresDeliveryFixtureStore(db)

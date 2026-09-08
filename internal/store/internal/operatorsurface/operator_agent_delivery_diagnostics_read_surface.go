@@ -93,16 +93,17 @@ func (r *AgentPostgres) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Co
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
-			WHERE agent_id = $1
-			  AND agent_name_owner = $2
-			  AND agent_name_source = $3
-			  AND agent_route_presence = $4
-			  AND flow_scope_key = $5
-			  AND flow_instance_id = $6
-			  AND flow_instance = $7
+			WHERE run_id = $1::uuid
+			  AND agent_id = $2
+			  AND agent_name_owner = $3
+			  AND agent_name_source = $4
+			  AND agent_route_presence = $5
+			  AND flow_scope_key = $6
+			  AND flow_instance_id = $7
+			  AND flow_instance = $8
 			  AND status NOT IN ('terminated', 'ephemeral')
 		)
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&exists); err != nil {
 		return fmt.Errorf("load agent delivery diagnostics agent: %w", err)
 	}

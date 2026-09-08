@@ -1,13 +1,11 @@
 package pipeline
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 )
 
 const workflowInitialMaterializationProjectionVersion = 2
@@ -27,14 +25,17 @@ type workflowInitialMaterializationProjection struct {
 }
 
 func newWorkflowInitialMaterializationProjection(
-	ctx context.Context,
+	owner runtimeflowidentity.RunScopedFlowInstance,
 	identity runtimeflowidentity.Persisted,
 	instance WorkflowInstance,
 	occurredAt time.Time,
 ) (workflowInitialMaterializationProjection, error) {
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
+	owner = owner.Normalize()
+	if err := owner.Validate(); err != nil {
 		return workflowInitialMaterializationProjection{}, err
+	}
+	if owner.Route != identity.Instance.Route() {
+		return workflowInitialMaterializationProjection{}, fmt.Errorf("workflow initial materialization owner disagrees with persisted route")
 	}
 	persisted, err := workflowInstancePersistedProjectionFromInstance(instance, identity.StorageRef)
 	if err != nil {
@@ -42,7 +43,7 @@ func newWorkflowInitialMaterializationProjection(
 	}
 	projection := workflowInitialMaterializationProjection{
 		Version:         workflowInitialMaterializationProjectionVersion,
-		RunID:           strings.TrimSpace(runID),
+		RunID:           owner.RunID,
 		EntityID:        strings.TrimSpace(identity.RowID()),
 		FlowInstance:    strings.Trim(strings.TrimSpace(identity.StorageRef), "/"),
 		WorkflowName:    strings.TrimSpace(instance.WorkflowName),

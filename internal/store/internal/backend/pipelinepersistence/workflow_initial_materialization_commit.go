@@ -32,14 +32,14 @@ func commitWorkflowInitialMaterialization(
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		record := command.Record
 		if postgres {
-			if err := requirePostgresRunActive(txctx, tx, record.State.RunID); err != nil {
+			if err := requirePostgresRunActive(txctx, tx, record.State.Identity.RunID); err != nil {
 				return err
 			}
-			lockIdentity := fmt.Sprintf("%d:%s%s", len(record.State.RunID), record.State.RunID, record.State.Route.InstancePath)
+			lockIdentity := fmt.Sprintf("%d:%s%s", len(record.State.Identity.RunID), record.State.Identity.RunID, record.State.Identity.Route.InstancePath)
 			if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
 				return fmt.Errorf("lock workflow initial materialization route: %w", err)
 			}
-		} else if err := requireSQLiteRunActive(txctx, tx, record.State.RunID); err != nil {
+		} else if err := requireSQLiteRunActive(txctx, tx, record.State.Identity.RunID); err != nil {
 			return err
 		}
 
@@ -49,14 +49,14 @@ func commitWorkflowInitialMaterialization(
 		}
 		if found {
 			if !equal {
-				return workflowInitialMaterializationConflict(record.State.Route.InstancePath)
+				return workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath)
 			}
 			complete, err := workflowInitialMaterializationSnapshotExists(txctx, tx, postgres, record)
 			if err != nil {
 				return err
 			}
 			if !complete {
-				return workflowInitialMaterializationConflict(record.State.Route.InstancePath)
+				return workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath)
 			}
 			return nil
 		}
@@ -70,20 +70,14 @@ func commitWorkflowInitialMaterialization(
 				occupancy.Entity,
 				occupancy.Initial,
 				occupancy.Readiness,
-				workflowInitialMaterializationConflict(record.State.Route.InstancePath),
+				workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath),
 			)
 		}
 		if occupancy.Flow {
-			allowed, reason, err := workflowInitialMaterializationRouteRebindAllowed(txctx, tx, postgres, record)
-			if err != nil {
-				return err
-			}
-			if !allowed {
-				return fmt.Errorf("workflow initial materialization route rebind rejected (%s): %w", reason, workflowInitialMaterializationConflict(record.State.Route.InstancePath))
-			}
+			return workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath)
 		}
 
-		if err := commitWorkflowEngineState(txctx, tx, postgres, effects, record.State, occupancy.Flow); err != nil {
+		if err := commitWorkflowEngineState(txctx, tx, postgres, effects, record.State); err != nil {
 			return err
 		}
 		if err := insertWorkflowInitialMaterializationRecord(txctx, tx, postgres, record); err != nil {
@@ -132,25 +126,25 @@ func workflowInitialMaterializationSnapshotExists(
 ) (bool, error) {
 	query := `
 		SELECT EXISTS (
-			SELECT 1 FROM flow_instances WHERE instance_id = ?
+			SELECT 1 FROM flow_instances WHERE run_id = ? AND instance_path = ?
 		), EXISTS (
 			SELECT 1
 			FROM entity_state
 			WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND entity_type = ?
 		)
 	`
-	args := []any{record.State.Route.InstancePath, record.State.RunID, record.State.EntityID, record.State.Route.InstancePath, record.State.EntityType}
+	args := []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.State.Identity.RunID, record.State.EntityID, record.State.Identity.Route.InstancePath, record.State.EntityType}
 	if postgres {
 		query = `
 			SELECT EXISTS (
-				SELECT 1 FROM flow_instances WHERE instance_id = $1
+				SELECT 1 FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2
 			), EXISTS (
 			SELECT 1
 				FROM entity_state
-				WHERE run_id = $2::uuid AND entity_id = $3::uuid AND flow_instance = $1 AND entity_type = $4
+				WHERE run_id = $1::uuid AND entity_id = $3::uuid AND flow_instance = $2 AND entity_type = $4
 			)
 		`
-		args = []any{record.State.Route.InstancePath, record.State.RunID, record.State.EntityID, record.State.EntityType}
+		args = []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.State.EntityID, record.State.EntityType}
 	}
 	var flow, entity bool
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&flow, &entity); err != nil {
@@ -192,13 +186,13 @@ func loadWorkflowInitialMaterializationEqual(
 	query := `
 		SELECT projection_version, projection, occurred_at
 		FROM workflow_instance_initial_materializations
-		WHERE run_id = ? AND entity_id = ? AND instance_id = ?
+		WHERE run_id = ? AND entity_id = ? AND instance_path = ?
 	`
 	if postgres {
 		query = `
 			SELECT projection_version, projection, occurred_at
 			FROM workflow_instance_initial_materializations
-			WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_id = $3
+			WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3
 		`
 	}
 	var version int
@@ -209,7 +203,7 @@ func loadWorkflowInitialMaterializationEqual(
 	if !postgres {
 		destination = &occurredAtRaw
 	}
-	err := tx.QueryRowContext(ctx, query, want.State.RunID, want.State.EntityID, want.State.Route.InstancePath).Scan(&version, &projection, destination)
+	err := tx.QueryRowContext(ctx, query, want.State.Identity.RunID, want.State.EntityID, want.State.Identity.Route.InstancePath).Scan(&version, &projection, destination)
 	if err == sql.ErrNoRows {
 		return false, false, nil
 	}
@@ -237,9 +231,9 @@ func loadWorkflowInitialMaterializationEqual(
 }
 
 func workflowInitialReadinessEqual(ctx context.Context, tx *sql.Tx, postgres bool, want runtimepipeline.WorkflowInitialMaterializationRecord) (bool, error) {
-	query := `SELECT plan, created_at FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_id = ?`
+	query := `SELECT plan, created_at FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?`
 	if postgres {
-		query = `SELECT plan, created_at FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_id = $2`
+		query = `SELECT plan, created_at FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2`
 	}
 	var plan []byte
 	var createdAt time.Time
@@ -248,7 +242,7 @@ func workflowInitialReadinessEqual(ctx context.Context, tx *sql.Tx, postgres boo
 	if !postgres {
 		destination = &createdAtRaw
 	}
-	err := tx.QueryRowContext(ctx, query, want.State.RunID, want.State.Route.InstancePath).Scan(&plan, destination)
+	err := tx.QueryRowContext(ctx, query, want.State.Identity.RunID, want.State.Identity.Route.InstancePath).Scan(&plan, destination)
 	if err == sql.ErrNoRows {
 		return len(want.Readiness) == 0, nil
 	}
@@ -280,25 +274,25 @@ type workflowInitialMaterializationOccupancy struct {
 
 func loadWorkflowInitialMaterializationOccupancy(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowInitialMaterializationRecord) (workflowInitialMaterializationOccupancy, error) {
 	query := `
-		SELECT EXISTS (SELECT 1 FROM flow_instances WHERE instance_id = ?),
+		SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = ? AND instance_path = ?),
 		       EXISTS (SELECT 1 FROM entity_state WHERE run_id = ? AND entity_id = ?),
 		       EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = ? AND entity_id = ?),
-		       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_id = ?)
+		       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?)
 	`
 	args := []any{
-		record.State.Route.InstancePath,
-		record.State.RunID, record.State.EntityID,
-		record.State.RunID, record.State.EntityID,
-		record.State.RunID, record.State.Route.InstancePath,
+		record.State.Identity.RunID, record.State.Identity.Route.InstancePath,
+		record.State.Identity.RunID, record.State.EntityID,
+		record.State.Identity.RunID, record.State.EntityID,
+		record.State.Identity.RunID, record.State.Identity.Route.InstancePath,
 	}
 	if postgres {
 		query = `
-			SELECT EXISTS (SELECT 1 FROM flow_instances WHERE instance_id = $1),
-			       EXISTS (SELECT 1 FROM entity_state WHERE run_id = $2::uuid AND entity_id = $3::uuid),
-			       EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = $2::uuid AND entity_id = $3::uuid),
-			       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = $2::uuid AND instance_id = $1)
+			SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2),
+			       EXISTS (SELECT 1 FROM entity_state WHERE run_id = $1::uuid AND entity_id = $3::uuid),
+			       EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND entity_id = $3::uuid),
+			       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2)
 		`
-		args = []any{record.State.Route.InstancePath, record.State.RunID, record.State.EntityID}
+		args = []any{record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.State.EntityID}
 	}
 	var occupancy workflowInitialMaterializationOccupancy
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&occupancy.Flow, &occupancy.Entity, &occupancy.Initial, &occupancy.Readiness); err != nil {
@@ -307,74 +301,20 @@ func loadWorkflowInitialMaterializationOccupancy(ctx context.Context, tx *sql.Tx
 	return occupancy, nil
 }
 
-func workflowInitialMaterializationRouteRebindAllowed(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowInitialMaterializationRecord) (bool, string, error) {
-	query := `
-		SELECT flow_template,
-		       EXISTS (
-			   SELECT 1 FROM entity_state AS state WHERE state.flow_instance = ?
-		       ),
-		       EXISTS (
-			   SELECT 1
-			   FROM entity_state AS state
-			   JOIN runs AS run ON run.run_id = state.run_id
-			   WHERE state.flow_instance = ?
-			     AND LOWER(TRIM(run.status)) IN ('running', 'paused')
-		       )
-		FROM flow_instances
-		WHERE instance_id = ?
-	`
-	args := []any{record.State.Route.InstancePath, record.State.Route.InstancePath, record.State.Route.InstancePath}
-	if postgres {
-		query = `
-			SELECT flow_template,
-			       EXISTS (
-				   SELECT 1 FROM entity_state AS state WHERE state.flow_instance = $1
-			       ),
-			       EXISTS (
-				   SELECT 1
-				   FROM entity_state AS state
-				   JOIN runs AS run ON run.run_id = state.run_id
-				   WHERE state.flow_instance = $1
-				     AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
-			       )
-			FROM flow_instances
-			WHERE instance_id = $1
-			FOR UPDATE
-		`
-		args = []any{record.State.Route.InstancePath}
-	}
-	var workflowName string
-	var priorReference bool
-	var activeReference bool
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&workflowName, &priorReference, &activeReference); err != nil {
-		return false, "inspection_failed", fmt.Errorf("inspect workflow initial materialization route rebind: %w", err)
-	}
-	if strings.TrimSpace(workflowName) != strings.TrimSpace(record.State.WorkflowName) {
-		return false, "workflow_template_changed", nil
-	}
-	if !priorReference {
-		return false, "predecessor_reference_missing", nil
-	}
-	if activeReference {
-		return false, "active_generation_exists", nil
-	}
-	return true, "", nil
-}
-
 func insertWorkflowInitialMaterializationRecord(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowInitialMaterializationRecord) error {
 	query := `
 		INSERT INTO workflow_instance_initial_materializations (
-			run_id, entity_id, instance_id, projection_version, projection, occurred_at
+			run_id, entity_id, instance_path, projection_version, projection, occurred_at
 		) VALUES (?, ?, ?, ?, ?, ?)
 	`
 	if postgres {
 		query = `
 			INSERT INTO workflow_instance_initial_materializations (
-				run_id, entity_id, instance_id, projection_version, projection, occurred_at
+				run_id, entity_id, instance_path, projection_version, projection, occurred_at
 			) VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6)
 		`
 	}
-	if _, err := tx.ExecContext(ctx, query, record.State.RunID, record.State.EntityID, record.State.Route.InstancePath, record.ProjectionVersion, record.Projection, record.OccurredAt); err != nil {
+	if _, err := tx.ExecContext(ctx, query, record.State.Identity.RunID, record.State.EntityID, record.State.Identity.Route.InstancePath, record.ProjectionVersion, record.Projection, record.OccurredAt); err != nil {
 		return fmt.Errorf("insert workflow initial materialization: %w", err)
 	}
 	return nil
@@ -386,21 +326,21 @@ func insertWorkflowInitialReadinessRecord(ctx context.Context, tx *sql.Tx, postg
 	}
 	query := `
 		INSERT INTO flow_instance_runtime_readiness (
-			run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+			run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
 		) VALUES (?, ?, ?, NULL, NULL, ?, ?)
 	`
 	if postgres {
 		query = `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+				run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
 			) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)
 		`
-		if _, err := tx.ExecContext(ctx, query, record.State.RunID, record.State.Route.InstancePath, record.Readiness, record.OccurredAt); err != nil {
+		if _, err := tx.ExecContext(ctx, query, record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.Readiness, record.OccurredAt); err != nil {
 			return fmt.Errorf("insert workflow initial readiness: %w", err)
 		}
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, query, record.State.RunID, record.State.Route.InstancePath, record.Readiness, record.OccurredAt, record.OccurredAt); err != nil {
+	if _, err := tx.ExecContext(ctx, query, record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.Readiness, record.OccurredAt, record.OccurredAt); err != nil {
 		return fmt.Errorf("insert workflow initial readiness: %w", err)
 	}
 	return nil

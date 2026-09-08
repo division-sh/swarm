@@ -18,12 +18,20 @@ func testNodeFrontierRecipient(id, path, source string) runfork.RunForkContractF
 		node = mustRunForkNode(flowID, id)
 	}
 	return runfork.NewRunForkContractFrontierRecipient(
-		events.MustNodeDeliveryRecipient(node), path, source, agentidentity.Identity{},
+		events.MustNodeDeliveryRecipient(node), path, source, agentidentity.Plan{},
 	)
 }
 
-func testAgentFrontierRecipient(id, path, source string, identity agentidentity.Identity) runfork.RunForkContractFrontierRecipient {
+func testAgentFrontierRecipient(id, path, source string, plan agentidentity.Plan) runfork.RunForkContractFrontierRecipient {
 	return runfork.NewRunForkContractFrontierRecipient(
-		events.MustAgentDeliveryRecipient(id), path, source, identity,
+		events.MustAgentDeliveryRecipient(id), path, source, plan,
 	)
+}
+
+func mustTestAgentPlan(identity agentidentity.Identity) agentidentity.Plan {
+	plan, err := identity.Plan()
+	if err != nil {
+		panic(err)
+	}
+	return plan
 }

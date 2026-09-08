@@ -80,9 +80,17 @@ func TestCanonicalStatelessConversationVisibilitySourceProjectsRunID(t *testing.
 }
 
 func testOperatorAgentConfig(agentID, role string) runtimeactors.AgentConfig {
+	return testOperatorAgentConfigForIdentity(testOperatorAgentIdentity(agentID), role)
+}
+
+func testOperatorAgentConfigForRun(runID, agentID, role string) runtimeactors.AgentConfig {
+	return testOperatorAgentConfigForIdentity(mustTestAgentIdentityForRun(runID, agentID, "global"), role)
+}
+
+func testOperatorAgentConfigForIdentity(identity agentidentity.Identity, role string) runtimeactors.AgentConfig {
 	return runtimePersistenceTestAgentConfig(runtimeactors.AgentConfig{
-		Identity:      testOperatorAgentIdentity(agentID),
-		ID:            agentID,
+		Identity:      identity,
+		ID:            identity.AgentID(),
 		Role:          role,
 		Type:          "managed",
 		Model:         "cheap",
@@ -152,18 +160,22 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
-	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config:    testOperatorAgentConfig("agent-1", "researcher"),
-		Status:    "active",
-		StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("UpsertAgent: %v", err)
-	}
-
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	for _, agent := range []struct {
+		id   string
+		role string
+	}{{"agent-1", "researcher"}, {"agent-2", "reviewer"}} {
+		if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
+			Config:    testOperatorAgentConfigForRun(runID, agent.id, agent.role),
+			Status:    "active",
+			StartedAt: now,
+		}); err != nil {
+			t.Fatalf("UpsertAgent %s: %v", agent.id, err)
+		}
+	}
 	failedNewEventID := uuid.NewString()
 	failedOldEventID := uuid.NewString()
 	deadEventID := uuid.NewString()
@@ -180,8 +192,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	} {
 		eventsByID[event.id] = seedOperatorAgentEvent(t, ctx, pg, event.id, runID, event.name, entityID, now.Add(-10*time.Minute))
 	}
-	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}
-	agentTwoRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-2"), AgentIdentity: testOperatorAgentIdentity("agent-2")}
+	agentOneIdentity := mustTestAgentIdentityForRun(runID, "agent-1", "global")
+	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: agentOneIdentity}
+	agentTwoRoute := testAgentDeliveryRoute(t, runID, "agent-2", "global")
 	oldFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "old_failure", nil)
 	oldSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOldEventID], agentOneRoute, runtimedelivery.StateRetrying, &oldFailure)
 	terminalFailureEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_failure", nil)
@@ -201,7 +214,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		t.Fatalf("load canonical dead letter: %v", err)
 	}
 
-	first, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryDiagnosticsOptions{
+	first, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, agentOneIdentity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{
 		FailureLimit:    1,
 		DeadLetterLimit: 10,
 	})
@@ -230,7 +243,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		t.Fatalf("dead letter records = %#v", first.DeadLetters[0].DeadLetterRecords)
 	}
 
-	second, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryDiagnosticsOptions{
+	second, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, agentOneIdentity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{
 		FailureLimit:  1,
 		FailureCursor: first.FailuresNextCursor,
 	})
@@ -295,15 +308,15 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 		}
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO spend_ledger (
-				flow_instance, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				run_id, flow_instance, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				agent_flow_scope_key, agent_flow_instance_id,
 				model, model_alias, backend_profile, provider, transport, resolved_model,
 				input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, execution_mode, created_at
 			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7,
-				$8, $9, $10, $11, $12, $13, $14, $15, $16::numeric, $17, $18, 'live', $19
+				$1::uuid, $2, $3, $4, $5, $6, $7, $8,
+				$9, $10, $11, $12, $13, $14, $15, $16, $17::numeric, $18, $19, 'live', $20
 			)
-		`, fields.FlowInstancePath, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		`, fields.RunID, fields.FlowInstancePath, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 			fields.FlowScopeKey, fields.FlowInstanceID,
 			row.model, row.modelAlias, row.backendProfile, row.provider, row.transport, row.resolvedModel,
 			row.inputTokens, row.outputTokens, row.costUSD, row.invocationType, row.usageAccounting, row.createdAt); err != nil {
@@ -421,13 +434,13 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 	}
 	if _, err := sqliteStore.backend.ExecContext(ctx, `
 		INSERT INTO spend_ledger (
-			flow_instance, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			run_id, flow_instance, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			agent_flow_scope_key, agent_flow_instance_id,
 			model, invocation_type, usage_accounting, execution_mode, created_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, '', 'anthropic', 'exact', 'live', ?
+			?, ?, ?, ?, ?, ?, ?, ?, '', 'anthropic', 'exact', 'live', ?
 		)
-	`, fields.FlowInstancePath, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+	`, fields.RunID, fields.FlowInstancePath, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID,
 		time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed malformed spend row: %v", err)
@@ -440,6 +453,13 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 
 func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, agentID string, status string) {
 	t.Helper()
+	identity := testOperatorAgentIdentity(agentID)
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{
+		Origin:     semanticScenarioSetupRunOriginForTest(),
+		RunID:      identity.RunID,
+		BundleHash: authorActivityTestBundleHash,
+		StartedAt:  time.Now().UTC(),
+	})
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig(agentID, "researcher"),
 		Status:    status,
@@ -484,28 +504,25 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
-	for _, agent := range []struct {
-		id   string
-		role string
-	}{
-		{"agent-1", "researcher"},
-		{"agent-2", "reviewer"},
-	} {
-		if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-			Config:    testOperatorAgentConfig(agent.id, agent.role),
-			Status:    "active",
-			StartedAt: time.Now().UTC(),
-		}); err != nil {
-			t.Fatalf("UpsertAgent %s: %v", agent.id, err)
-		}
-	}
-
 	base := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: base})
+	for _, agent := range []struct {
+		runID string
+		id    string
+		role  string
+	}{{runID, "agent-1", "researcher"}, {runID, "agent-2", "reviewer"}, {otherRunID, "agent-1", "researcher"}} {
+		if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
+			Config:    testOperatorAgentConfigForRun(agent.runID, agent.id, agent.role),
+			Status:    "active",
+			StartedAt: base,
+		}); err != nil {
+			t.Fatalf("UpsertAgent %s/%s: %v", agent.runID, agent.id, err)
+		}
+	}
 	pendingEventID := uuid.NewString()
 	inProgressEventID := uuid.NewString()
 	deliveredEventID := uuid.NewString()
@@ -529,8 +546,10 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	} {
 		eventsByID[event.id] = seedOperatorAgentEvent(t, ctx, pg, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute))
 	}
-	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}
-	agentTwoRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-2"), AgentIdentity: testOperatorAgentIdentity("agent-2")}
+	agentOneIdentity := mustTestAgentIdentityForRun(runID, "agent-1", "global")
+	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: agentOneIdentity}
+	agentOneOtherRunRoute := testAgentDeliveryRoute(t, otherRunID, "agent-1", "global")
+	agentTwoRoute := testAgentDeliveryRoute(t, runID, "agent-2", "global")
 	pendingSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[pendingEventID], agentOneRoute, runtimedelivery.StateQueued, nil)
 	inProgressSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[inProgressEventID], agentOneRoute, runtimedelivery.StateLaunching, nil)
 	deliveredSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deliveredEventID], agentOneRoute, runtimedelivery.StateDelivered, nil)
@@ -539,7 +558,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	terminalFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal", nil)
 	deadLetterSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deadLetterEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailure)
 	otherRunFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_run_boom", nil)
-	seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOtherRunEventID], agentOneRoute, runtimedelivery.StateRetrying, &otherRunFailure)
+	seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOtherRunEventID], agentOneOtherRunRoute, runtimedelivery.StateRetrying, &otherRunFailure)
 	seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateDelivered, nil)
 	pendingDeliveryID := pendingSnapshot.DeliveryID
 	inProgressDeliveryID := inProgressSnapshot.DeliveryID
@@ -547,7 +566,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	failedDeliveryID := failedSnapshot.DeliveryID
 	deadLetterDeliveryID := deadLetterSnapshot.DeliveryID
 
-	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryLifecycleOptions{
+	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, agentOneIdentity, operatorread.OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -562,7 +581,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		t.Fatal("next_cursor empty, want second page")
 	}
 
-	second, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryLifecycleOptions{
+	second, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, agentOneIdentity, operatorread.OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -643,27 +662,25 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityContext()
-	if err := agentfixture.UpsertStatic(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
-		Config:    testOperatorAgentConfig("agent-1", "researcher"),
-		Status:    "active",
-		StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("UpsertAgent: %v", err)
-	}
-	if err := agentfixture.UpsertStatic(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
-		Config:    testOperatorAgentConfig("agent-2", "reviewer"),
-		Status:    "active",
-		StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("UpsertAgent agent-2: %v", err)
-	}
-
 	base := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: base})
+	for _, agent := range []struct {
+		runID string
+		id    string
+		role  string
+	}{{runID, "agent-1", "researcher"}, {runID, "agent-2", "reviewer"}, {otherRunID, "agent-1", "researcher"}} {
+		if err := agentfixture.UpsertStatic(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
+			Config:    testOperatorAgentConfigForRun(agent.runID, agent.id, agent.role),
+			Status:    "active",
+			StartedAt: base,
+		}); err != nil {
+			t.Fatalf("UpsertAgent %s/%s: %v", agent.runID, agent.id, err)
+		}
+	}
 	pendingEventID := uuid.NewString()
 	inProgressEventID := uuid.NewString()
 	deliveredEventID := uuid.NewString()
@@ -694,8 +711,10 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		}
 		eventsByID[event.id] = fixture
 	}
-	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}
-	agentTwoRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-2"), AgentIdentity: testOperatorAgentIdentity("agent-2")}
+	agentOneIdentity := mustTestAgentIdentityForRun(runID, "agent-1", "global")
+	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: agentOneIdentity}
+	agentOneOtherRunRoute := testAgentDeliveryRoute(t, otherRunID, "agent-1", "global")
+	agentTwoRoute := testAgentDeliveryRoute(t, runID, "agent-2", "global")
 	pendingSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[pendingEventID], agentOneRoute, runtimedelivery.StateQueued, nil)
 	inProgressSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[inProgressEventID], agentOneRoute, runtimedelivery.StateLaunching, nil)
 	deliveredSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[deliveredEventID], agentOneRoute, runtimedelivery.StateDelivered, nil)
@@ -704,7 +723,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	terminalFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal", nil)
 	deadLetterSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[deadLetterEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailure)
 	otherRunFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_run_boom", nil)
-	seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[failedOtherRunEventID], agentOneRoute, runtimedelivery.StateRetrying, &otherRunFailure)
+	seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[failedOtherRunEventID], agentOneOtherRunRoute, runtimedelivery.StateRetrying, &otherRunFailure)
 	seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateDelivered, nil)
 	pendingDeliveryID := pendingSnapshot.DeliveryID
 	inProgressDeliveryID := inProgressSnapshot.DeliveryID
@@ -712,7 +731,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	failedDeliveryID := failedSnapshot.DeliveryID
 	deadLetterDeliveryID := deadLetterSnapshot.DeliveryID
 
-	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryLifecycleOptions{
+	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, agentOneIdentity, operatorread.OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -727,7 +746,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		t.Fatal("next_cursor empty, want second page")
 	}
 
-	second, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryLifecycleOptions{
+	second, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, agentOneIdentity, operatorread.OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -867,21 +886,22 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	agentIdentity := mustTestAgentIdentityForRun(runID, "agent-1", "global")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config:    testOperatorAgentConfig("agent-1", "researcher"),
+		Config:    testOperatorAgentConfigForIdentity(agentIdentity, "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	event := seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "missing_dead_letter_record", nil)
-	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}, runtimedelivery.StateExhausted, &failure)
+	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: agentIdentity}, runtimedelivery.StateExhausted, &failure)
 
-	got, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryDiagnosticsOptions{})
+	got, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, agentIdentity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics: %v", err)
 	}

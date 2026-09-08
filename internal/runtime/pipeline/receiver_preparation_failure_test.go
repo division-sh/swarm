@@ -25,7 +25,7 @@ type failingReceiverPersistenceReader struct {
 	before  func()
 }
 
-func (r *failingReceiverPersistenceReader) LoadWorkflowTargetPersistence(ctx context.Context, route runtimeflowidentity.Route, entity runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
+func (r *failingReceiverPersistenceReader) LoadWorkflowTargetPersistence(ctx context.Context, route runtimeflowidentity.RunScopedFlowInstance, entity runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
 	r.calls++
 	if r.before != nil {
 		r.before()

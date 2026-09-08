@@ -368,7 +368,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 	<-factory.secondStarted
 	restartDone := make(chan error, 1)
 	go func() {
-		_, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{AgentID: agentID})
+		_, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{RunID: managerIdentityTestRunID, AgentID: agentID})
 		restartDone <- err
 	}()
 	close(releaseBuild)
@@ -376,7 +376,14 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 		t.Fatalf("ReconfigureAgent: %v", err)
 	}
 	if err := <-restartDone; err != nil {
-		t.Fatalf("Restart: %v", err)
+		if !strings.Contains(err.Error(), "agent_retirement_pending") {
+			t.Fatalf("Restart: %v", err)
+		}
+		// A competing request may be rejected while exact predecessor retirement
+		// is retained. A new request after settlement observes the new config.
+		if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{RunID: managerIdentityTestRunID, AgentID: agentID}); err != nil {
+			t.Fatalf("Restart after predecessor settlement: %v", err)
+		}
 	}
 
 	history := bus.routeHistory(agentID)
@@ -550,7 +557,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 			boardStarted:        boardStarted, boardRelease: boardRelease,
 		}, nil
 	}
-	targetStore := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000009901", Mode: runtimeagentcontrol.RunResolutionSpecified}}
+	targetStore := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: managerIdentityTestRunID, Mode: runtimeagentcontrol.RunResolutionSpecified}}
 	owner := newTestManagerWorkOwner(t)
 	bus.owner = owner
 	am := newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{
@@ -580,7 +587,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	directiveDone := make(chan error, 1)
 	go func() {
 		_, err := am.SendDirective(testAuthorActivityContext(context.Background()), runtimeagentcontrol.SendDirectiveRequest{
-			AgentID: agentID, Directive: "hold generation", ActorTokenID: "operator-token",
+			RunID: identity.RunID, AgentID: agentID, Directive: "hold generation", ActorTokenID: "operator-token",
 			IdempotencyKey: "projection-directive", RequestHash: "projection-directive-hash",
 		})
 		directiveDone <- err
@@ -851,7 +858,7 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 }
 
 func projectionRuntimeEvent(id string, eventType events.EventType) events.Event {
-	return eventtest.RuntimeControl(eventtest.UUID(id), eventType, "test", "", []byte(`{}`), 0, eventtest.UUID("projection-run"), "", events.EventEnvelope{}, time.Now())
+	return eventtest.RuntimeControl(eventtest.UUID(id), eventType, "test", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now())
 }
 
 type projectionCarrierResolution struct {
@@ -1003,9 +1010,13 @@ func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 				})
 				baseStore := am.deliveryStore
 				const agentID = "carrier-disposition-agent"
+				runID := eventtest.UUID("projection-run")
+				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
+					runID = authority.ForkRunID()
+				}
 				if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 					ExecutionMode: "live", ID: agentID,
-					Identity: runtimeagentidentitytest.RootRuntime(t, agentID, "carrier-disposition-test"), Subscriptions: []string{"test.old"},
+					Identity: runtimeagentidentitytest.RootRuntimeForRun(t, runID, agentID, "carrier-disposition-test"), Subscriptions: []string{"test.old"},
 				})); err != nil {
 					t.Fatalf("SpawnAgent: %v", err)
 				}
@@ -1025,15 +1036,11 @@ func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 				if err := am.Run(managedCtx); err != nil {
 					t.Fatalf("Run: %v", err)
 				}
-				runID := eventtest.UUID("projection-run")
-				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
-					runID = authority.ForkRunID()
-				}
 				evt := eventtest.RuntimeControl(
 					eventtest.UUID("carrier-disposition-"+authorityName+"-"+test.name), "test.old", "test", "", []byte(`{}`), 0,
 					runID, "", events.EventEnvelope{}, time.Now(),
 				)
-				route := managerAgentDeliveryRoute(agentID)
+				route := managerAgentDeliveryRouteForRun(runID, agentID)
 				deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
 				if err != nil {
 					t.Fatalf("derive delivery identity: %v", err)
@@ -1140,7 +1147,7 @@ func TestAgentManagerFenceWinsDequeuedDeliveryAdmissionReturnsContinuationOnce(t
 	if !ok {
 		t.Fatal("running route missing")
 	}
-	if err := am.teardownIdentityAfterTerminalEvent(runCtx, identity, "test_fence", true); err != nil {
+	if _, err := am.lifecycle.beginIdentityTermination(runCtx, identity, "test_fence", AgentLifecycleTerminated, nil, nil, terminalSelfAuthor); err != nil {
 		t.Fatalf("fence execution: %v", err)
 	}
 
@@ -1199,7 +1206,8 @@ func TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDeli
 			projectionTestAgent: projectionTestAgent{id: cfg.ID, subs: []events.EventType{"test.old"}},
 			identity:            cfg.Identity, started: started, release: release,
 			retire: func(ctx context.Context, identity runtimeagentidentity.Identity) error {
-				return am.teardownIdentityAfterTerminalEvent(ctx, identity, "flow_instance_terminal", true)
+				_, err := am.lifecycle.beginIdentityTermination(ctx, identity, "flow_instance_terminal", AgentLifecycleTerminated, nil, nil, terminalSelfAuthor)
+				return err
 			},
 		}
 		return retiring, nil

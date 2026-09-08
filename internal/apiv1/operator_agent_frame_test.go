@@ -20,7 +20,7 @@ type agentFrameEffectiveResolverStub struct {
 	calls  int
 }
 
-func (s *agentFrameEffectiveResolverStub) ResolveAgentFrameConfig(agentID, flowInstance string, root bool) (runtimemanager.AgentFrameConfig, error) {
+func (s *agentFrameEffectiveResolverStub) ResolveAgentFrameConfig(runID, agentID, flowInstance string, root bool) (runtimemanager.AgentFrameConfig, error) {
 	s.calls++
 	return s.result, s.err
 }
@@ -40,7 +40,7 @@ func TestOperatorAgentFrameEffectiveInspectionUsesCanonicalProjection(t *testing
 	handler := OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Effective: resolver})["agent.frame"]
 
 	effectiveRaw, err := handler(context.Background(), Request{Params: map[string]any{
-		"scope": "effective", "agent_id": "reviewer", "root": true,
+		"scope": "effective", "agent_id": "reviewer", "run_id": agentidentitytest.DefaultRunID, "root": true,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestOperatorAgentFrameNotFoundDetailsMatchDeclaredSchema(t *testing.T) {
 	resolver := &agentFrameEffectiveResolverStub{err: runtimemanager.ErrAgentNotFound}
 	handler := OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Effective: resolver})["agent.frame"]
 	for _, params := range []map[string]any{
-		{"scope": "effective", "agent_id": "missing", "root": true},
+		{"scope": "effective", "agent_id": "missing", "run_id": agentidentitytest.DefaultRunID, "root": true},
 	} {
 		_, err := handler(context.Background(), Request{Params: params})
 		var appErr *ApplicationError

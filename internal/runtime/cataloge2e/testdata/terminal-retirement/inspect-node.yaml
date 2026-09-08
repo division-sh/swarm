@@ -1,0 +1,7 @@
+inspect-node:
+  id: inspect-node
+  execution_type: system_node
+  subscribes_to: [worker.inspect]
+  event_handlers:
+    worker.inspect:
+      advances_to: complete

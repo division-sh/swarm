@@ -51,11 +51,12 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				// must not become the receiver for this zero-match delivery.
 				unrelatedPath := "review/" + uuid.NewString()
 				unrelatedRoute := runtimeflowidentity.RouteForInstancePath(unrelatedPath)
+				unrelatedIdentity := testRunScopedWorkflowInstanceForRun(runID, unrelatedPath)
 				unrelatedReadiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: unrelatedRoute.InstanceID, InstancePath: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath), HasStoredPath: true},
 					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: "1", ExecutionMode: executionmode.Live,
 				}
-				if _, err := pc.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+				if _, err := pc.MaterializeInitialEntry(ctx, unrelatedIdentity, runtimepipeline.WorkflowInstance{
 					InstanceID: unrelatedRoute.InstanceID, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
 					WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active", EntityType: "review_entity",
 					Fields: map[string]any{"account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
@@ -65,7 +66,7 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				if err := pc.MarkDynamicFlowRuntimeTopologyReady(ctx, unrelatedReadiness, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
-				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedRoute}); err != nil {
+				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedIdentity}); err != nil {
 					t.Fatal(err)
 				}
 				evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.keyed", "operator", "", []byte(`{"account_id":"appearing-key","item":"accepted"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
@@ -85,7 +86,7 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				}
 				// Install the exact compiled subscriber route, not an entity descriptor
 				// or row. This test starts at the admitted template-route boundary.
-				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RouteForInstancePath(future.Route().FlowInstance)}); err != nil {
+				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, future.Route().FlowInstance)}); err != nil {
 					t.Fatal(err)
 				}
 				evt = eventtest.ExistingRunRootIngress(evt.ID(), evt.Type(), "operator", "", []byte(`{"account_id":"appearing-key","item":"accepted"}`), 0, runID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, future.Route()), evt.CreatedAt())
@@ -105,7 +106,8 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 					t.Fatal("publish changed future admission")
 				}
 				route := runtimeflowidentity.RouteForInstancePath(target.Route().FlowInstance)
-				if _, found, err := pc.Load(ctx, route); err != nil || found {
+				identity := testRunScopedWorkflowInstanceForRun(runID, target.Route().FlowInstance)
+				if _, found, err := pc.Load(ctx, identity); err != nil || found {
 					t.Fatalf("future existed before appearance: found=%t err=%v", found, err)
 				}
 				key := "appearing-key"
@@ -119,13 +121,13 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, StorageRef: target.Route().FlowInstance, EntityID: target.Route().EntityID,
 					WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active", EntityType: "review_entity",
 					Fields: map[string]any{"account_id": key, "owner": "appeared"}, RuntimeReadiness: &readiness}
-				if _, err := pc.MaterializeInitialEntry(ctx, instance, time.Now().UTC()); err != nil {
+				if _, err := pc.MaterializeInitialEntry(ctx, identity, instance, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 				if err := pc.MarkDynamicFlowRuntimeTopologyReady(ctx, readiness, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
-				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 					t.Fatal(err)
 				}
 				if err := bus.Publish(ctx, evt); err != nil {
@@ -139,7 +141,7 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				if forward || executionErr != nil {
 					t.Fatalf("execute committed future: forward=%t err=%v", forward, executionErr)
 				}
-				after, found, err := pc.Load(ctx, route)
+				after, found, err := pc.Load(ctx, identity)
 				if err != nil || !found || after.EntityID != target.Route().EntityID || after.Fields["account_id"] != key || after.Fields["owner"] != "appeared" {
 					t.Fatalf("exact appearance changed: %#v found=%t err=%v", after, found, err)
 				}
@@ -155,7 +157,7 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				if err != nil || !found || len(reloaded.DeliveryRoutes) != 1 || reloaded.DeliveryRoutes[0].Target != target {
 					t.Fatalf("appearance rewrote committed future: found=%t err=%v routes=%#v", found, err, reloaded.DeliveryRoutes)
 				}
-				unrelated, found, err := pc.Load(ctx, unrelatedRoute)
+				unrelated, found, err := pc.Load(ctx, unrelatedIdentity)
 				if err != nil || !found || unrelated.Revision != 1 || unrelated.Fields["account_id"] != "unrelated-key" {
 					t.Fatalf("appearance mutated unrelated owner: %#v %t %v", unrelated, found, err)
 				}

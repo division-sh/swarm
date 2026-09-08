@@ -1,0 +1,9 @@
+trigger:
+  boot: true
+expected:
+  boot_result: pass
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.selected_contract_fork

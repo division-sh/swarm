@@ -18,10 +18,10 @@ func TestProviderTurnAuthorityRequiresExactActorLifecycleAndSessionIdentity(t *t
 	identityB := testAgentIdentity("worker", "review/inst-b")
 	sessionA := &Session{
 		ID: uuid.NewString(), AgentID: "worker", Memory: agentmemory.PlatformDefault(),
-		MemoryIdentity: agentmemory.Identity{RunID: uuid.NewString(), Agent: identityA},
+		MemoryIdentity: identityA,
 	}
 	sessionB := *sessionA
-	sessionB.MemoryIdentity.Agent = identityB
+	sessionB.MemoryIdentity = identityB
 	admission, err := managedexecution.New(
 		managedexecution.KindNormalRuntime,
 		"capability-identity-test",

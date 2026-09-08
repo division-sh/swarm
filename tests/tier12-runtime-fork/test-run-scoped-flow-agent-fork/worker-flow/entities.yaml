@@ -1,0 +1,4 @@
+worker:
+  worker_id:
+    type: text
+    _unused_reason: selected-fork fixture key supplied by source materialization

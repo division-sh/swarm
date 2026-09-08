@@ -78,21 +78,21 @@ func TestAgentDirectiveOmitsOptionalParamsWhenNotProvided(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		writeJSONRPCResult(t, w, captured.ID, agentDirectiveTestResult("new_run_allocated"))
+		writeJSONRPCResult(t, w, captured.ID, agentDirectiveTestResult("specified"))
 	}))
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "start work"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "start work", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	wantParams := map[string]any{"agent_id": "agent-1", "directive": "start work"}
+	wantParams := map[string]any{"agent_id": "agent-1", "directive": "start work", "run_id": "run-1"}
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	if !strings.Contains(stdout.String(), "run_id_resolution=new_run_allocated") {
-		t.Fatalf("stdout = %q, want new run resolution", stdout.String())
+	if !strings.Contains(stdout.String(), "run_id_resolution=specified") {
+		t.Fatalf("stdout = %q, want exact specified run", stdout.String())
 	}
 }
 
@@ -109,7 +109,7 @@ func TestAgentDirectivePreservesDirectiveWhitespace(t *testing.T) {
 
 	directive := "  keep this spacing\n  "
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", directive}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", directive, "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -133,10 +133,11 @@ func TestAgentDirectiveRejectsInvalidInputBeforeRequest(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "missing args", args: []string{"agent", "directive"}, wantStderr: "requires <agent-id>"},
-		{name: "blank agent", args: []string{"agent", "directive", "  ", "run it"}, wantStderr: "agent id is required"},
-		{name: "blank directive", args: []string{"agent", "directive", "agent-1", "  "}, wantStderr: "directive is required"},
+		{name: "blank agent", args: []string{"agent", "directive", "  ", "run it", "--run-id", "run-1"}, wantStderr: "agent id is required"},
+		{name: "blank directive", args: []string{"agent", "directive", "agent-1", "  ", "--run-id", "run-1"}, wantStderr: "directive is required"},
 		{name: "extra arg", args: []string{"agent", "directive", "agent-1", "run it", "extra"}, wantStderr: "accepts two arguments"},
 		{name: "unsupported flag", args: []string{"agent", "directive", "agent-1", "run it", "--unknown"}, wantStderr: "unknown flag"},
+		{name: "missing run", args: []string{"agent", "directive", "agent-1", "run it"}, wantStderr: "required flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -165,7 +166,7 @@ func TestAgentDirectiveFailClosedWithoutToken(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "run it"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "run it", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -239,16 +240,6 @@ func TestAgentDirectiveMapsFailureExitCodes(t *testing.T) {
 			},
 			wantCode:   6,
 			wantStderr: "RUN_ALREADY_TERMINAL",
-		},
-		{
-			name: "ambiguous target exits six",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeAgentDirectiveJSONRPCError(t, w, req.ID, "AMBIGUOUS_RUN_TARGET")
-			},
-			wantCode:   6,
-			wantStderr: "AMBIGUOUS_RUN_TARGET",
 		},
 		{
 			name: "idempotency conflict exits six",
@@ -341,7 +332,7 @@ func TestAgentDirectiveMapsFailureExitCodes(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "run it"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "run it", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
@@ -385,7 +376,7 @@ func TestAgentDirectiveRendersCanonicalFailureEnvelope(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "run it"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "run it", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 6 {
 		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}

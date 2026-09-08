@@ -472,7 +472,7 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 		INSERT INTO routing_rules (
 			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
 		)
-		VALUES ('other.event', 'node', 'other-node', 'flow-other/1', 'flow-other', true, 'active', $1)
+		VALUES ('other.event', 'node', 'other-node', 'flow-other/1', 'flow-other', false, 'active', $1)
 	`, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed unrelated route: %v", err)
 	}
@@ -501,7 +501,7 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	}{
 		{label: "update", query: `UPDATE routing_rules SET event_pattern='fork.state', flow_instance='flow-a/1', source_flow='flow-a', status='active'`},
 		{label: "delete", query: `DELETE FROM routing_rules`},
-		{label: "insert", query: `INSERT INTO routing_rules (event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ('fork.state', 'node', 'late-node', 'flow-a/9', 'flow-a', true, 'active', now())`},
+		{label: "insert", query: `INSERT INTO routing_rules (event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ('fork.state', 'node', 'late-node', 'flow-a/9', 'flow-a', false, 'active', now())`},
 	} {
 		if _, err := db.ExecContext(ctx, mutation.query); err != nil {
 			t.Fatalf("%s current routing rules: %v", mutation.label, err)
@@ -558,11 +558,17 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 		t, runID, "node-a", "flow-a/1", entityID, "relevant", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
 	))
 	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+		VALUES ($1::uuid, 'flow-a/2', 'flow-a', 'template', '{}'::jsonb, 'active', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed relevant flow instance: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
 		INSERT INTO routing_rules (
-			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
+			run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
 		)
-		VALUES ('fork.timer_route', 'node', 'node-a', 'flow-a/2', 'flow-a', true, 'active', $1)
-	`, at.Add(-time.Minute)); err != nil {
+		VALUES ($1::uuid, 'fork.timer_route', 'node', 'node-a', 'flow-a/2', 'flow-a', true, 'active', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed relevant route: %v", err)
 	}
 
@@ -689,8 +695,8 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	at := time.Unix(1700000260, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
-	completedRoute := testAgentDeliveryRoute(t, "completed-after-fork", "fixture/completed-after-fork")
-	pendingRoute := testAgentDeliveryRoute(t, "started-after-fork", "fixture/started-after-fork")
+	completedRoute := testAgentDeliveryRoute(t, runID, "completed-after-fork", "fixture/completed-after-fork")
+	pendingRoute := testAgentDeliveryRoute(t, runID, "started-after-fork", "fixture/started-after-fork")
 	if err := commitDeliveryObligationFixture(ctx, pg, event, completedRoute); err != nil {
 		t.Fatalf("seed selected-revision completed route: %v", err)
 	}
@@ -753,8 +759,8 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	at := time.Unix(1700000270, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
-	failedRoute := testAgentDeliveryRoute(t, "failed-after-fork", "fixture/failed-after-fork")
-	pendingRoute := testAgentDeliveryRoute(t, "pending-then-failed-after-fork", "fixture/pending-then-failed-after-fork")
+	failedRoute := testAgentDeliveryRoute(t, runID, "failed-after-fork", "fixture/failed-after-fork")
+	pendingRoute := testAgentDeliveryRoute(t, runID, "pending-then-failed-after-fork", "fixture/pending-then-failed-after-fork")
 	if err := commitDeliveryObligationFixture(ctx, pg, event, failedRoute); err != nil {
 		t.Fatalf("seed selected-revision failed route: %v", err)
 	}
@@ -878,7 +884,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	at := time.Unix(1700000290, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.session", events.EventProducerPlatform, "test", "", "", at)
-	identity := testAgentIdentity(t, "agent-a", "fork-planner")
+	identity := mustTestAgentIdentityForRun(runID, "agent-a", "fork-planner")
 	fields := testAgentIdentityStorageFields(t, identity)
 	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
@@ -894,7 +900,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 		t.Fatalf("seed active session: %v", err)
 	}
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	route := testAgentDeliveryRoute(t, identity.AgentID(), identity.FlowInstance())
+	route := testAgentDeliveryRoute(t, identity.RunID, identity.AgentID(), identity.FlowInstance())
 	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
 		t.Fatalf("commit active turn origin: %v", err)
 	}
@@ -903,7 +909,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 		t.Fatalf("claim active turn origin: %v", err)
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
-		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: runID, Agent: identity},
+		AgentID: identity.AgentID(), Identity: identity,
 		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
 		TriggerEventID: eventID, TriggerEventType: "fork.session", ParseOK: true,
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
@@ -944,7 +950,7 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 	at := time.Unix(1700000295, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.task_audit", events.EventProducerPlatform, "test", "", "", at)
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-task", "fork-planner"))
+	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(runID, "agent-task", "fork-planner"))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -985,7 +991,7 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 	at := time.Unix(1700000297, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.completed_session", events.EventProducerPlatform, "test", "", "", at)
-	identity := testAgentIdentity(t, "agent-a", "fork-planner")
+	identity := mustTestAgentIdentityForRun(runID, "agent-a", "fork-planner")
 	fields := testAgentIdentityStorageFields(t, identity)
 	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
@@ -1027,7 +1033,7 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 	at := time.Unix(1700000298, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.terminated_audit", events.EventProducerPlatform, "test", "", "", at)
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-task", "fork-planner"))
+	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(runID, "agent-task", "fork-planner"))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,

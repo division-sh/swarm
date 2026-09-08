@@ -87,8 +87,9 @@ func agentIdentityFields(identity runtimeagentidentity.Identity) (runtimeagentid
 	return fields, nil
 }
 
-func agentIdentityFromColumns(agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string) (runtimeagentidentity.Identity, error) {
+func agentIdentityFromColumns(runID, agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string) (runtimeagentidentity.Identity, error) {
 	return runtimeagentidentity.FromStorageFields(runtimeagentidentity.StorageFields{
+		RunID:   runID,
 		AgentID: agentID, NameOwner: nameOwner, NameSource: nameSource,
 		RoutePresence: routePresence, FlowScopeKey: flowScopeKey,
 		FlowInstanceID: flowInstanceID, FlowInstancePath: flowInstance,

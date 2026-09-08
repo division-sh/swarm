@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -18,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -30,20 +32,20 @@ import (
 )
 
 type flowInstancePersistence interface {
-	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
-	PrepareInitialEntryLifecycle(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error)
+	MaterializeInitialEntry(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
+	PrepareInitialEntryLifecycle(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error)
 	FinalizeInitialEntryLifecycle(ctx context.Context, committed runtimepipeline.CommittedWorkflowLifecycleMutation) error
-	ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
-	ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
-	RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error
+	ArmInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
+	ReconcileInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
+	RetireInitialEntryTimerWakeups(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
 	ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
-	MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID, terminatedAt time.Time) error
-	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
-	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
+	MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error
+	Load(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
+	LoadRouteRecoveryProjection(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
 type FlowInstanceRouteContextInstaller interface {
@@ -55,8 +57,8 @@ type FlowInstanceActivationCommitter interface {
 }
 
 type FlowInstanceRouteContextVerifier interface {
-	HasFlowInstanceRoute(runtimeflowidentity.Route) bool
-	VerifyFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error
+	HasFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) bool
+	VerifyFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
 }
 
 type PersistedFlowInstanceRouteRestorer interface {
@@ -64,11 +66,11 @@ type PersistedFlowInstanceRouteRestorer interface {
 }
 
 type PublishedFlowInstanceRouteRetirer interface {
-	RetirePublishedFlowInstanceRoute(runtimeflowidentity.Route) error
+	RetirePublishedFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) error
 }
 
 type FlowInstanceRouteContextRemover interface {
-	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.Route) error
+	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
 }
 
 type FlowInstanceTerminalMutationOwner interface {
@@ -244,7 +246,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	if occurredAt.IsZero() {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow activation requires an exact occurrence time")
 	}
-	agentRecords, err := am.flowInstanceAgentRecords(req, schema, scope)
+	agentRecords, err := am.flowInstanceAgentRecords(autoEmitRunID, req, schema, scope)
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
@@ -279,7 +281,11 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		StandingGenerationReplacement: req.StandingGenerationReplacement,
 	}
 	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
-	plan.Instance, plan.Lifecycle, err = am.workflowInstances.PrepareInitialEntryLifecycle(ctx, plan.Instance, occurredAt)
+	flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(autoEmitRunID, instance.Route())
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	plan.Instance, plan.Lifecycle, err = am.workflowInstances.PrepareInitialEntryLifecycle(ctx, flowOwner, plan.Instance, occurredAt)
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
@@ -321,7 +327,15 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	}
 	req.ContractBundle = admittedSource.source
 	instance := req.Instance
-	stored, exists, err := am.workflowInstances.Load(ctx, instance.Route())
+	runID, err := exactFlowActivationRunID(ctx, req)
+	if err != nil {
+		return false, err
+	}
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, instance.Route())
+	if err != nil {
+		return false, err
+	}
+	stored, exists, err := am.workflowInstances.Load(ctx, flowIdentity)
 	if err != nil {
 		return false, err
 	}
@@ -334,10 +348,6 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	if strings.TrimSpace(stored.WorkflowName) != strings.TrimSpace(instance.TemplateID) {
 		return false, fmt.Errorf("standing flow instance %s belongs to template %s, not %s; run `swarm standing reset %s`",
 			instance.InstancePath, stored.WorkflowName, instance.TemplateID, instance.InstanceID)
-	}
-	runID, err := exactFlowActivationRunID(ctx, req)
-	if err != nil {
-		return false, err
 	}
 	readinessPlan, err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID)
 	if err != nil {
@@ -365,7 +375,97 @@ func exactFlowActivationRunID(ctx context.Context, req runtimepipeline.FlowInsta
 	return "", fmt.Errorf("flow activation requires exact run_id")
 }
 
-func (am *AgentManager) flowInstanceAgentRecords(req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) ([]PersistedAgent, error) {
+func (am *AgentManager) flowInstanceAgentRecords(runID string, req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) ([]PersistedAgent, error) {
+	records, err := flowInstanceAgentMaterializationRecords(runID, req, schema, scope)
+	if err != nil {
+		return nil, err
+	}
+	for i := range records {
+		if err := am.resolveAgentModel(&records[i].Config); err != nil {
+			return nil, err
+		}
+	}
+	return records, nil
+}
+
+// TemplateFlowAgentMaterializationRecords derives declaration-owned agent
+// records for one exact template instance without mutating durable or process
+// topology. Callers must still provide a typed topology admission before
+// execution.
+func TemplateFlowAgentMaterializationRecords(runID string, source semanticview.Source, flowID, instancePath, entityID string) ([]PersistedAgent, error) {
+	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, flowID, instancePath, entityID)
+	if err != nil {
+		return nil, err
+	}
+	return materializeStaticAgentBlueprints(runID, blueprints)
+}
+
+// TemplateFlowAgentMaterializationBlueprints derives declaration-owned agent
+// plans without fabricating a live run owner. The selected-store admission
+// owner materializes these plans only after it has committed the exact run.
+func TemplateFlowAgentMaterializationBlueprints(source semanticview.Source, flowID, instancePath, entityID string) ([]AgentMaterializationBlueprint, error) {
+	plan, err := TemplateFlowMaterialization(source, flowID, instancePath, entityID)
+	return plan.Agents, err
+}
+
+// TemplateFlowMaterializationPlan owns configuration even when the flow declares
+// no agents. Agents are derived from that configuration, never its authority.
+type TemplateFlowMaterializationPlan struct {
+	Instance            runtimeflowidentity.Instance
+	Config              map[string]any
+	Agents              []AgentMaterializationBlueprint
+	ActivationVariables map[string]string
+}
+
+func TemplateFlowMaterialization(source semanticview.Source, flowID, instancePath, entityID string) (TemplateFlowMaterializationPlan, error) {
+	if source == nil {
+		return TemplateFlowMaterializationPlan{}, fmt.Errorf("template flow materialization requires semantic source")
+	}
+	flowID = strings.TrimSpace(flowID)
+	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	entityID = strings.TrimSpace(entityID)
+	scope, ok := semanticview.FlowScopeByID(source, flowID)
+	if !ok {
+		return TemplateFlowMaterializationPlan{}, fmt.Errorf("flow contract view not found: %s", flowID)
+	}
+	schema, ok := source.FlowSchemaByID(flowID)
+	if !ok || !strings.EqualFold(strings.TrimSpace(schema.Mode), runtimecontracts.FlowModeTemplate) {
+		return TemplateFlowMaterializationPlan{}, fmt.Errorf("flow %s is not a template flow", flowID)
+	}
+	instanceID := runtimeflowidentity.LogicalInstanceID(instancePath)
+	if instanceID == "" || entityID == "" {
+		return TemplateFlowMaterializationPlan{}, fmt.Errorf("template flow materialization requires exact instance and entity identity")
+	}
+	instance := runtimeflowidentity.Stored(source, flowID, instancePath, instanceID, entityID, "")
+	scopeKey := runtimeflowidentity.ScopeKey(source, flowID)
+	if instance.Route() != runtimeflowidentity.StoredRoute(scopeKey, instanceID, instancePath) {
+		return TemplateFlowMaterializationPlan{}, fmt.Errorf("template flow materialization route %s disagrees with semantic scope %s", instancePath, scopeKey)
+	}
+	config := map[string]any{}
+	if key := schema.Instance.Path(); key != "" {
+		config[key] = instanceID
+	}
+	request := runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source,
+		Instance:       instance,
+		Config:         config,
+	}
+	agents, err := flowInstanceAgentMaterializationBlueprints(request, schema, scope)
+	if err != nil {
+		return TemplateFlowMaterializationPlan{}, err
+	}
+	return TemplateFlowMaterializationPlan{Instance: instance, Config: config, Agents: agents, ActivationVariables: flowActivationVars(request)}, nil
+}
+
+func flowInstanceAgentMaterializationRecords(runID string, req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) ([]PersistedAgent, error) {
+	blueprints, err := flowInstanceAgentMaterializationBlueprints(req, schema, scope)
+	if err != nil {
+		return nil, err
+	}
+	return materializeStaticAgentBlueprints(runID, blueprints)
+}
+
+func flowInstanceAgentMaterializationBlueprints(req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) ([]AgentMaterializationBlueprint, error) {
 	instance := req.Instance
 	vars := flowActivationVars(req)
 	localEvents := flowLocalEventSet(schema, scope)
@@ -379,7 +479,7 @@ func (am *AgentManager) flowInstanceAgentRecords(req runtimepipeline.FlowInstanc
 	sort.Slice(declarations, func(i, j int) bool {
 		return strings.TrimSpace(declarations[i].OwnerURI) < strings.TrimSpace(declarations[j].OwnerURI)
 	})
-	records := make([]PersistedAgent, 0, len(declarations))
+	blueprints := make([]AgentMaterializationBlueprint, 0, len(declarations))
 	for _, declaration := range declarations {
 		key := strings.TrimSpace(declaration.LocalID)
 		entry := declaration.Entry
@@ -387,31 +487,34 @@ func (am *AgentManager) flowInstanceAgentRecords(req runtimepipeline.FlowInstanc
 		if err != nil {
 			return nil, fmt.Errorf("flow agent %s declared name: %w", key, err)
 		}
-		cfg, err := buildFlowAgentConfig(req.ContractBundle, namePlan, instance.TemplateID, instance.InstanceID, instance.EntityID, instance.InstancePath, key, entry, vars, localEvents, req.Config)
+		identity, cfg, err := buildFlowAgentBlueprint(req.ContractBundle, namePlan, instance.TemplateID, instance.InstanceID, instance.EntityID, instance.InstancePath, key, entry, vars, localEvents, req.Config)
 		if err != nil {
 			return nil, err
 		}
-		rec := PersistedAgent{
+		blueprints = append(blueprints, AgentMaterializationBlueprint{
 			Config:          cfg,
+			Identity:        identity,
 			Status:          "active",
 			HiredBy:         "flow-instance-activator",
 			TemplateVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
-		}
-		if err := am.resolveAgentModel(&rec.Config); err != nil {
-			return nil, err
-		}
-		records = append(records, rec)
+		})
 	}
-	sort.Slice(records, func(i, j int) bool {
-		return strings.TrimSpace(records[i].Config.ID) < strings.TrimSpace(records[j].Config.ID)
+	sort.Slice(blueprints, func(i, j int) bool {
+		return strings.TrimSpace(blueprints[i].Config.ID) < strings.TrimSpace(blueprints[j].Config.ID)
 	})
-	return records, nil
+	return blueprints, nil
 }
 
-func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, req runtimepipeline.FlowInstanceActivationRequest) error {
 	instance := req.Instance
 	vars := flowActivationVars(req)
-	request := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: instance.Route(), ActivationVariables: vars}
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("invalid flow-instance route identity: %w", err)
+	}
+	if identity.Route != instance.Route() {
+		return fmt.Errorf("flow-instance route identity disagrees with activation instance")
+	}
+	request := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, ActivationVariables: vars}
 	if am.roles.RouteInstaller != nil {
 		return am.roles.RouteInstaller.StageFlowInstanceRouteContext(ctx, request)
 	}
@@ -548,7 +651,8 @@ func (am *AgentManager) VerifyStaticFlowRequiredAgents(source semanticview.Sourc
 	if am == nil || source == nil {
 		return nil
 	}
-	records, err := StaticFlowRequiredAgentMaterializationRecords(source)
+	runCtx, _, _ := am.lifecycle.runSnapshot()
+	records, err := StaticFlowRequiredAgentMaterializationRecords(runtimecorrelation.RunIDFromContext(runCtx), source)
 	if err != nil {
 		return err
 	}
@@ -559,7 +663,8 @@ func (am *AgentManager) VerifyStaticAgents(source semanticview.Source) error {
 	if am == nil || source == nil {
 		return nil
 	}
-	records, err := StaticAgentMaterializationRecords(source)
+	runCtx, _, _ := am.lifecycle.runSnapshot()
+	records, err := StaticAgentMaterializationRecords(runtimecorrelation.RunIDFromContext(runCtx), source)
 	if err != nil {
 		return err
 	}
@@ -610,7 +715,21 @@ func (am *AgentManager) verifyStaticAgentRecords(records []PersistedAgent) error
 
 // StaticAgentMaterializationRecords derives the ordinary runtime static-agent
 // materialization records without mutating the manager or persistence store.
-func StaticAgentMaterializationRecords(source semanticview.Source) ([]PersistedAgent, error) {
+func StaticAgentMaterializationRecords(runID string, source semanticview.Source) ([]PersistedAgent, error) {
+	blueprints, err := StaticAgentMaterializationBlueprints(source)
+	if err != nil {
+		return nil, err
+	}
+	return materializeStaticAgentBlueprints(runID, blueprints)
+}
+
+// StaticAgentMaterializationBlueprints derives ordinary static declarations
+// without assigning a live run.
+func StaticAgentMaterializationBlueprints(source semanticview.Source) ([]AgentMaterializationBlueprint, error) {
+	return staticAgentBlueprintRecords(source)
+}
+
+func staticAgentBlueprintRecords(source semanticview.Source) ([]staticAgentBlueprint, error) {
 	if source == nil {
 		return nil, nil
 	}
@@ -647,32 +766,46 @@ func StaticAgentMaterializationRecords(source semanticview.Source) ([]PersistedA
 		groupKeys = append(groupKeys, key)
 	}
 	sort.Strings(groupKeys)
-	records := []PersistedAgent{}
+	blueprints := []staticAgentBlueprint{}
 	for _, key := range groupKeys {
 		group := groups[key]
-		scopeRecords, err := staticAgentsForDeclarations(source, group)
+		scopeBlueprints, err := staticAgentBlueprintsForDeclarations(source, group)
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, scopeRecords...)
+		blueprints = append(blueprints, scopeBlueprints...)
 	}
-	return records, nil
+	return blueprints, nil
 }
 
 // StaticFlowRequiredAgentMaterializationRecords derives the ordinary runtime
 // required-flow-agent materialization records without mutating runtime state.
-func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) ([]PersistedAgent, error) {
+func StaticFlowRequiredAgentMaterializationRecords(runID string, source semanticview.Source) ([]PersistedAgent, error) {
+	blueprints, err := StaticFlowRequiredAgentMaterializationBlueprints(source)
+	if err != nil {
+		return nil, err
+	}
+	return materializeStaticAgentBlueprints(runID, blueprints)
+}
+
+// StaticFlowRequiredAgentMaterializationBlueprints derives required static
+// declarations without assigning a live run.
+func StaticFlowRequiredAgentMaterializationBlueprints(source semanticview.Source) ([]AgentMaterializationBlueprint, error) {
+	return staticFlowRequiredAgentBlueprintRecords(source)
+}
+
+func staticFlowRequiredAgentBlueprintRecords(source semanticview.Source) ([]staticAgentBlueprint, error) {
 	if source == nil {
 		return nil, nil
 	}
 	standingFlows := standingActivatedFlowIDs(source)
-	records := []PersistedAgent{}
+	blueprints := []staticAgentBlueprint{}
 	if required := source.RequiredAgents(); len(required) > 0 {
-		scopeRecords, err := staticRequiredAgentsForDeclarations(source, ".", "", required)
+		scopeBlueprints, err := staticRequiredAgentBlueprintsForDeclarations(source, ".", "", required)
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, scopeRecords...)
+		blueprints = append(blueprints, scopeBlueprints...)
 	}
 	for _, scope := range source.FlowScopes() {
 		flowID := strings.TrimSpace(scope.ID)
@@ -682,11 +815,23 @@ func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) (
 		if _, standing := standingFlows[flowID]; standing {
 			continue
 		}
-		scopeRecords, err := staticRequiredAgentsForDeclarations(source, flowID, strings.Trim(scope.Path, "/"), source.FlowRequiredAgents(flowID))
+		scopeBlueprints, err := staticRequiredAgentBlueprintsForDeclarations(source, flowID, strings.Trim(scope.Path, "/"), source.FlowRequiredAgents(flowID))
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, scopeRecords...)
+		blueprints = append(blueprints, scopeBlueprints...)
+	}
+	return blueprints, nil
+}
+
+func materializeStaticAgentBlueprints(runID string, blueprints []staticAgentBlueprint) ([]PersistedAgent, error) {
+	records := make([]PersistedAgent, 0, len(blueprints))
+	for _, blueprint := range blueprints {
+		record, err := blueprint.Materialize(runID)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
 	}
 	return records, nil
 }
@@ -718,11 +863,71 @@ type staticAgentFlowGroup struct {
 	Declarations []semanticview.AgentDeclaration
 }
 
+type staticAgentBlueprint struct {
+	Config          models.AgentConfig
+	Identity        runtimeagentidentity.Plan
+	Topology        runtimeagenttopology.Admission
+	Status          string
+	HiredBy         string
+	TemplateVersion string
+}
+
+// AgentMaterializationBlueprint is the runless declaration plan consumed by
+// exact run admission owners. It cannot identify a live agent until
+// Materialize is called with a concrete run.
+type AgentMaterializationBlueprint = staticAgentBlueprint
+
+// ResolveAgentMaterializationBlueprint seals the run-independent execution
+// selection that readiness and lifecycle admission hash before a live run is
+// assigned.
+func ResolveAgentMaterializationBlueprint(options AgentManagerOptions, blueprint AgentMaterializationBlueprint) (AgentMaterializationBlueprint, error) {
+	if !blueprint.Config.Identity.IsZero() {
+		return AgentMaterializationBlueprint{}, fmt.Errorf("agent materialization blueprint must remain runless during execution selection")
+	}
+	if err := resolveAgentModel(&blueprint.Config, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
+		return AgentMaterializationBlueprint{}, err
+	}
+	return blueprint, nil
+}
+
+func (b staticAgentBlueprint) Materialize(runID string) (PersistedAgent, error) {
+	identity, err := b.Identity.Live(runID)
+	if err != nil {
+		return PersistedAgent{}, err
+	}
+	config := b.Config
+	config.Identity = identity
+	config.NormalizeRuntimeDescriptor()
+	if _, err := config.ConcreteIdentity(); err != nil {
+		return PersistedAgent{}, err
+	}
+	return PersistedAgent{
+		Config: config, Topology: b.Topology, Status: b.Status, HiredBy: b.HiredBy,
+		TemplateVersion: b.TemplateVersion,
+	}, nil
+}
+
 func staticAgentFlowGroupKey(flowID, flowPath string) string {
 	return strings.TrimSpace(flowID) + "\x00" + strings.Trim(strings.TrimSpace(flowPath), "/")
 }
 
-func staticAgentsForDeclarations(source semanticview.Source, group staticAgentFlowGroup) ([]PersistedAgent, error) {
+func staticAgentsForDeclarations(runID string, source semanticview.Source, group staticAgentFlowGroup) ([]PersistedAgent, error) {
+	blueprints, err := staticAgentBlueprintsForDeclarations(source, group)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]PersistedAgent, 0, len(blueprints))
+	for _, blueprint := range blueprints {
+		record, err := blueprint.Materialize(runID)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+func staticAgentBlueprintsForDeclarations(source semanticview.Source, group staticAgentFlowGroup) ([]staticAgentBlueprint, error) {
 	declarations := append([]semanticview.AgentDeclaration(nil), group.Declarations...)
 	sort.Slice(declarations, func(i, j int) bool {
 		left := strings.TrimSpace(declarations[i].OwnerURI) + "\x00" + strings.TrimSpace(declarations[i].LocalID)
@@ -730,31 +935,45 @@ func staticAgentsForDeclarations(source semanticview.Source, group staticAgentFl
 		return left < right
 	})
 	localEvents := staticFlowLocalEventSetForDeclarations(declarations)
-	records := make([]PersistedAgent, 0, len(declarations))
+	blueprints := make([]staticAgentBlueprint, 0, len(declarations))
 	for _, declaration := range declarations {
 		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
 		if err != nil {
 			return nil, fmt.Errorf("agent declaration %q name: %w", declaration.LocalID, err)
 		}
-		cfg, err := buildStaticFlowAgentConfig(source, namePlan, group.FlowID, group.FlowPath, declaration.LocalID, declaration.Entry, localEvents)
+		identity, cfg, err := buildStaticFlowAgentBlueprint(source, namePlan, group.FlowID, group.FlowPath, declaration.LocalID, declaration.Entry, localEvents)
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, PersistedAgent{Config: cfg, Status: "active", HiredBy: "static-flow-agent"})
+		blueprints = append(blueprints, staticAgentBlueprint{Config: cfg, Identity: identity, Status: "active", HiredBy: "static-flow-agent"})
 	}
-	return records, nil
+	return blueprints, nil
 }
 
 func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
-	if am == nil {
-		return fmt.Errorf("agent manager is required")
-	}
-	lease, err := am.beginWork(ctx, "flow instance deactivation")
+	prepared, err := am.PrepareFlowInstanceDeactivation(ctx, req)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = lease.Done() }()
-	ctx = lease.Context()
+	return prepared.Commit()
+}
+
+func (am *AgentManager) deactivateFlowInstanceOwned(lease *worklifetime.Lease, req runtimepipeline.FlowInstanceDeactivationRequest) (result error) {
+	transferred := false
+	durableTerminal := false
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = errors.Join(result, fmt.Errorf("flow terminal completion panic: %v", recovered))
+			am.lifecycle.recordTerminalCompletion(result)
+		}
+		if !transferred {
+			if durableTerminal {
+				am.lifecycle.recordTerminalCompletion(result)
+			}
+			result = errors.Join(result, lease.Done())
+		}
+	}()
+	ctx := context.WithoutCancel(lease.Context())
 	if am.workflowInstances == nil {
 		return fmt.Errorf("workflow instance store is required")
 	}
@@ -774,18 +993,21 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	termination, err := owner.CommitFlowInstanceTermination(ctx, runtimepipeline.FlowInstanceTerminationRequest{
 		Route: instance.Route(), EntityID: identity.NormalizeEntityID(entityID), RunID: runID, TerminatedAt: time.Now().UTC(),
 	})
-	if err != nil {
+	if err != nil && termination.Instance.Status != "terminated" {
 		return fmt.Errorf("persist flow instance terminalization %s: %w", flowPath, err)
 	}
+	durableTerminal = true
+	commitErr := err
 	plan, err := am.terminalFlowInstanceSideEffectPlan(ctx, req, termination)
 	if err != nil {
-		return err
+		return errors.Join(commitErr, err)
 	}
-	if err := am.applyTerminalFlowInstanceSideEffects(ctx, plan); err != nil {
+	transferred, err = am.applyTerminalFlowInstanceSideEffects(lease, plan, commitErr)
+	if err != nil {
 		am.logTerminalFlowInstanceSideEffectFailure(plan, err)
-		return err
+		return errors.Join(commitErr, err)
 	}
-	return nil
+	return commitErr
 }
 
 func (am *AgentManager) terminalFlowInstanceSideEffectPlan(
@@ -800,18 +1022,21 @@ func (am *AgentManager) terminalFlowInstanceSideEffectPlan(
 	if canonicalFlowPath == "" {
 		return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("canonical terminal flow instance missing storage_ref")
 	}
-	canonicalRoute := termination.Route
+	flowIdentity := termination.Identity.Normalize()
+	if err := flowIdentity.Validate(); err != nil {
+		return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("canonical terminal flow identity: %w", err)
+	}
+	canonicalRoute := flowIdentity.Route
 	configs := am.lifecycle.executionConfigs()
 	agentIdentities := make([]runtimeagentidentity.Identity, 0, len(configs))
 	for _, cfg := range configs {
-		if cfg.CanonicalFlowPath() != canonicalFlowPath {
-			continue
-		}
 		identity, err := cfg.ConcreteIdentity()
 		if err != nil {
 			return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("terminal flow instance agent %q identity: %w", cfg.ID, err)
 		}
-		agentIdentities = append(agentIdentities, identity)
+		if identity.RunID == flowIdentity.RunID && identity.FlowInstance() == canonicalFlowPath {
+			agentIdentities = append(agentIdentities, identity)
+		}
 	}
 	sort.Slice(agentIdentities, func(i, j int) bool {
 		if agentIdentities[i].AgentID() != agentIdentities[j].AgentID() {
@@ -823,17 +1048,13 @@ func (am *AgentManager) terminalFlowInstanceSideEffectPlan(
 	if err != nil {
 		return terminalFlowInstanceSideEffectPlan{}, err
 	}
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if runID == "" {
-		return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("flow instance terminalization requires canonical run_id for %s", canonicalFlowPath)
-	}
 	plan := terminalFlowInstanceSideEffectPlan{
 		EntityID:          entityID,
 		FlowPath:          canonicalFlowPath,
 		AgentIdentities:   agentIdentities,
 		SelfRetiringAgent: selfRetiringAgent,
 		Route:             canonicalRoute,
-		RunID:             runID,
+		RunID:             flowIdentity.RunID,
 		FinalState:        req.FinalState,
 	}
 	return plan, nil
@@ -850,7 +1071,7 @@ func terminalFlowSelfRetiringAgent(ctx context.Context, candidates []runtimeagen
 	}
 	var match runtimeagentidentity.Identity
 	for _, candidate := range candidates {
-		if candidate.AgentID() != evt.SourceAgent() || candidate.FlowInstance() != source.FlowInstance {
+		if candidate.RunID != evt.RunID() || candidate.AgentID() != evt.SourceAgent() || candidate.FlowInstance() != source.FlowInstance {
 			continue
 		}
 		if !match.IsZero() {
@@ -864,26 +1085,17 @@ func terminalFlowSelfRetiringAgent(ctx context.Context, candidates []runtimeagen
 	return match, nil
 }
 
-func (am *AgentManager) applyTerminalFlowInstanceSideEffects(ctx context.Context, plan terminalFlowInstanceSideEffectPlan) error {
-	var agentErrs []error
-	for _, identity := range plan.AgentIdentities {
-		deferRouteRetirement := false
-		if !plan.SelfRetiringAgent.IsZero() {
-			deferRouteRetirement, _ = runtimeagentidentity.Equal(identity, plan.SelfRetiringAgent)
-		}
-		if err := am.teardownIdentityAfterTerminalEvent(ctx, identity, "flow_instance_terminal", deferRouteRetirement); err != nil && !errors.Is(err, ErrAgentNotFound) {
-			agentErrs = append(agentErrs, fmt.Errorf(
-				"teardown flow instance agent %s at %s: %w",
-				identity.AgentID(),
-				identity.FlowInstance(),
-				err,
-			))
-		}
+func (am *AgentManager) applyTerminalFlowInstanceSideEffects(lease *worklifetime.Lease, plan terminalFlowInstanceSideEffectPlan, priorErr error) (bool, error) {
+	set, err := am.lifecycle.fenceTerminalFlow(plan)
+	if err != nil && set == nil {
+		return false, err
 	}
-	if len(agentErrs) > 0 {
-		return errors.Join(agentErrs...)
+	if set == nil {
+		return false, nil
 	}
-	return nil
+	commitErr := errors.Join(priorErr, err, am.lifecycle.commitTerminalFlow(context.WithoutCancel(lease.Context()), set))
+	am.launchTerminalFlowCompletion(lease, set, commitErr)
+	return true, commitErr
 }
 
 func (am *AgentManager) logTerminalFlowInstanceSideEffectFailure(plan terminalFlowInstanceSideEffectPlan, err error) {
@@ -906,7 +1118,7 @@ func (am *AgentManager) logTerminalFlowInstanceSideEffectFailure(plan terminalFl
 	})
 }
 
-func buildFlowAgentConfig(
+func buildFlowAgentBlueprint(
 	source semanticview.Source,
 	namePlan semanticview.AgentNamePlan,
 	templateID string,
@@ -918,19 +1130,19 @@ func buildFlowAgentConfig(
 	vars map[string]string,
 	localEvents map[string]struct{},
 	config map[string]any,
-) (models.AgentConfig, error) {
+) (runtimeagentidentity.Plan, models.AgentConfig, error) {
 	name, err := namePlan.Materialize()
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("flow agent %s declaration identity: %w", key, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s declaration identity: %w", key, err)
 	}
 	agentID := name.AgentID
 	route, err := runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("flow agent %s route identity: %w", key, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s route identity: %w", key, err)
 	}
-	identity, err := runtimeagentidentity.New(name, route)
+	identity, err := runtimeagentidentity.NewPlan(name, route)
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("flow agent %s concrete identity: %w", key, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s declaration plan: %w", key, err)
 	}
 	subscriptions := make([]string, 0, len(entry.Subscriptions))
 	subscriptions = append(subscriptions, entry.Subscriptions...)
@@ -953,7 +1165,7 @@ func buildFlowAgentConfig(
 			Authored:     subscription,
 		})
 		if !admission.Admitted() {
-			return models.AgentConfig{}, fmt.Errorf("flow agent %s: %s", key, admission.Message())
+			return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s: %s", key, admission.Message())
 		}
 		if admission.Class() == semanticview.AuthoredSubscriptionSameScopeAgentExact {
 			subscription = eventidentity.Normalize(strings.Trim(flowPath, "/") + "/" + admission.LocalEvent())
@@ -973,23 +1185,23 @@ func buildFlowAgentConfig(
 	}
 	rawConfig, err := json.Marshal(cfgPayload)
 	if err != nil {
-		return models.AgentConfig{}, err
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, err
 	}
 	if err := models.ValidateNoAuthoredSystemPrompt(rawConfig); err != nil {
-		return models.AgentConfig{}, fmt.Errorf("flow agent %s config: %w", key, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s config: %w", key, err)
 	}
 	prompt, err := assembleResolvedAgentPrompt(source, templateID, entry)
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("flow agent %s intent: %w", key, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s intent: %w", key, err)
 	}
 	permissions, err := runtimetools.ResolveAgentPermissions(source, templateID, entry)
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("flow agent %s permissions: %w", key, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s permissions: %w", key, err)
 	}
 
 	cfg := models.AgentConfig{
 		ID:              agentID,
-		Identity:        identity,
+		Identity:        runtimeagentidentity.Identity{},
 		Type:            strings.TrimSpace(entry.Type),
 		Role:            namePlan.EffectiveRole(entry),
 		FlowID:          templateID,
@@ -1016,17 +1228,58 @@ func buildFlowAgentConfig(
 	}
 	cfg.NormalizeRuntimeDescriptor()
 	if _, err := admitAgentConfigSubscriptions(source, &cfg, localEvents); err != nil {
-		return models.AgentConfig{}, fmt.Errorf("flow agent %s: %w", key, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s: %w", key, err)
 	}
+	return identity, cfg, nil
+}
+
+func buildFlowAgentConfig(
+	runID string,
+	source semanticview.Source,
+	namePlan semanticview.AgentNamePlan,
+	templateID string,
+	instanceID string,
+	entityID string,
+	flowPath string,
+	key string,
+	entry runtimecontracts.AgentRegistryEntry,
+	vars map[string]string,
+	localEvents map[string]struct{},
+	config map[string]any,
+) (models.AgentConfig, error) {
+	plan, cfg, err := buildFlowAgentBlueprint(source, namePlan, templateID, instanceID, entityID, flowPath, key, entry, vars, localEvents, config)
+	if err != nil {
+		return models.AgentConfig{}, err
+	}
+	identity, err := plan.Live(runID)
+	if err != nil {
+		return models.AgentConfig{}, err
+	}
+	cfg.Identity = identity
+	cfg.NormalizeRuntimeDescriptor()
 	return cfg, nil
 }
 
 func staticRequiredAgentsForDeclarations(
+	runID string,
 	source semanticview.Source,
 	flowID string,
 	flowPath string,
 	required []runtimecontracts.FlowRequiredAgent,
 ) ([]PersistedAgent, error) {
+	blueprints, err := staticRequiredAgentBlueprintsForDeclarations(source, flowID, flowPath, required)
+	if err != nil {
+		return nil, err
+	}
+	return materializeStaticAgentBlueprints(runID, blueprints)
+}
+
+func staticRequiredAgentBlueprintsForDeclarations(
+	source semanticview.Source,
+	flowID string,
+	flowPath string,
+	required []runtimecontracts.FlowRequiredAgent,
+) ([]staticAgentBlueprint, error) {
 	flowID = strings.TrimSpace(flowID)
 	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	if len(required) == 0 {
@@ -1034,7 +1287,7 @@ func staticRequiredAgentsForDeclarations(
 	}
 	declarations := semanticview.AgentDeclarationsForOwner(source, flowID)
 	localEvents := staticFlowLocalEventSetForDeclarations(declarations)
-	records := make([]PersistedAgent, 0, len(required))
+	blueprints := make([]staticAgentBlueprint, 0, len(required))
 	for _, requiredAgent := range required {
 		logicalID := strings.TrimSpace(requiredAgent.Role)
 		matches := make([]semanticview.AgentDeclaration, 0, 1)
@@ -1054,21 +1307,19 @@ func staticRequiredAgentsForDeclarations(
 		if err != nil {
 			return nil, fmt.Errorf("required agent declaration %q in scope %q: %w", logicalID, flowID, err)
 		}
-		cfg, err := buildStaticFlowAgentConfig(source, namePlan, flowID, flowPath, logicalID, declaration.Entry, localEvents)
+		identity, cfg, err := buildStaticFlowAgentBlueprint(source, namePlan, flowID, flowPath, logicalID, declaration.Entry, localEvents)
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, PersistedAgent{
-			Config:          cfg,
-			Status:          "active",
-			HiredBy:         "static-flow-required-agent",
-			TemplateVersion: "",
+		blueprints = append(blueprints, staticAgentBlueprint{
+			Config: cfg, Identity: identity, Status: "active", HiredBy: "static-flow-required-agent",
 		})
 	}
-	return records, nil
+	return blueprints, nil
 }
 
 func buildStaticFlowAgentConfig(
+	runID string,
 	source semanticview.Source,
 	namePlan semanticview.AgentNamePlan,
 	flowID string,
@@ -1077,25 +1328,47 @@ func buildStaticFlowAgentConfig(
 	entry runtimecontracts.AgentRegistryEntry,
 	localEvents map[string]struct{},
 ) (models.AgentConfig, error) {
+	plan, config, err := buildStaticFlowAgentBlueprint(source, namePlan, flowID, flowPath, logicalID, entry, localEvents)
+	if err != nil {
+		return models.AgentConfig{}, err
+	}
+	identity, err := plan.Live(runID)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("static flow agent %s concrete identity: %w", logicalID, err)
+	}
+	config.Identity = identity
+	config.NormalizeRuntimeDescriptor()
+	return config, nil
+}
+
+func buildStaticFlowAgentBlueprint(
+	source semanticview.Source,
+	namePlan semanticview.AgentNamePlan,
+	flowID string,
+	flowPath string,
+	logicalID string,
+	entry runtimecontracts.AgentRegistryEntry,
+	localEvents map[string]struct{},
+) (runtimeagentidentity.Plan, models.AgentConfig, error) {
 	vars := map[string]string{
 		"flow_id":   strings.TrimSpace(flowID),
 		"flow_path": strings.Trim(strings.TrimSpace(flowPath), "/"),
 	}
 	name, err := namePlan.Materialize()
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("static flow agent %s declaration identity: %w", logicalID, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s declaration identity: %w", logicalID, err)
 	}
 	agentID := name.AgentID
 	route := runtimeagentidentity.RootRoute()
 	if flowPath != "" {
 		route, err = runtimeflowidentity.StoredRoute("", "", flowPath).AgentIdentityRoute()
 		if err != nil {
-			return models.AgentConfig{}, fmt.Errorf("static flow agent %s route identity: %w", logicalID, err)
+			return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s route identity: %w", logicalID, err)
 		}
 	}
-	identity, err := runtimeagentidentity.New(name, route)
+	identity, err := runtimeagentidentity.NewPlan(name, route)
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("static flow agent %s concrete identity: %w", logicalID, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s blueprint identity: %w", logicalID, err)
 	}
 	subscriptions := make([]string, 0, len(entry.Subscriptions))
 	subscriptions = append(subscriptions, entry.Subscriptions...)
@@ -1112,19 +1385,18 @@ func buildStaticFlowAgentConfig(
 
 	rawConfig, err := json.Marshal(map[string]any{})
 	if err != nil {
-		return models.AgentConfig{}, err
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, err
 	}
 	prompt, err := assembleResolvedAgentPrompt(source, flowID, entry)
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("static flow agent %s intent: %w", logicalID, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s intent: %w", logicalID, err)
 	}
 	permissions, err := runtimetools.ResolveAgentPermissions(source, flowID, entry)
 	if err != nil {
-		return models.AgentConfig{}, fmt.Errorf("static flow agent %s permissions: %w", logicalID, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s permissions: %w", logicalID, err)
 	}
 	cfg := models.AgentConfig{
 		ID:              agentID,
-		Identity:        identity,
 		Type:            strings.TrimSpace(entry.Type),
 		Role:            namePlan.EffectiveRole(entry),
 		FlowID:          flowID,
@@ -1151,9 +1423,9 @@ func buildStaticFlowAgentConfig(
 	}
 	cfg.NormalizeRuntimeDescriptor()
 	if _, err := admitAgentConfigSubscriptions(source, &cfg, localEvents); err != nil {
-		return models.AgentConfig{}, fmt.Errorf("static flow agent %s: %w", logicalID, err)
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s: %w", logicalID, err)
 	}
-	return cfg, nil
+	return identity, cfg, nil
 }
 
 func assembleResolvedAgentPrompt(source semanticview.Source, flowID string, entry runtimecontracts.AgentRegistryEntry) (runtimeagentintent.DerivedPrompt, error) {

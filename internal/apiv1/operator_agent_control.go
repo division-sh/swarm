@@ -62,7 +62,7 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts AgentContr
 	if err != nil {
 		return nil, err
 	}
-	runID, _, err := optionalStringParam(req.Params, "run_id")
+	runID, err := requiredStringParam(req.Params, "run_id")
 	if err != nil {
 		return nil, err
 	}
@@ -114,12 +114,25 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts AgentContr
 }
 
 func executeAgentRestart(ctx context.Context, req Request, opts AgentControlHandlerOptions, now time.Time) (any, error) {
-	if multiRuntimeContextMode(opts.RuntimeContexts) {
-		return nil, runtimeContextRequiredError(req.Method, "agent restart is not supported in multi-context DB-loaded mode without an explicit runtime context")
+	runID, err := requiredStringParam(req.Params, "run_id")
+	if err != nil {
+		return nil, err
 	}
 	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {
 		return nil, err
+	}
+	controller := opts.Controller
+	if runtimeContextManager(opts.RuntimeContexts) != nil {
+		var selected selectedRuntimeContext
+		ctx, selected, _, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, runID)
+		if err != nil {
+			return nil, err
+		}
+		if selected.Runtime == nil || selected.Runtime.Manager == nil {
+			return nil, fmt.Errorf("agent control owner is required for the selected runtime")
+		}
+		controller = selected.Runtime.Manager
 	}
 	flowInstance, _, err := optionalStringParam(req.Params, "flow_instance")
 	if err != nil {
@@ -138,11 +151,11 @@ func executeAgentRestart(ctx context.Context, req Request, opts AgentControlHand
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
-		ResourceID:     agentControlResourceID(agentID, flowInstance),
+		ResourceID:     agentControlResourceID(runID, agentID, flowInstance),
 		TTL:            agentControlIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
-		result, err := opts.Controller.Restart(ctx, runtimeagentcontrol.RestartRequest{AgentID: agentID, FlowInstance: flowInstance, OperationID: operationID})
+		result, err := controller.Restart(ctx, runtimeagentcontrol.RestartRequest{RunID: runID, AgentID: agentID, FlowInstance: flowInstance, OperationID: operationID})
 		if err != nil {
 			return apiidempotency.Completion{}, agentControlError(req.Method, agentID, err)
 		}
@@ -165,8 +178,8 @@ func executeAgentRestart(ctx context.Context, req Request, opts AgentControlHand
 	return stored, nil
 }
 
-func agentControlResourceID(agentID, flowInstance string) string {
-	return strings.TrimSpace(agentID) + "\x00" + strings.Trim(strings.TrimSpace(flowInstance), "/")
+func agentControlResourceID(runID, agentID, flowInstance string) string {
+	return strings.TrimSpace(runID) + "\x00" + strings.TrimSpace(agentID) + "\x00" + strings.Trim(strings.TrimSpace(flowInstance), "/")
 }
 
 func agentControlError(method, agentID string, err error) error {
@@ -229,15 +242,6 @@ func agentControlError(method, agentID string, err error) error {
 				"run_id":         stateErr.RunID,
 				"current_status": stateErr.CurrentStatus,
 			})
-		case errors.Is(stateErr.Err, runtimeagentcontrol.ErrAmbiguousRunTarget) && method == "agent.send_directive":
-			details := map[string]any{
-				"agent_id":        agentID,
-				"active_sessions": activeSessionDetails(stateErr.ActiveSessions),
-			}
-			if runID := strings.TrimSpace(stateErr.RunID); runID != "" {
-				details["run_id"] = runID
-			}
-			return NewApplicationError(AmbiguousRunTargetCode, false, details)
 		}
 	}
 	switch {
@@ -252,8 +256,6 @@ func agentControlError(method, agentID string, err error) error {
 		return NewApplicationError(RunNotFoundCode, false, nil)
 	case errors.Is(err, runtimeagentcontrol.ErrRunAlreadyTerminal) && method == "agent.send_directive":
 		return NewApplicationError(RunAlreadyTerminalCode, false, nil)
-	case errors.Is(err, runtimeagentcontrol.ErrAmbiguousRunTarget) && method == "agent.send_directive":
-		return NewApplicationError(AmbiguousRunTargetCode, false, map[string]any{"agent_id": agentID})
 	default:
 		return err
 	}
@@ -277,21 +279,4 @@ func directiveOperationApplicationDetails(op runtimeagentcontrol.DirectiveOperat
 		details["failure"] = runtimefailures.CloneEnvelope(op.Failure)
 	}
 	return details, nil
-}
-
-func activeSessionDetails(sessions []runtimeagentcontrol.ActiveSessionTarget) []map[string]any {
-	out := make([]map[string]any, 0, len(sessions))
-	for _, session := range sessions {
-		item := map[string]any{}
-		if sessionID := strings.TrimSpace(session.SessionID); sessionID != "" {
-			item["session_id"] = sessionID
-		}
-		if runID := strings.TrimSpace(session.RunID); runID != "" {
-			item["run_id"] = runID
-		}
-		if len(item) > 0 {
-			out = append(out, item)
-		}
-	}
-	return out
 }

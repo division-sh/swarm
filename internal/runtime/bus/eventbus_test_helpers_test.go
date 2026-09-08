@@ -29,13 +29,16 @@ const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
-func exactTestFlowInstanceDescriptors(in []runtimebus.ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact) []runtimebus.ActiveFlowInstanceDescriptor {
+func exactTestFlowInstanceDescriptors(in []runtimebus.ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string) []runtimebus.ActiveFlowInstanceDescriptor {
 	if sourceFact.Validate() != nil {
 		sourceFact = authorActivityTestSourceArtifactFact
 	}
 	bundleHash := sourceFact.BundleHash()
 	out := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), in...)
 	for idx := range out {
+		if strings.TrimSpace(out[idx].RunID) == "" {
+			out[idx].RunID = strings.TrimSpace(runID)
+		}
 		if strings.TrimSpace(out[idx].FlowTemplate) == "" {
 			out[idx].FlowTemplate = runtimeflowidentity.RouteForInstancePath(out[idx].FlowInstance).ScopeKey
 		}
@@ -168,6 +171,9 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	); err != nil {
 		return nil, err
 	}
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(context.Context, events.Event, []events.DeliveryRoute) error {
+		return nil
+	}))
 	return bus, nil
 }
 

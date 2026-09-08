@@ -477,10 +477,7 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create EventBus: %v", err)
 			}
-			agentID := "candidate-handoff-served-agent"
-			agentIdentity := runtimebustest.Identity(t, agentID, "")
-			seedStandaloneConvergenceAgent(t, fixture.store, runtimeCtx, agentIdentity)
-			event := eventtest.RuntimeControl(
+			candidate := eventtest.RuntimeControl(
 				uuid.NewString(),
 				"platform.boot",
 				"runtime",
@@ -492,8 +489,21 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 				events.EventEnvelope{},
 				time.Date(2025, 7, 29, 12, 0, 0, 0, time.UTC),
 			)
-			delivery := runtimebustest.Subscribe(t, eventBus, agentID, event.Type())
-			defer runtimebustest.Unsubscribe(eventBus, agentID)
+			admitted, err := events.AdmitForPublish(candidate, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+			if err != nil {
+				t.Fatalf("admit standalone event: %v", err)
+			}
+			event := admitted.Event()
+			runID := event.RunID()
+			agentID := "candidate-handoff-served-agent"
+			agentIdentity := runtimebustest.IdentityForRun(t, runID, agentID, "")
+			requireRunFixtureForTest(t, runtimeCtx, fixture.store, semanticRunFixture{
+				Origin: semanticEventRunOriginForTest(t, event.ID(), string(event.Type())),
+				RunID:  runID, StartedAt: event.CreatedAt(),
+			})
+			seedStandaloneConvergenceAgent(t, fixture.store, runtimeCtx, agentIdentity)
+			delivery := runtimebustest.SubscribeForRun(t, eventBus, runID, agentID, event.Type())
+			defer runtimebustest.UnsubscribeIdentity(eventBus, agentIdentity)
 			if err := eventBus.Publish(runtimeCtx, event); err != nil {
 				t.Fatalf("publish routed standalone event: %v", err)
 			}

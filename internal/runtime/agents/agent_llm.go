@@ -149,7 +149,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	ctx = runtimeeffects.WithExecutionMode(ctx, turnMode)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
-	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), Agent: a.cfg.Identity})
+	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, a.cfg.Identity)
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	ctx, releaseToolPublication, err := a.applyTurnToolDefinitions(ctx)
@@ -186,6 +186,9 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 
 func admitAgentTurnExecutionMode(cfg models.AgentConfig, evt events.Event) (runtimeeffects.ExecutionMode, error) {
 	agentID := strings.TrimSpace(cfg.ID)
+	if cfg.Identity.Normalize().RunID != strings.TrimSpace(evt.RunID()) {
+		return "", fmt.Errorf("agent %s received event for a different run", agentID)
+	}
 	if !cfg.ExecutionMode.Valid() {
 		return "", fmt.Errorf("agent %s has no resolved execution mode", agentID)
 	}
@@ -345,7 +348,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	ctx = runtimeeffects.WithExecutionMode(ctx, turnMode)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
-	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), Agent: a.cfg.Identity})
+	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, a.cfg.Identity)
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	ctx, releaseToolPublication, err := a.applyTurnToolDefinitions(ctx)

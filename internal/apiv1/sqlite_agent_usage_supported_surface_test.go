@@ -49,7 +49,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 			AgentUsage: sqliteStore,
 		}),
 	})
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"usage","method":"agent.usage","params":{"agent_id":"agent-1","since":"2026-05-21T09:00:00Z","until":"2026-05-21T10:00:00Z"}}`)
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"usage","method":"agent.usage","params":{"run_id":"`+agentidentitytest.DefaultRunID+`","agent_id":"agent-1","since":"2026-05-21T09:00:00Z","until":"2026-05-21T10:00:00Z"}}`)
 	if resp.Error != nil {
 		t.Fatalf("agent.usage error = %#v", resp.Error)
 	}
@@ -85,13 +85,12 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
-	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-1")
-
 	now := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
 	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, runID, "agent-1")
 	evt := eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("task.ready"),
@@ -103,7 +102,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity},
 		now.Add(-time.Minute),
 	)
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: sqliteAgentUsageIdentity(t, "agent-1")}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: sqliteAgentUsageIdentityForRun(t, runID, "agent-1")}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, "subscribed")
 	claimed, err := storetest.ClaimDelivery(ctx, sqliteStore, evt, route)
 	if err != nil {
@@ -147,14 +146,22 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 
 func newSQLiteAgentUsageStoreFixture(t *testing.T, ctx context.Context) *storepkg.SQLiteRuntimeStore {
 	t.Helper()
-	return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(selected), storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
+	})
+	return selected
 }
 
 func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, agentID string) {
+	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, agentidentitytest.DefaultRunID, agentID)
+}
+
+func seedSQLiteAgentUsageAgentForRun(t *testing.T, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, runID, agentID string) {
 	t.Helper()
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
-			Identity:           sqliteAgentUsageIdentity(t, agentID),
+			Identity:           sqliteAgentUsageIdentityForRun(t, runID, agentID),
 			ID:                 agentID,
 			Role:               "researcher",
 			Type:               "managed",
@@ -172,6 +179,10 @@ func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *s
 }
 
 func sqliteAgentUsageIdentity(t *testing.T, agentID string) agentidentity.Identity {
+	return sqliteAgentUsageIdentityForRun(t, agentidentitytest.DefaultRunID, agentID)
+}
+
+func sqliteAgentUsageIdentityForRun(t *testing.T, runID, agentID string) agentidentity.Identity {
 	t.Helper()
-	return agentidentitytest.Runtime(t, agentID, "api-agent-usage-test", "flow", "a", "flow/a")
+	return agentidentitytest.RuntimeForRun(t, runID, agentID, "api-agent-usage-test", "flow", "a", "flow/a")
 }

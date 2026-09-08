@@ -24,6 +24,12 @@ import (
 )
 
 func releaseCoordinatorLoop(coordinator *agentLifecycleCoordinator, token runtimeeffects.LifecycleToken, done chan struct{}) error {
+	coordinator.mu.Lock()
+	settled := coordinator.cells[token.Identity.Normalize()].execution.loopSettled
+	coordinator.mu.Unlock()
+	if settled != nil {
+		defer close(settled)
+	}
 	return coordinator.releaseLoop(token, done)
 }
 
@@ -40,6 +46,8 @@ func replaceCoordinatorLoop(
 	if err != nil {
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
 	}
+	coordinator.sourceSetPublishMu.RLock()
+	defer coordinator.sourceSetPublishMu.RUnlock()
 	coordinator.executionPublishMu.Lock()
 	defer coordinator.executionPublishMu.Unlock()
 	cell, err := coordinator.lockIdentityOperation(identity)
@@ -541,7 +549,7 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 		AgentLifecycleTerminated,
 		nil,
 		&rec.Config,
-		false,
+		terminalFenceAndSettle,
 	); err == nil {
 		t.Fatal("teardown succeeded despite persistence failure")
 	}
@@ -584,7 +592,7 @@ func TestLifecycleCoordinatorSelfRetirementCommitsAfterAcceptedLoopSettles(t *te
 		AgentLifecycleTerminated,
 		nil,
 		nil,
-		true,
+		terminalSelfAuthor,
 	); err != nil {
 		t.Fatalf("defer self retirement: %v", err)
 	}
@@ -645,7 +653,7 @@ func TestLifecycleCoordinatorDeliveryAdmissionFenceWins(t *testing.T) {
 
 	if _, err := coordinator.terminateIdentityWithTopologyExpected(
 		testAuthorActivityContext(context.Background()), rec.Config.Identity, "flow_instance_terminal",
-		AgentLifecycleTerminated, nil, nil, true,
+		AgentLifecycleTerminated, nil, nil, terminalSelfAuthor,
 	); err != nil {
 		t.Fatalf("fence execution: %v", err)
 	}
@@ -699,7 +707,7 @@ func TestLifecycleCoordinatorSourceSetTransitionBlocksDirectAndWaitsDelivery(t *
 	}
 	if _, err := coordinator.terminateIdentityWithTopologyExpected(
 		testAuthorActivityContext(context.Background()), rec.Config.Identity, "teardown",
-		AgentLifecycleTerminated, nil, nil, true,
+		AgentLifecycleTerminated, nil, nil, terminalSelfAuthor,
 	); err == nil || !strings.Contains(err.Error(), "source_set_transition_pending") {
 		admission.release()
 		t.Fatalf("teardown during source-set transition error=%v, want typed conflict", err)
@@ -794,12 +802,12 @@ func TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateReleas
 	}
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("source-set-waiting-event"), events.EventType("test.source_set_wait"), "test", "", nil, 0,
-		eventtest.UUID("source-set-waiting-run"), "", events.EventEnvelope{}, time.Now().UTC(),
+		managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
 		t.Fatalf("publish waiting event: %v", err)
 	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		admission.release()
 		t.Fatal(err)
@@ -898,7 +906,7 @@ func TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancella
 	baselineReads := gate.readCount()
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("source-set-cancelled-event"), events.EventType("test.source_set_cancelled"), "test", "", nil, 0,
-		eventtest.UUID("source-set-cancelled-run"), "", events.EventEnvelope{}, time.Now().UTC(),
+		managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
 		t.Fatalf("publish waiting event: %v", err)
@@ -940,7 +948,7 @@ func TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancella
 		t.Fatal("dequeued delivery invoked agent while source-set transition was pending")
 	default:
 	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRoute(agent.ID()))
+	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1001,7 +1009,7 @@ func TestLifecycleCoordinatorDeliveryAdmissionWinsBeforeDeferredFence(t *testing
 	}
 	if _, err := coordinator.terminateIdentityWithTopologyExpected(
 		testAuthorActivityContext(context.Background()), rec.Config.Identity, "flow_instance_terminal",
-		AgentLifecycleTerminated, nil, nil, true,
+		AgentLifecycleTerminated, nil, nil, terminalSelfAuthor,
 	); err != nil {
 		t.Fatalf("defer execution fence: %v", err)
 	}
@@ -1209,13 +1217,20 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 	}
 	wg.Wait()
 	close(errs)
+	rejected := 0
 	for err := range errs {
-		t.Fatalf("concurrent replacement: %v", err)
+		if !strings.Contains(err.Error(), "agent_retirement_pending") {
+			t.Fatalf("concurrent replacement: %v", err)
+		}
+		rejected++
 	}
 	close(generations)
 	got := make([]int, 0, replacements)
 	for generation := range generations {
 		got = append(got, int(generation))
+	}
+	if len(got) == 0 || len(got)+rejected != replacements {
+		t.Fatalf("replacement outcomes: accepted=%d rejected=%d total=%d", len(got), rejected, replacements)
 	}
 	sort.Ints(got)
 	for i, generation := range got {

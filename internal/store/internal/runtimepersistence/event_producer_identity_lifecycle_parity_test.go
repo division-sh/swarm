@@ -175,7 +175,7 @@ func eventProducerIdentityReadbacks(t testing.TB, surface eventProducerIdentityL
 			runtimeEvent: true,
 			load: func() (events.Event, error) {
 				page, err := surface.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
-					AgentIdentity: mustTestAgentIdentity(agentID, "fixture/"+agentID),
+					AgentIdentity: mustTestAgentIdentityForRun(runID, agentID, "fixture/"+agentID),
 					Since:         since,
 					Limit:         10,
 				})
@@ -356,9 +356,10 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("projectRunForkReplayEvent: %v", err)
 	}
-	route := testAgentDeliveryRoute(t, "replay-agent", "fixture/replay-agent")
+	sourceRoute := testAgentDeliveryRoute(t, sourceRunID, "replay-agent", "fixture/replay-agent")
+	forkRoute := testAgentDeliveryRoute(t, forkRunID, "replay-agent", "fixture/replay-agent")
 	pg := fixture.store.(*PostgresStore)
-	outcome, err := pg.AppendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), replayedProjection, testHistoricalReplaySettlement([]events.DeliveryRoute{route}))
+	outcome, err := pg.AppendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), replayedProjection, testHistoricalReplaySettlement([]events.DeliveryRoute{forkRoute}))
 	if err != nil {
 		t.Fatalf("append replay event: %v", err)
 	}
@@ -369,7 +370,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct source replay delivery authority: %v", err)
 	}
-	sourceProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, sourceEventID, sourceRunID, []events.DeliveryRoute{route}, sourceAuthority)
+	sourceProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, sourceEventID, sourceRunID, []events.DeliveryRoute{sourceRoute}, sourceAuthority)
 	if err != nil || len(sourceProofs) != 1 {
 		t.Fatalf("commit source replay delivery fixture: proofs=%d err=%v", len(sourceProofs), err)
 	}
@@ -377,7 +378,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct fork replay delivery authority: %v", err)
 	}
-	forkProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, replayedEventID, forkRunID, []events.DeliveryRoute{route}, forkAuthority)
+	forkProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, replayedEventID, forkRunID, []events.DeliveryRoute{forkRoute}, forkAuthority)
 	if err != nil || len(forkProofs) != 1 {
 		t.Fatalf("commit fork replay delivery fixture: proofs=%d err=%v", len(forkProofs), err)
 	}

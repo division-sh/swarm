@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -144,7 +145,7 @@ func (s *workflowInstanceStore) persistFixtureWorkflowInstance(ctx context.Conte
 	}
 	expectedState := ""
 	expectedRevision := int64(0)
-	target, err := s.LoadTargetPersistence(ctx, identity.Instance.Route(), runtimeidentity.NormalizeEntityID(identity.RowID()))
+	target, err := s.LoadTargetPersistence(ctx, testRunScopedWorkflowInstanceForRun(runID, identity.Instance.Route().InstancePath), runtimeidentity.NormalizeEntityID(identity.RowID()))
 	if err != nil {
 		return err
 	}
@@ -166,7 +167,7 @@ func (s *workflowInstanceStore) persistFixtureWorkflowInstance(ctx context.Conte
 	if updatedAt.Before(instance.CreatedAt) {
 		updatedAt = instance.CreatedAt
 	}
-	state, err := workflowEngineStateRecord(runID, identity.Instance.Route(), instance, expectedState, expectedRevision, transition, updatedAt)
+	state, err := workflowEngineStateRecord(runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Instance.Route()}, instance, expectedState, expectedRevision, transition, updatedAt)
 	if err != nil {
 		return err
 	}

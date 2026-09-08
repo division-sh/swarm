@@ -86,6 +86,8 @@ func TestValidateDirectiveOperationEvidenceMatrix(t *testing.T) {
 		{AgentIdentity: identity, State: DirectiveOperationSucceeded, Failure: &failure},
 		{AgentIdentity: identity, State: DirectiveOperationFailed},
 		{AgentIdentity: identity, State: DirectiveOperationIndeterminate, Response: response, Failure: &failure},
+		{AgentIdentity: identity, RequestedRunID: "different-run", State: DirectiveOperationPrepared},
+		{AgentIdentity: identity, ResolvedRunID: "different-run", State: DirectiveOperationPrepared},
 	} {
 		if err := ValidateDirectiveOperationEvidence(op); err == nil {
 			t.Fatalf("state %s accepted invalid evidence %#v", op.State, op)

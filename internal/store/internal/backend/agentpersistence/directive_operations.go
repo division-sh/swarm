@@ -150,6 +150,7 @@ func validateDirectiveReservation(req runtimeagentcontrol.ReserveDirectiveOperat
 		"actor_token_id":     op.ActorTokenID,
 		"request_hash":       op.RequestHash,
 		"directive":          op.Directive,
+		"requested_run_id":   op.RequestedRunID,
 		"resolved_run_id":    op.ResolvedRunID,
 		"run_id_resolution":  op.RunIDResolution,
 		"source":             op.Source,
@@ -167,24 +168,20 @@ func validateDirectiveReservation(req runtimeagentcontrol.ReserveDirectiveOperat
 			return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("%s must be a UUID: %w", name, err)
 		}
 	}
-	if op.RequestedRunID != "" {
-		if _, err := uuid.Parse(op.RequestedRunID); err != nil {
-			return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("requested_run_id must be a UUID: %w", err)
-		}
+	if _, err := uuid.Parse(op.RequestedRunID); err != nil {
+		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("requested_run_id must be a UUID: %w", err)
+	}
+	if op.RequestedRunID != op.ResolvedRunID || op.ResolvedRunID != op.AgentIdentity.RunID {
+		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation run identity mismatch")
+	}
+	if op.RunIDResolution != runtimeagentcontrol.RunResolutionSpecified {
+		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("unsupported run_id_resolution %q", op.RunIDResolution)
 	}
 	event := req.Event.Event()
 	if event.ID() != op.DirectiveEventID || event.RunID() != op.ResolvedRunID || event.Type() != events.EventTypePlatformAgentDirective || req.Event.Class() != events.EventAdmissionDiagnosticDirect {
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation event identity mismatch")
 	}
-	wantDisposition := events.AdmittedRunRequireActive
-	switch op.RunIDResolution {
-	case runtimeagentcontrol.RunResolutionNewRunAllocated:
-		wantDisposition = events.AdmittedRunCreateAuthorized
-	case runtimeagentcontrol.RunResolutionSpecified, runtimeagentcontrol.RunResolutionActiveSession:
-	default:
-		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("unsupported run_id_resolution %q", op.RunIDResolution)
-	}
-	if req.Event.RunDisposition() != wantDisposition {
+	if req.Event.RunDisposition() != events.AdmittedRunRequireActive {
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("directive operation run disposition %q does not match resolution %q", req.Event.RunDisposition(), op.RunIDResolution)
 	}
 	if op.State == "" {
@@ -1006,7 +1003,7 @@ func scanDirectiveOperation(row directiveOperationRow) (runtimeagentcontrol.Dire
 		return runtimeagentcontrol.DirectiveOperation{}, false, fmt.Errorf("scan directive operation: %w", err)
 	}
 	op.AgentIdentity, err = IdentityFromColumns(
-		agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance,
+		op.ResolvedRunID, agentID, nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance,
 	)
 	if err != nil {
 		return runtimeagentcontrol.DirectiveOperation{}, false, fmt.Errorf("scan directive operation agent identity: %w", err)

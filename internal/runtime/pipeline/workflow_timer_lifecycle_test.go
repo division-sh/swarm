@@ -142,7 +142,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if handled := pc.executeNodeHandlerPlan(deliveryCtx, pipelineNode(t, "", "dispatcher"), evt); handled {
 		t.Fatal("dispatcher should not handle child/task.done")
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(runID))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(runID))
 	if err != nil {
 		t.Fatalf("load workflow instance after wrong node execution: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, pipelineNode(t, "", "listener"), evt); err != nil || !handled {
 		t.Fatalf("listener should handle child/task.done: handled=%v err=%v", handled, err)
 	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(runID))
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(runID))
 	if err != nil {
 		t.Fatalf("load workflow instance after listener execution: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), childWorker, trigger); err != nil || !handled {
 		t.Fatalf("child-worker should handle work.requested through the input-pin alias: handled=%v err=%v", handled, err)
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID))
 	if err != nil {
 		t.Fatalf("load workflow instance after child-worker execution: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), parentListener, completion); err != nil || !handled {
 		t.Fatalf("parent-listener should clear inherited child flow scope and handle root-local work.completed: handled=%t err=%v", handled, err)
 	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID))
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID))
 	if err != nil {
 		t.Fatalf("load workflow instance after parent-listener execution: %v", err)
 	}
@@ -429,11 +429,11 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		"",
 		[]byte(`{"entity_id":"`+grandchildEntityID+`"}`),
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForTargetRoute(
 			events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: rootEntityID},
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: rootEntityID},
 		),
 		time.Now().UTC(),
 	)
@@ -448,7 +448,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
 	}
 
-	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("child/inst-1"))
+	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance("child/inst-1"))
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}
@@ -518,11 +518,11 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		"",
 		nil,
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForTargetRoute(
 			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: rootEntityID},
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: rootEntityID},
 		),
 		time.Time{},
 	)); err != nil || handled || consume {
@@ -536,11 +536,11 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		"",
 		[]byte(`{"entity_id":"`+childRowID+`"}`),
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForTargetRoute(
 			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: rootEntityID},
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: rootEntityID},
 		),
 		time.Now().UTC(),
 	)
@@ -621,11 +621,11 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 		"",
 		[]byte(`{"entity_id":"`+childRowID+`"}`),
 		0,
-		"",
+		testPipelineRunID,
 		"",
 		events.EnvelopeForTargetRoute(
 			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: rootEntityID},
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: rootEntityID},
 		),
 		time.Now().UTC(),
 	)

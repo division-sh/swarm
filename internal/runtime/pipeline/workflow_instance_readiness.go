@@ -306,6 +306,14 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 	if _, err := uuid.Parse(p.RunID); err != nil {
 		return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness run_id: %w", err)
 	}
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(p.RunID, p.Identity.Route())
+	if err != nil {
+		return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness owner: %w", err)
+	}
+	agentRoute, err := flowIdentity.Route.AgentIdentityRoute()
+	if err != nil {
+		return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness agent route: %w", err)
+	}
 	if p.WorkflowVersion == "" {
 		return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness requires workflow_version")
 	}
@@ -320,6 +328,13 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf(
 				"dynamic flow runtime readiness agent identity: %w",
 				err,
+			)
+		}
+		if agents[idx].Identity.RunID != flowIdentity.RunID || agents[idx].Identity.Route != agentRoute {
+			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf(
+				"dynamic flow runtime readiness agent %s disagrees with flow owner %s",
+				agents[idx].Identity.Description(),
+				flowIdentity.Key(),
 			)
 		}
 		if agents[idx].ConfigRevision == "" {
@@ -368,6 +383,14 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 		p.CreationEvent = &event
 	}
 	return p, nil
+}
+
+func (p DynamicFlowRuntimeReadinessPlan) FlowIdentity() (runtimeflowidentity.RunScopedFlowInstance, error) {
+	normalized, err := p.Normalized()
+	if err != nil {
+		return runtimeflowidentity.RunScopedFlowInstance{}, err
+	}
+	return runtimeflowidentity.NewRunScopedFlowInstance(normalized.RunID, normalized.Identity.Route())
 }
 
 func decodeDynamicFlowRuntimeReadiness(

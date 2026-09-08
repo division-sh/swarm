@@ -93,7 +93,7 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			if err := fixture.store.create(fixture.ctx, instance); err != nil {
 				t.Fatal(err)
 			}
-			before, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
+			before, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, fixture.runID, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
 			if err != nil || len(before) != 1 {
 				t.Fatalf("active selector before freeze = %d, %v", len(before), err)
 			}
@@ -106,18 +106,18 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			late.StorageRef = "freeze/" + late.InstanceID
 			late.Fields = cloneStringAnyMap(late.Fields)
 			requireForkedPipelineRefusal(t, "create workflow", fixture.store.create(fixture.ctx, late))
-			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.mutate(fixture.ctx, testWorkflowInstanceRoute(storageRef), func(item *WorkflowInstance) { item.CurrentState = "changed" }))
-			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.mutateE(fixture.ctx, testWorkflowInstanceRoute(storageRef), func(item *WorkflowInstance) error {
+			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.mutate(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef), func(item *WorkflowInstance) { item.CurrentState = "changed" }))
+			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.mutateE(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef), func(item *WorkflowInstance) error {
 				item.CurrentState = "changed"
 				return nil
 			}))
-			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, testWorkflowInstanceRoute(storageRef), identity.NormalizeEntityID(entityID), fixture.frozenAt))
+			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef), identity.NormalizeEntityID(entityID), fixture.frozenAt))
 
-			after, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
+			after, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, fixture.runID, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
 			if err != nil || len(after) != 0 {
 				t.Fatalf("active selector after freeze = %d, %v", len(after), err)
 			}
-			preserved, ok, err := fixture.store.Load(fixture.ctx, testWorkflowInstanceRoute(storageRef))
+			preserved, ok, err := fixture.store.Load(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef))
 			if err != nil || !ok || preserved.CurrentState != "active" {
 				t.Fatalf("preserved workflow = %#v found=%v err=%v", preserved, ok, err)
 			}

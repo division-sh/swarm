@@ -21,7 +21,7 @@ func TestCompositeInventoryReaderCapturesManagedContainersAtPlanTime(t *testing.
 			Kind:          "agent",
 			Action:        ContainerActionStop,
 			ResetEligible: true,
-			RunID:         "run-1",
+			RunID:         "11111111-1111-1111-1111-111111111111",
 			AgentIdentity: testManagedAgentIdentity(),
 		}}, nil
 	})
@@ -94,9 +94,9 @@ func TestManagedContainerStopperApplyReportsStoppedNoopAndPartialFailure(t *test
 		inspections: map[string]ManagedContainerInspection{
 			"swarm-agent-agent-a": managedInspection("swarm-agent-agent-a", "agent", true, true),
 			"swarm-flow-flow-a":   managedInspection("swarm-flow-flow-a", "flow", true, false),
-			"swarm-entity-a":      managedInspection("swarm-entity-a", "entity", true, true),
+			"swarm-agent-agent-b": managedInspection("swarm-agent-agent-b", "agent", true, true),
 		},
-		stopErrors: map[string]error{"swarm-entity-a": stopErr},
+		stopErrors: map[string]error{"swarm-agent-agent-b": stopErr},
 	}
 	result, err := (ManagedContainerStopper{
 		Runtime: runtime,
@@ -110,7 +110,7 @@ func TestManagedContainerStopperApplyReportsStoppedNoopAndPartialFailure(t *test
 			Plan: Plan{ManagedContainers: []ContainerRef{
 				{Name: "swarm-agent-agent-a", Action: ContainerActionStop},
 				{Name: "swarm-flow-flow-a", Action: ContainerActionStop},
-				{Name: "swarm-entity-a", Action: ContainerActionStop},
+				{Name: "swarm-agent-agent-b", Action: ContainerActionStop},
 			}},
 		},
 		Cleanup: CleanupResult{
@@ -122,7 +122,7 @@ func TestManagedContainerStopperApplyReportsStoppedNoopAndPartialFailure(t *test
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	if len(runtime.stops) != 2 || runtime.stops[0] != "swarm-agent-agent-a" || runtime.stops[1] != "swarm-entity-a" {
+	if len(runtime.stops) != 2 || runtime.stops[0] != "swarm-agent-agent-a" || runtime.stops[1] != "swarm-agent-agent-b" {
 		t.Fatalf("stops = %#v, want running reset-eligible containers only", runtime.stops)
 	}
 	if len(result.Stopped) != 1 || result.Stopped[0].Name != "swarm-agent-agent-a" {
@@ -131,8 +131,8 @@ func TestManagedContainerStopperApplyReportsStoppedNoopAndPartialFailure(t *test
 	if len(result.AlreadyStopped) != 1 || result.AlreadyStopped[0].Name != "swarm-flow-flow-a" {
 		t.Fatalf("already stopped = %#v, want flow no-op", result.AlreadyStopped)
 	}
-	if len(result.Failed) != 1 || result.Failed[0].Container.Name != "swarm-entity-a" || !strings.Contains(result.Failed[0].Error, stopErr.Error()) {
-		t.Fatalf("failed = %#v, want entity stop failure", result.Failed)
+	if len(result.Failed) != 1 || result.Failed[0].Container.Name != "swarm-agent-agent-b" || !strings.Contains(result.Failed[0].Error, stopErr.Error()) {
+		t.Fatalf("failed = %#v, want second agent stop failure", result.Failed)
 	}
 }
 
@@ -173,26 +173,30 @@ func (r *recordingManagedContainerRuntime) StopManagedContainer(_ context.Contex
 }
 
 func managedInspection(name, kind string, resetEligible, running bool) ManagedContainerInspection {
+	identity := ContainerIdentity{
+		Owner:          "runtime",
+		Kind:           kind,
+		ResetEligible:  resetEligible,
+		CreationSource: "test",
+		ContainerName:  name,
+		WorkspaceScope: kind,
+		RunID:          "11111111-1111-1111-1111-111111111111",
+		FlowInstance:   "flow/a",
+	}
+	if kind == "agent" || kind == "flow" {
+		identity.AgentIdentity = testManagedAgentIdentity()
+	}
 	return ManagedContainerInspection{
 		Exists:      true,
 		Running:     running,
 		HasIdentity: true,
-		Identity: ContainerIdentity{
-			Owner:          "runtime",
-			Kind:           kind,
-			ResetEligible:  resetEligible,
-			CreationSource: "test",
-			ContainerName:  name,
-			WorkspaceScope: kind,
-			RunID:          "11111111-1111-1111-1111-111111111111",
-			AgentIdentity:  testManagedAgentIdentity(),
-			FlowInstance:   "flow/a",
-		},
+		Identity:    identity,
 	}
 }
 
 func testManagedAgentIdentity() runtimeagentidentity.Identity {
 	return runtimeagentidentity.Identity{
+		RunID: "11111111-1111-1111-1111-111111111111",
 		Name: runtimeagentidentity.Name{
 			AgentID: "agent-a",
 			Owner:   "test/agents.yaml",

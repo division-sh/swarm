@@ -239,7 +239,11 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			if sourceEntityID == wantRoute.EntityID {
 				t.Fatal("root source and singleton receiver identities must remain distinguishable")
 			}
-			if instance, found, err := runtime.pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("consumer")); err != nil || found {
+			consumerIdentity := runtimeflowidentity.RunScopedFlowInstance{
+				RunID: runID,
+				Route: runtimeflowidentity.RouteForInstancePath("consumer"),
+			}
+			if instance, found, err := runtime.pipeline.Load(ctx, consumerIdentity); err != nil || found {
 				t.Fatalf("singleton receiver must not exist before first delivery: found:%t instance:%#v err:%v", found, instance, err)
 			}
 			plan, err := runtime.bus.CheckPublishRecipientPlan(ctx, event)
@@ -264,7 +268,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			if len(routes) != 1 || routes[0].Target != wantOwner || !routes[0].ConnectClaim.Equal(plan.DeliveryRoutes[0].ConnectClaim) {
 				t.Fatalf("persisted root-to-singleton routes = %#v, want exact preflight owner and claim", routes)
 			}
-			instance, found, err := runtime.pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("consumer"))
+			instance, found, err := runtime.pipeline.Load(ctx, consumerIdentity)
 			if err != nil {
 				t.Fatalf("load materialized singleton receiver: %v", err)
 			}
@@ -339,7 +343,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			}.Normalized()
 			seedRuntime := newFanInBarrierRuntime(t, backend, db, source)
 			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.pipeline, bundle, selectedOwner)
-			requireSelectedRunTargetOwner(t, ctx, backend, "portfolio", selectedOwner)
+			requireSelectedRunTargetOwner(t, ctx, backend, runID, "portfolio", selectedOwner)
 
 			proofBus := newFanInBarrierRouteProofBus(t, backend, source)
 			eventID := uuid.NewString()
@@ -467,7 +471,7 @@ func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceS
 	}
 	for _, route := range mustFanInBarrierRoutes(t, backend) {
 		if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
-			t.Fatalf("restore fan-in proof route %s: %v", route.Identity.InstancePath, err)
+			t.Fatalf("restore fan-in proof route %s: %v", route.Identity.Route.InstancePath, err)
 		}
 	}
 	return eventBus
@@ -634,9 +638,9 @@ func removeFanInBarrierSelectedOwner(t *testing.T, ctx context.Context, backend 
 	}
 }
 
-func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, flowInstance, entityID string) {
+func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, runID, flowInstance, entityID string) {
 	t.Helper()
-	owners, err := backend.ListSelectedRunTargetOwners(ctx)
+	owners, err := backend.ListSelectedRunTargetOwners(ctx, runID)
 	if err != nil {
 		t.Fatalf("list selected-run target owners: %v", err)
 	}
@@ -696,7 +700,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	}
 	for _, route := range mustFanInBarrierRoutes(t, backend) {
 		if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
-			t.Fatalf("restore fan-in route %s: %v", route.Identity.InstancePath, err)
+			t.Fatalf("restore fan-in route %s: %v", route.Identity.Route.InstancePath, err)
 		}
 	}
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
@@ -762,7 +766,7 @@ func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrier
 func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
 	t.Helper()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
+	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runtimecorrelation.RunIDFromContext(ctx), Route: runtimeflowidentity.RouteForInstancePath("portfolio")}, runtimepipeline.WorkflowInstance{
 		InstanceID:      "portfolio",
 		StorageRef:      "portfolio",
 		EntityID:        entityID,
@@ -892,7 +896,10 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 
 func loadFanInBarrierPortfolio(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator) runtimepipeline.WorkflowInstance {
 	t.Helper()
-	instance, ok, err := pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("portfolio"))
+	instance, ok, err := pipeline.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runtimecorrelation.RunIDFromContext(ctx),
+		Route: runtimeflowidentity.RouteForInstancePath("portfolio"),
+	})
 	if err != nil || !ok {
 		t.Fatalf("load portfolio = found:%v err:%v", ok, err)
 	}

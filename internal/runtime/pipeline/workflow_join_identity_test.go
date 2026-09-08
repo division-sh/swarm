@@ -143,7 +143,7 @@ func (h *exactWorkflowJoinHarness) transition(nextState, eventType string) {
 
 func (h *exactWorkflowJoinHarness) instance() WorkflowInstance {
 	h.t.Helper()
-	instance, found, err := h.store.Load(h.ctx, h.route)
+	instance, found, err := h.store.Load(h.ctx, testRunScopedWorkflowRoute(h.ctx, h.route))
 	if err != nil || !found {
 		h.t.Fatalf("load workflow instance: found=%v err=%v", found, err)
 	}
@@ -248,7 +248,7 @@ func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.
 
 func exactJoinActivationForScope(t *testing.T, pc *PipelineCoordinator, store *workflowInstanceStore, ctx context.Context, scope exactJoinScope) joinruntime.Activation {
 	t.Helper()
-	instance, found, err := store.Load(ctx, scope.route)
+	instance, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, scope.route))
 	if err != nil || !found {
 		t.Fatalf("load exact join scope %s: found=%v err=%v", scope.path, found, err)
 	}
@@ -506,7 +506,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				if !ok || armedRef.FlowPath() != pipelineDeclarationFlowPath(scope.flowID) || upserts[0].Command.RoutingSource.Route().FlowID != scope.flowID {
 					t.Fatalf("armed declaration = ref:%#v command:%#v ok=%v", armedRef, upserts[0].Command, ok)
 				}
-				armedInstance, found, err := store.Load(ctx, route)
+				armedInstance, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 				if err != nil || !found {
 					t.Fatalf("load armed instance: found=%v err=%v", found, err)
 				}
@@ -537,7 +537,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				if err := deliver(pc, "member-b", "b"); err != nil {
 					t.Fatal(err)
 				}
-				instance, found, err := store.Load(ctx, route)
+				instance, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
 				if err != nil || !found {
 					t.Fatalf("load closed instance: found=%v err=%v", found, err)
 				}
@@ -929,7 +929,7 @@ func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.
 
 			before := make([]WorkflowInstance, 0, 3)
 			for _, scope := range []exactJoinScope{root, left, right} {
-				instance, _, _ := store.Load(ctx, scope.route)
+				instance, _, _ := store.Load(ctx, testRunScopedWorkflowRoute(ctx, scope.route))
 				before = append(before, instance)
 			}
 			hostile := root
@@ -938,7 +938,7 @@ func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.
 				t.Fatal("unrelated same-leaf flow scope selected the root declaration")
 			}
 			for index, scope := range []exactJoinScope{root, left, right} {
-				after, _, _ := store.Load(ctx, scope.route)
+				after, _, _ := store.Load(ctx, testRunScopedWorkflowRoute(ctx, scope.route))
 				if !exactJoinSemanticStateEqual(before[index], after) {
 					t.Fatalf("hostile same-leaf event mutated %s", scope.path)
 				}

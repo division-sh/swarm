@@ -78,10 +78,10 @@ func resolveCompletionSettlementPermitPostgres(
 		FROM agents
 		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
 		  AND agent_route_presence=$4 AND flow_scope_key=$5
-		  AND flow_instance_id=$6 AND flow_instance=$7
+		  AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid
 		FOR UPDATE
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
 	if err != nil {
 		return completionSettlementPermit{}, err
 	}
@@ -125,9 +125,9 @@ func resolveCompletionSettlementPermitSQLite(
 		FROM agents
 		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
 		  AND agent_route_presence=? AND flow_scope_key=?
-		  AND flow_instance_id=? AND flow_instance=?
+		  AND flow_instance_id=? AND flow_instance=? AND run_id=?
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
 	if err != nil {
 		return completionSettlementPermit{}, err
 	}
@@ -336,14 +336,14 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 		err = tx.QueryRowContext(ctx, `
 			SELECT lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase FROM agents
 			WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3 AND agent_route_presence=$4
-			  AND flow_scope_key=$5 AND flow_instance_id=$6 AND flow_instance=$7 FOR UPDATE
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
+			  AND flow_scope_key=$5 AND flow_instance_id=$6 AND flow_instance=$7 AND run_id=$8::uuid FOR UPDATE
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
 	} else {
 		err = tx.QueryRowContext(ctx, `
 			SELECT lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase FROM agents
 			WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=? AND agent_route_presence=?
-			  AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=?
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&epoch, &generation, &phase)
+			  AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=? AND run_id=?
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, fields.RunID).Scan(&epoch, &generation, &phase)
 	}
 	if err != nil {
 		return providerDrainRecoveryResolution{}, err
@@ -622,10 +622,10 @@ func finalizeProviderDrainPostgres(
 		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
 		  AND agent_route_presence=$4 AND flow_scope_key=$5
 		  AND flow_instance_id=$6 AND flow_instance=$7
-		  AND lifecycle_runtime_epoch=$9 AND lifecycle_generation=$10 AND lifecycle_phase='draining'
+		  AND lifecycle_runtime_epoch=$9 AND lifecycle_generation=$10 AND run_id=$11::uuid AND lifecycle_phase='draining'
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		string(permit.Target), permit.SuccessorEpoch, permit.SuccessorGeneration)
+		string(permit.Target), permit.SuccessorEpoch, permit.SuccessorGeneration, fields.RunID)
 	if err := requireExternalAttemptTransition(res, err); err != nil {
 		return nil, err
 	}
@@ -657,10 +657,10 @@ func finalizeProviderDrainSQLite(
 		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
 		  AND agent_route_presence=? AND flow_scope_key=?
 		  AND flow_instance_id=? AND flow_instance=?
-		  AND lifecycle_runtime_epoch=? AND lifecycle_generation=? AND lifecycle_phase='draining'
+		  AND lifecycle_runtime_epoch=? AND lifecycle_generation=? AND run_id=? AND lifecycle_phase='draining'
 	`, string(permit.Target), fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		permit.SuccessorEpoch, permit.SuccessorGeneration)
+		permit.SuccessorEpoch, permit.SuccessorGeneration, fields.RunID)
 	if err := requireExternalAttemptTransition(res, err); err != nil {
 		return nil, err
 	}
@@ -712,13 +712,13 @@ func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
 		  AND o.agent_id=$1 AND o.agent_name_owner=$2 AND o.agent_name_source=$3
 		  AND o.agent_route_presence=$4 AND o.flow_scope_key=$5
 		  AND o.flow_instance_id=$6 AND o.flow_instance=$7
-		  AND o.runtime_epoch=$8 AND o.generation=$9
+		  AND o.runtime_epoch=$8 AND o.generation=$9 AND o.agent_run_id=$10::uuid
 		  AND a.state IN ('authorized','launched','response_observed')
 		ORDER BY a.attempt_id
 		FOR UPDATE OF a,o
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation)
+		capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation, fields.RunID)
 	if err != nil {
 		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 	}
@@ -755,12 +755,12 @@ func (s *EffectSQLiteOwner) CaptureProviderAttemptDrainsSQLiteTx(
 		  AND o.agent_id=? AND o.agent_name_owner=? AND o.agent_name_source=?
 		  AND o.agent_route_presence=? AND o.flow_scope_key=?
 		  AND o.flow_instance_id=? AND o.flow_instance=?
-		  AND o.runtime_epoch=? AND o.generation=?
+		  AND o.runtime_epoch=? AND o.generation=? AND o.agent_run_id=?
 		  AND a.state IN ('authorized','launched','response_observed')
 		ORDER BY a.attempt_id
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation)
+		capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation, fields.RunID)
 	if err != nil {
 		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 	}
@@ -943,7 +943,7 @@ func insertProviderAttemptDrain(
 		drainID, candidate.AttemptID, candidate.OperationID, capture.LifecycleOperationID, capture.LifecycleTransitionID,
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation, capture.SuccessorRuntimeEpoch, capture.SuccessorGeneration, string(capture.Target),
-		capture.CapturedAt.UTC(), capture.ExpiresAt.UTC(),
+		capture.CapturedAt.UTC(), capture.ExpiresAt.UTC(), fields.RunID,
 	}
 	originValues := completionOriginValues(origin)
 	args = append(args[:17], append(originValues, args[17:]...)...)
@@ -954,8 +954,8 @@ func insertProviderAttemptDrain(
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 				predecessor_runtime_epoch, predecessor_generation, successor_runtime_epoch, successor_generation, target_phase,
 				origin_kind,origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token, origin_claim_version, origin_subscriber_type, origin_subscriber_id,origin_directive_operation_id,origin_directive_owner_id,
-				state, captured_at, expires_at
-			) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF($19,'')::uuid,NULLIF($20,'')::uuid,NULLIF($21,''),NULLIF($22,'')::uuid,NULLIF($23,0),NULLIF($24,''),NULLIF($25,''),NULLIF($26,'')::uuid,NULLIF($27,''),'pending',$28,$29)
+				state, captured_at, expires_at, run_id
+			) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF($19,'')::uuid,NULLIF($20,'')::uuid,NULLIF($21,''),NULLIF($22,'')::uuid,NULLIF($23,0),NULLIF($24,''),NULLIF($25,''),NULLIF($26,'')::uuid,NULLIF($27,''),'pending',$28,$29,$30::uuid)
 		`, args...)
 		return err
 	}
@@ -965,8 +965,8 @@ func insertProviderAttemptDrain(
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 			predecessor_runtime_epoch, predecessor_generation, successor_runtime_epoch, successor_generation, target_phase,
 				origin_kind,origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token, origin_claim_version, origin_subscriber_type, origin_subscriber_id,origin_directive_operation_id,origin_directive_owner_id,
-			state, captured_at, expires_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,0),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),'pending',?,?)
+			state, captured_at, expires_at, run_id
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,0),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),'pending',?,?,?)
 	`, args...)
 	return err
 }
