@@ -427,7 +427,7 @@ func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
 		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "signing"},
-		"ingress:telegram-package:telegram-chat:telegram",
+		"ingress:telegram-chat:telegram",
 	)
 	if err != nil {
 		t.Fatal(err)
