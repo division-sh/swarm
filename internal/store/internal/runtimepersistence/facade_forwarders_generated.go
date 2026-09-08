@@ -954,6 +954,10 @@ func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope timerobl
 	return s.timerObligationPostgresReader.ReadTimerObligations(ctx, scope, observedAt)
 }
 
+func (s *PostgresStore) ReconcileChannelOnboardingBinding(ctx context.Context, req channelonboarding.ReconcileBindingRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.ReconcileChannelOnboardingBinding(ctx, req)
+}
+
 func (s *PostgresStore) ReconcileChannelOnboardingEffectOutcomes(ctx context.Context, onboardingOperationID string, now time.Time) ([]effects.ChannelOnboardingEffectOutcome, error) {
 	return s.effectPostgresOwner.ReconcileChannelOnboardingEffectOutcomes(ctx, onboardingOperationID, now)
 }
@@ -1092,6 +1096,10 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req agent
 
 func (s *PostgresStore) ResetAll(metadata sessions.ResetMetadata) (sessions.ResetSummary, error) {
 	return s.lLMPostgresOwner.ResetAll(metadata)
+}
+
+func (s *PostgresStore) ResetChannelOnboardingPendingIdentity(ctx context.Context, req channelonboarding.PendingResetRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.ResetChannelOnboardingPendingIdentity(ctx, req)
 }
 
 func (s *PostgresStore) ResetStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
@@ -2142,6 +2150,10 @@ func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope tim
 	return s.timerObligationSQLiteReader.ReadTimerObligations(ctx, scope, observedAt)
 }
 
+func (s *SQLiteRuntimeStore) ReconcileChannelOnboardingBinding(ctx context.Context, req channelonboarding.ReconcileBindingRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.ReconcileChannelOnboardingBinding(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) ReconcileChannelOnboardingEffectOutcomes(ctx context.Context, onboardingOperationID string, now time.Time) ([]effects.ChannelOnboardingEffectOutcome, error) {
 	return s.effectSQLiteOwner.ReconcileChannelOnboardingEffectOutcomes(ctx, onboardingOperationID, now)
 }
@@ -2284,6 +2296,10 @@ func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req 
 
 func (s *SQLiteRuntimeStore) ResetAll(metadata sessions.ResetMetadata) (sessions.ResetSummary, error) {
 	return s.lLMSQLiteOwner.ResetAll(metadata)
+}
+
+func (s *SQLiteRuntimeStore) ResetChannelOnboardingPendingIdentity(ctx context.Context, req channelonboarding.PendingResetRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.ResetChannelOnboardingPendingIdentity(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ResetStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {

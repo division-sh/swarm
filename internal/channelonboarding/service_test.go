@@ -383,7 +383,7 @@ func TestCredentialRotationBeforeConfirmationResetsParentAndAdmitsReplacement(t 
 					TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
 					Phase: PhaseAwaitingOperatorConfirmation, Revision: 5, SaveProof: saveProof,
 					CredentialReservations: reservations, CredentialAdmissions: admissions,
-					IdentityOperationID: identityID, BindingRevision: 3, RequestedAt: now, UpdatedAt: now,
+					IdentityOperationID: identityID, RequestedAt: now, UpdatedAt: now,
 				}
 				op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
 				identities := &cancellationTestIdentities{
@@ -445,7 +445,7 @@ func TestCredentialStaleIdentityRestartResetsParentWithoutExternalEffects(t *tes
 		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
 		Phase: PhaseAwaitingOperatorConfirmation, Revision: 5, CredentialReservations: credentialReservations(candidate),
-		IdentityOperationID: identityID, BindingRevision: 1, RequestedAt: now, UpdatedAt: now,
+		IdentityOperationID: identityID, RequestedAt: now, UpdatedAt: now,
 	}
 	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
 	store := &cancellationTestStore{op: op}
@@ -1986,6 +1986,46 @@ func (s *cancellationTestStore) ListChannelOnboardingOperations(ctx context.Cont
 	return append(out, s.op), nil
 }
 
+func (s *cancellationTestStore) ReconcileChannelOnboardingBinding(ctx context.Context, req ReconcileBindingRequest) (Operation, error) {
+	if s.op.Revision != req.ExpectedRevision || (s.op.BindingRevision > 0 && s.op.BindingRevision != req.ExpectedBindingRevision) {
+		return Operation{}, ErrRevisionConflict
+	}
+	if !req.ResetCredentials && s.op.BindingRevision == req.ExpectedBindingRevision {
+		return s.op, nil
+	}
+	phase := s.op.Phase
+	if req.ResetCredentials {
+		phase = PhasePreparing
+		s.op.IdentityOperationID = ""
+	}
+	return s.AdvanceChannelOnboarding(ctx, AdvanceRequest{
+		OperationID: req.OperationID, ExpectedRevision: req.ExpectedRevision, Phase: phase,
+		BindingRevision:             req.ExpectedBindingRevision,
+		ReplaceCredentialAdmissions: req.ResetCredentials, Now: req.Now,
+	})
+}
+
+func (s *cancellationTestStore) ResetChannelOnboardingPendingIdentity(ctx context.Context, req PendingResetRequest) (Operation, error) {
+	s.observe(ctx)
+	if s.op.OperationID != req.OperationID || s.op.Revision != req.ExpectedRevision {
+		return Operation{}, ErrRevisionConflict
+	}
+	if !req.Commit {
+		return s.op, nil
+	}
+	if s.advanceErrOnce != nil {
+		err := s.advanceErrOnce
+		s.advanceErrOnce = nil
+		return Operation{}, err
+	}
+	s.op.IdentityOperationID = ""
+	s.op.CredentialAdmissions = nil
+	s.op.Phase = PhasePreparing
+	s.op.Revision++
+	s.op.UpdatedAt = req.Now
+	return s.op, nil
+}
+
 func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, req AdvanceRequest) (Operation, error) {
 	s.observe(ctx)
 	if s.advanceErrOnce != nil {
@@ -2031,14 +2071,8 @@ func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, re
 	if req.IdentityOperationID != "" {
 		s.op.IdentityOperationID = req.IdentityOperationID
 	}
-	if req.ClearIdentityOperationID {
-		s.op.IdentityOperationID = ""
-	}
 	if req.BindingRevision > 0 {
 		s.op.BindingRevision = req.BindingRevision
-	}
-	if req.ClearBindingRevision {
-		s.op.BindingRevision = 0
 	}
 	if req.ConfirmationOperationID != "" {
 		s.op.ConfirmationOperationID = req.ConfirmationOperationID
