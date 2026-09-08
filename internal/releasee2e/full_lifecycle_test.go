@@ -386,6 +386,11 @@ func assertFullLifecycleReadySurface(t *testing.T, process *releaseServeProcess)
 
 func requireFullLifecycleHealth(t *testing.T, rpc *releaseRPCClient) string {
 	t.Helper()
+	return requireLifecycleHealthPosture(t, rpc, "mock_only")
+}
+
+func requireLifecycleHealthPosture(t *testing.T, rpc *releaseRPCClient, posture string) string {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var health struct {
@@ -403,10 +408,10 @@ func requireFullLifecycleHealth(t *testing.T, rpc *releaseRPCClient) string {
 	if err := rpc.call(ctx, "health.check", map[string]any{}, &health); err != nil {
 		t.Fatal(err)
 	}
-	if !health.Alive || !health.Ready || !health.DBOK || !health.RuntimeOK || health.ExecutionPosture != "mock_only" ||
+	if !health.Alive || !health.Ready || !health.DBOK || !health.RuntimeOK || health.ExecutionPosture != posture ||
 		health.Bundle.WorkflowName != "." || health.Bundle.WorkflowVersion != health.Bundle.BundleHash ||
 		strings.TrimSpace(health.Bundle.BundleHash) == "" {
-		t.Fatalf("health.check = %#v, want ready filesystem-root identity with bundle-hash version and mock_only runtime", health)
+		t.Fatalf("health.check = %#v, want ready filesystem-root identity with bundle-hash version and %s runtime", health, posture)
 	}
 	return health.Bundle.BundleHash
 }
@@ -609,13 +614,18 @@ func assertFullLifecycleStandingReceiptContinuity(t *testing.T, first fullLifecy
 
 func sendFullLifecycleTelegramUpdate(t *testing.T, process *releaseServeProcess, updateID, chatID int) fullLifecycleIngressReceipt {
 	t.Helper()
+	return sendLifecycleTelegramUpdateWithSecret(t, process, updateID, chatID, fullLifecycleSigningSecret)
+}
+
+func sendLifecycleTelegramUpdateWithSecret(t *testing.T, process *releaseServeProcess, updateID, chatID int, signingSecret string) fullLifecycleIngressReceipt {
+	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"lifecycle %d"}}`, updateID, updateID, chatID, chatID, updateID))
 	request, err := http.NewRequest(http.MethodPost, process.apiBase+"/webhooks/chat/telegram", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Telegram-Bot-Api-Secret-Token", fullLifecycleSigningSecret)
+	request.Header.Set("X-Telegram-Bot-Api-Secret-Token", signingSecret)
 	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
 	if err != nil {
 		t.Fatalf("send lifecycle Telegram webhook: %v\n%s", err, process.output.String())
@@ -919,6 +929,11 @@ func assertFullLifecycleDeliveryCompleted(t *testing.T, rpc *releaseRPCClient, r
 
 func waitForFullLifecycleConvergence(t *testing.T, process *releaseServeProcess, runID string, ingressCount int) {
 	t.Helper()
+	waitForLifecycleConvergenceMode(t, process, runID, ingressCount, "mock")
+}
+
+func waitForLifecycleConvergenceMode(t *testing.T, process *releaseServeProcess, runID string, ingressCount int, mode string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 	defer cancel()
 	var diagnosis goldenDiagnosis
@@ -956,8 +971,8 @@ func waitForFullLifecycleConvergence(t *testing.T, process *releaseServeProcess,
 		}
 		if event.EventName == "platform.activity_requested" || strings.HasSuffix(event.EventName, "/telegram.reply_requested") ||
 			strings.HasSuffix(event.EventName, "/telegram_send_message.succeeded") {
-			if event.ExecutionMode != "mock" {
-				t.Fatalf("lifecycle event %s execution mode = %q, want mock", event.EventName, event.ExecutionMode)
+			if event.ExecutionMode != mode {
+				t.Fatalf("lifecycle event %s execution mode = %q, want %s", event.EventName, event.ExecutionMode, mode)
 			}
 		}
 		for _, delivery := range event.Deliveries {
@@ -967,7 +982,7 @@ func waitForFullLifecycleConvergence(t *testing.T, process *releaseServeProcess,
 			seenDeliveries[delivery.DeliveryID] = true
 		}
 	}
-	assertFullLifecycleMockAgentReadback(t, ctx, process.rpc, runID)
+	assertLifecycleAgentModeReadback(t, ctx, process.rpc, runID, mode)
 }
 
 func countFullLifecycleEvents(events []fullLifecycleEvent, name string) int {
@@ -1162,7 +1177,7 @@ func assertFullLifecycleOldEvidenceUnchanged(t *testing.T, rpc *releaseRPCClient
 	}
 }
 
-func assertFullLifecycleMockAgentReadback(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string) {
+func assertLifecycleAgentModeReadback(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID, mode string) {
 	t.Helper()
 	var agents struct {
 		Agents []goldenAgentSummary `json:"agents"`
@@ -1174,21 +1189,21 @@ func assertFullLifecycleMockAgentReadback(t *testing.T, ctx context.Context, rpc
 	for _, agent := range agents.Agents {
 		if strings.Contains(agent.AgentID, "phrase-bot") {
 			foundAgent = true
-			if agent.ExecutionMode != "mock" {
-				t.Fatalf("agent.list phrase-bot = %#v, want mock execution", agent)
+			if agent.ExecutionMode != mode {
+				t.Fatalf("agent.list phrase-bot = %#v, want %s execution", agent, mode)
 			}
 		}
 	}
 	if !foundAgent {
-		t.Fatalf("agent.list omitted phrase-bot mock owner: %#v", agents.Agents)
+		t.Fatalf("agent.list omitted phrase-bot owner: %#v", agents.Agents)
 	}
 	conversations := listGoldenConversations(t, ctx, rpc, runID)
 	foundConversation := false
 	for _, conversation := range conversations {
 		if strings.Contains(conversation.AgentID, "phrase-bot") {
 			foundConversation = true
-			if conversation.ExecutionMode != "mock" || conversation.TurnCount < 1 {
-				t.Fatalf("conversation.list phrase-bot = %#v, want mock turn evidence", conversation)
+			if conversation.ExecutionMode != mode || conversation.TurnCount < 1 {
+				t.Fatalf("conversation.list phrase-bot = %#v, want %s turn evidence", conversation, mode)
 			}
 		}
 	}

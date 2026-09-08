@@ -202,6 +202,10 @@ runtime network readiness, a live turn or retained restart. The expected OAuth
 credential is absent from this process environment; no credential values were read
 or logged and no authenticated live-provider proof is credited.
 The existing paid Claude test does not cover the entire planned L matrix.
+The specific `TestCommandLiveServeAndRestartParity` harness is now implemented
+using the real public process, both retained stores and separate SQLite dev epochs.
+Only its prerequisite refusal and shared H-helper regression have executed so far;
+its authenticated L rows remain unproven, as do the separate live archetype rows.
 After #2432 integration the full-profile rerun uses an explicit 30-minute package
 timeout without relaxing scenario deadlines. No final audit or
 review-ready PR exists. This checklist must not be submitted as proof of closure.

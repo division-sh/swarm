@@ -20287,7 +20287,10 @@ test_specification:
       surface_credit: >-
         T runs fresh public authored/derived tests without ingress. H owns J1-J5 retained mock lifecycle and signed ingress.
         L separately exercises actual public live serve/dev, real provider prerequisites and graceful/crash restart on both
-        supported stores. Preserve the exact workload and assertions across this separation. Credential-absent ingress
+        supported retained stores; dev epochs remain SQLite. TestCommandLiveServeAndRestartParity owns this provisioned
+        public-process journey, with real provider credentials and an explicitly authorized Telegram test destination.
+        Missing prerequisites or an unexecuted opt-in test are not passing L evidence. Preserve the exact workload and
+        assertions across this separation. Credential-absent ingress
         startup, subsequent activation and Telegram example collapse are split to #2319, not proven by provisioned L or H
         execution and not prerequisites to #2321 review/merge/closure. The broader credential-absent onboarding claim
         remains open; existing fail-closed credential checks remain valid until that separate work ships.

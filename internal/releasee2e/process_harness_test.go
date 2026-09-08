@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,8 +51,9 @@ func buildReleaseBinaryWithArgs(t *testing.T, outputRoot string, buildArgs ...st
 }
 
 type releaseProcessOutput struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	secrets []string
 }
 
 func (o *releaseProcessOutput) Write(p []byte) (int, error) {
@@ -63,7 +65,13 @@ func (o *releaseProcessOutput) Write(p []byte) (int, error) {
 func (o *releaseProcessOutput) String() string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.buf.String()
+	output := o.buf.String()
+	for _, secret := range o.secrets {
+		if secret != "" {
+			output = strings.ReplaceAll(output, secret, "[REDACTED]")
+		}
+	}
+	return output
 }
 
 type releaseProcessSpec struct {
@@ -81,6 +89,8 @@ type releaseProcessSpec struct {
 	TokenFile                   string
 	Token                       string
 	Env                         []string
+	WorkspaceBackend            string
+	RedactValues                []string
 }
 
 type releaseServeProcess struct {
@@ -96,11 +106,15 @@ type releaseServeProcess struct {
 
 func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServeProcess {
 	t.Helper()
-	output := &releaseProcessOutput{}
+	output := &releaseProcessOutput{secrets: append([]string(nil), options.RedactValues...)}
+	workspaceBackend := options.WorkspaceBackend
+	if workspaceBackend == "" {
+		workspaceBackend = "host"
+	}
 	args := []string{
 		"serve",
 		"--backend", "claude_cli",
-		"--workspace-backend", "host",
+		"--workspace-backend", workspaceBackend,
 		"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.APIPort),
 		"--mcp-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.MCPPort),
 		"--shutdown-grace", "2s",

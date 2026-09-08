@@ -228,8 +228,44 @@ swarm-workspace:agent-g-2321 is available; direct `claude --version` returned
 /tmp/agent-g-2321-workspace-build.log. No authenticated provider turn, runtime
 network readiness or retained restart is credited. The expected OAuth credential
 is absent from this process environment; the supported configuration location
-request remains outstanding. The exact L harness still needs implementation.
+request remains outstanding. At this checkpoint the exact L harness still needed implementation;
+the next section records its subsequent addition, not passing live execution.
 
 Administrative split verification: API-spec package passed (4.773s), both YAML
 documents parsed, and git diff --check passed. No production runtime code changed;
 the full suite is deferred to the integrated diagnostic repair, not claimed green.
+
+## Public Live Restart Harness
+
+Added `TestCommandLiveServeAndRestartParity` in releasee2e. It builds and launches
+the actual public binary, never the H entry, against the unchanged standing Telegram
+source including its authored double. It uses existing ordered-receipt, exact-route,
+delivery, event, decision-card and public readback assertions with an explicit live
+expectation; H still asserts mock mode. No runtime semantic owner changed.
+
+The planned execution covers retained SQLite and isolated PostgreSQL, graceful
+restart, paused-delivery SIGKILL followed by intrinsic default recovery and fresh
+same-conversation ingress, then two SQLite dev epochs and reopening the untouched
+retained store. It checks immutable old event/delivery facts while permitting new
+startup diagnostics, exact transport/route continuity, live agent/conversation/event
+mode, connector success counts and source bytes unchanged. Dev is SQLite even when
+the retained store is PostgreSQL, not a claim of PostgreSQL dev-scratch support.
+
+Opt in with `SWARM_COMMAND_LIVE_E2E=1`. Required inputs are
+`CLAUDE_CODE_OAUTH_TOKEN`, `TELEGRAM_BOT_TOKEN`,
+`SWARM_COMMAND_LIVE_TELEGRAM_CHAT_ID` (authorized dedicated private chat),
+`SWARM_COMMAND_LIVE_WORKSPACE_IMAGE`, and `SWARM_TEST_POSTGRES_DSN`.
+`SWARM_COMMAND_LIVE_WORKSPACE_NETWORK` optionally selects a supported deployment
+network. Credentials enter through public `secrets set --stdin`, not source edits;
+API/signing credentials are fresh local transport secrets. The test performs real
+provider turns and sends real Telegram messages; no bot or provider double is used.
+Process output is redacted before diagnostic rendering, including split writes.
+
+Execution so far: prerequisite, output-redaction, public-boundary and existing
+journey-census tests pass (0.017s); existing H SQLite smoke passes (26.100s).
+Explicit L opt-in without the OAuth credential fails before process creation with
+the exact missing prerequisite (0.003s). That is refusal evidence, NOT live success.
+The retained H dual-store J1-J5 matrix is submitted through swarm-test and currently
+queued behind other work; no matrix result is claimed yet. No final full-suite run
+or provisioned L pass is claimed. Bare live archetype proof is still separate work,
+not automatically credited by this fixture or the installed workspace image.
