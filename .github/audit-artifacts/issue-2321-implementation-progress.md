@@ -423,3 +423,27 @@ root cause. See the updated observation artifact and #2321 comment
 https://github.com/division-sh/swarm/issues/2321#issuecomment-5592833963.
 All launched proof jobs have completed. No further sends, production expansion,
 full-suite success or review-ready PR is claimed. #2432 remains frozen.
+
+## Approved Restart Addition: Failure Handoff Implemented
+
+The preceding hypothesis/classification-request status is superseded by the lead's
+confirmed Docker reproduction and bounded approval:
+https://github.com/division-sh/swarm/issues/2321#issuecomment-5593141304.
+The full approved census is transcribed in issue-2321-provider-restart-amendment.md.
+
+First coherent repair implements nonretryable uncertain CLI failure handoff and
+bounded structured error explanations, with authoritative spec updates. Exact
+prelaunch retry remains unchanged. The original cause and explanation persist
+into terminal readback; no later retry/replay-conflict overwrites them.
+
+Passing proof: selected-store delivery/restart/settlement-fault/prelaunch controls
+(SQLite/Postgres, 5.893s); targeted timeout/inventory/diagnostic/startup tests x3
+(0.697s); focused race tests (13.605s); apispec (1.652s); full LLM package through
+swarm-test (2.220s). Tests first exposed stale expectations for retryable started
+failures, corrected alongside the binding contract. Positive fixture output now
+includes authoritative init; result-only JSON remains a negative inventory case.
+
+Provider-private backing implementation, offline retention/isolation/cleanup proof
+and new dual-store L restart are still outstanding. No paid live calls, delivery
+replays, full integrated-suite pass or review-ready PR claimed. #2432 remains a
+separate blocker. No new issue, framework, migration or retry policy introduced.

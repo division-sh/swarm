@@ -6037,6 +6037,10 @@ engine:
           - Provider responses must normalize assistant messages and tool calls into the platform response model.
           - Raw provider responses must be preserved for turn/audit persistence.
           - Provider-specific stream parsers are implementation details behind the adapter contract, not generic platform truth.
+          - Claude CLI failure diagnostics select a bounded explanation from typed result errors in JSON or JSONL before
+            truncation, redact injected provider and MCP credentials before bounding, and never substitute arbitrary
+            structured output, successful message text, prompts, or usage fields for an error explanation. Malformed,
+            unknown and plain-text errors remain bounded. Error prose does not authorize retries.
         native_tools:
           rules:
           - The adapter must declare whether it is strict provider-native for native_tools and which native capabilities are callable.
@@ -36101,7 +36105,10 @@ managed_external_effect_authority:
     postlaunch_read_only_failure: Terminal connector failure with no automatic retry.
     postlaunch_write_or_unknown_failure: Every error after cmd.Start succeeds, including provider exit, response validation,
       mutable projection, and atomic provider-head settlement failure, settles the attempt platform.outcome_uncertain with
-      adapter-specific evidence while preserving the original failure as the returned classification; automatic redispatch is forbidden.
+      adapter-specific evidence and returns a nonretryable platform.outcome_uncertain classification. The original typed
+      failure remains attached as cause evidence, including on terminal delivery readback. A joined settlement or heartbeat
+      failure must not expose a retryable inner cause as the outer decision. Exact prelaunch rejection retains its existing
+      canonical retry policy; automatic postlaunch redispatch is forbidden.
     current_completion: Successor-facing session, conversation, watchdog, provider-head, turn-count, and rotation projection is lifecycle-token validated at the same selected-store mutation boundary as immutable completion evidence. Current projection and evidence commit together.
     current_delivery_response_continuation:
       owner: settled runtime_external_effect_attempt evidence plus selected-store authorization and the normal provider adapter loop

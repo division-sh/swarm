@@ -173,10 +173,11 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 	}
 	if result.found {
 		if waitErr != nil && !errors.Is(runCtx.Err(), context.Canceled) {
-			stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
+			secrets := claudeCommandSecrets(cmd)
+			stderrText := summarizeCLIErrorOutput(string(joinRawLines(stderrLines)), secrets...)
 			stdoutText := ""
 			if result.resp != nil {
-				stdoutText = strings.TrimSpace(string(result.resp.Raw))
+				stdoutText = summarizeCLIErrorOutput(string(result.resp.Raw), secrets...)
 			}
 			failure := claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_startup_probe_failed", "startup_probe", waitErr)
 			_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)
@@ -185,7 +186,7 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 		return result.resp, nil
 	}
 
-	stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
+	stderrText := summarizeCLIErrorOutput(string(joinRawLines(stderrLines)), claudeCommandSecrets(cmd)...)
 	if isClaudeAuthOutput(stderrText) {
 		failure := claudeCLIProcessFailure(stderrText, "", "claude_cli_startup_probe_failed", "startup_probe", waitErr)
 		_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)

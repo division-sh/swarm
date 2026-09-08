@@ -291,3 +291,15 @@ mixed/native-negative controls pass. The separate bounded escalation artifact
 records this pre-existing capability defect for explicit lead disposition before
 production repair. L remains blocked; external-send success is not turn acceptance,
 retained restart, PostgreSQL L, or final-suite closure.
+
+## Provider Restart Gate Follow-Through
+
+Lead independently confirmed the transcript-loss defect and approved three bounded
+additions at issuecomment-5593141304. The inventory repair is already pushed;
+the new first repair covers uncertain-failure disposition and bounded structured
+error explanations. See issue-2321-provider-restart-amendment.md for the complete
+R1-R19 accounting and executed manifestation rows. Full LLM package, focused race,
+API-spec, both-store terminal delivery/restart, persistence-fault and prelaunch
+retry controls pass. This is not provider-private backing or live restart closure.
+R1-R10/R16 and separate #2432 remain outstanding. No new live sends or full
+integrated suite were run for this commit.
