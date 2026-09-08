@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,7 +85,7 @@ func TestSelectedContractWorkflowStateProjectionDoesNotInventUndeclaredAgentRead
 			},
 		}}},
 		map[string]executionmode.Mode{eventID: executionmode.Mock},
-		runtimemanager.AgentManagerOptions{},
+		runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live},
 	)
 	if err != nil {
 		t.Fatalf("selectedContractWorkflowStateProjection: %v", err)
@@ -140,7 +141,7 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 							Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: "entity-1"}),
 						}
 					}
-					prepared, err := selectedContractWorkflowStateProjectionWithReadiness(plan, source, planning, modes, runtimemanager.AgentManagerOptions{})
+					prepared, err := selectedContractWorkflowStateProjectionWithReadiness(plan, source, planning, modes, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -217,7 +218,7 @@ func TestSelectedContractWorkflowStateProjectionPreservesExactTemplateActivityRo
 			SourceEventID: "activity-event", EventName: runfork.RunForkSelectedContractPlatformActivityEvent,
 		}}},
 		map[string]executionmode.Mode{"activity-event": executionmode.Mock},
-		runtimemanager.AgentManagerOptions{},
+		runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live},
 	)
 	if err != nil {
 		t.Fatalf("selectedContractWorkflowStateProjection: %v", err)
@@ -283,7 +284,7 @@ func selectedContractWorkflowStateProjection(
 	for _, event := range planning.RecipientPlanEvents {
 		sourceModes[strings.TrimSpace(event.SourceEventID)] = executionmode.Mock
 	}
-	prepared, err := selectedContractWorkflowStateProjectionWithReadiness(plan, source, planning, sourceModes, runtimemanager.AgentManagerOptions{})
+	prepared, err := selectedContractWorkflowStateProjectionWithReadiness(plan, source, planning, sourceModes, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 	if err != nil {
 		return nil, err
 	}

@@ -1595,7 +1595,6 @@ func standingSQLiteDiagnostics(path string) string {
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	removeExactCanonicalTelegramAgentMock(t, root)
 	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegramBaseURL})
 	return root
 }

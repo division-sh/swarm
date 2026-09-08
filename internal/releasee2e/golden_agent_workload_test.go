@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
@@ -36,6 +37,7 @@ const (
 var goldenSmokeCandidateIDs = []string{"alpha", "beta"}
 
 type goldenWorkloadOptions struct {
+	lifecycleBinary   string
 	candidateIDs      []string
 	processGOMAXPROCS int
 	runDeadline       time.Duration
@@ -48,7 +50,8 @@ func TestGoldenAgentWorkloadSQLiteSmoke(t *testing.T) {
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
 	runGoldenAgentWorkload(t, binaryPath, releaseRoot, goldenSQLiteStore(releaseRoot), false, goldenWorkloadOptions{
-		candidateIDs: goldenSmokeCandidateIDs,
+		lifecycleBinary: buildOwnedMockLifecycleBinary(t, releaseRoot),
+		candidateIDs:    goldenSmokeCandidateIDs,
 	})
 }
 
@@ -60,7 +63,8 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 		t.Fatalf("create release project: %v", err)
 	}
 	contracts := filepath.Join(root, "contracts")
-	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
+	// L: exercise public live process ownership without claiming agent execution.
+	copyReleaseTree(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), contracts)
 	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-sqlite-possession-e2e\n\ngo 1.23.0\n")
 	store := goldenSQLiteStore(root)
 	configPath := filepath.Join(root, "config", "swarm.yaml")
@@ -115,7 +119,7 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			goldenServedBundleHash(t, process.rpc)
+			goldenServedBundleHash(t, process.rpc, "live")
 			if info, err := os.Stat(test.possessionPath); err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
 				t.Fatalf("serve possession coordinate %s: info=%v err=%v", test.possessionPath, info, err)
 			}
@@ -135,10 +139,12 @@ func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
 	t.Run("sqlite", func(t *testing.T) {
 		root := filepath.Join(releaseRoot, "sqlite-restart")
 		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), true, goldenWorkloadOptions{
-			candidateIDs: goldenSmokeCandidateIDs,
+			lifecycleBinary: lifecycleBinary,
+			candidateIDs:    goldenSmokeCandidateIDs,
 		})
 	})
 	t.Run("postgres", func(t *testing.T) {
@@ -148,7 +154,8 @@ func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 		}
 		root := filepath.Join(releaseRoot, "postgres-restart")
 		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), true, goldenWorkloadOptions{
-			candidateIDs: goldenSmokeCandidateIDs,
+			lifecycleBinary: lifecycleBinary,
+			candidateIDs:    goldenSmokeCandidateIDs,
 		})
 	})
 }
@@ -165,6 +172,7 @@ func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends(t *testing.T) {
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildRaceReleaseBinary(t, releaseRoot)
 	options := goldenWorkloadOptions{
+		lifecycleBinary:   buildOwnedMockLifecycleBinary(t, releaseRoot, "-race"),
 		candidateIDs:      goldenBurstCandidateIDs(),
 		processGOMAXPROCS: goldenBurstGOMAXPROCS,
 		runDeadline:       goldenBurstDeadline,
@@ -212,6 +220,7 @@ func goldenContinuousProofProfile(t *testing.T) (string, bool) {
 func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T) {
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
 	root := filepath.Join(releaseRoot, "sqlite-dev-restart")
 	store := goldenStoreSelection{name: "sqlite", configYAML: "store:\n  backend: sqlite\n"}
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -231,17 +240,18 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	mcpPort := freeReleaseTCPPort(t)
 	start := func(dev bool) *releaseServeProcess {
 		return startReleaseServe(t, releaseProcessSpec{
-			BinaryPath: binaryPath,
-			WorkingDir: root,
-			ConfigPath: configPath,
-			Source:     contracts,
-			Store:      store.name,
-			Dev:        dev,
-			APIPort:    apiPort,
-			MCPPort:    mcpPort,
-			TokenFile:  tokenFile,
-			Token:      goldenAPIToken,
-			Env:        env,
+			BinaryPath:                  binaryPath,
+			InternalMockLifecycleBinary: lifecycleBinary,
+			WorkingDir:                  root,
+			ConfigPath:                  configPath,
+			Source:                      contracts,
+			Store:                       store.name,
+			Dev:                         dev,
+			APIPort:                     apiPort,
+			MCPPort:                     mcpPort,
+			TokenFile:                   tokenFile,
+			Token:                       goldenAPIToken,
+			Env:                         env,
 		})
 	}
 
@@ -252,7 +262,7 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 		t.Fatal(err)
 	}
 	readyCancel()
-	bundleHash := goldenServedBundleHash(t, process.rpc)
+	bundleHash := goldenServedBundleHash(t, process.rpc, "mock_only")
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, goldenSmokeCandidateIDs)
 	waitForGoldenCrashCheckpoint(t, process.rpc, runID, goldenSmokeCandidateIDs, goldenRunDeadline)
 	if err := process.killAndWait(5 * time.Second); err != nil {
@@ -265,7 +275,7 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	if err != nil {
 		t.Fatalf("restart fresh dev scratch epoch: %v", err)
 	}
-	if restartedHash := goldenServedBundleHash(t, restarted.rpc); restartedHash != bundleHash {
+	if restartedHash := goldenServedBundleHash(t, restarted.rpc, "mock_only"); restartedHash != bundleHash {
 		t.Fatalf("restarted bundle hash = %q, want unchanged persisted source %q", restartedHash, bundleHash)
 	}
 	missingCtx, missingCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -294,7 +304,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			if err := os.MkdirAll(test.root, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), filepath.Join(test.root, "contracts"))
+			copyReleaseTree(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), filepath.Join(test.root, "contracts"))
 			writeReleaseFile(t, filepath.Join(test.root, ".swarm", "swarm.yaml"), goldenRuntimeConfig(goldenStoreSelection{name: "sqlite", configYAML: "store:\n  backend: sqlite\n"}))
 			writeReleaseFile(t, filepath.Join(test.root, "api-token"), goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, test.root, "", 0)
@@ -329,7 +339,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 				t.Fatal(err)
 			}
 			cancel()
-			goldenServedBundleHash(t, process.rpc)
+			goldenServedBundleHash(t, process.rpc, "live")
 			scratchPath := filepath.Join(contracts, ".swarm", "stores", "dev-scratch.db")
 			if info, err := os.Stat(scratchPath); err != nil || !info.Mode().IsRegular() {
 				t.Fatalf("canonical dev scratch store %s: info=%v err=%v", scratchPath, info, err)
@@ -351,7 +361,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 		}
 		contracts := filepath.Join(projectRoot, "contracts")
-		copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
+		copyReleaseTree(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), contracts)
 		invocationEnv := goldenProcessEnv(t, invocationRoot, "", 0)
 		assertGoldenProcessHasNoExternalExecutables(t, invocationEnv)
 
@@ -389,7 +399,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			t.Fatal(err)
 		}
 		borrowedCancel()
-		goldenServedBundleHash(t, borrowed.rpc)
+		goldenServedBundleHash(t, borrowed.rpc, "live")
 		if err := borrowed.stopAndWait(5 * time.Second); err != nil {
 			t.Fatalf("borrowed non-dev teardown: %v\n%s", err, borrowed.output.String())
 		}
@@ -415,7 +425,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			t.Fatal(err)
 		}
 		localCancel()
-		goldenServedBundleHash(t, local.rpc)
+		goldenServedBundleHash(t, local.rpc, "live")
 		if err := local.stopAndWait(5 * time.Second); err != nil {
 			t.Fatalf("remediated local dev teardown: %v\n%s", err, local.output.String())
 		}
@@ -523,6 +533,10 @@ func goldenDatabaseName(t *testing.T) string {
 
 func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenStoreSelection, restart bool, options goldenWorkloadOptions) {
 	t.Helper()
+	if options.lifecycleBinary == "" {
+		t.Fatal("retained mock workload requires its internal compiled lifecycle binary")
+	}
+	t.Log("proof_surface=H; exact mock workload/restart proof, not public serve/test")
 	const (
 		configOperand    = "swarm.yaml"
 		contractsOperand = "contracts"
@@ -570,16 +584,17 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	mcpPort := freeReleaseTCPPort(t)
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
-			BinaryPath: binaryPath,
-			WorkingDir: projectRoot,
-			ConfigPath: configOperand,
-			Source:     contractsOperand,
-			Store:      store.name,
-			APIPort:    apiPort,
-			MCPPort:    mcpPort,
-			TokenFile:  tokenOperand,
-			Token:      goldenAPIToken,
-			Env:        env,
+			BinaryPath:                  binaryPath,
+			InternalMockLifecycleBinary: options.lifecycleBinary,
+			WorkingDir:                  projectRoot,
+			ConfigPath:                  configOperand,
+			Source:                      contractsOperand,
+			Store:                       store.name,
+			APIPort:                     apiPort,
+			MCPPort:                     mcpPort,
+			TokenFile:                   tokenOperand,
+			Token:                       goldenAPIToken,
+			Env:                         env,
 		})
 		ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 		defer cancel()
@@ -589,7 +604,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		return process
 	}
 	process := start()
-	bundleHash := goldenServedBundleHash(t, process.rpc)
+	bundleHash := goldenServedBundleHash(t, process.rpc, "mock_only")
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, options.candidateIDs)
 	var preRestartRuntimeLog *goldenRuntimeLog
 	if restart {
@@ -649,7 +664,6 @@ func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
 
 func goldenRuntimeConfig(store goldenStoreSelection) string {
 	return "runtime:\n" +
-		"  execution_posture: mock_only\n" +
 		"  recovery_on_startup: true\n" +
 		"llm:\n" +
 		"  backend: claude_cli\n" +
@@ -725,7 +739,7 @@ func assertGoldenProcessHasNoExternalExecutables(t *testing.T, env []string) {
 	}
 }
 
-func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient) string {
+func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient, wantPosture string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -744,9 +758,9 @@ func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient) string {
 	if err := rpc.call(ctx, "health.check", map[string]any{}, &health); err != nil {
 		t.Fatal(err)
 	}
-	if !health.Alive || !health.Ready || !health.DBOK || !health.RuntimeOK || health.ExecutionPosture != "mock_only" ||
+	if !health.Alive || !health.Ready || !health.DBOK || !health.RuntimeOK || health.ExecutionPosture != wantPosture ||
 		health.Bundle.WorkflowName != "." || health.Bundle.WorkflowVersion != health.Bundle.BundleHash || strings.TrimSpace(health.Bundle.BundleHash) == "" {
-		t.Fatalf("health.check = %#v, want ready root flow at the exact admitted bundle hash in mock_only posture", health)
+		t.Fatalf("health.check = %#v, want ready root flow at the exact admitted bundle hash in %s posture", health, wantPosture)
 	}
 	return health.Bundle.BundleHash
 }

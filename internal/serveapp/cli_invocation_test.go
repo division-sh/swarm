@@ -22,6 +22,10 @@ func repoRootForTest() string {
 }
 
 func executeCLIFrom(ctx context.Context, root string, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner) int {
+	return executeCLIFromWithRunners(ctx, root, args, out, errOut, runServe, RunTestSession)
+}
+
+func executeCLIFromWithRunners(ctx context.Context, root string, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner, runTest cliapp.TestSessionRunner) int {
 	cliInvocationTestMu.Lock()
 	defer cliInvocationTestMu.Unlock()
 
@@ -37,11 +41,11 @@ func executeCLIFrom(ctx context.Context, root string, args []string, out, errOut
 			panic(err)
 		}
 	}()
-	return cliapp.Execute(ctx, args, out, errOut, runServe)
+	return cliapp.Execute(ctx, args, out, errOut, runServe, runTest)
 }
 
 func executeCLI(ctx context.Context, args []string, out, errOut io.Writer, runServe cliapp.ServeRunner) int {
-	return cliapp.Execute(ctx, args, out, errOut, runServe)
+	return cliapp.Execute(ctx, args, out, errOut, runServe, RunTestSession)
 }
 
 func invocationRootForTest(root string) cliapp.InvocationRoot {

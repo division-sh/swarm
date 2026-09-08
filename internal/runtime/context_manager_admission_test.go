@@ -176,7 +176,6 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	}
 	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
 	cfg := &config.Config{}
-	cfg.Runtime.ExecutionPosture = "live"
 	rt, err := NewRuntime(testAuthorActivityContext(ctx), RuntimeDeps{
 		Config: cfg,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{

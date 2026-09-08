@@ -1,117 +1,115 @@
 # Issue #2321 Implementation Progress
 
-Agent: agent-g. Status: implementation in progress, not review-ready.
-
-This is a work checkpoint, not a Post-Implementation Proof Audit or a first-slice
-closure claim. The approved 29-manifestation class and all T/L/H obligations remain
-binding in `issue-2321-preimplementation.md` and `issue-2321-spec-delta.yaml`.
+Agent: agent-g. Status: implementation and integrated verification in progress,
+not review-ready. This is not a Post-Implementation Proof Audit or a first-slice
+closure claim. The approved 29-manifestation class remains binding.
 
 ## Authority And Integration
 
-- Independent gate cycle 2 approved:
-  https://github.com/division-sh/swarm/issues/2321#issuecomment-5584592517.
-- Integrated `origin/master@bdc82dfba`; audit-only commits rebased cleanly on branch
-  `agent-g/2321-command-execution` before implementation. The approved historical
-  audit remains an audit, not a claim that the old master is the implementation base.
-- Preserved current run-scoped actor/source identities, terminal retirement, fresh
-  activity lineage and static receiver readiness. No runtime startup, fork, timer,
-  topology or persistence authority changes are included in this checkpoint.
-- Docs watchlist approval `swarm-docs@efac8cd` is consumed. No new tracker or
-  POTENTIAL_ISSUES entry. #2319 remains open and F-owned; #1801/#2284 remain separate.
-- Unrelated #2008 WIP in the original Agent G worktree remains untouched.
+- Independent gate cycle 2: https://github.com/division-sh/swarm/issues/2321#issuecomment-5584592517.
+- Implementation base: origin/master@bdc82dfba, preserving its run-scoped identities,
+  receiver/lifecycle contracts, terminal retirement and fresh activity lineage.
+- Approved audit and 13-target spec delta remain historical design artifacts;
+  authoritative rules are promoted into platform-spec.yaml alongside implementation.
+- Existing docs watchlist refinement efac8cd is consumed. No new issue or architecture
+  framework. #2319 remains F-owned and open; #1801/#2284 remain separate.
+- Original Agent G worktree's unrelated #2008 WIP is untouched.
 
-## Implemented So Far
+## Implemented
 
-Structural reader separation in the existing owners:
-
-- `packadmission.FromBundle` and `runtime.AdmitEffectiveSourceProjection` provide
-  the admitted source to verify, describe, describe --graph and describe routes.
-  No reader calls the credential-observing pack runtime loader.
-- `runtime.ValidateWorkflowContractSurface` and `bootverify` receive an explicit
-  structural validation purpose. Credential/managed-credential access, MCP
-  discovery and concrete availability are not structural observations. Declared
-  tools, permissions, workspace classes, fields, references and supplied doubles
-  continue through existing validators.
-- Model declaration/reference validation remains in `llm/selection`; live
-  `ResolveModel` adds concrete selected-provider fulfillment. A configured alias
-  without a target for the selected live provider is structurally valid but still
-  fails live resolution. Undefined aliases remain invalid.
-- Common validation severity options remain shared. Warning escalation is
-  preserved, and later structural failures enter the canonical diagnostic report
-  without replacing existing warning severity with a fabricated hard finding.
-- Structural output explicitly reports `validation_scope: structural` and
-  `live_readiness: not_evaluated`. Removed workspace selection output and verify
-  operational capability subjects; kept inventory and harness-independence truth.
-  Routing output retains routing-topology/v1 and its stable IDs.
-- Removed the unused production `VerifyBundle` facade and workspace diagnostic
-  wrapper. Execution-specific fixtures call the existing runtime owner through a
-  test-only helper; they are not public structural-command proof.
-- Promoted matching structural rules into authoritative `platform-spec.yaml`.
-  Remaining approved command/composition rules are NOT claimed implemented yet.
+- Structural readers share admitted effective source and the existing validation
+  report. No credential/MCP/machine observations; declared model/tool/workspace
+  constraints, supplied doubles, severity and harness independence remain checked.
+  Output separates structural validity from unobserved live readiness.
+- Commands select Live (serve/dev) or MockOnly (test). Authored doubles do not select
+  a backend or waive live credentials/native/Claude/workspace requirements.
+- ResolveAgentExecution owns write-time executable descriptor projection. Live
+  descriptors omit executable doubles; mock descriptors retain exact admitted
+  performance and live-model metadata. ValidateAgentExecutionDescriptor consumes
+  complete persisted truth unchanged at dispatch, adoption, recovery and selected
+  fork. Removed unused backend-migration helper; no read-side reselection.
+- Manager fresh/blueprint/reconfigure paths use the selector; persisted paths
+  validate. Selected-fork blueprint creation now carries configured model aliases
+  before sealing, rather than depending on later read-side model resolution.
+- Native boot checks use the same command-selected descriptor and real runtime
+  capability owner. Same-source mock/live negative proof preserves native refusals.
+- Retired runtime.execution_posture and mock backend selectors reject with originating
+  file/key, including masked config layers. Recovery defaults true; explicit false
+  survives merging. Removed all five shipped deployment configurations and stale
+  graduation teaching. Artifact census rejects newly introduced deployment files.
+- TestSessionRunner is injected into the CLI; RunTestSession uses the same
+  buildRuntimeComposition as Run. Admission of source, scenarios, variables, setup,
+  effective identities and exact mock completeness precedes acquisition.
+- Public test owns fresh temporary SQLite, workspace/data roots, ephemeral loopback
+  listeners and generated memory auth. No ambient API/context/store/credential
+  selection, provider ingress, public exposure or registration. Existing process,
+  selected-store, source, workspace and supervisor owners perform joined teardown.
+- Private-root cleanup runs after joined shutdown and removes immutable projections
+  without following symlinks out of the owned root. Cleanup errors remain failures.
+- Internal retained mock proof uses TestOwnedMockLifecycleProcessEntry in a go test -c
+  binary, not a production flag. Parent retains isolated SQLite/PostgreSQL and signs
+  real local ingress across child restarts. Internal scenario protocol fixtures use
+  explicit injected parent-owned sessions, never a connected-test compatibility path.
+- Golden possession/invocation-root tests retain real public live serve, now using the
+  agent-free canonical RootIngress fixture because these tests prove process ownership,
+  not agent execution. Retained agent workload tests stay explicitly internal (H).
 
 ## Executed Evidence
 
-Focused commands passed:
+These are development results, not a final integrated-head closure matrix.
 
-```sh
-go test ./internal/cliapp -run '^TestRunVerifyCommand_' -count=1
-go test ./internal/cliapp -run '^TestStructuralReadersRetainPostBootInvalidity$' -count=1
-go test ./internal/cliapp ./internal/runtime/bootverify -run '^(TestStructural|TestDescribeCommandJSONRendersRunScopedTemplateInstanceIdentity)' -count=1
-go test ./internal/cliapp ./internal/serveapp -run '^(TestExecutionValidation|TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2|TestStructuralReadersShareAdmittedSource)' -count=1
-go test ./internal/apispec -count=1
-```
+- Public compiled verify/describe/graph/routes passed on unchanged webhook scaffold
+  without external executables or readable credential documents; explicit structural
+  output and invalid-source/no-probe tests pass.
+- Actual compiled public bare test and verify passed on both unchanged scaffolds
+  without live credentials/Claude/Docker.
+- Full CLI package passed (41.906s); full catalog package passed (368.598s).
+- Full manager, bootverify, llm and selector packages passed at the earlier command
+  selection checkpoint; later integrated run remains required.
+- Private session success/callback failure/cancellation tests passed: auth required,
+  ingress absent, listeners joined, DB closed, private root removed.
+- Private startup failures before store acquisition, after schema acquisition and
+  during workspace preparation passed. Workspace release invoked once; injected
+  release failure surfaced. Common public listener-bind refusal tests also passed.
+- Concurrent public live runtime noninterference and immutable projection cleanup
+  tests passed.
+- Internal MockAgent signed-ingress/retained-restart proof passed on both stores.
+  Golden SQLite internal smoke passed. Full internal J1-J5 lifecycle matrix passed
+  on SQLite/PostgreSQL (54.878s), preserving receipt chain, semantic identities,
+  old snapshots, crash convergence and fresh-epoch cardinality.
+- Internal authored/derived/root-setup/atomic-publication scenarios passed. Exact
+  scenario profiles and mismatch refusal passed across SQLite/PostgreSQL.
+- Selected-fork provider/model/failure-compensation focused tests passed (4.712s),
+  including custom model preservation after configured aliases change.
+- Controlled live Anthropic/Telegram transport proof passed with source doubles
+  unchanged. This is not paid external-provider or provisioned Claude acceptance.
+- Native boot purpose/refusal matrix passed. API specification tests passed (1.820s).
+  Production async-owner census passed (0.865s); focused persistence boundary guards
+  passed. Retired Builder semantic census and git diff checks passed.
+- Actual compiled public live possession and invocation-root tests passed (14.064s),
+  including retained/dev ownership, hostile ancestor and borrowed-project refusal.
+  Agent-free fixture: this does not claim live-provider turns or agent restarts.
 
-Additional focused selector/model, effect-reachability, route-equivalence, provider
-capability and harness-boundary checks passed during development. Newly introduced
-tests pin the complete bootcheck/supplemental-check census, poison credential
-interfaces and count MCP requests, preserve invalid workspace declarations, and
-verify canonical post-boot errors remain visible across structural readers.
+Large/whole suites use go run ./cmd/swarm-test; targeted tests use ordinary go test.
+The unfiltered whole suite acquired its slot after 13m28s. Its result is
+pending; no whole-suite success is claimed.
 
-Built the actual `cmd/swarm` binary and executed verify, describe, describe --graph
-and describe routes on the unchanged generated webhook scaffold from its invocation
-root, with PATH pointing to a nonexistent directory and both credential-file paths
-pointing to unreadable-as-documents directories. All four returned exit 0; no false
-provider-event/conversation-reference hard invalidities or retired deployment
-fields were emitted. Test-quarantined environment variables were unset. This is
-structural compiled-command proof only, NOT T, L or H execution credit.
+## Remaining Work And Acceptance
 
-The first broader reader run found two failures: an obsolete expected empty JSON
-response, and a real dropped warning-escalation option. Both were repaired; the
-targeted regression tests now pass. A subsequent invalid-source test initially
-stopped at warning escalation before reaching its intended later strict-schema
-failure; its fixture now explicitly selects nonfatal warnings and strict schemas.
-
-The broader reader-package rerun passed at this checkpoint after waiting for the
-shared swarm-test admission slot:
-
-```sh
-go run ./cmd/swarm-test -- ./internal/cliapp ./internal/runtime/bootverify ./internal/runtime/llm/selection ./internal/apispec -count=1
-```
-
-Results: cliapp 43.110s; bootverify 21.417s; selection 0.002s; apispec 2.508s.
-Authoritative spec YAML parsing and `git diff --check` also passed. This is not the
-whole suite or the required final integrated T/L/H acceptance run.
-
-## Outstanding In The Same Implementation
-
-1. Command-owned live/mock selection, descriptor creation before persistence and
-   read-only consumption on restore/fork; remove all mock-presence waivers and
-   retired configuration selectors/producers.
-2. Injected TestSessionRunner and shared serve/test runtime construction, pre-resource
-   test admission, private endpoint/state ownership and joined cleanup; no connected
-   test fallback or public retained/mock-serve selector.
-3. Recovery default and presence-aware explicit-false behavior; example/archetype
-   config removal and mutation/census guards; remaining authoritative spec sections.
-4. T public mock test, L genuine live serve/dev/restart, and H internal retained
-   mock lifecycle proof migration and execution, including both stores and all
-   existing exact identity/event/delivery/card/timer assertions.
-5. Full swarm-test run, exhaustive final-head proof audit, final normal PR and review.
-
-Live prerequisite observation: Docker responds, but this host currently has neither
-a Claude executable on PATH nor the Swarm workspace image. Only Go and PostgreSQL
-images were present. No credential values were read or logged, and no paid live turn
-has been attempted. A usable live environment must be established for L proof;
-internal mock results cannot substitute. #2319 separately blocks combined
-credential-absent webhook acceptance, not the implementation above.
+1. Complete the unfiltered integrated swarm-test run and repair in-scope failures.
+   Rerun changed proof families on the final commit rather than aggregating obsolete
+   checkpoint results into a final-head pass.
+2. Finish explicit M1-M29 owner/consumer/proof accounting, including failure injection
+   for every acquired resource and all required selection/reintroduction negatives.
+   A shared constructor or pre-existing passing test is not alone closure proof.
+3. Complete actual live serve/dev/signed-ingress/graceful/crash restart proof on both
+   stores with provisioned prerequisites. This host lacks Claude and the workspace
+   image. An environment/configuration location has been requested; no credentials
+   were logged and no paid live turn has been attempted.
+4. Consume F's #2319 activation proof before combined absent-credential webhook
+   acceptance. Its open status does not block independent implementation.
+5. Record the final-head exhaustive proof audit, then open the single normal PR
+   only when review-ready. No final proof audit, PR or failure-class closure exists
+   at this checkpoint.
 
 No new semantic contradiction or approved stop condition has been discovered.

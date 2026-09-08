@@ -1835,7 +1835,6 @@ func writeServedConversationForkConfig(t *testing.T, backend, sqlitePath, provid
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"store:",
 		"  backend: " + backend,
@@ -2366,7 +2365,7 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 			servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 		})
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
@@ -2386,7 +2385,7 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 			return serveRuntimeWorkspaceStub{}
 		})
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       writeServeRuntimeTestConfig(t),
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
@@ -8804,6 +8803,24 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 }
 
 func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
+	return startRuntimeTestProcessWithRunner(t, repo, opts, runFrom)
+}
+
+func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
+	t.Helper()
+	t.Log("proof_surface=H in-process retained mock lifecycle; not public serve/test")
+	return startRuntimeTestProcessWithRunner(t, repo, opts, func(ctx context.Context, root string, opts cliapp.ServeOptions) int {
+		code, err := runOwnedMockLifecycle(ctx, root, retainedRoot, opts, apiv1.AuthTokenResolution{
+			Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Source: "internal-lifecycle-parent", Explicit: true,
+		})
+		if err != nil {
+			fmt.Fprintf(opts.Output, "internal lifecycle setup: %v\n", err)
+		}
+		return code
+	})
+}
+
+func startRuntimeTestProcessWithRunner(t *testing.T, repo string, opts cliapp.ServeOptions, run func(context.Context, string, cliapp.ServeOptions) int) *serveRuntimeTestProcess {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &lockedBuffer{}
@@ -8826,7 +8843,7 @@ func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.S
 	}
 	t.Cleanup(process.cleanup)
 	go func() {
-		done <- runFrom(ctx, repo, opts)
+		done <- run(ctx, repo, opts)
 	}()
 	return process
 }
@@ -8956,7 +8973,6 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 	t.Helper()
 	configText := strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 	}, "\n") + "\n"
@@ -9165,7 +9181,6 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 	}

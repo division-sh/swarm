@@ -313,6 +313,7 @@ func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agent
 	}
 	if c != nil && c.opts.Purpose != StructuralValidation && c.opts.ValidateModelResolution {
 		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			Posture:           c.opts.ExecutionPosture,
 			ConfiguredDefault: c.opts.LLMProfile,
 			MockConfigured:    mockConfigured,
 		})

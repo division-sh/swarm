@@ -17,7 +17,6 @@ import (
 func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := &config.Config{}
-	cfg.Runtime.ExecutionPosture = "live"
 	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{
 		Config: cfg, Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
@@ -42,7 +41,6 @@ func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := &config.Config{}
-	cfg.Runtime.ExecutionPosture = "live"
 	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
 	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,

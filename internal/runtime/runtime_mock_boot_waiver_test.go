@@ -19,38 +19,35 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestValidateSelectedBackendCredentialForDeclaredAgents_WaivesFullyMockedBundle(t *testing.T) {
+func TestCommandMockStartupDoesNotRequireLiveCredential(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+		ExecutionPosture:    executionposture.MockOnly,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", ""),
 	}, fullyMockedRuntimeAgentMemorySource(t))
 	if err != nil {
-		t.Fatalf("fully-mocked bundle must waive the boot credential requirement, got %v", err)
+		t.Fatalf("mock command must not require a live credential, got %v", err)
 	}
 }
 
-func TestValidateSelectedBackendCredentialForDeclaredAgents_NamesUnmockedAgents(t *testing.T) {
+func TestCommandLiveStartupRequiresCredentialDespiteSourceDoubles(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+		ExecutionPosture:    executionposture.Live,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", ""),
-	}, partiallyMockedRuntimeAgentMemorySource(t, 1))
+	}, fullyMockedRuntimeAgentMemorySource(t))
 	if err == nil {
-		t.Fatal("partially-mocked bundle must still require the credential")
+		t.Fatal("live command must require credentials even with complete source doubles")
 	}
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
 		t.Fatalf("error = %v, want typed provider_credential_missing preserved", err)
-	}
-	for _, want := range []string{"declared agents are mocked", "ANTHROPIC_API_KEY"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error missing %q: %v", want, err)
-		}
 	}
 }
 
@@ -60,6 +57,7 @@ func TestValidateSelectedBackendCredentialForDeclaredAgents_UnmockedAgentWithCre
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
 	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+		ExecutionPosture:    executionposture.Live,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", "sk-test"),
 	}, partiallyMockedRuntimeAgentMemorySource(t, 1))
 	if err != nil {
@@ -67,28 +65,30 @@ func TestValidateSelectedBackendCredentialForDeclaredAgents_UnmockedAgentWithCre
 	}
 }
 
-func TestValidateSelectedBackendCredentialForActiveAgents_MockWaiverInvariant(t *testing.T) {
+func TestCommandMockStartupRejectsRestoredLiveDescriptor(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:  executionposture.Live,
+		LLMBackend:        "anthropic",
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live", ID: "recovered-agent", Role: "recovered",
-		Model: "regular",
+		ResolvedLLMProvider: "anthropic", ResolvedLLMTransport: "api",
+		Model: "regular", ResolvedModel: "claude-sonnet-4-5",
 	})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{}, fullyMockedRuntimeAgentMemorySource(t), manager)
-	if err == nil || !strings.Contains(err.Error(), "mock waiver invariant violation") || !strings.Contains(err.Error(), "recovered-agent") {
-		t.Fatalf("error = %v, want mock waiver invariant violation naming the active agent", err)
+	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
+	if err == nil || !strings.Contains(err.Error(), "mock execution rejects live active agent") || !strings.Contains(err.Error(), "recovered-agent") {
+		t.Fatalf("error = %v, want causal-mode refusal naming the active agent", err)
 	}
 }
 
-func TestValidateSelectedBackendCredentialForActiveAgents_MockWaiverAcceptsNoDivergentActiveAgents(t *testing.T) {
+func TestCommandMockStartupAcceptsEmptyActiveSet(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
@@ -97,13 +97,13 @@ func TestValidateSelectedBackendCredentialForActiveAgents_MockWaiverAcceptsNoDiv
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
-	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{}, fullyMockedRuntimeAgentMemorySource(t), manager)
+	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
 	if err != nil {
-		t.Fatalf("fully-mocked source with bundle-derived active agents must waive, got %v", err)
+		t.Fatalf("empty active set must not require a live credential in mock execution, got %v", err)
 	}
 }
 
-func TestValidateClaudeStartupConfig_WaivesFullyMockedBundle(t *testing.T) {
+func TestCommandPurposeControlsClaudeStartupRequirements(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
@@ -112,9 +112,14 @@ func TestValidateClaudeStartupConfig_WaivesFullyMockedBundle(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	err := validateClaudeStartupConfig(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{}, fullyMockedRuntimeAgentMemorySource(t))
+	source := fullyMockedRuntimeAgentMemorySource(t)
+	err := validateClaudeStartupConfig(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, source)
 	if err != nil {
-		t.Fatalf("fully-mocked bundle must waive the claude startup chain, got %v", err)
+		t.Fatalf("mock command must not require Claude startup, got %v", err)
+	}
+	err = validateClaudeStartupConfig(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.Live}, source)
+	if err == nil {
+		t.Fatal("live command skipped Claude requirements because the source had doubles")
 	}
 }
 

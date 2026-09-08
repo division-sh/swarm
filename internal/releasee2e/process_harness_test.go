@@ -23,6 +23,19 @@ func buildRaceReleaseBinary(t *testing.T, outputRoot string) string {
 	return buildReleaseBinaryWithArgs(t, outputRoot, "-race")
 }
 
+func buildOwnedMockLifecycleBinary(t *testing.T, outputRoot string, buildArgs ...string) string {
+	t.Helper()
+	path := filepath.Join(outputRoot, "internal-mock-lifecycle.test")
+	args := append([]string{"test", "-c"}, buildArgs...)
+	args = append(args, "-o", path, "./internal/serveapp")
+	cmd := exec.Command("go", args...)
+	cmd.Dir = releaseE2ERepoRoot(t)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build internal retained lifecycle binary: %v\n%s", err, output)
+	}
+	return path
+}
+
 func buildReleaseBinaryWithArgs(t *testing.T, outputRoot string, buildArgs ...string) string {
 	t.Helper()
 	binaryPath := filepath.Join(outputRoot, "swarm")
@@ -54,19 +67,20 @@ func (o *releaseProcessOutput) String() string {
 }
 
 type releaseProcessSpec struct {
-	BinaryPath           string
-	WorkingDir           string
-	ConfigPath           string
-	Source               string
-	Store                string
-	Dev                  bool
-	APIPort              int
-	MCPPort              int
-	PublicWebhookBaseURL string
-	PublicWebhookListen  string
-	TokenFile            string
-	Token                string
-	Env                  []string
+	BinaryPath                  string
+	InternalMockLifecycleBinary string
+	WorkingDir                  string
+	ConfigPath                  string
+	Source                      string
+	Store                       string
+	Dev                         bool
+	APIPort                     int
+	MCPPort                     int
+	PublicWebhookBaseURL        string
+	PublicWebhookListen         string
+	TokenFile                   string
+	Token                       string
+	Env                         []string
 }
 
 type releaseServeProcess struct {
@@ -113,9 +127,31 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	if options.PublicWebhookListen != "" {
 		args = append(args, "--public-webhook-listen", options.PublicWebhookListen)
 	}
-	cmd := exec.Command(options.BinaryPath, args...)
+	binary := options.BinaryPath
+	env := append([]string(nil), options.Env...)
+	if options.InternalMockLifecycleBinary != "" {
+		if options.PublicWebhookBaseURL != "" || options.PublicWebhookListen != "" {
+			t.Fatal("internal mock lifecycle does not own public exposure/registration proof")
+		}
+		request, err := json.Marshal(struct {
+			ConfigPath string
+			Source     string
+			Store      string
+			Dev        bool
+			APIPort    int
+			MCPPort    int
+			Token      string
+		}{options.ConfigPath, options.Source, options.Store, options.Dev, options.APIPort, options.MCPPort, options.Token})
+		if err != nil {
+			t.Fatal(err)
+		}
+		binary = options.InternalMockLifecycleBinary
+		args = []string{"-test.run=^TestOwnedMockLifecycleProcessEntry$", "-test.v", "-test.timeout=10m"}
+		env = append(env, "SWARM_INTERNAL_MOCK_LIFECYCLE_REQUEST="+string(request))
+	}
+	cmd := exec.Command(binary, args...)
 	cmd.Dir = options.WorkingDir
-	cmd.Env = options.Env
+	cmd.Env = env
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Start(); err != nil {

@@ -13,6 +13,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -156,7 +157,7 @@ func TestValidateNativeToolBootConfig_FailsClosedWhenRuntimeLacksNativeCapabilit
 		},
 	})
 
-	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{strict: true}), nil)
+	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{strict: true}), nil)
 	if err == nil || !strings.Contains(err.Error(), "selected runtime is strict provider-native and does not support provider-native capability") {
 		t.Fatalf("expected unsupported native capability error, got %v", err)
 	}
@@ -174,7 +175,7 @@ func TestValidateNativeToolBootConfig_CLINativeWebSearchDoesNotRequireFallbackPr
 		},
 	})
 
-	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{
+	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{
 		caps:   llm.NativeToolCapabilities{WebSearch: true},
 		strict: true,
 	}), nil)
@@ -212,7 +213,7 @@ func TestValidateNativeToolBootConfig_NonCLIRuntimeRequiresWebSearchFallbackCred
 	if err != nil {
 		t.Fatalf("NewFileStore empty: %v", err)
 	}
-	_, err = ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, emptyStore, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), nil)
+	_, err = ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, emptyStore, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), nil)
 	if err == nil || !strings.Contains(err.Error(), `missing credential "brave_search_api_key"`) {
 		t.Fatalf("ValidateNativeToolBootConfig error = %v, want missing web_search credential", err)
 	}
@@ -224,7 +225,7 @@ func TestValidateNativeToolBootConfig_NonCLIRuntimeRequiresWebSearchFallbackCred
 	if err := store.Set(unmanagedToolTestContext(), "brave_search_api_key", "secret"); err != nil {
 		t.Fatalf("Set credential: %v", err)
 	}
-	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, store, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), nil)
+	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, store, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), nil)
 	if err != nil {
 		t.Fatalf("ValidateNativeToolBootConfig with credential: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestValidateNativeToolBootConfig_NonCLIRuntimeRequiresWebSearchFallbackCred
 	}
 }
 
-func TestValidateNativeToolBootConfig_ExactlyMockedAgentSkipsLiveNativeAdmission(t *testing.T) {
+func TestValidateNativeToolBootConfig_CommandPurposeOwnsNativeAdmission(t *testing.T) {
 	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {
@@ -278,12 +279,18 @@ func TestValidateNativeToolBootConfig_ExactlyMockedAgentSkipsLiveNativeAdmission
 		t.Fatalf("NewAgentRuntimeSet: %v", err)
 	}
 
-	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, runtimes, nil)
+	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.MockOnly, nil, source, nil, runtimes, nil)
 	if err != nil {
 		t.Fatalf("ValidateNativeToolBootConfig: %v", err)
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if _, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, nil, runtimes, nil); err == nil || !strings.Contains(err.Error(), "credential store is not configured") {
+		t.Fatalf("same authored double must not waive live credentials: %v", err)
+	}
+	if _, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.MockOnly, nil, source, nil, runtimes, nil); err != nil {
+		t.Fatalf("live admission mutated the source double: %v", err)
 	}
 }
 
@@ -299,12 +306,12 @@ func TestValidateNativeToolBootConfig_FallbackFileIORequiresWorkspaceExecutionTa
 		},
 	})
 
-	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), nil)
+	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), nil)
 	if err == nil || !strings.Contains(err.Error(), "workspace resolver is not configured") {
 		t.Fatalf("ValidateNativeToolBootConfig error = %v, want missing workspace resolver", err)
 	}
 
-	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), relayWorkspaceResolverStub{
+	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), relayWorkspaceResolverStub{
 		target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 	})
 	if err != nil {
@@ -333,7 +340,7 @@ func TestValidateNativeToolBootConfigUsesNonExecutingCapabilityAdmission(t *test
 		target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 	}
 
-	if _, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), resolver); err != nil {
+	if _, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), resolver); err != nil {
 		t.Fatalf("ValidateNativeToolBootConfig: %v", err)
 	}
 	if regularCalls != 0 || admissionCalls != 2 {
@@ -343,7 +350,7 @@ func TestValidateNativeToolBootConfigUsesNonExecutingCapabilityAdmission(t *test
 
 func TestValidateNativeToolBootConfigCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	source := scopedNativeToolAgentFixture(t)
-	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nil, nil)
+	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), executionposture.Live, nil, source, nil, nil, nil)
 	if err == nil {
 		t.Fatal("ValidateNativeToolBootConfig unexpectedly ignored scoped native-tool agents")
 	}
@@ -362,7 +369,7 @@ func TestValidateNativeToolBootConfigCensusesScopedAgentsHiddenByAmbiguousAlias(
 func TestValidateNativeToolBootConfigResolvesDistinctProjectAndFlowOwners(t *testing.T) {
 	source := scopedNativeToolAgentFixture(t)
 	warnings, err := ValidateNativeToolBootConfig(
-		unmanagedToolTestContext(),
+		unmanagedToolTestContext(), executionposture.Live, nil,
 		source,
 		nil,
 		nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}),
@@ -394,7 +401,7 @@ func TestValidateNativeToolBootConfigValidatesScopedFlowRouteWithoutMaterializin
 	workspaces.SetSemanticSource(source)
 
 	warnings, err := ValidateNativeToolBootConfig(
-		unmanagedToolTestContext(),
+		unmanagedToolTestContext(), executionposture.Live, nil,
 		source,
 		nil,
 		nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}),
@@ -429,7 +436,7 @@ func TestValidateNativeToolBootConfigResolvesProjectOwnersWithinOneFlow(t *testi
 	}
 
 	warnings, err := ValidateNativeToolBootConfig(
-		unmanagedToolTestContext(),
+		unmanagedToolTestContext(), executionposture.Live, nil,
 		source,
 		nil,
 		nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}),

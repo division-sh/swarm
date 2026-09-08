@@ -7,13 +7,17 @@ import (
 	"strings"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtimes *llm.AgentRuntimeSet, workspaces workspace.Resolver) ([]error, error) {
+func ValidateNativeToolBootConfig(ctx context.Context, posture executionposture.Posture, aliases llmselection.ModelAliases, source semanticview.Source, store runtimecredentials.Store, runtimes *llm.AgentRuntimeSet, workspaces workspace.Resolver) ([]error, error) {
+	if !posture.Valid() {
+		return nil, fmt.Errorf("native tool boot validation requires command execution purpose")
+	}
 	if source == nil {
 		return nil, nil
 	}
@@ -42,7 +46,12 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 			failures = append(failures, fmt.Sprintf("agent %s llm runtime resolver is required", strings.TrimSpace(agentID)))
 			continue
 		}
-		resolved, err := runtimes.ResolveAgentRuntime(actor)
+		projected, err := llm.ResolveAgentExecution(posture, runtimes.ConfiguredDefault(), aliases, actor)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("agent %s execution selection: %v", strings.TrimSpace(agentID), err))
+			continue
+		}
+		resolved, err := runtimes.ResolveAgentRuntime(projected.Actor)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("agent %s execution selection: %v", strings.TrimSpace(agentID), err))
 			continue

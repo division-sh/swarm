@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -159,6 +160,7 @@ type Report struct {
 }
 
 type Options struct {
+	ExecutionPosture        executionposture.Posture
 	Purpose                 ValidationPurpose
 	Credentials             runtimecredentials.Store
 	ManagedCredentials      runtimemanagedcredentials.Store

@@ -119,8 +119,10 @@ development serve and plain retained serve; only the managed quick tunnel is
 development-only. The public listener exposes `/webhooks/*` only and never
 exposes API, MCP, health, or other control-plane routes.
 
-For credentialless end-to-end agent runs, select `llm.backend: mock` and give each
-agent one contracts-root-relative Python performance:
+For credentialless scenarios, use `swarm test` and give each agent one
+contracts-root-relative Python performance. The command owns a fresh private
+runtime; no running server or deployment configuration is required. `swarm serve`
+and `swarm serve --dev` always select live execution, even with doubles present:
 
 ```yaml
 # agents.yaml

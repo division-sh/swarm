@@ -28,10 +28,10 @@ func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultRuntimeConfig: %v", err)
 	}
-	cfg.Runtime.ExecutionPosture = executionposture.Live
 	loaded.sourceArtifactFact = mustServeTestEphemeralSourceArtifactFact(loaded.bootIdentity.BundleHash)
 	contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
-		Ctx: context.Background(), Loaded: loaded, StateStoreSummary: "test stores ready",
+		ExecutionPosture: executionposture.Live,
+		Ctx:              context.Background(), Loaded: loaded, StateStoreSummary: "test stores ready",
 		WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: cliapp.WorkspaceBackendNone, NoWorkspace: true, Source: "test"},
 		BootStartedAt:    time.Now().UTC(), Config: cfg,
 	})
@@ -56,7 +56,6 @@ func TestBuildServeRuntimeContextFailureAfterRuntimeConstructionJoinsOccurrence(
 	if err != nil {
 		t.Fatalf("DefaultRuntimeConfig: %v", err)
 	}
-	cfg.Runtime.ExecutionPosture = executionposture.Live
 	loaded.sourceArtifactFact = mustServeTestEphemeralSourceArtifactFact(loaded.bootIdentity.BundleHash)
 	stores := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime-context-abort.sqlite"), cfg)
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
@@ -69,7 +68,8 @@ func TestBuildServeRuntimeContextFailureAfterRuntimeConstructionJoinsOccurrence(
 	process := worklifetime.NewProcess()
 
 	contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
-		Ctx: context.Background(), Stores: persistence, Loaded: loaded,
+		ExecutionPosture: executionposture.Live,
+		Ctx:              context.Background(), Stores: persistence, Loaded: loaded,
 		StateStoreSummary: stateStoreSummary, Config: cfg,
 		WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: cliapp.WorkspaceBackendNone, NoWorkspace: true, Source: "test"},
 		BootStartedAt:    time.Now().UTC(), ProcessWorkOwner: process, RuntimeInstanceID: uuid.NewString(),

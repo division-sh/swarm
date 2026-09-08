@@ -130,15 +130,14 @@ func (r *standingLiveAnthropicRecorder) waitForInitialCount(t testing.TB, want i
 	t.Fatalf("Anthropic initial requests = %d, want at least %d", got, want)
 }
 
-func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
+func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 
 	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	removeExactCanonicalTelegramAgentMock(t, sourceRoot)
-	configPath := filepath.Join(sourceRoot, "swarm.live.yaml")
-	sqlitePath := filepath.Join(sourceRoot, ".swarm", "swarm.db")
+	sqlitePath := filepath.Join(t.TempDir(), "live.sqlite")
+	configPath := writeStandingMockRuntimeConfig(t, "sqlite", sqlitePath)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
@@ -279,77 +278,6 @@ func requireStandingLiveTelegramCalls(t testing.TB, calls <-chan map[string]any,
 	}
 }
 
-func removeExactCanonicalTelegramAgentMock(t testing.TB, sourceRoot string) {
-	t.Helper()
-	canonicalPath := filepath.Join(canonicalrouting.ExampleRoot(t, canonicalrouting.TelegramAgent), "telegram-chat", "agents.yaml")
-	derivedPath := filepath.Join(sourceRoot, "telegram-chat", "agents.yaml")
-	if got := countCanonicalTelegramAgentMocks(t, canonicalPath); got != 1 {
-		t.Fatalf("checked canonical phrase-bot mock count = %d, want 1", got)
-	}
-
-	body, err := os.ReadFile(derivedPath)
-	if err != nil {
-		t.Fatalf("read copied Telegram agents: %v", err)
-	}
-	var document yaml.Node
-	if err := yaml.Unmarshal(body, &document); err != nil {
-		t.Fatalf("parse copied Telegram agents: %v", err)
-	}
-	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
-		t.Fatalf("copied Telegram agents root must be one mapping")
-	}
-	root := document.Content[0]
-	var phraseBot *yaml.Node
-	phraseBotCount := 0
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value == "phrase-bot" {
-			phraseBotCount++
-			phraseBot = root.Content[i+1]
-		}
-	}
-	if phraseBotCount != 1 || phraseBot == nil || phraseBot.Kind != yaml.MappingNode {
-		t.Fatalf("copied Telegram phrase-bot declarations = %d, want one mapping", phraseBotCount)
-	}
-	mockIndex := -1
-	mockCount := 0
-	var mock *yaml.Node
-	for i := 0; i+1 < len(phraseBot.Content); i += 2 {
-		if phraseBot.Content[i].Value == "mock" {
-			mockCount++
-			mockIndex = i
-			mock = phraseBot.Content[i+1]
-		}
-	}
-	if mockCount != 1 || mock == nil || mock.Kind != yaml.MappingNode || len(mock.Content) != 4 {
-		t.Fatalf("copied Telegram phrase-bot mock shape = count:%d node:%#v, want one two-field mapping", mockCount, mock)
-	}
-	wantMock := map[string]string{"kind": "python", "module": "mocks/phrase-bot.py"}
-	seenMock := map[string]string{}
-	for i := 0; i+1 < len(mock.Content); i += 2 {
-		if mock.Content[i].Kind != yaml.ScalarNode || mock.Content[i+1].Kind != yaml.ScalarNode {
-			t.Fatalf("copied Telegram phrase-bot mock entry must be scalar: %#v", mock.Content[i:i+2])
-		}
-		seenMock[mock.Content[i].Value] = mock.Content[i+1].Value
-	}
-	if !equalStringValues(seenMock, wantMock) {
-		t.Fatalf("copied Telegram phrase-bot mock = %#v, want exact %#v", seenMock, wantMock)
-	}
-	phraseBot.Content = append(append([]*yaml.Node(nil), phraseBot.Content[:mockIndex]...), phraseBot.Content[mockIndex+2:]...)
-	updated, err := yaml.Marshal(&document)
-	if err != nil {
-		t.Fatalf("encode graduated Telegram agents: %v", err)
-	}
-	if err := os.WriteFile(derivedPath, updated, 0o644); err != nil {
-		t.Fatalf("write graduated Telegram agents: %v", err)
-	}
-	if got := countCanonicalTelegramAgentMocks(t, canonicalPath); got != 1 {
-		t.Fatalf("graduation mutated checked canonical mock count to %d, want 1", got)
-	}
-	if got := countCanonicalTelegramAgentMocks(t, derivedPath); got != 0 {
-		t.Fatalf("graduated copied phrase-bot mock count = %d, want 0", got)
-	}
-}
-
 func countCanonicalTelegramAgentMocks(t testing.TB, path string) int {
 	t.Helper()
 	body, err := os.ReadFile(path)
@@ -456,7 +384,8 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 		t.Fatalf("unsupported backend %q", backend)
 	}
 
-	first := startServeRuntimeTestProcess(t, opts)
+	retainedRoot := t.TempDir()
+	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 	firstDiagnostics := func() string {
@@ -499,7 +428,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	if prepareRestart != nil {
 		prepareRestart()
 	}
-	second := startServeRuntimeTestProcess(t, opts)
+	second := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, secondURL, 101, 42), firstMatched)
@@ -988,7 +917,6 @@ func writeStandingMockRuntimeConfig(t *testing.T, backend, sqlitePath string) st
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  execution_posture: mock_only",
 		"  recovery_on_startup: true",
 		"store:",
 		"  backend: " + backend,

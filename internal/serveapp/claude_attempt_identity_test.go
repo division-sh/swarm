@@ -544,7 +544,7 @@ func newClaudeAttemptProofManagerForGeneration(
 	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-attempt-proof-token")
 	eventBus, workOwner, coordinator := newClaudeAttemptProofEventBus(t, backend, generation)
-	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{}}
 	cfg.Workspace.DockerBin = dockerBin
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.OutputFormat = surface.outputFormat

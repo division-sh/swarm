@@ -192,7 +192,6 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 	}
 	writeRuntimeConfigText(t, userPath, strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"serve:",
 		"  api_listen_addr: 127.0.0.1:1111",
 	}, "\n")+"\n")

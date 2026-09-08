@@ -203,7 +203,7 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 	storetest.RequireBundleDataCatalog(t, runtimeCtx, catalogStore, bundle)
 	cfg := &config.Config{
 		LLM:     config.LLMConfig{Backend: "anthropic"},
-		Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live},
+		Runtime: config.RuntimeConfig{},
 	}
 	base := runtimepkg.RuntimeDeps{
 		Config: cfg,

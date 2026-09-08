@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -76,7 +75,7 @@ func withTestProviderTriggerPlatformInventory(t *testing.T, configText string) s
 func writeTestVerifyRuntimeConfig(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "verify-runtime.yaml")
-	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, "runtime:\n  execution_posture: live\nllm:\n  backend: anthropic\n")), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: anthropic\n")), 0o644); err != nil {
 		t.Fatalf("write verify runtime config: %v", err)
 	}
 	return path
@@ -105,7 +104,7 @@ func emptyProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot
 
 func testWorkspaceBackendConfig(backend string) *config.Config {
 	return &config.Config{
-		Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live},
+		Runtime: config.RuntimeConfig{},
 		LLM:     config.LLMConfig{Backend: backend},
 	}
 }
@@ -113,7 +112,6 @@ func testWorkspaceBackendConfig(backend string) *config.Config {
 func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
 	t.Helper()
 	var body strings.Builder
-	body.WriteString("runtime:\n  execution_posture: live\n")
 	for _, section := range []struct {
 		name string
 		keys map[string]string

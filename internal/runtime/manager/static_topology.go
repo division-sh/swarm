@@ -877,6 +877,13 @@ func (am *AgentManager) hydratePersistedAgentExecutions(ctx context.Context) err
 	}
 	sort.SliceStable(agents, func(i, j int) bool { return agents[i].StartedAt.Before(agents[j].StartedAt) })
 	for _, rec := range agents {
+		if rec.Topology.Equal(admission) {
+			if err := am.validatePersistedAgentExecution(rec.Config); err != nil {
+				return fmt.Errorf("hydrate reconciled agent %s: %w", rec.Config.ID, err)
+			}
+		}
+	}
+	for _, rec := range agents {
 		if !rec.Topology.Equal(admission) {
 			continue
 		}

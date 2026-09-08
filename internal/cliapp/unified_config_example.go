@@ -38,8 +38,7 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		return entry
 	}
 	return []unifiedConfigExampleEntry{
-		e("runtime.execution_posture", "live", "Maximum execution mode for this process; exactly live or mock_only.", unifiedConfigExampleTierProjectSafe),
-		e("runtime.recovery_on_startup", "false", "Recover persisted runtime state on startup.", unifiedConfigExampleTierProjectSafe),
+		e("runtime.recovery_on_startup", "true", "Recover retained runtime state on startup; explicit false disables replay.", unifiedConfigExampleTierProjectSafe),
 		e("runtime.decision_card_first_reminder", "4h", "Delay before the first pending decision-card reminder.", unifiedConfigExampleTierProjectSafe),
 		e("runtime.decision_card_urgency", "24h", "Delay before a pending decision card becomes urgent.", unifiedConfigExampleTierProjectSafe),
 		e("runtime.decision_card_reminder_interval", "24h", "Cadence for later pending decision-card reminders.", unifiedConfigExampleTierProjectSafe),

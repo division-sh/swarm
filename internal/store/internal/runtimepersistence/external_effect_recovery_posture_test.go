@@ -65,7 +65,7 @@ func TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres(t *testi
 				testAuthorActivityContext(),
 				runtimeeffects.NewRecoveryRequest(now.Add(time.Minute), executionposture.MockOnly),
 			)
-			if err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+			if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 				t.Fatalf("recover live generic attempts under mock_only = %v, want rejection", err)
 			}
 			after := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, live)
@@ -293,7 +293,7 @@ func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *
 				testAuthorActivityContext(),
 				runtimeeffects.NewRecoveryRequest(now.Add(2*time.Minute), executionposture.MockOnly),
 			)
-			if err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+			if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 				t.Fatalf("recover live provider attempts under mock_only = %v, want rejection", err)
 			}
 			after := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, live)
@@ -357,7 +357,7 @@ func TestExternalEffectRecoveryPostureAdmissionTerminalRunProviderSQLiteAndPostg
 				testAuthorActivityContext(),
 				runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly),
 			)
-			if err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+			if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 				t.Fatalf("recover live terminal-run provider attempt under mock_only = %v, want rejection", err)
 			}
 			after := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts)

@@ -978,7 +978,6 @@ func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	t.Setenv("SWARM_CONFIG", configPath)
 	writeRuntimeConfigText(t, configPath, fmt.Sprintf(`runtime:
-  execution_posture: live
 store:
   backend: postgres
 database:

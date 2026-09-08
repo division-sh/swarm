@@ -847,7 +847,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 		{
 			name: "missing workflow module",
 			deps: RuntimeDeps{
-				Config:  &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
+				Config:  &config.Config{Runtime: config.RuntimeConfig{}},
 				Options: RuntimeOptions{SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)},
 			},
 			errContains: "workflow contract validation failed: workflow module is required",
@@ -856,7 +856,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			name: "retired llm runtime mode",
 			deps: RuntimeDeps{
 				Config: &config.Config{
-					Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live},
+					Runtime: config.RuntimeConfig{},
 					LLM:     config.LLMConfig{RuntimeMode: "cli_test"},
 				},
 				Options: RuntimeOptions{
@@ -869,7 +869,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 		{
 			name: "valid dependency graph",
 			deps: RuntimeDeps{
-				Config: &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
+				Config: &config.Config{Runtime: config.RuntimeConfig{}},
 				Options: RuntimeOptions{
 					WorkflowModule:     validModule,
 					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
@@ -879,7 +879,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 		{
 			name: "inbound store without admitted provider registry",
 			deps: RuntimeDeps{
-				Config:       &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
+				Config:       &config.Config{Runtime: config.RuntimeConfig{}},
 				InboundStore: &recordingInboundStore{},
 				Options: RuntimeOptions{
 					WorkflowModule:     validModule,
@@ -912,7 +912,7 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	module := semanticOnlyWorkflowRuntime{source: semanticview.Wrap(testRuntimeWorkflowValidationBundle())}
 
 	boot, err := (RuntimeDeps{
-		Config: &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
+		Config: &config.Config{Runtime: config.RuntimeConfig{}},
 		Options: RuntimeOptions{
 			WorkflowModule:     module,
 			SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),

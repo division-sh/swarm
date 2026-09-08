@@ -884,7 +884,7 @@ func ResolveAgentMaterializationBlueprint(options AgentManagerOptions, blueprint
 	if !blueprint.Config.Identity.IsZero() {
 		return AgentMaterializationBlueprint{}, fmt.Errorf("agent materialization blueprint must remain runless during execution selection")
 	}
-	if err := resolveAgentModel(&blueprint.Config, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
+	if err := resolveAgentModel(&blueprint.Config, options.ExecutionPosture, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
 		return AgentMaterializationBlueprint{}, err
 	}
 	return blueprint, nil

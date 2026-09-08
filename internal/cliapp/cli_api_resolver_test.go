@@ -944,8 +944,8 @@ func writeCLIAPITestExecutionPosture(t cliAPITestFataler) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("create test user config directory: %v", err)
 	}
-	if err := os.WriteFile(path, []byte("runtime:\n  execution_posture: live\n"), 0o600); err != nil {
-		t.Fatalf("write test execution posture: %v", err)
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write isolated user config: %v", err)
 	}
 }
 

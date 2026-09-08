@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -82,7 +83,7 @@ func TestResolveAgentExecutionPreservesAuthoredIntentAndUsesConfiguredLiveModelP
 	actor.ResolvedLLMProvider = llmselection.ProviderOpenAI
 	actor.ResolvedLLMTransport = llmselection.TransportAPI
 	actor.ResolvedModel = "stale-model"
-	resolved, err := ResolveAgentExecution(profile, llmselection.ModelAliases{
+	resolved, err := ResolveAgentExecution(executionposture.MockOnly, profile, llmselection.ModelAliases{
 		llmselection.ModelAliasRegular: {llmselection.BackendClaudeCLI: "configured-live-model"},
 	}, actor)
 	if err != nil {
@@ -112,8 +113,8 @@ func TestAgentRuntimeSetRejectsDescriptorSelectionDriftBeforeDispatch(t *testing
 		t.Fatalf("NewAgentRuntimeSet: %v", err)
 	}
 	actor := resolvedMockAgent("drifted-agent")
-	actor.LLMBackend = llmselection.BackendClaudeCLI
-	if _, err := runtimes.ResolveAgentRuntime(actor); err == nil || !strings.Contains(err.Error(), "conflicts with an exact mock performance") {
+	actor.ExecutionMode = runtimeeffects.ExecutionModeLive
+	if _, err := runtimes.ResolveAgentRuntime(actor); err == nil || !strings.Contains(err.Error(), "descriptor conflicts") {
 		t.Fatalf("ResolveAgentRuntime drift error = %v", err)
 	}
 }
@@ -138,7 +139,8 @@ func TestAgentRuntimeSetRejectsUncompiledMockArtifactBeforeDispatch(t *testing.T
 func resolvedMockAgent(id string) models.AgentConfig {
 	return models.AgentConfig{
 		ID:                   id,
-		LLMBackend:           llmselection.BackendMock,
+		LLMBackend:           llmselection.BackendClaudeCLI,
+		ResolvedLLMBackend:   llmselection.BackendMock,
 		ResolvedLLMProvider:  llmselection.ProviderMock,
 		ResolvedLLMTransport: llmselection.TransportMock,
 		ExecutionMode:        runtimeeffects.ExecutionModeMock,
@@ -153,6 +155,7 @@ func resolvedClaudeAgent(id string) models.AgentConfig {
 	return models.AgentConfig{
 		ID:                   id,
 		LLMBackend:           llmselection.BackendClaudeCLI,
+		ResolvedLLMBackend:   llmselection.BackendClaudeCLI,
 		ResolvedLLMProvider:  llmselection.ProviderClaude,
 		ResolvedLLMTransport: llmselection.TransportCLI,
 		ExecutionMode:        runtimeeffects.ExecutionModeLive,

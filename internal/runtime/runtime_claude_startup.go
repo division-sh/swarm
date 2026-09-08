@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -44,7 +45,7 @@ func validateClaudeStartupConfig(ctx context.Context, cfg *config.Config, opts R
 	if !hasAgents {
 		return nil
 	}
-	if bundleFullyMocked(source) {
+	if opts.ExecutionPosture == executionposture.MockOnly {
 		return nil
 	}
 	return validateClaudeStartupRequirements(ctx, cfg, opts)
@@ -65,8 +66,8 @@ func validateClaudeStartupConfigForActiveAgents(ctx context.Context, cfg *config
 	if !hasAgents {
 		return nil
 	}
-	if bundleFullyMocked(source) {
-		return activeAgentMockConsistencyError(manager)
+	if opts.ExecutionPosture == executionposture.MockOnly {
+		return validateActiveMockDescriptors(cfg, manager)
 	}
 	return validateClaudeStartupRequirements(ctx, cfg, opts)
 }
@@ -79,13 +80,13 @@ func validateSelectedBackendCredentialForDeclaredAgents(ctx context.Context, cfg
 	if !hasAgents {
 		return nil
 	}
-	if bundleFullyMocked(source) {
+	if opts.ExecutionPosture == executionposture.MockOnly {
 		return nil
 	}
-	return enrichCredentialFailureWithMockCensus(validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts)), cfg, source)
+	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
 
-func validateSelectedBackendModelAliasesForDeclaredAgents(cfg *config.Config, source semanticview.Source) error {
+func validateSelectedBackendModelAliasesForDeclaredAgents(posture executionposture.Posture, cfg *config.Config, source semanticview.Source) error {
 	if cfg == nil {
 		return nil
 	}
@@ -105,6 +106,7 @@ func validateSelectedBackendModelAliasesForDeclaredAgents(cfg *config.Config, so
 		agent := declaration.Entry
 		agentID := declaration.Label(localIDCounts[declaration.LocalID] > 1)
 		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			Posture:           posture,
 			ConfiguredDefault: profile,
 			MockConfigured:    agent.Mock.Configured(),
 		})
@@ -129,10 +131,10 @@ func validateSelectedBackendCredentialForActiveAgents(ctx context.Context, cfg *
 	if !hasAgents {
 		return nil
 	}
-	if bundleFullyMocked(source) {
-		return activeAgentMockConsistencyError(manager)
+	if opts.ExecutionPosture == executionposture.MockOnly {
+		return validateActiveMockDescriptors(cfg, manager)
 	}
-	return enrichCredentialFailureWithMockCensus(validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts)), cfg, source)
+	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
 
 func validateSelectedBackendCredential(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver) error {
@@ -147,82 +149,24 @@ func validateSelectedBackendCredential(ctx context.Context, cfg *config.Config, 
 	return err
 }
 
-// declaredAgentMockCensus is the single owner of the fully-mocked waiver fact:
-// every entry in the effective source agent registry is mock-configured. It
-// reports the mocked/total counts and the sorted unmocked agent ids.
-func declaredAgentMockCensus(source semanticview.Source) (mocked, total int, unmocked []string) {
-	if source == nil {
-		return 0, 0, nil
-	}
-	entries := semanticview.AgentDeclarations(source)
-	total = len(entries)
-	localIDCounts := map[string]int{}
-	for _, declaration := range entries {
-		localIDCounts[declaration.LocalID]++
-	}
-	for _, declaration := range entries {
-		agent := declaration.Entry
-		if agent.Mock.Configured() {
-			mocked++
-		} else {
-			unmocked = append(unmocked, declaration.Label(localIDCounts[declaration.LocalID] > 1))
-		}
-	}
-	sort.Strings(unmocked)
-	return mocked, total, unmocked
-}
-
-// bundleFullyMocked reports whether every declared model agent in the bundle
-// carries a configured mock performance. A fully-mocked bundle can never
-// launch a provider turn, so boot provider-backend startup obligations are
-// waived for it (zero-credential testing affordance; production validity is
-// unchanged and mock mode still fails closed on real external surfaces).
-func bundleFullyMocked(source semanticview.Source) bool {
-	mocked, total, _ := declaredAgentMockCensus(source)
-	return total > 0 && mocked == total
-}
-
-// activeAgentMockConsistencyError enforces the waiver invariant at the
-// active-agents site: recovered and cloned agents are bundle-derived, so a
-// fully-mocked source must never observe a non-mock-configured active agent.
-// A divergence is corruption, not a case to handle; fail closed loudly rather
-// than silently falling back to credential gating.
-func activeAgentMockConsistencyError(manager *runtimemanager.AgentManager) error {
+func validateActiveMockDescriptors(cfg *config.Config, manager *runtimemanager.AgentManager) error {
 	if manager == nil {
 		return nil
 	}
-	unmocked := make([]string, 0)
-	for _, agentCfg := range manager.ListAgentConfigs() {
-		if !agentCfg.Mock.Configured() {
-			unmocked = append(unmocked, strings.TrimSpace(agentCfg.ID))
-		}
-	}
-	sort.Strings(unmocked)
-	if len(unmocked) == 0 {
-		return nil
-	}
-	return fmt.Errorf("mock waiver invariant violation: bundle agents are fully mocked but active agents %s are not mock-configured", strings.Join(unmocked, ", "))
-}
-
-// enrichCredentialFailureWithMockCensus keeps the existing typed
-// provider_credential_missing failure and extends its message with the mock
-// census and unmocked agent names when the resolve fails with unmocked agents
-// present. Fully-mocked bundles never reach here (waived earlier).
-func enrichCredentialFailureWithMockCensus(err error, cfg *config.Config, source semanticview.Source) error {
-	if err == nil {
-		return nil
-	}
-	mocked, total, unmocked := declaredAgentMockCensus(source)
-	if len(unmocked) == 0 {
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
 		return err
 	}
-	envVar := ""
-	if cfg != nil {
-		if profile, profileErr := cfg.LLMBackendProfile(); profileErr == nil {
-			envVar = strings.TrimSpace(profile.Credential.EnvVar)
+	for _, actor := range manager.ListAgentConfigs() {
+		selection, err := llm.ValidateAgentExecutionDescriptor(profile, actor)
+		if err != nil {
+			return fmt.Errorf("active agent %s: %w", actor.ID, err)
+		}
+		if selection.Mode != executionposture.MockOnly.RootMode() {
+			return fmt.Errorf("mock execution rejects live active agent %s", actor.ID)
 		}
 	}
-	return fmt.Errorf("%w (%d of %d declared agents are mocked; unmocked: %s — mock them or provide %s)", err, mocked, total, strings.Join(unmocked, ", "), envVar)
+	return nil
 }
 
 func validateClaudeStartupRequirements(ctx context.Context, cfg *config.Config, opts RuntimeOptions) error {
@@ -357,9 +301,6 @@ func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Confi
 	if !hasAgents {
 		return nil
 	}
-	if bundleFullyMocked(source) {
-		return activeAgentMockConsistencyError(manager)
-	}
 	if workspaces == nil {
 		return fmt.Errorf("workspace lifecycle is required for claude cli runtime")
 	}
@@ -440,9 +381,6 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 	}
 	if !hasAgents {
 		return nil, nil
-	}
-	if bundleFullyMocked(source) {
-		return nil, activeAgentMockConsistencyError(manager)
 	}
 	if manager == nil {
 		return nil, fmt.Errorf("agent manager is required for managed provider preflight")

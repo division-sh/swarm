@@ -273,6 +273,7 @@ func selectedContractAgentModelOptions(options SelectedContractAgentRuntimeOptio
 		return runtimemanager.AgentManagerOptions{}, llmselection.Profile{}, fmt.Errorf("selected-contract manager llm backend %q conflicts with runtime default %q", configured, backendProfile.ID)
 	}
 	managerOptions.LLMBackend = backendProfile.ID
+	managerOptions.ModelAliases = options.Config.LLM.Models
 	return managerOptions, backendProfile, nil
 }
 

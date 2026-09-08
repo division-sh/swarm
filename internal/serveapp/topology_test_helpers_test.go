@@ -248,7 +248,9 @@ func registerServeTestDurableAgent(
 		if candidateIdentity.Normalize() != identity.Normalize() {
 			continue
 		}
-		candidate.Config = cfg
+		// The prompt is intentionally process-local; all persisted execution
+		// fields remain exactly those read back from the fixture writer.
+		candidate.Config.Prompt = cfg.Prompt
 		if err := manager.MaterializeAdmittedAgentForExecution(ctx, candidate); err != nil {
 			t.Fatalf("materialize committed serve test durable agent: %v", err)
 		}

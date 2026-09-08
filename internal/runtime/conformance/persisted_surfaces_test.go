@@ -1003,7 +1003,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: false, ExecutionPosture: executionposture.Live,
+			RecoveryOnStartup: false,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
@@ -1099,7 +1099,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: true, ExecutionPosture: executionposture.Live,
+			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
@@ -1340,7 +1340,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: true, ExecutionPosture: executionposture.Live,
+			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
 
 const (
@@ -111,6 +112,7 @@ type AgentExecutionSelection struct {
 }
 
 type AgentExecutionSelectionInput struct {
+	Posture           executionposture.Posture
 	ConfiguredDefault Profile
 	AuthoredBackend   string
 	MockConfigured    bool
@@ -263,31 +265,28 @@ func ExecutionModeForProfile(profile Profile) (executionmode.Mode, error) {
 }
 
 // ResolveAgentExecutionSelection is the canonical per-agent selection owner.
-// Authored backend intent is validated as input and never rewritten. An exact
-// mock selects scripted execution only when no conflicting live pin exists.
+// Construction supplies execution purpose. Authored doubles are data, never
+// authority to select a provider or waive live prerequisites.
 func ResolveAgentExecutionSelection(input AgentExecutionSelectionInput) (AgentExecutionSelection, error) {
-	configuredDefault, err := ResolveActiveBackend(input.ConfiguredDefault.ID)
+	if !input.Posture.Valid() {
+		return AgentExecutionSelection{}, fmt.Errorf("command execution purpose is required")
+	}
+	configuredDefault, err := ResolveLiveBackend(input.ConfiguredDefault.ID)
 	if err != nil {
 		return AgentExecutionSelection{}, err
 	}
 	profile := configuredDefault
 	authoredBackend := NormalizeBackendID(input.AuthoredBackend)
 	if authoredBackend != "" {
-		authoredProfile, resolveErr := ResolveActiveBackend(authoredBackend)
+		authoredProfile, resolveErr := ResolveLiveBackend(authoredBackend)
 		if resolveErr != nil {
 			return AgentExecutionSelection{}, fmt.Errorf("authored llm_backend %q is invalid: %w", authoredBackend, resolveErr)
 		}
-		switch {
-		case authoredProfile.ID == BackendMock:
-			profile = authoredProfile
-		case authoredProfile.ID != configuredDefault.ID:
+		if authoredProfile.ID != configuredDefault.ID {
 			return AgentExecutionSelection{}, fmt.Errorf("authored llm_backend %q conflicts with configured runtime backend %q", authoredProfile.ID, configuredDefault.ID)
-		case input.MockConfigured:
-			return AgentExecutionSelection{}, fmt.Errorf("authored llm_backend %q conflicts with an exact mock performance", authoredProfile.ID)
-		default:
-			profile = authoredProfile
 		}
-	} else if input.MockConfigured {
+	}
+	if input.Posture == executionposture.MockOnly {
 		profile, err = ResolveActiveBackend(BackendMock)
 		if err != nil {
 			return AgentExecutionSelection{}, err
@@ -312,6 +311,17 @@ func ResolveAgentExecutionSelection(input AgentExecutionSelectionInput) (AgentEx
 	}, nil
 }
 
+func ResolveLiveBackend(raw string) (Profile, error) {
+	profile, err := ResolveActiveBackend(raw)
+	if err != nil {
+		return Profile{}, err
+	}
+	if profile.ID == BackendMock {
+		return Profile{}, fmt.Errorf("backend mock is retired as a public selector; use swarm test to execute authored doubles")
+	}
+	return profile, nil
+}
+
 func ResolvePersistedBackend(raw string) (Profile, error) {
 	id := NormalizeBackendID(raw)
 	if id == "" {
@@ -322,24 +332,6 @@ func ResolvePersistedBackend(raw string) (Profile, error) {
 		return Profile{}, fmt.Errorf("unsupported llm backend profile %q", id)
 	}
 	return profile, nil
-}
-
-func MigratePersistedBackend(raw string) (Profile, bool, error) {
-	id := NormalizeBackendID(raw)
-	if id == "" {
-		id = DefaultBackend
-	}
-	switch id {
-	case LegacyBackendAPI:
-		profile, err := ResolvePersistedBackend(BackendAnthropic)
-		return profile, true, err
-	case LegacyBackendCLITest:
-		profile, err := ResolvePersistedBackend(BackendClaudeCLI)
-		return profile, true, err
-	default:
-		profile, err := ResolvePersistedBackend(id)
-		return profile, false, err
-	}
 }
 
 func RejectRetiredConfigRuntimeMode(raw string) error {

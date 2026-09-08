@@ -1659,7 +1659,6 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndRejectsEmptyConfig(t *
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	writeRuntimeConfigText(t, configPath, strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: \"   \"",
@@ -1888,7 +1887,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if authority.CLIFlag != "--workspace-backend <docker|host>" || authority.ConfigKey != "workspace.backend" || authority.UnsafeConfigKey != "workspace.allow_exec_on_host" || authority.RetiredEnvVar != "SWARM_WORKSPACE_BACKEND" {
 		t.Fatalf("workspace backend selectors = %#v", authority)
 	}
-	for _, want := range []string{"loaded contract execution capability", "--workspace-backend", "workspace.backend"} {
+	for _, want := range []string{"command-selected executable descriptor", "--workspace-backend", "workspace.backend"} {
 		if !stringSliceContains(authority.SourceOrder, want) {
 			t.Fatalf("workspace backend order missing %q: %#v", want, authority.SourceOrder)
 		}
@@ -3024,7 +3023,7 @@ func TestDefaultRuntimeConfig_DoesNotInferLLMBackendFromCredentials(t *testing.T
 
 func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
 	for key, value := range map[string]string{
-		"SWARM_RUNTIME_RECOVERY_ON_STARTUP":          "true",
+		"SWARM_RUNTIME_RECOVERY_ON_STARTUP":          "false",
 		"SWARM_LLM_SESSION_LOCK_TTL":                 "1s",
 		"SWARM_LLM_SESSION_ROTATE_AFTER_TURNS":       "2",
 		"SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES": "2",
@@ -3045,8 +3044,8 @@ func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaultRuntimeConfig: %v", err)
 	}
-	if cfg.Runtime.RecoveryOnStartup {
-		t.Fatalf("recovery_on_startup = true, want built-in false")
+	if !cfg.Runtime.RecoveryOnStartup {
+		t.Fatalf("recovery_on_startup = false, want built-in true regardless of retired environment override")
 	}
 	if cfg.LLM.Session.LockTTL != 10*time.Second || cfg.LLM.Session.RotateAfterTurns != 40 || cfg.LLM.Session.RotateOnParseFailures != 3 {
 		t.Fatalf("session defaults = %#v, want built-ins", cfg.LLM.Session)

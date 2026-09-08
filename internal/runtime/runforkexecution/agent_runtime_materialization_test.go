@@ -124,7 +124,7 @@ func selectedContractTestProcessCapability(
 	ctx context.Context,
 	selected runtimestartupownership.Store,
 	loaded LoadedSelectedContractSource,
-	backend ...string,
+	configs ...*config.Config,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
 	if selected == nil {
@@ -132,16 +132,12 @@ func selectedContractTestProcessCapability(
 	}
 	bundleHash := loaded.SourceArtifactFact.BundleHash()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
-	configuredBackend := ""
-	if len(backend) > 0 {
-		configuredBackend = backend[0]
+	modelOptions := runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live, SemanticSource: loaded.Source, ReceiverExecution: eventreceiver.NormalExecution()}
+	if len(configs) > 0 {
+		modelOptions.LLMBackend = configs[0].LLM.Backend
+		modelOptions.ModelAliases = configs[0].LLM.Models
 	}
-	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		SemanticSource:    loaded.Source,
-		LLMBackend:        configuredBackend,
-		ReceiverExecution: eventreceiver.NormalExecution(),
-	})
+	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, modelOptions)
 	desired, err := manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
 	if err != nil {
 		t.Fatalf("compile selected-contract declaration topology: %v", err)
@@ -324,7 +320,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		t.Fatal("selected-contract mock runtime returned no agent factory")
 	}
 	actor := runtimeactors.AgentConfig{
-		ID: "mock-agent", LLMBackend: llmselection.BackendMock,
+		ID: "mock-agent", ResolvedLLMBackend: llmselection.BackendMock,
 		ResolvedLLMProvider: llmselection.ProviderMock, ResolvedLLMTransport: llmselection.TransportMock,
 		ExecutionMode: runtimeeffects.ExecutionModeMock,
 		Mock: mockperformance.Performance{
@@ -495,7 +491,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	})
 	config.Identity = agentidentity.Identity{}
 	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(
-		runtimemanager.AgentManagerOptions{},
+		runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live},
 		runtimemanager.AgentMaterializationBlueprint{Config: config, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
 	)
 	if err != nil {

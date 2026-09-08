@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"io"
 	"net"
 	"net/http"
@@ -141,6 +142,7 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
+	ExecutionPosture       executionposture.Posture
 	Ctx                    context.Context
 	Stores                 serveRuntimePersistence
 	Config                 *config.Config
@@ -161,6 +163,7 @@ type serveRuntimeBundleContextRequest struct {
 	ToolGatewayBinding     toolgateway.Binding
 	UseStartupRecovery     bool
 	RuntimeInstanceID      string
+	DataProjectionRoot     string
 	ProcessWorkOwner       *worklifetime.Process
 	NoticePresentation     runtimetools.InformationalNoticePresentationSink
 }
@@ -346,6 +349,10 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
+	return materializeRuntimeBundle(module, bundle, sourceRoot, resolvedPaths.PlatformSpecPath)
+}
+
+func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *runtimecontracts.WorkflowContractBundle, sourceRoot, platformSpecPath string) (serveRuntimeBundle, error) {
 	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("compute boot bundle identity: %w", err)
@@ -360,8 +367,8 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 		source:           semanticview.Wrap(bundle),
 		sourceProjection: sourceProjection,
 		sourceRoot:       sourceRoot,
-		platformSpecPath: resolvedPaths.PlatformSpecPath,
-		runningSpecPath:  resolvedPaths.PlatformSpecPath,
+		platformSpecPath: platformSpecPath,
+		runningSpecPath:  platformSpecPath,
 		bootIdentity:     bootIdentity,
 		cleanup:          sourceProjection.Release,
 	}, nil
@@ -445,6 +452,9 @@ func prepareLoadedServeSourceArtifact(ctx context.Context, persistence serveRunt
 }
 
 func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (result serveRuntimeBundleContext, retErr error) {
+	if !req.ExecutionPosture.Valid() {
+		return serveRuntimeBundleContext{}, fmt.Errorf("command execution purpose is required")
+	}
 	loaded := req.Loaded
 	stateStoreSummary := strings.TrimSpace(req.StateStoreSummary)
 	if stateStoreSummary == "" {
@@ -489,7 +499,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 				retErr = errors.Join(retErr, workspaces.ReleaseSourceProjection(context.WithoutCancel(req.Ctx)))
 			}
 		}()
-		if err := configureWorkspaceDataProjection(workspaces, loaded.source, req.Stores); err != nil {
+		if err := configureWorkspaceDataProjection(workspaces, loaded.source, req.Stores, req.DataProjectionRoot); err != nil {
 			return serveRuntimeBundleContext{}, err
 		}
 		if err := workspaces.ValidateSource(req.Ctx, loaded.source); err != nil {
@@ -507,11 +517,14 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 			}
 		}()
 	}
-	posture, err := req.Config.ProcessExecutionPosture()
-	if err != nil {
-		return serveRuntimeBundleContext{}, err
+	posture := req.ExecutionPosture
+	if !posture.Valid() {
+		return serveRuntimeBundleContext{}, fmt.Errorf("command execution purpose is required")
 	}
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials, posture)
+	validationOpts.AllowHarnessInputs = posture == executionposture.MockOnly
+	validationOpts.AllowHarnessOutputs = posture == executionposture.MockOnly
+	validationOpts.ModelAliases = req.Config.LLM.Models
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderCredentials = req.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
@@ -546,6 +559,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		scenarioDeclarations = append(scenarioDeclarations, located.Declaration)
 	}
 	runtimeDeps.Options = runtime.RuntimeOptions{
+		ExecutionPosture:                 posture,
 		SelfCheck:                        req.Options.SelfCheck,
 		WorkflowModule:                   loaded.module,
 		WorkspaceLifecycle:               workspaces,
@@ -615,14 +629,17 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	}, nil
 }
 
-func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source semanticview.Source, stores serveRuntimePersistence) error {
+func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source semanticview.Source, stores serveRuntimePersistence, root string) error {
 	if workspaces == nil || source == nil {
 		return nil
 	}
 	if source.DataProjectionRequired() && stores.data == nil {
 		return fmt.Errorf("selected store does not expose durable data access projection")
 	}
-	materializer, err := runtimedataaccess.NewMaterializer(runtimedataaccess.DefaultProjectionRoot(), source, stores.data)
+	if root == "" {
+		root = runtimedataaccess.DefaultProjectionRoot()
+	}
+	materializer, err := runtimedataaccess.NewMaterializer(root, source, stores.data)
 	if err != nil {
 		return err
 	}
@@ -636,7 +653,7 @@ func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source sem
 	return nil
 }
 
-func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (*runtimellm.AgentRuntimeSet, error) {
+func buildForkChatSandboxLLMRuntimes(posture executionposture.Posture, cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (*runtimellm.AgentRuntimeSet, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
@@ -644,9 +661,8 @@ func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Re
 	if err != nil {
 		return nil, err
 	}
-	posture, err := cfg.ProcessExecutionPosture()
-	if err != nil {
-		return nil, err
+	if !posture.Valid() {
+		return nil, fmt.Errorf("command execution purpose is required")
 	}
 	registry := sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
 	return runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
@@ -833,6 +849,95 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			return 3
 		}
 	}
+	managedCredentials, err := cliapp.BuildManagedCredentialStore()
+	if err != nil {
+		presenter.fail(5, "managed_credentials", err)
+		return 1
+	}
+	providerCredentials, err := cliapp.BuildProviderCredentialStore()
+	if err != nil {
+		presenter.fail(5, "provider_credentials", err)
+		return 1
+	}
+	credentials, err := cliapp.BuildCredentialStore()
+	if err != nil {
+		presenter.fail(5, "credentials", err)
+		return 1
+	}
+	composition := runtimeCompositionRequest{
+		Purpose: executionposture.Live, ProviderIngress: true,
+		Repo: repo, Options: opts, Config: cfgResult, ResolvedPaths: resolvedPaths,
+		LocalState: localState, SwarmDir: swarmDir, StoreSelection: storeSelection,
+		WorkspacePreference: workspaceBackendPreference, MountSources: mountSources,
+		PlatformPackBase: platformPackBase, PlatformPackBases: platformPackBases,
+		APIAuth: apiAuth, PublicIngressMode: publicIngressMode, PublicIngressEnabled: publicIngressEnabled,
+		Registration: projectContextRegistration, ScratchAuthority: scratchAuthority,
+		Credentials: credentials, ManagedCredentials: managedCredentials, ProviderCredentials: providerCredentials,
+		Presenter: presenter, NoticePresentation: noticePresentation, Cancel: cancelServe,
+		BootStartedAt: bootStartedAt, RuntimeInstanceID: runtimeInstanceID,
+	}
+	scratchAuthority = nil // The common constructor now owns abort-or-joined-close.
+	return buildRuntimeComposition(ctx, composition)
+}
+
+// runtimeCompositionRequest contains command-admitted construction facts. It is
+// internal to the composition root, not a public runtime mode/configuration API.
+type runtimeCompositionRequest struct {
+	Purpose              executionposture.Posture
+	ProviderIngress      bool
+	Repo                 string
+	Options              cliapp.ServeOptions
+	Config               cliapp.RuntimeConfigLoadResult
+	ResolvedPaths        cliapp.CLISourcePlatformSpecPaths
+	LocalState           cliapp.LocalRuntimeStateResolution
+	SwarmDir             cliapp.CLISwarmDirResolution
+	StoreSelection       storebackend.Selection
+	WorkspacePreference  cliapp.WorkspaceBackendSelection
+	MountSources         cliapp.WorkspaceMountSources
+	PlatformPackBase     *packartifact.PlatformPackInventory
+	PlatformPackBases    *packartifact.PlatformPackBaseGenerationOwner
+	APIAuth              apiv1.AuthTokenResolution
+	PublicIngressMode    string
+	PublicIngressEnabled bool
+	Registration         *cliapp.ServeProjectContextRegistration
+	ScratchAuthority     *devscratch.EpochAuthority
+	Credentials          runtimecredentials.Store
+	ManagedCredentials   runtimemanagedcredentials.Store
+	ProviderCredentials  runtimecredentials.Store
+	Presenter            *serveLifecyclePresenter
+	NoticePresentation   *serveNoticePresentationSink
+	Cancel               context.CancelFunc
+	BootStartedAt        time.Time
+	RuntimeInstanceID    string
+	OnReady              func(context.Context, string) error
+	AdmittedBundle       *runtimecontracts.WorkflowContractBundle
+	DataProjectionRoot   string
+}
+
+// buildRuntimeComposition owns the common acquisition/start/ready/close path for
+// live serving and private test execution. Existing owners retain all semantics.
+func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) int {
+	repo, opts, cfgResult := req.Repo, req.Options, req.Config
+	cfg, resolvedPaths := cfgResult.Config, req.ResolvedPaths
+	localState, swarmDir, storeSelection := req.LocalState, req.SwarmDir, req.StoreSelection
+	mountSources, workspaceBackendPreference := req.MountSources, req.WorkspacePreference
+	platformPackBase, platformPackBases := req.PlatformPackBase, req.PlatformPackBases
+	apiAuth, projectContextRegistration := req.APIAuth, req.Registration
+	publicIngressMode, publicIngressEnabled := req.PublicIngressMode, req.PublicIngressEnabled
+	scratchAuthority := req.ScratchAuthority
+	defer func() {
+		if scratchAuthority != nil {
+			if err := scratchAuthority.AbortBeforeStoreOpen(); err != nil {
+				req.Presenter.cleanupFailure("scratch acquisition", err)
+			}
+		}
+	}()
+	presenter, noticePresentation, cancelServe := req.Presenter, req.NoticePresentation, req.Cancel
+	bootStartedAt, runtimeInstanceID := req.BootStartedAt, req.RuntimeInstanceID
+	if !req.Purpose.Valid() {
+		presenter.fail(3, "runtime_composition", fmt.Errorf("command execution purpose is required"))
+		return 2
+	}
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
@@ -875,7 +980,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	channelOnboardingStore := stores.ChannelOnboarding()
-	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores.SourceArtifactStore(), resolvedPaths, opts, platformPackBases)
+	loadedBundles, err := loadRuntimeCompositionBundles(ctx, req, stores.SourceArtifactStore())
 	if err != nil {
 		detail := err.Error()
 		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
@@ -910,7 +1015,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	source := loadedBundle.source
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
 	presenter.boot(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
-	primaryWorkspaceBackend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+	primaryWorkspaceBackend, err := cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, source)
 	if err != nil {
 		presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
 			cliapp.WriteWorkspaceBackendDecisionFailure(out, "serve", err)
@@ -918,16 +1023,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		})
 		return 3
 	}
-	managedCredentialStore, err := cliapp.BuildManagedCredentialStore()
-	if err != nil {
-		presenter.fail(5, "managed_credentials", err)
-		return 1
-	}
-	providerCredentialStore, err := cliapp.BuildProviderCredentialStore()
-	if err != nil {
-		presenter.fail(5, "provider_credentials", err)
-		return 1
-	}
+	managedCredentialStore, providerCredentialStore := req.ManagedCredentials, req.ProviderCredentials
 	providerCredentialOwner, err := runtimecredentials.NewSnapshotOwner(providerCredentialStore)
 	if err != nil {
 		presenter.fail(5, "provider_credentials", err)
@@ -942,7 +1038,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}
 	primaryPackLoad := bundlePackLoads[0]
-	if cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
+	if req.Purpose == executionposture.Live && cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
 		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
@@ -974,11 +1070,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	}
 	loadedBundle = loadedBundles[0]
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
-	credentialStore, err := cliapp.BuildCredentialStore()
-	if err != nil {
-		presenter.fail(5, "credentials", err)
-		return 1
-	}
+	credentialStore := req.Credentials
 	apiListener, err := cliapp.ListenServeHTTPListener("api", opts.APIListenAddr)
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", err)
@@ -1052,7 +1144,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		if i == 0 {
 			contextToolGatewayBinding = toolGatewayBinding
 		}
-		workspaceBackend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, loaded.source)
+		workspaceBackend, err := cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, loaded.source)
 		if err != nil {
 			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
 				cliapp.WriteWorkspaceBackendDecisionFailure(out, "serve", err)
@@ -1067,6 +1159,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 		packLoad := bundlePackLoads[i]
 		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
+			ExecutionPosture:       req.Purpose,
+			DataProjectionRoot:     req.DataProjectionRoot,
 			Ctx:                    ctx,
 			Stores:                 runtimePersistence,
 			Config:                 cfg,
@@ -1223,7 +1317,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 
-	forkChatLLM, err := buildForkChatSandboxLLMRuntimes(cfg, workspaces, toolGatewayBinding, providerCredentialStore, stores.Effects(), stores.Completion(), stores.CompletionHeartbeat(), rt.Budget)
+	forkChatLLM, err := buildForkChatSandboxLLMRuntimes(rt.ExecutionPosture, cfg, workspaces, toolGatewayBinding, providerCredentialStore, stores.Effects(), stores.Completion(), stores.CompletionHeartbeat(), rt.Budget)
 	if err != nil {
 		presenter.fail(5, "forkchat_sandbox", err)
 		return 1
@@ -1366,7 +1460,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	var inboundHandler http.Handler
-	if rt.InboundGateway != nil {
+	if req.ProviderIngress && rt.InboundGateway != nil {
 		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
 	apiServer = newAPIServer(ready, apiV1Handler, inboundHandler, ctx)
@@ -1551,10 +1645,13 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	presenter.boot(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
-	standing, err := serveReadyStandingIngress(ctx, runtimeContextManager, providerCredentialOwner, apiListener.Addr())
-	if err != nil {
-		presenter.fail(22, "ready", err)
-		return 1
+	var standing []serveLifecycleIngressFact
+	if req.ProviderIngress {
+		standing, err = serveReadyStandingIngress(ctx, runtimeContextManager, providerCredentialOwner, apiListener.Addr())
+		if err != nil {
+			presenter.fail(22, "ready", err)
+			return 1
+		}
 	}
 	if !publicIngressEnabled && len(standing) > 0 {
 		presenter.recordPublicIngressDisabledHint()
@@ -1619,6 +1716,15 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}
 
+	if req.OnReady != nil {
+		err := req.OnReady(ctx, "http://"+apiListener.Addr().String())
+		ready.Store(false)
+		if err != nil {
+			presenter.runtimeFailure("test_execution", err)
+			return 1
+		}
+		return 0
+	}
 	<-ctx.Done()
 	ready.Store(false)
 	return serveCancellationExitCode(ownershipLoss)

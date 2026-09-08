@@ -5898,17 +5898,17 @@ engine:
     - "Production multi-writer SQLite concurrency semantics are not promoted by #1087."
     - "Additional raw-SQL runtime feature parity for SQLite requires a separately gated backend-neutral owner before use."
   process_execution_posture:
-    promoted_by: '#2214'
-    implementation_status: mandatory_binary_process_ceiling
+    promoted_by: '#2214, #2321'
+    implementation_status: command_owned_process_ceiling
     owner: internal/runtime/executionposture.Posture
-    config:
-      key: runtime.execution_posture
+    command_composition:
       values: [live, mock_only]
-      required: true
       rule: >
-        Every runtime process declares exactly one execution posture. Omission and unknown values fail config verification.
-        Environment variables, CLI flags, LLM backend/profile, agent census, responder presence, provider/event names,
-        persisted rows, and credentials never default, override, or infer posture. There is no compatibility alias.
+        Serve and serve --dev select live; test selects mock_only through command composition.
+        Runtime construction requires that typed purpose. runtime.execution_posture is retired in every config layer,
+        including masked declarations, and fails with originating file/key and command-oriented remediation.
+        Environment variables, backend profiles, agent census, source doubles, responder presence, persisted descriptors
+        and credentials never select command purpose. There is no compatibility selector.
     relationship_to_execution_mode: >
       Posture is the immutable current-process ceiling; it is not persisted causal execution_mode and does not rewrite it.
       live admits both live and exact mock chains under the ordinary monotonic actor rules. mock_only admits only mock work.
@@ -5959,7 +5959,7 @@ engine:
       a live intent is rejected even when restored durable state or a lower-level adapter would otherwise admit it.
     source_readiness: >
       internal/runtime/bootverify.ResolveSourceBootEffectReachability is the sole source-level provider-connector credential
-      readiness projection consumed by verify, doctor, serve validation, and final runtime
+      readiness projection consumed by doctor, serve validation, and final runtime
       boot. live retains conservative declarative activity reachability. mock_only requires every effective agent to resolve
       exact mock and every provider-connector activity site to have an exact compiled mock response; only those unreachable
       outbound transport credentials are waived. Signing, listener, MCP, native, exec, workspace, and other independent
@@ -5972,8 +5972,8 @@ engine:
       and drains exact loaded contexts before their source projections are released; observations never expose a stale or
       lexical-hash fallback identity. A process epoch does not replace or reload a loaded source.
     no_legacy_rule: >
-      Old configs without runtime.execution_posture and old selected stores containing live work selected under mock_only are
-      unsupported. No default, migration, fallback reader, store-wide posture marker, live-to-mock rewrite, warning-only
+      Configs containing runtime.execution_posture and old selected stores containing live work selected under mock_only are
+      unsupported. No migration, fallback reader, store-wide posture marker, live-to-mock rewrite, warning-only
       admission, dummy credential, or dual semantic owner exists.
     proof: >
       Source-boundary ratchets forbid posture-owned live literals and profile-derived process mode. Supported proof covers
@@ -6234,7 +6234,7 @@ engine:
           owner: internal/runtime/llm/selection.ResolveAgentExecutionSelection
           configured_default: llm.backend
           authored_backend_intent: AgentConfig.LLMBackend
-          exact_override: generation-owned AgentConfig.Mock.Configured
+          execution_purpose: command-owned internal/runtime/executionposture.Posture
           derived_descriptor:
             backend: AgentConfig.ResolvedLLMBackend
             provider: AgentConfig.ResolvedLLMProvider
@@ -6242,15 +6242,13 @@ engine:
             mode: AgentConfig.ExecutionMode
             model: AgentConfig.ResolvedModel
           rule: >
-            llm.backend is the configured default. Authored AgentConfig.LLMBackend is immutable selection intent, not a
-            writable effective field: an authored live backend must equal the configured default, authored mock requires an
-            exact Python performance, and any unsupported or conflicting combination fails closed. With no conflicting live
-            pin, a generation-owned exact Python mock selects the mock profile and typed mock execution mode before model
-            resolution, conversation construction, tool/provider admission, completion authorization, or persistence.
-            Selection writes only the derived descriptor fields. It never overwrites authored backend, model, mock,
-            capability, or authority fields. The mock profile requires and retains the exact captured artifact. Missing or
-            conflicting backend, provider, transport, mode, or artifact state is invalid; no downstream reader may infer or
-            override selection.
+            llm.backend is the configured live default. An authored live AgentConfig.LLMBackend must equal that default.
+            Public llm.backend mock, --backend mock and authored llm_backend mock are retired selectors. A valid live pin
+            plus a supplied double is valid source under both commands. Command purpose selects execution exactly once
+            before model resolution, construction, admission, authorization or persistence. Live produces a live descriptor
+            with no executable mock artifact; mock_only requires and captures the exact compiled Python performance.
+            Source declarations retain their authored double, model and capabilities unchanged. Missing or conflicting
+            backend, provider, transport, mode or artifact state fails descriptor validation; readers never reselect.
           model_metadata_rule: >
             Authored model aliases always resolve against the configured live profile and its llm.models metadata, even when
             an exact mock selects mock execution. The mock execution profile is not a second model-metadata namespace and
@@ -6261,11 +6259,10 @@ engine:
               Every agent conversation is constructed with the concrete runtime selected by its resolved descriptor. The
               configured live adapter and mock adapter are typed lazy slots, not a context-switched runtime multiplexer.
               The mock slot has an independent canonical constructor and does not require an injected live adapter's factory
-              or live-session dependencies. Fully mocked sources never construct or consult the unreachable live adapter.
-              Mixed sources bind exact mocked agents to MockRuntime and all other agents to the configured live adapter.
-              The process execution posture is a separate ceiling: mock_only requires every effective agent to resolve exact
-              mock before runtime construction, while live permits the existing per-agent selection matrix. Agent source
-              artifacts, backend profiles, and responder presence never select process posture.
+              or live-session dependencies. Mock-selected descriptors never construct or consult the unreachable live
+              adapter. Source doubles do not select an adapter. Mock command admission requires exact performances for
+              every effective declaration; serve selects live even for a source containing doubles.
+              Stored descriptors are validated and consumed unchanged, without resolving model aliases again.
             turn_mode_admission:
               owner: internal/runtime/agents.LLMAgent.OnEvent
               invariant_ids:
@@ -6302,12 +6299,12 @@ engine:
               - selected-contract ephemeral materialization
               - conversation fork-chat source snapshot
             lifecycle_rule: >
-              Static spawn, persisted recovery/restart, selected-contract reconstruction, and fork-chat reconstruction re-run
-              canonical selection from authored runtime selection plus the current configured default.
-              Persisted derived fields are observations, not cross-boot authority, and stale derived fields are replaced
-              before admission or construction. The persistence projection accepts only an already-resolved backend and never
-              invents a configured default from authored intent or an empty descriptor. Native-tool admission runs only after
-              this resolution and construction uses that same resolved actor/runtime pair.
+              Fresh materialization and explicit authored model/backend/performance patches consume canonical selection
+              at the write entrance. Recovery/restart, stored selected-contract agents and fork-chat snapshots validate
+              and consume the persisted descriptor, including its concrete model, without reselection or conversion.
+              Reconfiguration cannot change causal execution mode. Persistence accepts only an already-resolved descriptor;
+              no reader invents a configured default or silently repairs stale state. Native-tool admission and runtime
+              binding consume that exact descriptor.
             agent_lifecycle_authority_rule: >
               Managed agents are declarative residents of their flow instance. Flow termination and contract-readiness
               reconciliation own agent teardown. Agents cannot independently terminate other declared agents. Operator
@@ -6322,16 +6319,16 @@ engine:
               mutation and never rewrite it.
             native_capability_rule: >
               Exact mock selection waives provider-native capability admission because no provider-native process can run;
-              authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
-              bash, and exec-tool reasons remain authoritative in workspace selection and are never erased by the waiver.
-          fully_mocked_provider_startup_waiver:
-            promoted_by: '#2172, #2214'
-            owner: effective source agent registry entry Mock.Configured fact consumed through ResolveAgentExecutionSelection
+              authored native_tools declarations remain legal and unchanged. Live descriptors retain every native,
+              bash, exec-tool and workspace prerequisite regardless of source doubles. Mock execution uses isolated
+              workspace backing and cannot authorize native or external execution.
+          command_selected_provider_startup:
+            promoted_by: '#2172, #2214, #2321'
+            owner: command purpose and the canonical executable agent descriptor
             rule: >
-              A configured exact Python mock selects in-process mock execution for that agent even when runtime config names
-              a live provider profile. When every declared agent is mock-configured, no provider turn is reachable, so the
-              complete provider startup chain is waived. Mixed bundles remain fail-closed for every unmocked agent, and
-              teaching errors must name the sorted unmocked agent ids.
+              Live purpose preserves the complete provider startup chain even when every source agent has a double.
+              Mock purpose requires complete source admission and exact stored mock descriptors and does not acquire
+              live-provider prerequisites. No fully-mocked predicate or source-presence waiver remains authoritative.
             consumers:
               - validateSelectedBackendCredentialForDeclaredAgents
               - validateSelectedBackendCredentialForActiveAgents
@@ -6349,7 +6346,7 @@ engine:
                 - every project-scoped and flow-scoped node declaration lowered through runtime/contracts.ActivitySitesForNode
               rule: >
                 Static and managed outbound tool credentials are required exactly when that tool's transport remains
-                reachable under the mandatory process posture. live retains the conservative #2172 rule: any live-selected
+                reachable under command purpose. live retains the conservative rule: any live-selected
                 agent retains every outbound tool credential, and declarative activity sites remain live-reachable from
                 non-agent ingress regardless of agent census. mock_only requires every effective agent to resolve exact mock
                 and every provider_connector activity site to have an exact compiled response; it then waives only the
@@ -6362,7 +6359,7 @@ engine:
                 requirement remains required. Process posture is explicit authority; persisted event mode, profile, agent
                 count, responder presence, and missing credentials never infer it.
               consumers:
-                - internal/runtime/workflow_validation.go for swarm verify and serve validation
+                - internal/runtime/workflow_validation.go for execution validation
                 - internal/cliapp/local_preflight.go for doctor contract-secret admission
                 - internal/runtime/runtime.go for final runtime boot credential admission
               diagnostics: >
@@ -6372,10 +6369,10 @@ engine:
                 never exposed.
             workspace_classifier_rule: >
               The workspace backend classifier consumes every canonical project-scoped and flow-scoped declaration plus
-              only flat declarations not represented by a scope. It resolves each declaration's Mock.Configured fact. An
-              exact mocked agent contributes no claude_cli process-execution reason, but retains ordinary workspace
-              lifecycle/write requirements and any independently declared exec-class capability. Any unmocked claude_cli
-              agent remains exec-capable and host execution is refused with the scope-qualified unmocked agent named. Boot and
+              only flat declarations not represented by a scope. It consumes canonical command-selected execution.
+              Mock purpose contributes no live Claude/native/exec requirement and retains isolated workspace backing.
+              Live Claude agents remain exec-capable even with doubles, and host execution is refused with the
+              scope-qualified agent named. Boot and
               runtime workspace-class validation consume the same census, not flattened aliases. A package/flow projection of one
               authored declaration is counted once. Native admission binds each scoped declaration through its scope-owned
               URI and canonical owning-flow route/path only when that URI is unique across declarations; missing or collapsed
@@ -6390,7 +6387,7 @@ engine:
               StartupVisibleToolSurfaceProber. Absence is a hard startup error; it cannot be skipped and an empty target set
               is not success. Exact mock and non-Claude selections do not carry this provider-specific obligation.
         authoring:
-          runtime_config: A live provider profile may remain selected globally; each exact agent mock selects in-process mock execution for that agent.
+          runtime_config: Configuration selects a live provider profile; command composition selects live serve or exact mock test execution.
           agent_performance:
             shape: '{mock: {kind: python, module: <declaring-flow-relative mocks/ .py file>, post_tool_tail_latency_ms: <optional non-negative integer>}}'
             kind: python
@@ -18805,15 +18802,15 @@ configuration_source_authority:
         runtime:
           trust: project_safe_unless_key_is_marked_elevated
           keys:
-            execution_posture: project_safe_required_exact_live_or_mock_only
+            execution_posture: retired_rejected_in_every_layer
             max_concurrent_agents: split_unsupported
             event_poll_interval: split_unsupported
-            recovery_on_startup: project_safe
+            recovery_on_startup: project_safe_default_true_explicit_false_preserved
             decision_card_first_reminder: project_safe_duration_default_4h
             decision_card_urgency: project_safe_duration_default_24h
             decision_card_reminder_interval: project_safe_duration_default_24h
             decision_card_input_draft_ttl: project_safe_duration_default_15m
-          owner: process_execution_posture for execution_posture; runtime_storage.runtime_store_backend_selection for existing runtime/store keys
+          owner: process_execution_posture for retired selector refusal; runtime_storage.runtime_store_backend_selection for runtime/store keys
         store:
           trust: elevated
           keys:
@@ -19177,10 +19174,14 @@ workspace_model:
     unsafe_config_key: workspace.allow_exec_on_host
     retired_env_var: SWARM_WORKSPACE_BACKEND
     source_order:
-    - loaded contract execution capability
+    - command-selected executable descriptor and typed effect reachability over the admitted source
     - --workspace-backend preference / unsafe host opt-out
     - workspace.backend preference plus workspace.allow_exec_on_host for persistent unsafe host opt-out
     default_backend: capability-derived
+    command_selection: >-
+      Source doubles do not waive live Claude, native bash, exec tools or managed-workspace prerequisites. MockOnly
+      execution uses isolated host backings for mock agents and the existing mock-effect fence instead of executing
+      their live native/exec capabilities. Structural readers select no concrete workspace or machine readiness.
     capability_classes:
       none:
         rule: No declared agents require no workspace lifecycle by default and MUST boot with zero Docker/workspace external dependencies.
@@ -20224,20 +20225,28 @@ test_specification:
       - catalog.runtime.agent_emission_delivery
       - catalog.runtime.agent_terminal_teardown
     compiled_process_golden_profile:
-      promoted_by: '#2168'
+      promoted_by: '#2168, #2321'
       source: internal/releasee2e/testdata/golden_agent_workload
       executor: github.com/division-sh/swarm/internal/releasee2e
       ci_owner: hitl-releasee2e-full
       process_boundary: >
-        The executor builds the current swarm binary and uses only public readiness and
+        The executor builds the current swarm binary for public structural commands and a separate go test -c
+        serveapp binary with TestOwnedMockLifecycleProcessEntry for retained mock execution (H). The child uses
+        buildRuntimeComposition and existing lifecycle owners; its input is absent from the production binary.
+        The parent owns retained stores/workspace roots across children. The proof uses public readiness and
         /v1/rpc behavior against the authored source. Every workload runs from an authored
         YAML-only child project with no project-local `go.mod`, beneath one hostile ancestor
-        `go.mod` that acts only as an upward-search canary. Verify, initial serve, and every
+        `go.mod` that acts only as an upward-search canary. Verify, initial internal child, and every
         restart use that exact child working directory and relative `swarm.yaml`, `contracts`,
         and `api-token` operands. It runs with mock_only execution, no provider credential
         and a fixture-private empty executable search path, so Claude, Docker, and Podman
         cannot be discovered. SQL is permitted only to provision and remove an isolated
         host-PostgreSQL database.
+      surface_credit: >-
+        H is retained mock workload, restart, forced death and burst evidence, never public serve/test or live-provider
+        credit. T is real public test with fresh resources and no ingress. Separate L evidence exercises actual live
+        serve/dev, possession/refusal, real provider readiness/turn and retained restart with supported prerequisites.
+        Missing L prerequisites are an acceptance blocker, not a skipped-success row or permission to relabel H.
       pr_profile: >
         pr-common and pr-escalated execute the complete N=2 SQLite composition shape.
         Forced restart and contention rows are skipped explicitly by the canonical proof
@@ -20257,7 +20266,7 @@ test_specification:
       - project-local Go-module authority or absolute config, source-root, or token operands
       - reduced payload assertions, deadline-as-success, or a non-race burst substitute
     compiled_process_full_lifecycle_profile:
-      promoted_by: '#2008'
+      promoted_by: '#2008, #2321'
       source: internal/releasee2e/testdata/full_lifecycle/standing_telegram
       executor: github.com/division-sh/swarm/internal/releasee2e
       ci_owner: hitl-releasee2e-full
@@ -20267,22 +20276,31 @@ test_specification:
         progression, mock connector settlement, graceful restart, forced death, default-config intrinsic standing recovery, and post-restart
         public convergence without interpreting any production semantic inside the harness.
       invocation_boundary: >
-        Every journey builds the current swarm binary once per test group and runs real verify and Cobra serve from an
+        Every journey builds the current swarm binary for structural verify, secrets and test-admission commands, plus an
+        internal go test -c serveapp lifecycle binary (H) using the shared buildRuntimeComposition, from an
         authored YAML-only child beneath a hostile ancestor go.mod. Config, source-root, and token operands are relative
         to that child. Selected stores begin empty; secrets are set through the public command; RPC and webhook traffic
-        use public listeners. Provider credentials and discoverable Claude, Docker, or Podman executables are absent.
+        use real listeners and authentication/receipt/normalization/settlement owners. The parent retains the selected
+        store/workspace roots across children; J5 delegates fresh epochs to the existing dev-scratch owner. Provider
+        session credentials and discoverable Claude, Docker, or Podman executables are absent. Local signed-ingress
+        fixture credentials are present. This is not public mock serve or private test restart proof.
+      surface_credit: >-
+        T runs fresh public authored/derived tests without ingress. H owns J1-J5 retained mock lifecycle and signed ingress.
+        L separately exercises actual public live serve/dev, real provider prerequisites and graceful/crash restart on both
+        supported stores. Preserve the exact workload and assertions across this separation. Combined webhook acceptance
+        remains dependent on #2319's dormant-to-activated proof. No hidden mock serve flag or second semantic owner exists.
       journeys:
-        J1_sqlite_graceful: Plain serve with omitted recovery gracefully restarts one SQLite store and retains the exact standing service, run, generation, standing ingress entity, bundle, and downstream route before one fresh same-conversation ingress converges.
+        J1_sqlite_graceful: Internal retained mock child with omitted recovery gracefully restarts one SQLite store and retains the exact standing service, run, generation, standing ingress entity, bundle, and downstream route before one fresh same-conversation ingress converges.
         J2_postgres_graceful: J1 against an isolated host-PostgreSQL database.
         J3_sqlite_crash_intrinsic_recover: >
-          Plain SQLite serve is publicly paused at one exact pending normal-authority delivery and killed. One restart with
+          The internal SQLite child is publicly paused at one exact pending normal-authority delivery and killed. One restart with
           the same store/source and unchanged omitted recovery configuration reaches readiness because the active exact-current
           standing generation is active_intrinsic. It retains exact identities, normalizes the same N to running with
           standing_reconcile, automatically converges the interrupted chain once, and converges one fresh transport identity
           using the same conversation and downstream entity/route once. Generic run.pause does not persist standing suspension.
         J4_postgres_crash_intrinsic_recover: J3 against an isolated host-PostgreSQL database.
         J5_sqlite_dev_fresh_epoch: >
-          Project-local serve --dev reaches the same public paused/pending checkpoint and is killed. Its next invocation
+          The internal child using the existing project-local dev-scratch owner reaches the same public paused/pending checkpoint and is killed. Its next invocation
           uses a fresh SQLite scratch epoch. The same authored filesystem flow may rederive identical service, generation-one
           run, and standing ingress entity IDs; freshness requires a strictly later public run started_at and absence of every predecessor
           exact event, delivery, and card fact before one new ingress converges exactly once. PostgreSQL, authored-path,
@@ -20296,9 +20314,9 @@ test_specification:
         delivery. A deadline is failure, not success.
       manifestations:
         M1: The explicit fixture source is one finite admitted filesystem flow tree; child flows are discovered directly from directories, and package.yaml or flows/ topology is absent.
-        M2: Verify and serve use the same production-shaped YAML-only relative invocation root.
-        M3: Exact authored connector mock response admission succeeds and a missing response fails verify.
-        M4: Cold plain serve reaches committed readiness on both selected stores with recovery omitted.
+        M2: Public verify and internal retained mock construction use the same production-shaped YAML-only relative invocation root; public live serve is separate L evidence.
+        M3: Exact authored connector mock response admission succeeds; missing response is structurally valid but fails public test admission before acquisition. Malformed supplied responses still fail structural verification.
+        M4: Cold internal retained mock construction reaches committed readiness on both selected stores with recovery omitted.
         M5: Signed ingress proves the exact ordered receipt from its raw standing-entity event and no-subscriber settlement through its normalized downstream-entity event and exact delivery target, with no dead letter.
         M6: The filesystem-flow-owned mock agent executes without external provider or container discovery and exposes mock provenance.
         M7: One workflow timer advances once with exact platform.stage_timer event cardinality.
@@ -20321,7 +20339,8 @@ test_specification:
         M24: The mandatory unfiltered CI owner executes smoke in PR profiles and all five journeys in full/nightly profiles.
       supported_surfaces:
       - compiled swarm verify --json
-      - compiled swarm serve and project-local swarm serve --dev
+      - compiled swarm test admission (T) and internal retained mock lifecycle child (H)
+      - separately proven compiled live swarm serve and project-local swarm serve --dev (L)
       - /readyz and health.check
       - signed provider webhook ingress
       - run.list, run.get, run.pause, and run.diagnose
@@ -20563,6 +20582,28 @@ test_specification:
       live LLM provider sessions.
     selected_public_surface:
       command_family: swarm test
+      execution_purpose: mock_only selected by command composition, never source doubles or deployment configuration
+      session_ownership: >-
+        Each invocation admits effective source, scenario declarations, payloads and exact mock completeness before
+        acquiring one fresh private runtime. TestSessionRunner is injected into cliapp.Execute by cmd/swarm and implemented
+        by serveapp.RunTestSession through the same buildRuntimeComposition used by live serve. Existing store, workspace,
+        source-set, API, process supervisor and runtime lifetime owners remain authoritative; no second scheduler or lifecycle
+        framework is introduced. Committed readiness and exact runtime.identity source matching precede scenario execution.
+      private_resources: >-
+        The session owns fresh temporary SQLite state, isolated host workspace and data-projection roots, ephemeral numeric
+        loopback API/gateway listeners and generated in-memory authentication. Deployment store/listener/auth/workspace
+        selections and ambient credentials or API targets cannot enter its construction request. All configuration layers
+        are still parsed and validated, including masked retired keys. Live backend/model policy remains source-validation
+        input, not live execution authority. No project store, dev epoch or persistent project-context registration is used.
+      external_boundary: >-
+        Explicit --api-server, --context and --api-token-file refuse before connection lookup or acquisition. Public test
+        mounts no provider ingress, channel registration or external exposure. Real signed ingress and retained restart
+        evidence belong to a separately labelled internal lifecycle harness, not this public command.
+      shutdown: >-
+        On cooperative success, failure or cancellation, withdraw readiness, cancel/drain/join owned work, shut down
+        listeners, close contexts/workspaces/store, then remove private resources. Surface execution and cleanup errors.
+        Forced death may leave inaccessible temporary artifacts; later invocations never reuse them. No scavenger,
+        retained test daemon, compatibility reader or recovery abstraction is added.
       command_catalog_status: >
         `swarm test` is the selected and implemented first-slice user-facing
         runner family. The concrete cli_specification.command_catalog row
@@ -20675,13 +20716,14 @@ test_specification:
           provenance is unavailable. PostgreSQL and SQLite selected-contract forks inherit exact profile bytes only when
           effective identities match before materialization.
       archetype_admission: >-
-        Every admitted `swarm new` archetype contains an authored derived smoke scenario, verifies, boots under mock_only, and
-        runs through the public scenario runner with zero credentials and zero Docker in under 60 seconds. `swarm new` writes
+        Every admitted `swarm new` archetype contains an authored derived smoke scenario, verifies structurally, and runs
+        through bare public `swarm test` with zero credentials and zero Docker in under 60 seconds. No separate server,
+        deployment configuration, precreated .swarm directory or mock-to-live graduation file is shipped. `swarm new` writes
         only the selected embedded canonical archetype and refuses overwrite; future producers persist the same canonical plan
         grammar rather than introducing a scaffold-only format.
     non_goals:
     - No runtime/backend/provider implementation is promoted by this section.
-    - This runner does not select or implement the active `mock` backend, and no active `local` LLM backend profile is promoted.
+    - The command selects MockOnly through the canonical execution selector; it does not implement a provider or promote an active `local` LLM backend profile.
     - The runner does not satisfy, weaken, or bypass internal/runtime/llm.ProviderContract.
     - The runner does not prove live agent sessions, tool-call translation, agent-memory behavior, turn/audit persistence,
       retry lineage, native-tool capability truth, or spend/budget accounting.
@@ -23841,7 +23883,7 @@ cli_specification:
       tier: should_have
       implementation_status: implemented_first_slice
       owner: platform-spec.yaml#test_specification.deterministic_scenario_runner
-      behavior: Public deterministic scenario-runner CLI consumer. The command discovers v1 YAML scenarios only under tests/... and <flow-path>/tests/...; automatic discovery treats YAML files with version, steps, derive, or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps optionally consume setup/pre-state aliases seeded through /v1/rpc test.setup_entities before calling /v1/rpc event.publish; mailbox.decide/defer steps locate exactly one pending decision card through mailbox.list and then call the typed mailbox mutation RPC. The command waits for test quiescence by repeatedly reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt work, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic completion rule. Expectations consume run.trace, event.list dead-letter readback, paginated entity.list, and entity.get for detail assertions. The command does not activate mock/local providers, implement ProviderContract, test live agent sessions/tool calls/audit/ spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables directly.
+      behavior: Public deterministic scenario-runner CLI consumer owning a fresh private MockOnly runtime through the shared serve composition. The command discovers v1 YAML scenarios only under tests/... and <flow-path>/tests/...; automatic discovery treats YAML files with version, steps, derive, or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps optionally consume setup/pre-state aliases seeded through /v1/rpc test.setup_entities before calling /v1/rpc event.publish; mailbox.decide/defer steps locate exactly one pending decision card through mailbox.list and then call the typed mailbox mutation RPC. The command waits for test quiescence by repeatedly reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt work, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic completion rule. Expectations consume run.trace, event.list dead-letter readback, paginated entity.list, and entity.get for detail assertions. The command selects exact mock execution through the canonical selector; it does not implement ProviderContract or a local provider, test live agent sessions/tool calls/audit/ spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables directly.
       derived_mode: >-
         `--derive <flow>` explicitly compiles and executes the canonical S6 derived plan without writing a scenario file.
         `--input` selects one exact public pin; ambiguity fails with candidate evidence; `--all-inputs` runs one plan per exact
@@ -23861,7 +23903,7 @@ cli_specification:
           acquiring generated-input eligibility.
         effective_source_owner: >-
           The command resolves unified configuration once, loads configured provider-trigger packs from that same snapshot, and
-          composes the bundle source through internal/runtime.SourceWithProviderTriggerEvents before endpoint census and schema
+          admits the bundle through packadmission.FromBundle and internal/runtime.AdmitEffectiveSourceProjection before endpoint census and schema
           resolution. Generated, inline, and file-backed payloads resolve their canonical event key and validate through one
           semanticview.ResolveEventSchema path over this same effective source; only generated payloads additionally require an
           exact input-pin census match.

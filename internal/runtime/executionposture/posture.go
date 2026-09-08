@@ -45,7 +45,7 @@ func (p Posture) Admit(mode executionmode.Mode, operation string) error {
 		return fmt.Errorf("%s has invalid execution mode %q", strings.TrimSpace(operation), mode)
 	}
 	if p == MockOnly && mode == executionmode.Live {
-		return fmt.Errorf("runtime.execution_posture=mock_only rejects live execution before %s", strings.TrimSpace(operation))
+		return fmt.Errorf("command-selected mock execution rejects live execution before %s", strings.TrimSpace(operation))
 	}
 	return nil
 }

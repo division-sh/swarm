@@ -142,6 +142,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	}
 
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
+		ExecutionPosture:        opts.ExecutionPosture,
 		Purpose:                 opts.Purpose,
 		Credentials:             opts.Credentials,
 		ManagedCredentials:      opts.ManagedCredentials,

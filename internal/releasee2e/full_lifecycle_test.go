@@ -51,10 +51,11 @@ func TestCompiledProcessFullLifecycleSQLiteSmoke(t *testing.T) {
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, releaseRoot)
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
 	assertFullLifecycleSourceAdmission(t, binary, filepath.Join(releaseRoot, "source-admission"))
 	journey := fullLifecycleJourneys[0]
 	root := filepath.Join(releaseRoot, journey.name)
-	runFullLifecycleJourney(t, binary, root, goldenSQLiteStore(filepath.Join(root, "store")), journey)
+	runFullLifecycleJourney(t, binary, lifecycleBinary, root, goldenSQLiteStore(filepath.Join(root, "store")), journey)
 }
 
 func TestCompiledProcessFullLifecycleJourneysSQLitePostgres(t *testing.T) {
@@ -68,6 +69,7 @@ func TestCompiledProcessFullLifecycleJourneysSQLitePostgres(t *testing.T) {
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, releaseRoot)
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
 	assertFullLifecycleSourceAdmission(t, binary, filepath.Join(releaseRoot, "source-admission"))
 
 	limit := make(chan struct{}, 2)
@@ -82,7 +84,7 @@ func TestCompiledProcessFullLifecycleJourneysSQLitePostgres(t *testing.T) {
 			if journey.backend == "postgres" {
 				store = goldenPostgresStore(t, dsn)
 			}
-			runFullLifecycleJourney(t, binary, root, store, journey)
+			runFullLifecycleJourney(t, binary, lifecycleBinary, root, store, journey)
 		})
 	}
 }
@@ -132,13 +134,11 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 }
 
 func fullLifecycleRuntimeConfig(store goldenStoreSelection, dev bool) string {
-	runtimeConfig := "runtime:\n  execution_posture: mock_only\n"
 	storeConfig := store.configYAML
 	if dev {
 		storeConfig = "store:\n  backend: sqlite\n"
 	}
-	return runtimeConfig +
-		"llm:\n  backend: claude_cli\n" +
+	return "llm:\n  backend: claude_cli\n" +
 		"workspace:\n  backend: host\n" +
 		storeConfig
 }
@@ -167,13 +167,15 @@ func assertFullLifecycleSourceAdmission(t *testing.T, binary, root string) {
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			result := runReleaseCommand(t, fullLifecycleStartupLimit, project, env, "", binary,
 				"verify", "contracts", "--config", "swarm.yaml", "--json")
+			assertFullLifecycleVerifySuccess(t, result)
 			if !test.mutate {
-				assertFullLifecycleVerifySuccess(t, result)
 				return
 			}
+			result = runReleaseCommand(t, fullLifecycleStartupLimit, project, env, "", binary,
+				"test", "contracts", "--config", "swarm.yaml", "--derive", "telegram-chat")
 			if result.err == nil || !strings.Contains(result.output, "exact mock response") ||
 				!strings.Contains(result.output, "telegram.send_message") {
-				t.Fatalf("missing-response verify = err:%v output:%s, want exact connector-response refusal", result.err, result.output)
+				t.Fatalf("missing-response test admission = err:%v output:%s, want exact connector-response refusal", result.err, result.output)
 			}
 		})
 	}
@@ -192,10 +194,12 @@ func assertFullLifecycleVerifySuccess(t *testing.T, result releaseCommandResult)
 	}
 }
 
-func runFullLifecycleJourney(t *testing.T, binary, root string, store goldenStoreSelection, journey fullLifecycleJourney) {
+func runFullLifecycleJourney(t *testing.T, binary, lifecycleBinary, root string, store goldenStoreSelection, journey fullLifecycleJourney) {
 	t.Helper()
 	started := time.Now()
 	processSpec := prepareFullLifecycleProject(t, binary, root, store, journey.kind == fullLifecycleDevFresh)
+	processSpec.InternalMockLifecycleBinary = lifecycleBinary
+	t.Log("proof_surface=H; retained lifecycle assertions use internal compiled composition, not public serve/test")
 	startReady := func() *releaseServeProcess {
 		process := startReleaseServe(t, processSpec)
 		ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleStartupLimit)

@@ -104,7 +104,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 	}
 	cfg := &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: false,
+			RecoveryOnStartup: true,
 		},
 		Database: config.DatabaseConfig{
 			Host:     "127.0.0.1",

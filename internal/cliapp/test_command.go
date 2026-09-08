@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"path"
 	"path/filepath"
 	"sort"
@@ -16,10 +17,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -27,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
@@ -69,6 +71,13 @@ type scenarioTestFile struct {
 	FlowID   string
 	Raw      []byte
 	Document *scenarioDocument
+}
+
+type preparedScenario struct {
+	file      scenarioTestFile
+	document  scenarioDocument
+	evaluator *scenarioExpressionEvaluator
+	execution *scenarioexecution.Selector
 }
 
 type scenarioDocument struct {
@@ -233,6 +242,9 @@ func newTestCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command
 		Short: "Run deterministic scenario tests through public read owners.",
 		Args:  argcount.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cliAPIConnectionFlagsChanged(cmd) {
+				return returnScenarioTestValidationError(cmd.ErrOrStderr(), fmt.Errorf("swarm test owns a fresh private session; --api-server, --context and --api-token-file are not supported"))
+			}
 			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
 				return returnScenarioTestValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -308,83 +320,101 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 			return returnScenarioTestValidationError(errOut, err)
 		}
 	}
-	providerCredentials, err := BuildProviderCredentialStore()
+	metadata, err := packadmission.FromBundle(bundle)
 	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("configure provider credentials: %w", err))
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit pack metadata: %w", err))
 	}
-	managedCredentials, err := BuildManagedCredentialStore()
-	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("configure managed credentials: %w", err))
-	}
-	packRuntime, err := LoadBundlePackRuntime(ctx, configResult, bundle, providerCredentials, managedCredentials)
-	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("load bundle pack runtime: %w", err))
-	}
-	providerPacks := packRuntime.ProviderTriggers
-	channelPacks := packRuntime.Channels
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("compute bundle_hash: %w", err))
+		return returnScenarioTestValidationError(errOut, err)
 	}
-	client, err := newCLIAPIClientFromConfig(opts.apiOptions, configResult.cli)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
-	}
-	sourceFact, err := scenarioTestSourceArtifactFact(ctx, client, bundleHash)
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
+		return returnScenarioTestValidationError(errOut, err)
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceFact,
-		ProviderTriggerCatalog: providerPacks.Catalog, ChannelPlans: channelPacks.Plans,
+		ProviderTriggerCatalog: metadata.ProviderTriggers, ChannelPlans: metadata.ChannelPlans,
 	})
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit effective source: %w", err))
 	}
 	source := projection.Source()
-	declaredChannelPublication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(channelPacks.Bindings)
+	validation := runtime.StructuralWorkflowContractValidationOptions()
+	validation.AllowHarnessInputs, validation.AllowHarnessOutputs = true, true
+	validation.ModelAliases = configResult.Config.LLM.Models
+	validation.ProviderTriggerCatalog, validation.ChannelPlans = metadata.ProviderTriggers, metadata.ChannelPlans
+	if _, err := runtime.ValidateWorkflowContractSurface(ctx, source, validation); err != nil {
+		return returnScenarioTestValidationError(errOut, err)
+	}
+	profile, err := configResult.Config.LLMBackendProfile()
 	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("compile declared-only channel activation publication: %w", err))
+		return returnScenarioTestValidationError(errOut, err)
 	}
-	if err := declaredChannelPublication.Validate(); err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("validate declared-only channel activation publication: %w", err))
+	if _, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, executionposture.MockOnly); err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("test completeness: %w", err))
 	}
-	runner := scenarioRunner{
-		client:                  client,
-		bundle:                  bundle,
-		source:                  source,
-		bundleHash:              bundleHash,
-		sourceRoot:              sourceRoot,
-		timeout:                 opts.timeout,
-		pollInterval:            opts.pollInterval,
-		out:                     out,
-		effectiveSourceIdentity: projection.Identity(),
-	}
+	var plans []scenarioderivation.Plan
 	if deriveFlow != "" {
-		plans, err := scenarioderivation.Compile(source, projection.Identity(), scenarioderivation.Request{
+		plans, err = scenarioderivation.Compile(source, projection.Identity(), scenarioderivation.Request{
 			FlowID: deriveFlow, Input: opts.input, AllInputs: opts.allInputs,
 		})
 		if err != nil {
 			return returnScenarioTestValidationError(errOut, err)
 		}
+	}
+	runner := scenarioRunner{
+		bundle: bundle, source: source, bundleHash: bundleHash,
+		sourceRoot: sourceRoot, timeout: opts.timeout, pollInterval: opts.pollInterval,
+		out: out, effectiveSourceIdentity: projection.Identity(),
+	}
+	prepared := make([]preparedScenario, 0, len(files))
+	for _, file := range files {
+		scenario, err := runner.prepareScenario(file)
+		if err != nil {
+			return returnScenarioTestValidationError(errOut, err)
+		}
+		prepared = append(prepared, scenario)
+	}
+	if opts.apiOptions.runTest == nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("private test session runner is unavailable"))
+	}
+	err = opts.apiOptions.runTest(ctx, TestSessionRequest{
+		Bundle: bundle, SourceRoot: sourceRoot, PlatformSpecPath: platformSpec,
+		PlatformPackBase: platformPackBase, LiveBackend: profile.ID, ModelAliases: configResult.Config.LLM.Models,
+	}, func(sessionCtx context.Context, endpoint TestSessionEndpoint) error {
+		rpcEndpoint, err := cliAPIRPCEndpointFromServer(endpoint.APIServer, "private test session")
+		if err != nil {
+			return err
+		}
+		if !cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) || endpoint.Token == "" {
+			return fmt.Errorf("private test session requires a numeric loopback endpoint and explicit token")
+		}
+		client := &cliAPIClient{endpoint: rpcEndpoint, token: endpoint.Token, httpClient: opts.apiOptions.httpClient}
+		if client.httpClient == nil {
+			client.httpClient = http.DefaultClient
+		}
+		if _, err := scenarioTestSourceArtifactFact(sessionCtx, client, bundleHash); err != nil {
+			return err
+		}
+		runner.client = client
 		for _, plan := range plans {
-			if err := runner.runDerivedPlan(ctx, plan); err != nil {
-				writeCLIAPIError(errOut, err)
-				return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
+			if err := runner.runDerivedPlan(sessionCtx, plan); err != nil {
+				return err
 			}
 		}
-		fmt.Fprintf(out, "swarm test ok: scenarios=%d\n", len(plans))
-		return nil
-	}
-	for _, file := range files {
-		if err := runner.runScenarioFile(ctx, file); err != nil {
-			writeCLIAPIError(errOut, err)
-			return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
+		for _, scenario := range prepared {
+			if err := runner.runPreparedScenario(sessionCtx, scenario); err != nil {
+				return err
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		writeCLIAPIError(errOut, err)
+		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
 	}
-	fmt.Fprintf(out, "swarm test ok: scenarios=%d\n", len(files))
+	fmt.Fprintf(out, "swarm test ok: scenarios=%d\n", len(files)+len(plans))
 	return nil
 }
 
@@ -557,18 +587,18 @@ func splitPath(path string) []string {
 	return out
 }
 
-func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFile) error {
+func (r scenarioRunner) prepareScenario(file scenarioTestFile) (preparedScenario, error) {
 	var doc scenarioDocument
 	if file.Document != nil {
 		doc = *file.Document
 	} else {
 		if len(file.Raw) == 0 {
-			return scenarioTestValidationError{err: fmt.Errorf("%s: admitted scenario bytes are missing", file.Path)}
+			return preparedScenario{}, fmt.Errorf("%s: admitted scenario bytes are missing", file.Path)
 		}
 		var err error
 		doc, err = parseScenarioDocument(file.Raw)
 		if err != nil {
-			return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+			return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
 		}
 	}
 	if doc.Derive != nil {
@@ -577,35 +607,52 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 			ProfileID: doc.Derive.Name, Responses: doc.Derive.ConnectorResponses,
 		})
 		if err != nil {
-			return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+			return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
 		}
 		payload := map[string]any{}
 		if err := canonicaljson.DecodeInto(plans[0].Payload, &payload); err != nil {
-			return scenarioTestValidationError{err: fmt.Errorf("%s: materialize derived payload: %w", file.Path, err)}
+			return preparedScenario{}, fmt.Errorf("%s: materialize derived payload: %w", file.Path, err)
 		}
 		doc.Steps = []scenarioStep{{Action: "publish", PublishEvent: plans[0].EventKey, Payload: payload}}
 		file.FlowID = plans[0].FlowID
 		selector, err := scenarioexecution.NewSelector(plans[0].Profile)
 		if err != nil {
-			return scenarioTestValidationError{err: fmt.Errorf("%s: select scenario execution profile: %w", file.Path, err)}
+			return preparedScenario{}, fmt.Errorf("%s: select scenario execution profile: %w", file.Path, err)
 		}
 		r.scenarioExecution = &selector
-		defer func() { r.scenarioExecution = nil }()
 		addDerivedGenericOracle(&doc.Expect, plans[0].EventKey)
 	}
 	seed, err := r.scenarioEvaluatorSeed(file, doc)
 	if err != nil {
-		return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+		return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
 	}
 	evaluator, err := newScenarioExpressionEvaluator(seed, doc.Vars)
 	if err != nil {
-		return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+		return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
 	}
 	if doc.Invalid != nil {
 		if err := r.runInvalidVariants(file, doc, evaluator); err != nil {
-			return scenarioTestValidationError{err: err}
+			return preparedScenario{}, err
 		}
 	}
+	for _, entity := range doc.Setup.Entities {
+		if _, err := r.evaluateScenarioSetupEntity(file, evaluator, entity); err != nil {
+			return preparedScenario{}, fmt.Errorf("%s: setup: %w", file.Path, err)
+		}
+	}
+	for i, step := range doc.Steps {
+		if step.Action == "publish" {
+			if _, _, err := r.buildPublishPayload(file, evaluator, step); err != nil {
+				return preparedScenario{}, fmt.Errorf("%s: step %d: %w", file.Path, i+1, err)
+			}
+		}
+	}
+	return preparedScenario{file: file, document: doc, evaluator: evaluator, execution: r.scenarioExecution}, nil
+}
+
+func (r scenarioRunner) runPreparedScenario(ctx context.Context, prepared preparedScenario) error {
+	file, doc, evaluator := prepared.file, prepared.document, prepared.evaluator
+	r.scenarioExecution = prepared.execution
 	state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
 	if len(doc.Setup.Entities) > 0 {
 		if err := r.runScenarioSetup(ctx, file, evaluator, state, doc.Setup); err != nil {

@@ -120,7 +120,7 @@ func TestMockOnlyPipelineScanRejectsPersistedLiveWorkBeforeClaimOnSQLiteAndPostg
 			if err != nil {
 				t.Fatalf("open mock_only scan: %v", err)
 			}
-			if _, err := owner.ClaimBatch(ctx, blocked, 1); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+			if _, err := owner.ClaimBatch(ctx, blocked, 1); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 				t.Fatalf("mock_only ClaimBatch error = %v, want live-work rejection", err)
 			}
 			if err := owner.CloseScan(ctx, blocked); err != nil && !errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
@@ -185,7 +185,7 @@ func TestMockOnlyPipelinePreflightRejectsLiveQueuesWithoutClaimOnSQLiteAndPostgr
 				}
 				for _, scoped := range requests {
 					err := preflighter.PreflightResume(ctx, scoped.request.WithExecutionPosture(executionposture.MockOnly))
-					if err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+					if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 						t.Fatalf("%s mock_only preflight error = %v, want live-work rejection", scoped.name, err)
 					}
 				}

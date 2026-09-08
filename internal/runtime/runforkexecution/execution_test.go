@@ -1590,7 +1590,6 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			if err != nil {
 				t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 			}
-			processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, tc.backend)
 
 			var cfg *config.Config
 			var providerCalls atomic.Int32
@@ -1644,6 +1643,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 				t.Fatalf("store provider credential: %v", err)
 			}
 			cfg = selectedForkAPIProviderConfig(tc.backend, tc.model, provider.URL)
+			processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, cfg)
 
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -1952,7 +1952,6 @@ func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabili
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, llmselection.BackendClaudeCLI)
 
 	captureDir := t.TempDir()
 	dockerPath := filepath.Join(captureDir, "fake-docker.sh")
@@ -2060,6 +2059,7 @@ fi
 		ClaudeCLI: config.ClaudeCLIConfig{Command: "claude", OutputFormat: "stream-json"},
 	}}
 	cfg.Workspace.DockerBin = dockerPath
+	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, cfg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2788,7 +2788,6 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, llmselection.BackendOpenAICompatible)
 	var providerCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		providerCalls.Add(1)
@@ -2804,6 +2803,8 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	if err := credentials.Set(ctx, llmselection.OpenAICompatibleCredentialEnv, "test-key"); err != nil {
 		t.Fatalf("store provider credential: %v", err)
 	}
+	cfg := selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "gpt-selected-fork", provider.URL)
+	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, cfg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2817,7 +2818,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
-			Config:              selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "gpt-selected-fork", provider.URL),
+			Config:              cfg,
 			ProviderCredentials: credentials, ProcessCapability: processCapability,
 			QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
 		},

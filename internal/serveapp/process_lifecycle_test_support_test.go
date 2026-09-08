@@ -40,8 +40,8 @@ func runtimeDepsForServeTest(t testing.TB, stores *selectedStoreOwner, cfg *conf
 			bundle.PackAdmission = projection
 		}
 	}
-	if cfg != nil && !cfg.Runtime.ExecutionPosture.Valid() {
-		cfg.Runtime.ExecutionPosture = executionposture.Live
+	if !options.ExecutionPosture.Valid() {
+		options.ExecutionPosture = executionposture.Live
 	}
 	if options.ProviderCredentials == nil {
 		options.ProviderCredentials = processIngressCredentialStore{}

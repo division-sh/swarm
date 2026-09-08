@@ -79,6 +79,7 @@ type AuthorActivityCatalogRegistrar interface {
 }
 
 type RuntimeOptions struct {
+	ExecutionPosture                 executionposture.Posture
 	SelfCheck                        bool
 	WorkspaceLifecycle               workspace.Lifecycle
 	EnableToolGateway                bool
@@ -696,10 +697,10 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
-	return ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, false)
+	return ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, false, nil)
 }
 
-func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, allowValidationHarness bool) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, allowValidationHarness bool, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -714,6 +715,7 @@ func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llms
 	validationOpts.ProviderCredentials = opts.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	validationOpts.LLMProfile = profile
+	validationOpts.ModelAliases = modelAliases
 	validationOpts.ChannelPlans = opts.ChannelPlans
 	validationOpts.ChannelActivationPublication = opts.DeclaredChannelPublication
 	if !validationOpts.ChannelActivationPublication.Generation().Valid() {
@@ -795,9 +797,9 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
-	posture, err := cfg.ProcessExecutionPosture()
-	if err != nil {
-		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
+	posture := opts.ExecutionPosture
+	if !posture.Valid() {
+		return validatedRuntimeDeps{}, fmt.Errorf("command execution purpose is required before runtime construction")
 	}
 	if deps.WorkflowPersistence.Configured() && !deps.WorkflowPersistence.Valid() {
 		return validatedRuntimeDeps{}, fmt.Errorf("selected runtime workflow persistence mutation owner is required")
@@ -838,11 +840,11 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, allowValidationHarness)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, allowValidationHarness, cfg.LLM.Models)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
-	if err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source); err != nil {
+	if err := validateSelectedBackendModelAliasesForDeclaredAgents(posture, cfg, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
 	}
 	providerCredentialResolver := providerCredentialResolverForRuntimeOptions(opts)
@@ -1038,7 +1040,7 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 }
 
 func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
-	return newRuntime(ctx, deps, false)
+	return newRuntime(ctx, deps, deps.Options.ExecutionPosture == executionposture.MockOnly)
 }
 
 // NewValidationHarnessRuntime is the explicit non-production catalog execution
@@ -1297,7 +1299,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	if err != nil {
 		return nil, fmt.Errorf("build agent runtime resolver: %w", err)
 	}
-	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, rt.LLMRuntimes, rt.Workspace); err != nil {
+	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, rt.ExecutionPosture, cfg.LLM.Models, source, rt.Credentials, rt.LLMRuntimes, rt.Workspace); err != nil {
 		return nil, fmt.Errorf("native tool validation failed: %w", err)
 	} else {
 		if bootWarningsFatal() && len(warnings) > 0 {

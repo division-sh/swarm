@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -112,7 +111,6 @@ func testRuntimeConfig() *config.Config {
 			MaxConcurrentAgents: 4,
 			EventPollInterval:   5 * time.Millisecond,
 			RecoveryOnStartup:   false,
-			ExecutionPosture:    executionposture.Live,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",

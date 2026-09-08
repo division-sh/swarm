@@ -42,7 +42,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	apiTokenFile := filepath.Join(releaseRoot, "api-token")
 	home := filepath.Join(releaseRoot, "home")
 	writeReleaseFile(t, apiTokenFile, apiToken+"\n")
-	writeReleaseFile(t, filepath.Join(releaseRoot, "swarm.yaml"), "runtime:\n  execution_posture: live\n")
+	writeReleaseFile(t, filepath.Join(releaseRoot, "swarm.yaml"), "{}\n")
 	writeReleaseFile(t, filepath.Join(home, ".config", "swarm", "swarm.yaml"), fmt.Sprintf("serve:\n  api_token_file: %s\nconnection:\n  api_token_file: %s\n", apiTokenFile, apiTokenFile))
 
 	fakeRoot := filepath.Join(releaseRoot, "fake-docker-state")

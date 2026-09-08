@@ -37,7 +37,6 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"logs.go":            {},
 		"run_command.go":     {},
 		"standing.go":        {},
-		"test_command.go":    {},
 	}
 
 	gotAPIConsumers := map[string]struct{}{}
@@ -55,6 +54,14 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 	if diff := missingKeys(gotAPIConsumers, wantAPIConsumers); len(diff) > 0 {
 		t.Fatalf("new API-backed command files must be classified in this guard: %v", diff)
 	}
+	// Test owns a private endpoint and token, never ambient deployment resolution.
+	privateTest := sources["test_command.go"]
+	for _, required := range []string{"opts.apiOptions.runTest(", "TestSessionEndpoint", "&cliAPIClient{"} {
+		if !strings.Contains(privateTest, required) {
+			t.Fatalf("private test command no longer consumes its session port/shared client: missing %q", required)
+		}
+	}
+	wantAPIConsumers["test_command.go"] = struct{}{}
 
 	localBypassNeedles := []string{
 		"runForkRuntimeOwnerHarness",
@@ -78,7 +85,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 				continue
 			}
 			if strings.Contains(source, needle) {
-				t.Fatalf("%s contains local/runtime bypass %q; runtime-state CLI commands must consume newCLIAPIClient", name, needle)
+				t.Fatalf("%s contains local/runtime bypass %q; runtime-state CLI commands must consume the shared API client", name, needle)
 			}
 		}
 	}

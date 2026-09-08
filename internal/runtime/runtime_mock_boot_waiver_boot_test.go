@@ -20,7 +20,7 @@ import (
 )
 
 func TestNewRuntime_FullyMockedBundleBootsWithoutCredential(t *testing.T) {
-	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.MockOnly}}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{}}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
@@ -34,6 +34,7 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutCredential(t *testing.T) {
 		CompletionHeartbeatStore: store,
 		LiveSessionAcquirer:      store,
 		Options: swarmruntime.RuntimeOptions{
+			ExecutionPosture:   executionposture.MockOnly,
 			SelfCheck:          false,
 			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemorySource(t)),
 			SourceArtifactFact: authorActivityTestSourceArtifactFact,
@@ -48,7 +49,7 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutCredential(t *testing.T) {
 }
 
 func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T) {
-	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.MockOnly}}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{}}
 	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -66,6 +67,7 @@ func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T
 		CompletionHeartbeatStore: store,
 		LiveSessionAcquirer:      store,
 		Options: swarmruntime.RuntimeOptions{
+			ExecutionPosture:   executionposture.MockOnly,
 			SelfCheck:          false,
 			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemorySource(t)),
 			SourceArtifactFact: authorActivityTestSourceArtifactFact,
@@ -80,7 +82,7 @@ func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T
 }
 
 func TestNewRuntime_FullyMockedBundleBootsWithoutUnreachableConnectorCredential(t *testing.T) {
-	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.MockOnly}}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{}}
 	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
@@ -98,6 +100,7 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutUnreachableConnectorCredential(
 		CompletionHeartbeatStore: store,
 		LiveSessionAcquirer:      store,
 		Options: swarmruntime.RuntimeOptions{
+			ExecutionPosture:   executionposture.MockOnly,
 			SelfCheck:          false,
 			WorkflowModule:     newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemoryWithConnectorSource(t)),
 			Credentials:        credentialStore,

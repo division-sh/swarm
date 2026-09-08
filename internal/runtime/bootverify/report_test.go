@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -233,6 +234,7 @@ func TestRunModelAliasValidationUsesConfiguredLiveProfileForMockMetadata(t *test
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
 	opts := Options{
+		ExecutionPosture:        executionposture.MockOnly,
 		ValidateModelResolution: true,
 		LLMProfile:              profile,
 		ModelAliases: llmselection.ModelAliases{

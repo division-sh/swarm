@@ -94,87 +94,6 @@ func TestExecutionModeForProfileUsesSelectedBackendOnly(t *testing.T) {
 	}
 }
 
-func TestResolveAgentExecutionSelectionUsesExactMockBeforeConfiguredDefault(t *testing.T) {
-	for _, backend := range []string{
-		BackendAnthropic,
-		BackendClaudeCLI,
-		BackendOpenAICompatible,
-		BackendOpenAIResponses,
-	} {
-		t.Run(backend, func(t *testing.T) {
-			profile, err := ResolveActiveBackend(backend)
-			if err != nil {
-				t.Fatalf("ResolveActiveBackend: %v", err)
-			}
-			live, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{ConfiguredDefault: profile})
-			if err != nil {
-				t.Fatalf("ResolveAgentExecutionSelection(live): %v", err)
-			}
-			if live.Profile.ID != backend || live.Mode != executionmode.Live || live.ArtifactRequirement != ArtifactForbidden {
-				t.Fatalf("live selection = %#v", live)
-			}
-			mock, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{ConfiguredDefault: profile, MockConfigured: true})
-			if err != nil {
-				t.Fatalf("ResolveAgentExecutionSelection(mock): %v", err)
-			}
-			if mock.Profile.ID != BackendMock || mock.Mode != executionmode.Mock || mock.ArtifactRequirement != ArtifactRequired {
-				t.Fatalf("mock selection = %#v", mock)
-			}
-		})
-	}
-}
-
-func TestResolveAgentExecutionSelectionRequiresArtifactForMockDefault(t *testing.T) {
-	profile, err := ResolveActiveBackend(BackendMock)
-	if err != nil {
-		t.Fatalf("ResolveActiveBackend: %v", err)
-	}
-	if _, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{ConfiguredDefault: profile}); err == nil || !strings.Contains(err.Error(), "requires an exact mock performance artifact") {
-		t.Fatalf("missing artifact error = %v", err)
-	}
-	got, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{ConfiguredDefault: profile, MockConfigured: true})
-	if err != nil {
-		t.Fatalf("ResolveAgentExecutionSelection: %v", err)
-	}
-	if got.Profile.ID != BackendMock || got.Mode != executionmode.Mock {
-		t.Fatalf("selection = %#v", got)
-	}
-}
-
-func TestResolveAgentExecutionSelectionHonorsOrRejectsAuthoredBackend(t *testing.T) {
-	profile, err := ResolveActiveBackend(BackendClaudeCLI)
-	if err != nil {
-		t.Fatalf("ResolveActiveBackend: %v", err)
-	}
-	mock, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{
-		ConfiguredDefault: profile,
-		AuthoredBackend:   BackendMock,
-		MockConfigured:    true,
-	})
-	if err != nil || mock.Profile.ID != BackendMock {
-		t.Fatalf("authored mock selection = %#v, %v", mock, err)
-	}
-	if _, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{
-		ConfiguredDefault: profile,
-		AuthoredBackend:   BackendMock,
-	}); err == nil || !strings.Contains(err.Error(), "requires an exact mock performance artifact") {
-		t.Fatalf("authored mock without artifact error = %v", err)
-	}
-	if _, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{
-		ConfiguredDefault: profile,
-		AuthoredBackend:   BackendAnthropic,
-	}); err == nil || !strings.Contains(err.Error(), "conflicts with configured runtime backend") {
-		t.Fatalf("different live pin error = %v", err)
-	}
-	if _, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{
-		ConfiguredDefault: profile,
-		AuthoredBackend:   BackendClaudeCLI,
-		MockConfigured:    true,
-	}); err == nil || !strings.Contains(err.Error(), "conflicts with an exact mock performance") {
-		t.Fatalf("live pin plus mock error = %v", err)
-	}
-}
-
 func TestResolvePersistedBackendAllowsReservedProfiles(t *testing.T) {
 	for _, raw := range []string{BackendAnthropic, BackendClaudeCLI, BackendOpenAICompatible, BackendOpenAIResponses, BackendMock, BackendLocal} {
 		t.Run(raw, func(t *testing.T) {
@@ -196,29 +115,6 @@ func TestResolvePersistedBackendAcceptsActivatedOpenAIResponsesProfile(t *testin
 	}
 	if profile.Provider != ProviderOpenAI || profile.RuntimeMode != ProviderContractRuntimeModeOpenAIResponses {
 		t.Fatalf("openai_responses profile = %#v", profile)
-	}
-}
-
-func TestMigratePersistedBackendBackfillsLegacyProfiles(t *testing.T) {
-	tests := []struct {
-		raw     string
-		want    string
-		changed bool
-	}{
-		{raw: LegacyBackendAPI, want: BackendAnthropic, changed: true},
-		{raw: LegacyBackendCLITest, want: BackendClaudeCLI, changed: true},
-		{raw: BackendOpenAICompatible, want: BackendOpenAICompatible},
-		{raw: BackendOpenAIResponses, want: BackendOpenAIResponses},
-		{raw: BackendMock, want: BackendMock},
-	}
-	for _, tt := range tests {
-		profile, changed, err := MigratePersistedBackend(tt.raw)
-		if err != nil {
-			t.Fatalf("MigratePersistedBackend(%q): %v", tt.raw, err)
-		}
-		if profile.ID != tt.want || changed != tt.changed {
-			t.Fatalf("MigratePersistedBackend(%q) = id=%q changed=%v, want id=%q changed=%v", tt.raw, profile.ID, changed, tt.want, tt.changed)
-		}
 	}
 }
 

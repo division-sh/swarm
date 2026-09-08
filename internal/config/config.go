@@ -8,7 +8,6 @@ import (
 	"time"
 
 	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"gopkg.in/yaml.v3"
 )
@@ -30,18 +29,31 @@ type Config struct {
 }
 
 type RuntimeConfig struct {
-	ExecutionPosture             executionposture.Posture `yaml:"execution_posture"`
-	MaxConcurrentAgents          int                      `yaml:"max_concurrent_agents"`
-	EventPollInterval            time.Duration            `yaml:"event_poll_interval"`
-	RecoveryOnStartup            bool                     `yaml:"recovery_on_startup"`
-	DecisionCardFirstReminder    time.Duration            `yaml:"decision_card_first_reminder"`
-	DecisionCardUrgency          time.Duration            `yaml:"decision_card_urgency"`
-	DecisionCardReminderInterval time.Duration            `yaml:"decision_card_reminder_interval"`
-	DecisionCardInputDraftTTL    time.Duration            `yaml:"decision_card_input_draft_ttl"`
+	MaxConcurrentAgents          int           `yaml:"max_concurrent_agents"`
+	EventPollInterval            time.Duration `yaml:"event_poll_interval"`
+	RecoveryOnStartup            bool          `yaml:"recovery_on_startup"`
+	DecisionCardFirstReminder    time.Duration `yaml:"decision_card_first_reminder"`
+	DecisionCardUrgency          time.Duration `yaml:"decision_card_urgency"`
+	DecisionCardReminderInterval time.Duration `yaml:"decision_card_reminder_interval"`
+	DecisionCardInputDraftTTL    time.Duration `yaml:"decision_card_input_draft_ttl"`
 }
 
 type PlatformConfig struct {
 	Packs PlatformPacksConfig `yaml:"packs"`
+}
+
+const RetiredExecutionPostureMessage = "runtime.execution_posture is retired; swarm serve selects live execution and swarm test selects mock execution"
+
+func (r *RuntimeConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			if value.Content[i].Value == "execution_posture" {
+				return errors.New(RetiredExecutionPostureMessage)
+			}
+		}
+	}
+	type runtimeConfig RuntimeConfig
+	return value.Decode((*runtimeConfig)(r))
 }
 
 type PlatformPacksConfig struct {
@@ -229,8 +241,9 @@ func LoadWithOptions(path string, opts LoadOptions) (*Config, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 	var cfg Config
+	cfg.Runtime.RecoveryOnStartup = true
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	backendOverride := strings.TrimSpace(opts.BackendOverride)
 	if err := cfg.validate(backendOverride); err != nil {
@@ -249,7 +262,7 @@ func (c *Config) LLMBackendProfile() (llmselection.Profile, error) {
 	if err := llmselection.RejectRetiredConfigRuntimeMode(c.LLM.RuntimeMode); err != nil {
 		return llmselection.Profile{}, err
 	}
-	return llmselection.ResolveActiveBackend(c.LLM.Backend)
+	return llmselection.ResolveLiveBackend(c.LLM.Backend)
 }
 
 func (c *Config) Validate() error {
@@ -257,9 +270,6 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validate(backendOverride string) error {
-	if _, err := c.ProcessExecutionPosture(); err != nil {
-		return err
-	}
 	if err := c.validateDecisionCardCadence(); err != nil {
 		return err
 	}
@@ -289,7 +299,7 @@ func (c *Config) validate(backendOverride string) error {
 		return err
 	}
 	if backendOverride = strings.TrimSpace(backendOverride); backendOverride != "" {
-		profile, err = llmselection.ResolveActiveBackend(backendOverride)
+		profile, err = llmselection.ResolveLiveBackend(backendOverride)
 		if err != nil {
 			return err
 		}
@@ -327,18 +337,6 @@ func (c *Config) validate(backendOverride string) error {
 		return errors.New("llm.session.rotate_on_parse_failures must be > 0")
 	}
 	return nil
-}
-
-// ProcessExecutionPosture returns the mandatory process execution ceiling.
-func (c *Config) ProcessExecutionPosture() (executionposture.Posture, error) {
-	if c == nil {
-		return "", errors.New("config is required")
-	}
-	posture, ok := executionposture.Parse(string(c.Runtime.ExecutionPosture))
-	if !ok {
-		return "", fmt.Errorf("runtime.execution_posture must be exactly live or mock_only, got %q", strings.TrimSpace(string(c.Runtime.ExecutionPosture)))
-	}
-	return posture, nil
 }
 
 func (c *Config) validateDecisionCardCadence() error {

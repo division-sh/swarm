@@ -1011,7 +1011,6 @@ func writeChannelOnboardingPostgresRuntimeConfig(t *testing.T, dsn string) strin
 	parameters := connection.Parameters()
 	t.Setenv("PGPASSWORD", parameters.Password)
 	configText := fmt.Sprintf(`runtime:
-  execution_posture: live
   recovery_on_startup: false
 workspace:
   backend: host
