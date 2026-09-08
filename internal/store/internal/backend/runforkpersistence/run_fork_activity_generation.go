@@ -471,18 +471,59 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 	}
 	var gotRunID, gotStatus, gotResultID string
 	var gotExecutionMode executionmode.Mode
-	var gotGeneration []byte
-	if err := tx.QueryRowContext(ctx, `SELECT CAST(run_id AS TEXT), execution_mode, status, CAST(result_event_id AS TEXT), loop_generation FROM activity_attempts WHERE request_event_id = $1`, requestEventID).
-		Scan(&gotRunID, &gotExecutionMode, &gotStatus, &gotResultID, &gotGeneration); err != nil {
+	var gotRequest runForkActivityRequestPayload
+	var gotFlowInstance, gotResultType, gotInputHash, gotReplyContext string
+	var gotGeneration, gotResultPayload, gotFailure []byte
+	var gotStarted, gotCompleted, gotUpdated any
+	if err := tx.QueryRowContext(ctx, `
+		SELECT CAST(run_id AS TEXT), execution_mode, status, CAST(result_event_id AS TEXT), loop_generation,
+		       COALESCE(CAST(source_event_id AS TEXT), ''), COALESCE(CAST(parent_event_id AS TEXT), ''),
+		       COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(flow_instance, ''), node_id, handler_event_key,
+		       activity_id, tool, effect_class, attempt, success_event, failure_event, result_event_type,
+		       result_payload, COALESCE(failure, 'null'), input_hash, COALESCE(loop_stage, ''),
+		       COALESCE(CAST(reply_context_id AS TEXT), ''), started_at, completed_at, updated_at
+		FROM activity_attempts WHERE request_event_id = $1`, requestEventID).
+		Scan(&gotRunID, &gotExecutionMode, &gotStatus, &gotResultID, &gotGeneration,
+			&gotRequest.SourceEventID, &gotRequest.ParentEventID, &gotRequest.EntityID, &gotFlowInstance,
+			&gotRequest.NodeID, &gotRequest.HandlerEventKey, &gotRequest.ActivityID, &gotRequest.Tool,
+			&gotRequest.EffectClass, &gotRequest.Attempt, &gotRequest.SuccessEvent, &gotRequest.FailureEvent,
+			&gotResultType, &gotResultPayload, &gotFailure, &gotInputHash, &gotRequest.LoopStage,
+			&gotReplyContext, &gotStarted, &gotCompleted, &gotUpdated); err != nil {
 		return fmt.Errorf("confirm fork-local activity evidence %s: %w", request.ActivityID, err)
 	}
 	var got attemptgeneration.Generation
 	if err := json.Unmarshal(gotGeneration, &got); err != nil {
 		return err
 	}
-	generationMatches := (!got.Valid() && !generation.Valid()) || got.Equal(generation)
-	if gotRunID != forkRunID || gotExecutionMode != evidence.ExecutionMode || gotStatus != evidence.Status || gotResultID != resultEventID || !generationMatches {
+	// An idempotency key proves which row to inspect, not that its evidence agrees.
+	// Compare raw generation coordinates; malformed partial evidence is not no-loop.
+	if gotRunID != forkRunID || gotExecutionMode != evidence.ExecutionMode || gotStatus != evidence.Status || gotResultID != resultEventID || got != generation ||
+		gotRequest.SourceEventID != request.SourceEventID || gotRequest.ParentEventID != request.ParentEventID ||
+		gotRequest.EntityID != request.EntityID || gotFlowInstance != flowInstance || gotRequest.NodeID != request.NodeID ||
+		gotRequest.HandlerEventKey != request.HandlerEventKey || gotRequest.ActivityID != request.ActivityID ||
+		gotRequest.Tool != request.Tool || gotRequest.EffectClass != request.EffectClass || gotRequest.Attempt != 1 ||
+		gotRequest.SuccessEvent != request.SuccessEvent || gotRequest.FailureEvent != request.FailureEvent ||
+		gotResultType != evidence.ResultEventType || gotInputHash != evidence.InputHash || gotRequest.LoopStage != request.LoopStage ||
+		gotReplyContext != "" || !workflowCommitJSONEqual(gotGeneration, generationJSON) || !workflowCommitJSONEqual(gotResultPayload, resultPayload) {
 		return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork identity", request.ActivityID)
+	}
+	expectedFailure := evidence.Failure
+	if len(strings.TrimSpace(string(expectedFailure))) == 0 {
+		expectedFailure = json.RawMessage("null")
+	}
+	if !workflowCommitJSONEqual(gotFailure, expectedFailure) {
+		return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork failure", request.ActivityID)
+	}
+	for _, stamp := range []struct {
+		raw  any
+		want time.Time
+	}{
+		{gotStarted, evidence.StartedAt}, {gotCompleted, evidence.CompletedAt}, {gotUpdated, evidence.UpdatedAt},
+	} {
+		actual, present, err := sqliteTimeValue(stamp.raw)
+		if err != nil || !present || !actual.Equal(stamp.want) {
+			return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork timestamps", request.ActivityID)
+		}
 	}
 	if !inserted {
 		return nil
