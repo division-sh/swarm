@@ -238,8 +238,8 @@ func TestChannelOnboardingCredentialStaleRecoverySelectedStoreParity(t *testing.
 			candidate := channelonboarding.Candidate{
 				Provider: request.Provider, Interface: request.Interface, Coordinate: request.Coordinate,
 				Target: channelonboarding.CandidateTarget{
-					Selector: request.TargetSelector, ServiceID: "service-support", PackageKey: parsedTarget.PackageKey,
-					FlowID: parsedTarget.FlowID, Alias: "support", Provider: parsedTarget.Provider,
+					Selector: request.TargetSelector, ServiceID: "service-support",
+					FlowPath: parsedTarget.FlowPath, Alias: "support", Provider: parsedTarget.Provider,
 					Generation: request.Coordinate.TargetGeneration, PublicationSequence: 1,
 					AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("stale-recovery")), SigningCredentialKey: "signing",
 				},
