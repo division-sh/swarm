@@ -564,6 +564,26 @@ contract_formats:
         attempt; started, uncertain, missing, or otherwise non-terminal dispatch evidence
         fails the fork closed. Source-run approval never authorizes a fork-local provider
         call. Policy-inconsistent evidence also fails the fork closed.
+      fork_generation_correspondence: >
+        One transient correspondence owns source-to-child generation projection.
+        Its source is the exact admitted run/entity snapshot at the fixed fork
+        revision, including valid ancestor-fork activations; its destination is
+        the canonical child run/entity projection. Every reference must be owned
+        by that source activation in all six generation coordinates. Translation
+        uses the existing deterministic fork identity owner and preserves the
+        referenced attempt, not the latest source or child attempt. Duplicate
+        activation evidence, contradictory scope or cap, an unknown reference,
+        and an occupied projection destination fail closed; no first-match,
+        field-name, revision-only or substring election is authoritative.
+        Source-bound and already-child-bound references are distinct operations.
+        Actual child ownership must agree with the correspondence before use.
+        Later lawful child repeat or close preserves historical ownership but
+        does not grant current execution permission. Accumulator keys omit the
+        revision-field coordinate: strict key decoding preserves this partial
+        reference and only the admitted source activation can complete it.
+        Projection leaves all source input unchanged on success or failure and
+        detaches nested child values, including when no loop is present. Absence
+        of a loop bucket cannot hide a nonempty dependent generation reference.
       expression_context: >
         `loop.id`, `loop.activation_id`, `loop.revision_id`, `loop.attempt`, and
         `loop.max_attempts` are available after loop admission. The CEL

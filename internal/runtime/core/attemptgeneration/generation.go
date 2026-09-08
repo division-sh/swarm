@@ -3,6 +3,7 @@ package attemptgeneration
 import (
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -51,26 +52,29 @@ func (g Generation) KeySuffix() string {
 }
 
 func ParseKeySuffix(raw string) (Generation, bool) {
-	parts := strings.Split(strings.TrimSpace(raw), ".")
+	if raw == "" || raw != strings.TrimSpace(raw) {
+		return Generation{}, false
+	}
+	parts := strings.Split(raw, ".")
 	if len(parts) != 5 {
 		return Generation{}, false
 	}
 	decoded := make([]string, len(parts))
 	for i, part := range parts {
 		value, err := base64.RawURLEncoding.DecodeString(part)
-		if err != nil {
+		if err != nil || base64.RawURLEncoding.EncodeToString(value) != part {
 			return Generation{}, false
 		}
 		decoded[i] = string(value)
 	}
-	attempt := 0
-	if _, err := fmt.Sscanf(decoded[4], "%d", &attempt); err != nil {
+	attempt, err := strconv.Atoi(decoded[4])
+	if err != nil || strconv.Itoa(attempt) != decoded[4] {
 		return Generation{}, false
 	}
 	g := Generation{FlowID: decoded[0], LoopID: decoded[1], ActivationID: decoded[2], RevisionID: decoded[3], Attempt: attempt}
 	// revision_field is carried in payload and persisted records. Key parsing is
 	// used only to isolate generations, so it intentionally cannot reconstruct it.
-	return g.Normalize(), g.LoopID != "" && g.ActivationID != "" && g.RevisionID != "" && g.Attempt > 0
+	return g, g == g.Normalize() && g.LoopID != "" && g.ActivationID != "" && g.RevisionID != "" && g.Attempt > 0
 }
 
 func (g Generation) PayloadValue() map[string]any {
