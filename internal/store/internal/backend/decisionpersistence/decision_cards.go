@@ -296,7 +296,7 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 	if opts.Limit > 200 {
 		opts.Limit = 200
 	}
-	cursor, err := decodeDecisionCursor(opts.Cursor)
+	cursor, err := decisioncard.DecodeCursor(opts.Cursor)
 	if err != nil {
 		return nil, "", decisioncard.ErrInvalidCursor
 	}
@@ -421,7 +421,7 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 	}
 	next := ""
 	if len(results) > opts.Limit {
-		next = encodeDecisionCursor(results[opts.Limit-1].CreatedAt, results[opts.Limit-1].CardID)
+		next = decisioncard.EncodeCursor(results[opts.Limit-1].CreatedAt, results[opts.Limit-1].CardID)
 		results = results[:opts.Limit]
 	}
 	return results, next, nil

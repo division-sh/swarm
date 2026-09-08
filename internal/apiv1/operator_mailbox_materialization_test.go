@@ -63,9 +63,10 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			Ready:    func() bool { return true },
-			Database: fakePinger{},
-			Mailbox:  sqliteStore,
+			Ready:         func() bool { return true },
+			Database:      fakePinger{},
+			Mailbox:       sqliteStore,
+			DecisionCards: sqliteStore,
 		}),
 	})
 	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"mailbox.list","params":{"status":"pending","run_id":"`+runID+`","entity_id":"`+entityID+`","type":"review_request","priority":"high","limit":1}}`)
@@ -76,7 +77,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	if len(items) != 1 {
 		t.Fatalf("mailbox.list items = %#v", items)
 	}
-	got := asMap(t, items[0])
+	got := requireTaggedNoticeProjection(t, items[0])
 	if got["mailbox_id"] != itemID || got["source_event_id"] != eventID || got["source_flow"] != "validation/case-1" || got["priority"] != "high" {
 		t.Fatalf("mailbox.list item = %#v, want materialized mailbox_write row", got)
 	}
@@ -87,4 +88,13 @@ func newSQLiteMailboxMaterializationAPIStore(t *testing.T, ctx context.Context) 
 	store := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	registerScopedAPITestCatalog(t, store, nil)
 	return store
+}
+
+func requireTaggedNoticeProjection(t *testing.T, value any) map[string]any {
+	t.Helper()
+	projection := asMap(t, value)
+	if projection["kind"] != "notice" {
+		t.Fatalf("expected tagged notice, got %#v", projection)
+	}
+	return asMap(t, projection["notice"])
 }

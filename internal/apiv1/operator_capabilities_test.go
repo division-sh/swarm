@@ -147,7 +147,6 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorHealthHandlers(HealthHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Ready: c.Ready, Database: c.Database, Publication: c.runtimePublication()}),
 		OperatorRuntimeIdentityHandlers(RuntimeIdentityHandlerOptions{Identity: c.RuntimeIdentity, Publication: c.runtimePublication()}),
 		OperatorRunReadHandlers(RunReadHandlerOptions{Runs: c.Runs}),
-		OperatorMailboxHandlers(MailboxHandlerOptions{Mailbox: c.Mailbox}),
 		OperatorDecisionCardHandlers(c.decisionCards()),
 		OperatorRunStartHandlers(RunStartHandlerOptions{Publication: c.publication()}),
 		OperatorEventPublishHandlers(EventPublishHandlerOptions{Publication: c.publication()}),

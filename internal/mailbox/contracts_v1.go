@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
 var (
@@ -91,8 +93,17 @@ func DecodeV1Cursor(raw string) (V1Cursor, error) {
 	if err != nil {
 		return V1Cursor{}, ErrV1InvalidCursor
 	}
+	value, err := canonicaljson.Decode(decoded)
+	if err != nil || value.Kind() != semanticvalue.KindObject || value.Len() != 2 {
+		return V1Cursor{}, ErrV1InvalidCursor
+	}
+	for _, member := range value.Members() {
+		if member.Name != "created_at" && member.Name != "mailbox_id" || member.Value.Kind() != semanticvalue.KindString {
+			return V1Cursor{}, ErrV1InvalidCursor
+		}
+	}
 	var cursor V1Cursor
-	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.CreatedAt.IsZero() || strings.TrimSpace(cursor.MailboxID) == "" {
+	if err := canonicaljson.ValueInto(value, &cursor); err != nil || cursor.CreatedAt.IsZero() || strings.TrimSpace(cursor.MailboxID) == "" {
 		return V1Cursor{}, ErrV1InvalidCursor
 	}
 	return cursor, nil

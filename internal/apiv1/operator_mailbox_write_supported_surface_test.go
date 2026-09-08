@@ -16,6 +16,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -250,6 +251,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 			Source:           source,
 			RunBundleContext: runBundleContext,
 			Mailbox:          mailbox,
+			DecisionCards:    persistence.(decisioncard.Store),
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    source.WorkflowName(),
 				WorkflowVersion: source.WorkflowVersion(),
@@ -526,7 +528,7 @@ func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql
 		}
 		items := asSlice(t, asMap(t, listed.Result)["items"])
 		if len(items) == 1 {
-			item := asMap(t, items[0])
+			item := requireTaggedNoticeProjection(t, items[0])
 			if err := assertMailboxWriteSupportedSurfaceItem(t, handler, item, runID, eventID); err != nil {
 				return false, err
 			}
@@ -549,7 +551,7 @@ func waitForConditionalRuleMailboxWrite(t *testing.T, handler *Handler, db *sql.
 		}
 		items := asSlice(t, asMap(t, listed.Result)["items"])
 		if len(items) == 1 {
-			item := asMap(t, items[0])
+			item := requireTaggedNoticeProjection(t, items[0])
 			if err := assertConditionalRuleMailboxItem(t, handler, item, runID, eventID); err != nil {
 				return false, err
 			}
@@ -685,7 +687,7 @@ func assertConditionalRuleMailboxItem(t *testing.T, handler *Handler, item map[s
 	if detail.Error != nil {
 		return fmt.Errorf("mailbox.get error = %#v", detail.Error)
 	}
-	detailPayload := asMap(t, asMap(t, detail.Result)["payload"])
+	detailPayload := asMap(t, requireTaggedNoticeProjection(t, detail.Result)["payload"])
 	if detailPayload["who"] != "bob" || detailPayload["amount"] != float64(250) || detailPayload["review_kind"] != "conditional" {
 		return fmt.Errorf("mailbox.get payload = %#v, want selected rule payload", detailPayload)
 	}
@@ -719,7 +721,7 @@ func assertMailboxWriteSupportedSurfaceItem(t *testing.T, handler *Handler, item
 	if detail.Error != nil {
 		return fmt.Errorf("mailbox.get error = %#v", detail.Error)
 	}
-	detailPayload := asMap(t, asMap(t, detail.Result)["payload"])
+	detailPayload := asMap(t, requireTaggedNoticeProjection(t, detail.Result)["payload"])
 	if detailPayload["who"] != "alice" || detailPayload["amount"] != float64(250) || detailPayload["review_kind"] != "validation" {
 		return fmt.Errorf("mailbox.get payload = %#v, want materialized handler payload", detailPayload)
 	}
