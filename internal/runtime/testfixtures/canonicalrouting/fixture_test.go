@@ -73,6 +73,19 @@ func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 	}
 }
 
+func TestStaticDataInvocationFixtureLoadsAndVerifies(t *testing.T) {
+	Prove(t, ArtifactID("internal/releasee2e/testdata/static_data_invocation"))
+	repo := RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(repo, "internal/releasee2e/testdata/static_data_invocation"), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
+	if findings := report.HardInvalidities(); len(findings) != 0 {
+		t.Fatalf("hard invalidities: %#v", findings)
+	}
+}
+
 func TestReleaseE2EClaudeLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	const fixture = ArtifactID("internal/releasee2e/testdata/claude_cli_managed_lifecycle")
 	Prove(t, ArtifactID("internal/releasee2e/testdata/claude_cli_managed_lifecycle"))

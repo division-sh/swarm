@@ -1,0 +1,22 @@
+intake:
+  execution_type: system_node
+  subscribes_to: [child.requested]
+  produces: [child.work]
+  event_handlers:
+    child.requested:
+      advances_to: reading
+      data_accumulation:
+        writes:
+          - {source_field: request_key, target_field: request_key}
+      emit:
+        event: child.work
+        fields: {request_key: payload.request_key}
+completion:
+  execution_type: system_node
+  subscribes_to: [child.completed]
+  event_handlers:
+    child.completed:
+      advances_to: complete
+      data_accumulation:
+        writes:
+          - {source_field: content, target_field: content}
