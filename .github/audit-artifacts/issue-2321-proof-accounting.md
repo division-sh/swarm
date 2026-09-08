@@ -113,7 +113,7 @@ pipeline 2.039s, generic schedule 0.008s. Named proofs are
 `TestOccurrenceEventPreservesImmutableExecutionMode`.
 
 Replay/resume consumer check: event.replay and agent.replay share the typed
-`operator_event_replay.go` original-mode admission and exact-mode event builder.
+`operator_event_replay.go` original-mode admission and exact-mode event constructor.
 `TestOperatorReplayMockOnlyRejectsLiveOriginalBeforeMutation` is the negative;
 `TestServedParityHarnessLiveAgentEventReplayLifecycle` is the dual-store supported
 positive. Runtime ingress resume invokes `PreflightRuntimeIngressQueue` before its
@@ -164,8 +164,21 @@ canonical runtime set, and carries mock mode through root events and maintenance
 context. No production mode fence was relaxed. An earlier obsolete matrix run was
 cancelled after the live-context fixture mismatch was reproduced and classified;
 it is not passing evidence. The new dual-store descriptor proof passed (1.807s).
-Another integrated run with the full proof profile is required; no whole-suite
-pass is claimed yet.
+The third integrated run with the full proof profile passed releasee2e (533.640s),
+including complete retained journeys and golden restart/burst proof, but failed
+conformance cleanup with a lifecycle diagnostic projection conflict. A remaining
+serve mixed-agent fixture and audit-wording guard also failed; their bounded repair
+passes both store cases and the exact guard (15.019s). Runtimepersistence exhausted
+its aggregate ten-minute timeout with the current subtest only two seconds old.
+No whole-suite pass is claimed.
+
+A deterministic production-projector probe reproduced duplicate emission plus
+one mark conflict in three of three executions. Ten real SQLite focused retries
+passed, which does not erase the full-profile failure. The reproduction and exact
+evidence/limitations are in the adjacent progress artifact and probe source. This
+new diagnostic convergence finding is awaiting lead classification; it is not
+silently absorbed into command-owned execution or repaired by weakening failure
+handling. The relevant production projector and store CAS are unchanged.
 
 Remaining independent work includes the next integrated result and final-head
 verification. External acceptance

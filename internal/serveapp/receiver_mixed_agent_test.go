@@ -30,7 +30,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", "")
 				opts.StoreMode, opts.StoreModeSet = backendselection.BackendPostgres.String(), true
 			}
-			endpoint, runtime := startServedEventPublishFollowUpRuntime(t, opts)
+			endpoint, runtime := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 			bundle := servedEventPublishFixtureBundleHash(t, root)
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": bundle, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-agent-seed"})
 			requireServedEventPublishEntityState(t, db, backend, seed.RunID, flowidentity.EntityID("sink"), "active")

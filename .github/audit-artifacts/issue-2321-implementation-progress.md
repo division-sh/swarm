@@ -1,7 +1,8 @@
 # Issue #2321 Implementation Progress
 
-Agent: agent-g. Status: implementation and integrated verification in progress,
-not review-ready. This is not a Post-Implementation Proof Audit or a first-slice
+Agent: agent-g. Status: verification exposed an additional lifecycle diagnostic
+projection defect; awaiting lead classification, not review-ready.
+This is not a Post-Implementation Proof Audit or a first-slice
 closure claim. The approved 29-manifestation class remains binding.
 
 ## Authority And Integration
@@ -85,7 +86,7 @@ These are development results, not a final integrated-head closure matrix.
   unchanged. This is not paid external-provider or provisioned Claude acceptance.
 - Native boot purpose/refusal matrix passed. API specification tests passed (1.820s).
   Production async-owner census passed (0.865s); focused persistence boundary guards
-  passed. Retired Builder semantic census and git diff checks passed.
+  passed. Retired product-surface census and git diff checks passed.
 - Actual compiled public live possession and invocation-root tests passed (14.064s),
   including retained/dev ownership, hostile ancestor and borrowed-project refusal.
   Agent-free fixture: this does not claim live-provider turns or agent restarts.
@@ -120,4 +121,33 @@ gaps are recorded in issue-2321-proof-accounting.md; it is not a final proof aud
    only when review-ready. No final proof audit, PR or failure-class closure exists
    at this checkpoint.
 
-No new semantic contradiction or approved stop condition has been discovered.
+## Additional Verification Finding
+
+The third complete run used the full proof profile and passed releasee2e (533.640s),
+including the retained J1-J5 and golden restart/burst assertions. It did not pass
+the whole suite: conformance reported a terminal lifecycle diagnostic projection
+conflict; serveapp found one unmigrated mixed-agent fixture and two ambiguous audit
+text references; runtimepersistence exhausted the default aggregate ten-minute
+package timeout while its current subtest had run only two seconds.
+
+The mixed-agent fixture now uses the existing H entry, not public live serve as a
+mock host; the exact readback/cardinality assertions remain. Both store cases and
+the audit-text guard pass (15.019s). These are bounded test/document corrections.
+
+The lifecycle conflict is not dismissed as flaky or suppressed. Ten focused real
+SQLite three-child repetitions passed (61.285s), but a deterministic two-reader
+barrier probe fails three of three times: the same pending diagnostic is logged
+twice and the second mark returns `lifecycle diagnostic projection conflict`.
+The probe exercises the production manager projector with an explicit snapshot/CAS
+test double; it is not additional real-store execution credit. The real SQLite
+manifestation is the full-profile failure. Reproduction source is retained in
+`issue-2321-diagnostic-projection-probe.go.txt`, not in the passing test inventory.
+
+`projectLifecycleDiagnostics` is byte-identical to the integrated bdc82dfba base.
+Its list/log/mark steps have no concurrent claim or serialization, and the two
+store mark operations intentionally require one newly updated row. Terminal
+completion, loop/start paths and startup hydration can all call this projector.
+Lifecycle diagnostic convergence is distinct from command-owned selection and
+needs lead tracker/scope disposition before production remediation. No projector,
+store CAS, lifecycle ownership, or diagnostic failure policy was changed here.
+No new issue or reopening of a closed tracker has been performed by this work.
