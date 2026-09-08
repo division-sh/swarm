@@ -6051,6 +6051,11 @@ engine:
             turn when provider-native support or the required fallback owner proof is missing. Retired dynamic mutation
             surfaces never reach this admission point.
           - Persisted turn visible-tool facts must reflect callable truth for the adapter's turn.
+          - CLI native validation consumes only exact provider-native inventory from authoritative provider initialization.
+            Observed valid-empty inventory is distinct from missing or invalid inventory; missing, null, non-array, or
+            malformed entries fail closed even when no native capability is planned. Canonical display names and MCP
+            observations never substitute for native inventory. Managed turns, startup probes, and fork-chat share this
+            checked observation contract while retaining their distinct capability policies.
         persistence:
           rules:
           - Agent turns and stateless execution audits must be persisted consistently across adapters.
@@ -6888,6 +6893,7 @@ engine:
         native-tool surface must equal callable truth on the same turn. A provider CLI whose builtin availability can be
         selected MUST receive the exact positively selected provider-native bindings on its first process launch; permission
         admission, provider defaults, and a static catalog complement are not capability-availability authority.
+        Exact valid-empty provider inventory proves zero native tools; missing or malformed inventory does not.
       contract_field:
         field: native_tools
         type: object
@@ -6906,6 +6912,8 @@ engine:
           path to satisfy a native_tools declaration. Platform fallback native tools must consume the same actor authorization
           plus workspace execution-target capability owner. The visible native-tool surface for a turn must equal callable truth
           on that same turn.
+          Canonical display names may combine these channels for presentation but cannot supply provider-native evidence
+          when the exact native channel is empty. Each CLI process must supply its own valid inventory observation.
       capabilities:
         bash:
           description: Shell command execution. On supporting provider-native runtimes, bash runs provider-natively. On the
@@ -36010,6 +36018,11 @@ managed_agent_capability_surface:
     statuses: [confirmed, unavailable, mismatch]
     rule: Each planned binding names its required typed evidence kind. Effective visibility and callability require the upstream toolcapabilities decision to be visible/callable and every required delivery binding to have exact confirmed evidence. Missing evidence is not success. Unavailable evidence denies that tool. Any unplanned, duplicate, missing, schema-changed, cross-authority, or otherwise mismatched delivery records a typed mismatch and denies the complete surface.
     monotonicity: Evidence may be added or narrowed from confirmed to unavailable/mismatch. Unavailable or mismatch evidence and mismatch facts cannot be removed, rewritten, or widened for the life of the surface.
+    cli_inventory_presence: The parser/Response preserves valid, not-observed and invalid authoritative inventory separately.
+      Only provider system/init metadata supplies inventory or MCP connection evidence; assistant, tool-result and result
+      data fields cannot fabricate or repair it. Valid string and named-object entries are supported. Any malformed entry
+      invalidates the complete observation, and later metadata cannot erase that invalidity. A valid empty or controls-only
+      list supplies affirmative zero-native evidence. Tool calls, planned names and canonical display lists do not.
   startup_preflight:
     owner: one provider-contract-aware managed preflight implementation that produces startup_probe surfaces and persists both successful and failed operation/evidence facts
     actor_owner: Normal cold-start and prepared-handoff probes consume the exact declaration-owned runless agent plan before execution admission. Selected-contract-fork probes consume the exact concrete fork-run actor identity because the fork run is already admitted. A startup surface cannot carry both forms, fabricate a run, infer a run from context, or reuse a provider-turn identity.
@@ -36029,12 +36042,17 @@ managed_agent_capability_surface:
     selected_contract_fork: Consume the exact current selected-fork completion authority and derive the selected managed-execution admission; settle provider/MCP preflight before gateway use, agent-loop start, or fork-event publication.
     claude_cli_selection: Every cold, recovery, prepared-replacement, and selected-contract Claude startup process receives positive --tools selection derived from the exact callable provider_builtin bindings plus the closed transport-control set. --allowedTools separately admits those builtins, exact MCP bindings, and controls. Missing or incompatible positive-selector support fails closed without static-catalog fallback, discovery/relaunch, or negative-complement retry.
     failure: Missing provider evidence, MCP tools/list or required startup tools/call failure, delivery mismatch, persistence failure, or authority loss fails closed with retained typed evidence and zero managed execution under that admission.
+      Missing or invalid CLI inventory also fails when the planned native set is empty; valid-empty inventory is not missing.
   provider_turn:
     rule: Every managed provider turn receives a fresh provider_turn authority under one admitted execution variant. Its typed concrete actor identity must exactly equal the actor configuration, normal lifecycle token when present, session memory identity, usage target, and persisted turn identity. The same surface identity is carried through API/CLI request construction or deterministic in-process execution, provider response normalization, MCP registration/list/call, response tool-call validation, direct executor and relay admission, managed effects, recovery/settlement, turn persistence, and supported readback. Same-slug siblings are distinct principals and any cross-identity combination fails before provider or tool execution.
     receiver_scope: A provider turn reached through EventBus consumes only the receiver-owned normal or selected-contract execution variant. Publisher execution state is not provider-turn evidence and cannot authorize tools, MCP calls, completions, or effects.
     api: Exact live-request definitions are the delivery evidence. Planned names alone are not observation.
     cli: Provider-builtin availability uses positive --tools selection from the exact callable provider_builtin bindings on every first, resumed, and tool-result process launch. The closed provider transport-control set, currently ExitPlanMode, is selected separately and is excluded from actor capability evidence. --allowedTools is permission admission for the selected builtins, exact MCP bindings, permitted local tools, and transport controls; it is never builtin-availability authority, and MCP/local names never enter --tools. Provider-visible initialization facts preserve every reported non-control builtin as exact evidence; unknown/default builtins are typed mismatches rather than filtered observations. Prompt text is a rendering only and cannot authorize a tool. A provider-owned MCP tools/call occurrence atomically confirms its exact planned mcp_provider_visible binding and consumes that occurrence before tool authorization. Missing, ambiguous, or mismatched managed-versus-forkchat authority, incompatible selector support, unplanned tools, missing occurrence coordinates, and replayed occurrences fail closed with no static catalog, negative complement, compatibility fallback, or discovery/relaunch.
     in_process: Deterministic platform mock execution carries the exact local-runtime bindings and interpreter evidence in the same provider-turn surface. It is not reclassified as API or CLI transport and cannot authorize external effects.
+    cli_inventory: Every fresh, resumed and tool-result CLI process requires a valid authoritative inventory. Native
+      comparisons consume the exact native channel only; MCP names remain exact MCP evidence, even when their canonical
+      display names collide with native names. A failure discovered after provider execution settles outcome_uncertain
+      through the existing completion owner, preserving external effects and forbidding automatic redispatch.
   enforcement:
     mcp: tools/list exposes only planned surface tools whose exact delivered name, description, and schema match the canonical candidate definition identity for the same typed concrete actor, provider-turn, and managed-execution authority; any difference records a typed mismatch and denies the complete surface. tools/call settles exact provider-turn MCP visibility from the provider-owned call occurrence before authorization and rejects missing, mismatched, unavailable, unplanned, differently authorized, cross-identity, missing-coordinate, or replayed calls before executor dispatch.
     executor_relay: Tool executor, local runtime, and relay paths consume the exact provider-turn surface and managed-execution admission. They cannot recompute a broader set from actor declarations, names, prompts, or provider defaults.

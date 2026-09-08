@@ -442,11 +442,12 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if surface, ok := managedcapabilities.FromContext(ctx); ok {
 		observed, observeErr := observeCLIResponse(surface, resp)
 		if observeErr != nil {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_observation_invalid", "claude-cli-adapter", "observe_tool_surface", nil, observeErr)
+			observeErr = runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_observation_invalid", "claude-cli-adapter", "observe_tool_surface", nil, observeErr)
+		} else {
+			resp.CapabilitySurface = &observed
+			ctx = managedcapabilities.WithContext(ctx, observed)
 		}
-		resp.CapabilitySurface = &observed
-		ctx = managedcapabilities.WithContext(ctx, observed)
-		if validateErr := ValidateCLIProviderCapabilitySurface(observed, resp); validateErr != nil {
+		if validateErr := errors.Join(observeErr, ValidateCLIProviderCapabilitySurface(observed, resp)); validateErr != nil {
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
 			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
 				return nil, errors.Join(validateErr, settleErr)

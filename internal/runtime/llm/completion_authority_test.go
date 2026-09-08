@@ -225,7 +225,8 @@ while [ "$#" -gt 0 ]; do
   shift || true
 done
 cat >/dev/null
-printf '{"result":"done","session_id":"%s"}\n' "$session_id"
+printf '{"type":"system","subtype":"init","tools":[],"session_id":"%s"}\n' "$session_id"
+printf '{"type":"result","result":"done","session_id":"%s"}\n' "$session_id"
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake Claude transport: %v", err)
@@ -238,7 +239,7 @@ printf '{"result":"done","session_id":"%s"}\n' "$session_id"
 	cfg := &config.Config{}
 	cfg.Workspace.DockerBin = scriptPath
 	cfg.LLM.ClaudeCLI.Command = "claude"
-	cfg.LLM.ClaudeCLI.OutputFormat = "json"
+	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
 	registry := atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(time.Second)}
 	runtime := NewClaudeCLIRuntime(cfg, registry, "worker-1", workspaceResolverStub{
 		target: &workspace.Target{Container: "swarm-agent-agent-1", Workdir: "/workspace"},

@@ -1,5 +1,11 @@
 # Pre-Implementation Coverage Audit: #2321
 
+Approved additive capability boundary: https://github.com/division-sh/swarm/issues/2321#issuecomment-5592428086.
+See issue-2321-mcp-only-capability-escalation.md, Approved Bounded Amendment, for
+the exact CLI observation channel/presence class, owner census and added proof
+rows. This absorbs the live-discovered residual into #2321 without reopening its
+command-selection gate. #2432 remains a separate prerequisite and freeze.
+
 Agent: agent-g. Date: 2026-09-08. Audited code: `origin/master@09eaf68345cfc24770ce3b5109efd0d49cd15196`.
 
 Historical pre-implementation artifact, now approved by independent gate cycle 2:

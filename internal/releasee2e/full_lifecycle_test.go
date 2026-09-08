@@ -248,7 +248,7 @@ func runFullLifecycleGracefulJourney(
 	firstReceipt := sendFullLifecycleTelegramUpdate(t, process, 1001, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-first")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
-	first := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1001, firstReceipt)
+	first := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1001, "42", firstReceipt)
 	if err := process.stopAndWait(10 * time.Second); err != nil {
 		t.Fatalf("graceful lifecycle stop: %v\n%s", err, process.output.String())
 	}
@@ -263,7 +263,7 @@ func runFullLifecycleGracefulJourney(
 	secondReceipt := sendFullLifecycleTelegramUpdate(t, process, 1002, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "graceful-second")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 2)
-	second := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1002, secondReceipt)
+	second := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 1002, "42", secondReceipt)
 	assertFullLifecycleStandingReceiptContinuity(t, firstReceipt, secondReceipt)
 	assertFullLifecycleSameRoute(t, first, second)
 	assertFullLifecycleTimerCardinality(t, process.rpc, standing.RunID, 1)
@@ -280,10 +280,10 @@ func runFullLifecycleCrashIntrinsicJourney(
 	baselineReceipt := sendFullLifecycleTelegramUpdate(t, process, 2000, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovery-baseline")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
-	baseline := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2000, baselineReceipt)
+	baseline := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2000, "42", baselineReceipt)
 	pauseFullLifecycleRun(t, process.rpc, standing.RunID)
 	checkpointReceipt := sendFullLifecycleTelegramUpdate(t, process, 2001, 42)
-	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 2001, checkpointReceipt)
+	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 2001, "42", checkpointReceipt)
 	if err := process.killAndWait(10 * time.Second); err != nil {
 		t.Fatalf("force lifecycle process death: %v\n%s", err, process.output.String())
 	}
@@ -307,7 +307,7 @@ func runFullLifecycleCrashIntrinsicJourney(
 	freshReceipt := sendFullLifecycleTelegramUpdate(t, process, 2002, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "recovered-fresh")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 3)
-	fresh := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2002, freshReceipt)
+	fresh := requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 2002, "42", freshReceipt)
 	assertFullLifecycleStandingReceiptContinuity(t, baselineReceipt, checkpointReceipt, freshReceipt)
 	assertFullLifecycleSameRoute(t, old, fresh)
 	assertFullLifecycleOldEvidenceUnchanged(t, process.rpc, standing.RunID, checkpoint, before)
@@ -326,10 +326,10 @@ func runFullLifecycleDevFreshJourney(
 	baselineReceipt := sendFullLifecycleTelegramUpdate(t, process, 3000, 42)
 	approveFullLifecycleEffect(t, process.rpc, standing.RunID, "dev-baseline")
 	waitForFullLifecycleConvergence(t, process, standing.RunID, 1)
-	requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 3000, baselineReceipt)
+	requireFullLifecycleReceiptEvents(t, process.rpc, standing.RunID, 3000, "42", baselineReceipt)
 	pauseFullLifecycleRun(t, process.rpc, standing.RunID)
 	checkpointReceipt := sendFullLifecycleTelegramUpdate(t, process, 3001, 42)
-	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 3001, checkpointReceipt)
+	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, 3001, "42", checkpointReceipt)
 	predecessorHistory := captureFullLifecycleHistory(t, process.rpc, standing.RunID)
 	predecessorHistory.EventIDs[checkpoint.EventID] = true
 	predecessorHistory.DeliveryIDs[checkpoint.Delivery.DeliveryID] = true
@@ -354,7 +354,7 @@ func runFullLifecycleDevFreshJourney(
 	freshReceipt := sendFullLifecycleTelegramUpdate(t, process, 3002, 42)
 	approveFullLifecycleEffect(t, process.rpc, fresh.RunID, "dev-fresh")
 	waitForFullLifecycleConvergence(t, process, fresh.RunID, 1)
-	requireFullLifecycleReceiptEvents(t, process.rpc, fresh.RunID, 3002, freshReceipt)
+	requireFullLifecycleReceiptEvents(t, process.rpc, fresh.RunID, 3002, "42", freshReceipt)
 }
 
 func assertFullLifecycleReadySurface(t *testing.T, process *releaseServeProcess) {
@@ -869,7 +869,7 @@ type fullLifecycleCrashCheckpoint struct {
 	Delivery fullLifecycleEventDelivery
 }
 
-func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProcess, runID string, providerMessageReference int, receipt fullLifecycleIngressReceipt) fullLifecycleCrashCheckpoint {
+func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProcess, runID string, providerMessageReference int, conversationReference string, receipt fullLifecycleIngressReceipt) fullLifecycleCrashCheckpoint {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleRunLimit)
 	defer cancel()
@@ -880,7 +880,7 @@ func waitForFullLifecycleCrashCheckpoint(t *testing.T, process *releaseServeProc
 		if err != nil {
 			return false, err
 		}
-		_, event, err := fullLifecycleReceiptEvents(events, receipt, providerMessageReference)
+		_, event, err := fullLifecycleReceiptEvents(events, receipt, providerMessageReference, conversationReference)
 		if err != nil {
 			return false, err
 		}
@@ -1023,7 +1023,7 @@ func assertFullLifecycleTimerCardinality(t *testing.T, rpc *releaseRPCClient, ru
 	}
 }
 
-func requireFullLifecycleReceiptEvents(t *testing.T, rpc *releaseRPCClient, runID string, providerMessageReference int, receipt fullLifecycleIngressReceipt) fullLifecycleEvent {
+func requireFullLifecycleReceiptEvents(t *testing.T, rpc *releaseRPCClient, runID string, providerMessageReference int, conversationReference string, receipt fullLifecycleIngressReceipt) fullLifecycleEvent {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1031,19 +1031,19 @@ func requireFullLifecycleReceiptEvents(t *testing.T, rpc *releaseRPCClient, runI
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, normalized, err := fullLifecycleReceiptEvents(events, receipt, providerMessageReference)
+	_, normalized, err := fullLifecycleReceiptEvents(events, receipt, providerMessageReference, conversationReference)
 	if err != nil {
 		t.Fatalf("join lifecycle webhook receipt to public events: %v; receipt=%#v all=%#v", err, receipt, events)
 	}
 	return normalized
 }
 
-func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecycleIngressReceipt, providerMessageReference int) (fullLifecycleEvent, fullLifecycleEvent, error) {
+func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecycleIngressReceipt, providerMessageReference int, conversationReference string) (fullLifecycleEvent, fullLifecycleEvent, error) {
 	byID := make(map[string]fullLifecycleEvent, len(events))
 	var transportMatches []fullLifecycleEvent
 	for _, event := range events {
 		byID[event.EventID] = event
-		if event.EventName == "inbound.telegram.text_message" && fullLifecycleEventHasTransport(event, providerMessageReference, "42") {
+		if event.EventName == "inbound.telegram.text_message" && fullLifecycleEventHasTransport(event, providerMessageReference, conversationReference) {
 			transportMatches = append(transportMatches, event)
 		}
 	}

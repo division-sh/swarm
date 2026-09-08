@@ -349,3 +349,67 @@ native controls behave as expected. See issue-2321-mcp-only-capability-escalatio
 and the adjacent executable probe text for exact evidence, consumer census and
 requested bounded lead disposition. No further Telegram sends are needed for
 classification, and no production capability change is authorized or implemented.
+
+## Approved Capability Repair
+
+The bounded independent approval at issuecomment-5592428086 supersedes the last
+checkpoint's implementation freeze for this class only. The parser now retains
+valid/missing/invalid inventory state and accepts inventory only from provider
+system/init metadata. One strict entry parser replaces the two permissive entry
+parsers. The native reader no longer falls back to canonical display names.
+Managed observation/validation, startup and separate fork-chat comparisons consume
+the checked reader. Fork display recognizes valid-empty while retaining its
+existing local sandbox policy. No native grant, control allowlist or retry changed.
+
+Normal post-provider observation failure now reaches the existing uncertain
+completion settlement, just like a genuine native mismatch, rather than returning
+before settlement. Actual fake-provider fresh and resumed/tool-result invocations
+prove one uncertain settlement and no extra invocation or repeated local effect.
+Synthetic native fixtures now use the real inventory parser. The unrelated drained
+completion fixture now emits real stream initialization instead of inventing a
+successful inventory-less JSON response.
+
+Focused parser/channel/presence, startup, managed process, fork policy, API and
+mock controls passed three repetitions (0.438s). API-spec tests passed (1.751s)
+and git diff --check passed. The broader LLM package and authorized fresh
+SQLite/PostgreSQL L journeys are queued through swarm-test, not yet credited.
+Their logs are /tmp/agent-g-2321-inventory-llm.log and
+/tmp/agent-g-2321-live-inventory-repair.log. No already-sent delivery is replayed.
+#2432 remains separately frozen. No final audit, full-suite or merge-readiness
+claim is made by this checkpoint.
+
+## Capability Repair Execution Results
+
+The full LLM package passed through swarm-test (2.105s). Focused race-enabled
+inventory/startup/fresh/resumed settlement proofs passed (13.431s). The complete
+retained H J1-J5 matrix passed on SQLite/PostgreSQL (55.288s). These remain
+distinct proof surfaces, not substitutes for L or the integrated full suite.
+
+The first repaired L run passed the live SQLite turn and delivery but exposed a
+test-only receipt join hardcoded to mock chat 42. The join now takes the exact
+authored test conversation reference for both H and L; ordered receipt IDs and
+downstream target equality remain mandatory. TestCommandLiveReceiptUsesExactConfiguredConversation
+proves both reference shapes and wrong-reference/occurrence/order refusals. The
+three focused L helper tests passed three repetitions (0.009s).
+
+PostgreSQL secret setup initially refused SWARM_GOLDEN_POSTGRES_PASSWORD as an
+undelegated environment variable. The live harness now removes that database-only
+variable from source-free secret commands and SQLite dev invocations, matching H.
+No production environment guard changed. Failure output uses the existing secret
+redactor, including database passwords.
+
+The corrected full L attempt ran 246.257s: each store completed its first live
+Claude/MCP/Telegram turn and original delivery. Each then timed out awaiting the
+second reply after graceful restart. PostgreSQL public readback independently
+showed a failed second turn at claude_cli_process_failed/run_streaming, one provider
+dispatch and zero tools/output. The attempt was outcome_uncertain; re-entry was
+refused with external_effect_replay_fingerprint_conflict despite equal request
+fingerprints. This is not the corrected capability-validation failure. No old
+delivery was replayed or reset by the harness/operator.
+
+No restart, SIGKILL recovery, repeated dev epoch or full-suite L closure is claimed.
+See issue-2321-live-restart-observation.md. Before broadening production scope,
+the separate post-restart provider failure needs classification. A fresh PG
+diagnostic rerun is queued through swarm-test to retain the underlying attempt
+stderr/stdout before cleanup; it does not retry the failed delivery. #2432 remains
+unchanged and frozen. No full issue/merge-readiness claim is made.

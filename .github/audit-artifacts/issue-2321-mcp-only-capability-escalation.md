@@ -50,6 +50,37 @@ The failing probe is retained as .go.txt, not installed as a passing test. The
 live journal is /tmp/agent-g-2321-live-sqlite-6.log; no credentials or full private
 transcripts are included in this artifact.
 
+## Approved Bounded Amendment
+
+The independent gate at https://github.com/division-sh/swarm/issues/2321#issuecomment-5592428086
+supersedes the pending-disposition statements below. Absorption into #2321 is
+approved for **exact CLI capability observation channel and presence integrity**.
+No additional gate or issue is required. #2432 remains separately frozen.
+
+Implementation removes the display fallback and adds explicit valid, missing and
+invalid inventory state to the existing parser/Response. Only provider init
+metadata supplies inventory; assistant/result data cannot supply it. Invalid
+entries invalidate the inventory rather than silently disappearing. Exact native
+extraction is checked by managed observation/validation and fork-chat validation.
+Startup and each fresh/resumed/tool-result process require their own observation.
+Post-provider refusal still settles outcome_uncertain; it cannot retry effects.
+
+| Added manifestation | Required proof (not yet claimed executed) |
+| --- | --- |
+| MCP-only, empty and controls-only | Parser -> managed/fork validation accepts exact empty native inventory. |
+| Native-only, mixed and canonical collisions | Exact channel membership survives canonical display normalization. |
+| Missing/null/non-array/malformed inventory | Managed/fork/startup refuse; invalid cannot be erased by later message metadata. |
+| Missing/unexpected native, disconnected/unplanned MCP | Existing authority refuses or marks required evidence unavailable without granting tools. |
+| Fresh/resumed/tool-result processes | Actual invocation tests prove no inventory inheritance and uncertain settlement on invalid post-provider response. |
+| API/mock and local sandbox | Existing independent policy/transport tests remain green. |
+| Live SQLite/PostgreSQL | Fresh authorized journeys prove accepted turn, causal reply, original delivery settlement, retained restart and no duplicate effects. Never replay already-sent delivery. |
+
+Watchlist decision: consume lead refinement swarm-docs@038244f on the existing
+transport_policy_and_surface_parity and effective_agent_execution_contract_identity
+nodes. No new framework, permission, compatibility reader or architecture issue.
+Intended closure is the complete bounded observation class; broader #2321 review
+readiness still requires diagnostic repair and integrated full proof.
+
 ## Boundary And Consumer Census
 
 Proposed class: exact_native_vs_mcp_capability_observation_separation.

@@ -115,7 +115,10 @@ func newClaudeInvocationToolProjection(providerBuiltins, permissionAdmission []s
 }
 
 func validateClaudeInvocationProviderBuiltins(projection claudeInvocationToolProjection, response *Response) error {
-	actual := exactCLIProviderVisibleTools(response)
+	actual, err := exactCLIProviderVisibleTools(response)
+	if err != nil {
+		return err
+	}
 	if !slices.Equal(projection.ExpectedProviderBuiltin, actual) {
 		return fmt.Errorf(
 			"provider-visible capability mismatch: expected [%s], got [%s]",

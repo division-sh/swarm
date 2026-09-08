@@ -8,6 +8,50 @@ An H result never substitutes for L, or for a public test restart feature.
 
 ## Owner And Consumption Recheck
 
+Additional approved owner/consumer census: cliStreamAccumulator/Response owns
+exact native/MCP observations plus inventory presence. exactCLIProviderVisibleTools
+is the checked reader used by observeCLIResponse, ValidateCLIProviderCapabilitySurface
+and validateClaudeInvocationProviderBuiltins. Startup consumes the same managed
+reader; fresh/resumed/tool-result calls each construct a new accumulator. Fork
+display consumes presence but keeps policy-owned local tools, not native grants.
+API/mock request owners and the existing completion/effect owner are unchanged.
+The VisibleTools native fallback and permissive duplicate MCP entry parser are
+removed, and native synthetic test producers now consume the real parser.
+
+## Absorbed Capability Proof Rows
+
+Approved class: exact CLI capability observation channel and presence integrity
+(issuecomment-5592428086). Focused tests below passed three repetitions, 0.438s;
+this is not live or final integrated-head closure credit.
+
+| Manifestation | Exact proof / status |
+| --- | --- |
+| MCP-only false native mismatch | TestCLIInventoryChannelIntegrity/mcp_only; reproduced and fixed. |
+| Native-only/mixed/canonical collision/empty/controls | TestCLIInventoryChannelIntegrity and TestCLIInventoryForkDisplayPreservesEmptyAndLocalPolicy; execution-proven through the same corrected path. |
+| Missing/null/wrong-type/malformed/name-less inventory | TestCLIInventoryPresence; reproduced and fixed; managed/fork reader refusals and response serialization. |
+| Later data fabricates or erases inventory | TestCLIInventoryCannotBeManufacturedOrRepairedByMessages; execution-proven through the same corrected path. |
+| Unknown/wrong/missing native, unplanned/disconnected MCP | TestCLIInventoryChannelIntegrity plus existing TestManagedCapabilityPlanRejectsMissingAndUnexpectedProviderBuiltins; execution-proven through the same corrected path. |
+| Startup zero-native observation | TestClaudeCLIStartupInventoryPresence; execution-proven through the same corrected path, one process per success/refusal. |
+| Fresh/resumed/tool-result failure settlement | TestClaudeCLIManagedInventoryFailureSettlesWithoutRetry, both real process paths with missing/null/malformed/unexpected-native; execution-proven through the same corrected path, exactly one uncertain settlement, no extra invocation/local effect. |
+| Valid resumed native/MCP and drained settlement | TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame and TestClaudeMemoryDrainedCompletionStopsBeforeProviderHeadProjection; execution-proven through the same corrected path. |
+| Fork local/canonical policy, API/mock controls | TestCLIInventoryForkDisplayPreservesEmptyAndLocalPolicy, TestClaudeInvocationToolProjection*, TestValidateCLIResponseToolCallsForTurn_*, TestManagedCapabilityPlanPreservesConcreteAPIFallbackDefinition, TestObserveMockRuntimeCapabilitySurfaceBindsExactInterpreterInput; separate policy preserved and execution-proven. |
+| Live accepted turn/delivery SQLite/PostgreSQL | TestCommandLiveServeAndRestartParity reaches first-turn causal reply and original delivery convergence on both stores; execution-proven through the corrected path. |
+| Live retained restart SQLite/PostgreSQL | Same L test fails second ingress after graceful restart (246.257s total). Separate provider-process failure is escalated for classification in issue-2321-live-restart-observation.md; not closure credit. |
+
+Watchlist: lead's 038244f refinement covers the absorbed class. No extra node,
+new issue or framework. #2432 remains split/tracked and frozen; #2319 nonblocking.
+The intended bounded class closure has no planned child tail, but live evidence
+and #2321's integrated full suite remain required before final review readiness.
+
+Broader executed evidence: full LLM package via swarm-test PASS (2.105s), focused
+inventory/startup/managed process race PASS (13.431s), API-spec PASS (1.751s), full
+retained H J1-J5 SQLite/PostgreSQL PASS (55.288s), L receipt/reference/setup helper
+controls PASS three repetitions (0.009s), diff check PASS. H remains H, not L.
+The runtime repair stays limited to the approved observation class; no provider
+state persistence/recovery or #2432 implementation is included.
+
+## Original Owner And Consumption Recheck
+
 - Command composition: `serveapp.Run` passes Live and `RunTestSession` passes
   MockOnly to `buildRuntimeComposition`; `cmd/swarm` injects the CLI session port.
   `LocalRun` retains the Live serve path. H's parent-owned retained entry exists

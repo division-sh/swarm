@@ -296,7 +296,7 @@ func conversationForkSandboxHasObservedSurface(resp *Response) bool {
 	if resp == nil {
 		return false
 	}
-	return len(resp.VisibleTools) > 0 || len(resp.MCPVisibleTools) > 0 || len(resp.MCPServers) > 0
+	return resp.CLIInventory != CLIInventoryNotObserved || len(resp.VisibleTools) > 0 || len(resp.MCPVisibleTools) > 0 || len(resp.MCPServers) > 0
 }
 
 func conversationForkSandboxToolCallAllowed(tools []ToolDefinition, resp *Response, name string) bool {

@@ -218,9 +218,7 @@ func TestClaudeInvocationToolProjectionRejectsUnknownForkBuiltinEvidence(t *test
 	if err != nil {
 		t.Fatalf("projectClaudeInvocationTools: %v", err)
 	}
-	if err := validateClaudeInvocationProviderBuiltins(projection, &Response{
-		ProviderVisibleTools: []string{"ExitPlanMode", "FutureUnplannedBuiltin"},
-	}); err == nil || !strings.Contains(err.Error(), "FutureUnplannedBuiltin") {
+	if err := validateClaudeInvocationProviderBuiltins(projection, cliInventoryResponseForTest(`["ExitPlanMode","FutureUnplannedBuiltin"]`)); err == nil || !strings.Contains(err.Error(), "FutureUnplannedBuiltin") {
 		t.Fatalf("unknown provider builtin validation error = %v", err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -130,17 +131,20 @@ func prepareCommandLiveProject(t *testing.T, binary, project string, store golde
 	verify := runReleaseCommand(t, fullLifecycleStartupLimit, project, env, "", binary,
 		"verify", "contracts", "--config", "live.yaml", "--json")
 	assertFullLifecycleVerifySuccess(t, verify)
+	secretEnv := slices.DeleteFunc(slices.Clone(env), func(entry string) bool { return strings.HasPrefix(entry, goldenPostgresPass+"=") })
 	for key, value := range map[string]string{
 		"CLAUDE_CODE_OAUTH_TOKEN":  prerequisites.claudeToken,
 		"telegram_bot_token":       prerequisites.botToken,
 		"webhook_signing.telegram": signingSecret,
 	} {
-		result := runReleaseCommand(t, 30*time.Second, project, env, value+"\n", binary, "secrets", "set", key, "--stdin")
+		result := runReleaseCommand(t, 30*time.Second, project, secretEnv, value+"\n", binary, "secrets", "set", key, "--stdin")
 		if strings.Contains(result.output, value) {
 			t.Fatalf("public secret setup leaked %s (output withheld)", key)
 		}
 		if result.err != nil {
-			t.Fatalf("public secret setup failed for %s: %v (output withheld)", key, result.err)
+			output := &releaseProcessOutput{secrets: []string{prerequisites.claudeToken, prerequisites.botToken, signingSecret, apiToken, store.passwordEnv}}
+			_, _ = output.Write([]byte(result.output))
+			t.Fatalf("public secret setup failed for %s: %v\n%s", key, result.err, output.String())
 		}
 	}
 	return releaseProcessSpec{
@@ -209,17 +213,40 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 		approveLifecycleEffectMode(t, process.rpc, run.RunID, fmt.Sprintf("live-send-%d", id), "live")
 		waitForLifecycleConvergenceMode(t, process, run.RunID, count, "live")
 		t.Logf("L ingress %d converged through live agent and Telegram connector", id)
-		return requireFullLifecycleReceiptEvents(t, process.rpc, run.RunID, id, receipt)
+		return requireFullLifecycleReceiptEvents(t, process.rpc, run.RunID, id, strconv.Itoa(prerequisites.chatID), receipt)
 	}
 
 	process := start(spec)
 	bundle, standing := openStanding(process, nil)
-	t.Cleanup(func() {
+	// Capture while the current process/store are still alive, before cleanup
+	// callbacks registered by later restarted processes run.
+	defer func() {
 		if !t.Failed() {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		if store.diagnosticDB != nil {
+			rows, err := store.diagnosticDB.QueryContext(ctx, `SELECT jsonb_build_object('attempt_id',attempt_id,'stage',evidence->'stage','operation',evidence->'operation','stderr',evidence->'stderr','stdout',evidence->'stdout')::text FROM runtime_external_effect_attempts WHERE state='outcome_uncertain'`)
+			if err != nil {
+				t.Logf("uncertain attempt evidence unavailable: %v", err)
+			} else {
+				defer rows.Close()
+				for rows.Next() {
+					var evidence string
+					if err := rows.Scan(&evidence); err != nil {
+						t.Logf("scan uncertain attempt: %v", err)
+						break
+					}
+					output := &releaseProcessOutput{secrets: spec.RedactValues}
+					_, _ = output.Write([]byte(evidence))
+					t.Logf("sanitized uncertain provider attempt: %s", output.String())
+				}
+				if err := rows.Err(); err != nil {
+					t.Logf("read uncertain attempt: %v", err)
+				}
+			}
+		}
 		queries := []struct {
 			method string
 			params map[string]any
@@ -255,7 +282,7 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 				}
 			}
 		}
-	})
+	}()
 	id, firstReceipt := send(process)
 	first := converge(process, standing, 1, id, firstReceipt)
 	stop(process)
@@ -270,7 +297,7 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 
 	pauseFullLifecycleRun(t, process.rpc, standing.RunID)
 	id, pendingReceipt := send(process)
-	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, id, pendingReceipt)
+	checkpoint := waitForFullLifecycleCrashCheckpoint(t, process, standing.RunID, id, strconv.Itoa(prerequisites.chatID), pendingReceipt)
 	if err := process.killAndWait(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -294,6 +321,7 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 
 	devSpec := spec
 	devSpec.ConfigPath, devSpec.Store, devSpec.Dev = "dev.yaml", "sqlite", true
+	devSpec.Env = slices.DeleteFunc(slices.Clone(spec.Env), func(entry string) bool { return strings.HasPrefix(entry, goldenPostgresPass+"=") })
 	var priorDev *fullLifecycleRun
 	var priorHistory fullLifecycleHistory
 	for epoch := 0; epoch < 2; epoch++ {
@@ -334,6 +362,31 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 	stop(process)
 	if actual, err := releaseSourceTree(filepath.Join(project, "contracts"), true); err != nil || !reflect.DeepEqual(actual, source) {
 		t.Fatalf("live/restart journey changed authored source, including doubles: %v", err)
+	}
+}
+
+func TestCommandLiveReceiptUsesExactConfiguredConversation(t *testing.T) {
+	for _, chat := range []string{"42", "424242"} {
+		t.Run(chat, func(t *testing.T) {
+			receipt := fullLifecycleIngressReceipt{EntityID: "standing", EventIDs: []string{"raw", "normalized"}, EventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}}
+			events := []fullLifecycleEvent{
+				{EventID: "raw", EventName: "inbound.telegram", EntityID: "standing", NoDelivery: &fullLifecycleNoDelivery{Reason: "no_subscriber_by_design"}},
+				{EventID: "normalized", EventName: "inbound.telegram.text_message", EntityID: "downstream", Payload: map[string]any{"provider_message_reference": float64(1001), "conversation_reference": chat}, Deliveries: []fullLifecycleEventDelivery{{SubscriberType: "agent", SubscriberID: "phrase-bot", Target: fullLifecycleDeliveryTarget{Kind: "materializing_entity", EntityID: "downstream", FlowID: "telegram-chat", FlowInstance: "telegram-chat/instance"}}}},
+			}
+			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1001, chat); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1001, "wrong-chat"); err == nil {
+				t.Fatal("wrong conversation accepted")
+			}
+			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1002, chat); err == nil {
+				t.Fatal("wrong occurrence accepted")
+			}
+			slices.Reverse(receipt.EventIDs)
+			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1001, chat); err == nil {
+				t.Fatal("unordered receipt accepted")
+			}
+		})
 	}
 }
 

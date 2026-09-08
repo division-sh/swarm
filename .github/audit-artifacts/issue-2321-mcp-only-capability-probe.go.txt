@@ -1,5 +1,7 @@
-// Diagnostic reproducer, not a passing regression or production implementation.
-// Place in internal/runtime/llm as a _test.go file (or use go test -overlay).
+// Historical diagnostic reproducer for baseline 05528a92e / 0a140df7f only.
+// Use that baseline with go test -overlay; this predates the checked reader API.
+// Current passing regressions are TestCLIInventoryChannelIntegrity and
+// TestCLIInventoryPresence in internal/runtime/llm/cli_inventory_test.go.
 package llm
 
 import (

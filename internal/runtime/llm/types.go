@@ -148,6 +148,16 @@ type ToolOutputEventExecutor interface {
 	ExecuteOutputEvent(context.Context, string, any, ToolOutputEventIdentity) (any, error)
 }
 
+// CLIInventoryObservation describes authoritative provider init metadata, not
+// tool calls or the derived canonical display list. Its zero value is absence.
+type CLIInventoryObservation string
+
+const (
+	CLIInventoryNotObserved CLIInventoryObservation = ""
+	CLIInventoryValid       CLIInventoryObservation = "valid"
+	CLIInventoryInvalid     CLIInventoryObservation = "invalid"
+)
+
 type Response struct {
 	Message              Message                      `json:"message"`
 	ToolCalls            []ToolCall                   `json:"tool_calls,omitempty"`
@@ -156,6 +166,7 @@ type Response struct {
 	Raw                  []byte                       `json:"raw,omitempty"`
 	VisibleTools         []string                     `json:"visible_tools,omitempty"`
 	ProviderVisibleTools []string                     `json:"provider_visible_tools,omitempty"`
+	CLIInventory         CLIInventoryObservation      `json:"cli_inventory,omitempty"`
 	MCPServers           map[string]string            `json:"mcp_servers,omitempty"`
 	MCPVisibleTools      []string                     `json:"mcp_visible_tools,omitempty"`
 	CapabilitySurface    *managedcapabilities.Surface `json:"capability_surface,omitempty"`
