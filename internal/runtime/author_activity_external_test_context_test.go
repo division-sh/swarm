@@ -328,7 +328,7 @@ func installExternalRuntimeTestGeneration(
 	ctx context.Context,
 	selected any,
 	runtime *runtimepkg.Runtime,
-) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant) {
+) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant) {
 	t.Helper()
 	store, ok := selected.(runtimestartupownership.Store)
 	if !ok {
@@ -404,7 +404,7 @@ func installExternalManagerTestGeneration(
 	t testing.TB,
 	ctx context.Context,
 	manager *runtimemanager.AgentManager,
-	grant runtimestartupownership.GenerationGrant,
+	grant runtimestartupownership.LiveGenerationGrant,
 ) {
 	t.Helper()
 	if manager == nil || grant == nil {

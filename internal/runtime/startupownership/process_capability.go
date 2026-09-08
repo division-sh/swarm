@@ -95,7 +95,6 @@ type GenerationGrant interface {
 	runtimemanager.AgentLifecyclePersistence
 	Evidence() (GrantEvidence, error)
 	ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error)
-	SourceSetPlan(context.Context) (runtimeagenttopology.SourceSetPlan, error)
 	ProveCurrent(context.Context) error
 	MarkProbesSettled(context.Context, []string) (GrantEvidence, error)
 	AdmitExecution(context.Context) (GrantEvidence, error)
@@ -103,10 +102,18 @@ type GenerationGrant interface {
 	Done() <-chan struct{}
 }
 
+// LiveGenerationGrant is the complete-source-set authority used by normal
+// runtime startup and replacement. Selected execution consumes GenerationGrant
+// without acquiring authority to interpret the live source-set head.
+type LiveGenerationGrant interface {
+	GenerationGrant
+	SourceSetPlan(context.Context) (runtimeagenttopology.SourceSetPlan, error)
+}
+
 type ProcessCapability interface {
 	Evidence() (Authority, error)
 	CurrentSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error)
-	IssueGenerationGrant(context.Context, GrantRequest) (GenerationGrant, error)
+	IssueGenerationGrant(context.Context, GrantRequest) (LiveGenerationGrant, error)
 	InstallCompleteSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	RestoreSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error)
@@ -137,6 +144,10 @@ type generationGrant struct {
 	evidence GrantEvidence
 	done     chan struct{}
 	doneOnce sync.Once
+}
+
+type liveGenerationGrant struct {
+	*generationGrant
 }
 
 func NewProcessCapability(session RetainedSession) (ProcessCapability, error) {
@@ -187,7 +198,7 @@ func (p *processCapability) CurrentSourceSet(ctx context.Context) (runtimeagentt
 	return plan, exists, err
 }
 
-func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantRequest) (GenerationGrant, error) {
+func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantRequest) (LiveGenerationGrant, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -248,7 +259,7 @@ func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantR
 	default:
 	}
 	p.grants[evidence.GrantID] = g
-	return g, nil
+	return &liveGenerationGrant{generationGrant: g}, nil
 }
 
 func (p *processCapability) InstallCompleteSourceSet(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
@@ -574,8 +585,8 @@ func (g *generationGrant) ProcessExecutionBinding() (runtimemanager.ProcessExecu
 	return binding, binding.Validate()
 }
 
-func (g *generationGrant) SourceSetPlan(ctx context.Context) (runtimeagenttopology.SourceSetPlan, error) {
-	if g == nil || g.owner == nil {
+func (g *liveGenerationGrant) SourceSetPlan(ctx context.Context) (runtimeagenttopology.SourceSetPlan, error) {
+	if g == nil || g.generationGrant == nil || g.owner == nil {
 		return runtimeagenttopology.SourceSetPlan{}, errors.New("runtime generation grant is missing its process owner")
 	}
 	g.owner.opMu.Lock()

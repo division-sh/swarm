@@ -246,11 +246,11 @@ func (s *runtimeTestRetainedSession) Release(context.Context) error {
 	return nil
 }
 
-func newRuntimeTestProcessCapability(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, error) {
+func newRuntimeTestProcessCapability(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant, error) {
 	return newRuntimeTestProcessCapabilityWithSession(t, manager, source, fact, runtimeInstanceID, nil)
 }
 
-func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, session *runtimeTestRetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, error) {
+func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, session *runtimeTestRetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant, error) {
 	t.Helper()
 	bundleHash := fact.BundleHash()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
@@ -310,7 +310,7 @@ func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimema
 	return capability, grant, nil
 }
 
-func installRuntimeTestManagerGeneration(t testing.TB, ctx context.Context, manager *runtimemanager.AgentManager, grant runtimestartupownership.GenerationGrant) {
+func installRuntimeTestManagerGeneration(t testing.TB, ctx context.Context, manager *runtimemanager.AgentManager, grant runtimestartupownership.LiveGenerationGrant) {
 	t.Helper()
 	if manager == nil || grant == nil {
 		t.Fatal("runtime test manager generation requires a manager and generation grant")

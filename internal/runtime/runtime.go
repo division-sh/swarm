@@ -143,7 +143,7 @@ type RuntimeDeps struct {
 	DecisionCardHumanTasks         decisioncard.HumanTaskStore
 	DecisionCardDraftExpiry        runtimepipeline.DecisionCardDraftExpiry
 	HumanTaskExpiry                runtimepipeline.HumanTaskExpiry
-	StartupGrant                   runtimestartupownership.GenerationGrant
+	StartupGrant                   runtimestartupownership.LiveGenerationGrant
 	MailboxStore                   runtimetools.MailboxPersistence
 	ToolEntityStore                runtimetools.EntityPersistence
 	DataAccessStore                durabledata.ResourceAccessStore
@@ -231,7 +231,7 @@ type Runtime struct {
 	startupPrepareMu           sync.Mutex
 	startCtx                   context.Context
 	cancelStart                context.CancelFunc
-	startupGrant               runtimestartupownership.GenerationGrant
+	startupGrant               runtimestartupownership.LiveGenerationGrant
 	startupLifecyclePrepared   bool
 	replacementQuiesced        bool
 	workOccurrence             *worklifetime.RuntimeOccurrence
@@ -354,7 +354,7 @@ func (rt *Runtime) CurrentStartupGrantEvidence() (runtimestartupownership.GrantE
 // InstallStartupGrant binds one non-release-capable generation grant before
 // Start. Process composition remains the sole owner of acquisition, topology
 // mutation, generation replacement, and final selected-store release.
-func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.GenerationGrant) error {
+func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.LiveGenerationGrant) error {
 	if rt == nil || grant == nil {
 		return fmt.Errorf("runtime generation grant is required")
 	}
@@ -469,7 +469,7 @@ type PreparedSourceSetGenerationRefresh struct {
 	mu              sync.Mutex
 	runtime         *Runtime
 	plan            runtimeagenttopology.SourceSetPlan
-	current         runtimestartupownership.GenerationGrant
+	current         runtimestartupownership.LiveGenerationGrant
 	currentEvidence runtimestartupownership.GrantEvidence
 	topology        *runtimemanager.PreparedDurableTopologySourceSetRebind
 	done            bool

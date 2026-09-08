@@ -402,7 +402,7 @@ func (p *Process) Begin(ctx context.Context) (*Lease, error) {
 	if p == nil {
 		return nil, errors.New("process work owner is required")
 	}
-	return p.occurrence.begin(ctx)
+	return p.occurrence.begin(WithProcess(ctx, p))
 }
 
 func (p *Process) Fence() error {
@@ -1003,6 +1003,7 @@ func (i SelectedForkIdentity) validate() error {
 type SelectedForkOccurrence struct {
 	occurrence *ownedOccurrence
 	identity   SelectedForkIdentity
+	process    *Process
 }
 
 func (r *RuntimeOccurrence) NewSelectedFork(ctx context.Context, identity SelectedForkIdentity) (*SelectedForkOccurrence, error) {
@@ -1018,7 +1019,7 @@ func (r *RuntimeOccurrence) NewSelectedFork(ctx context.Context, identity Select
 	}
 	identity.ExecutionID = strings.TrimSpace(identity.ExecutionID)
 	identity.RunID = strings.TrimSpace(identity.RunID)
-	return &SelectedForkOccurrence{occurrence: r.occurrence.newChild(parentLease), identity: identity}, nil
+	return &SelectedForkOccurrence{occurrence: r.occurrence.newChild(parentLease), identity: identity, process: r.process}, nil
 }
 
 func (p *Process) NewSelectedFork(ctx context.Context, identity SelectedForkIdentity) (*SelectedForkOccurrence, error) {
@@ -1034,21 +1035,21 @@ func (p *Process) NewSelectedFork(ctx context.Context, identity SelectedForkIden
 	}
 	identity.ExecutionID = strings.TrimSpace(identity.ExecutionID)
 	identity.RunID = strings.TrimSpace(identity.RunID)
-	return &SelectedForkOccurrence{occurrence: p.occurrence.newChild(parentLease), identity: identity}, nil
+	return &SelectedForkOccurrence{occurrence: p.occurrence.newChild(parentLease), identity: identity, process: p}, nil
 }
 
 func (s *SelectedForkOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	if s == nil {
 		return nil, errors.New("selected-fork occurrence is required")
 	}
-	return s.occurrence.begin(WithOccurrence(ctx, s))
+	return s.occurrence.begin(WithOccurrence(WithProcess(ctx, s.process), s))
 }
 
 func (s *SelectedForkOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
 	if s == nil {
 		return nil, errors.New("selected-fork occurrence is required")
 	}
-	return s.occurrence.gate.beginStanding(WithOccurrence(ctx, s))
+	return s.occurrence.gate.beginStanding(WithOccurrence(WithProcess(ctx, s.process), s))
 }
 
 func (s *SelectedForkOccurrence) RetireAndWait(ctx context.Context) error {

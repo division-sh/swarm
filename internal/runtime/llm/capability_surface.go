@@ -196,6 +196,14 @@ func ManagedCapabilitySurfaceForStartup(ctx context.Context, actorPlan runtimeag
 	if !ok || strings.TrimSpace(actor.ID) != actorPlan.AgentID() || actor.CanonicalFlowPath() != actorPlan.FlowInstance() {
 		return managedcapabilities.Surface{}, fmt.Errorf("startup capability surface requires exact actor plan projection")
 	}
+	if authority.ExecutionKind == managedcapabilities.ExecutionSelectedForkPreparation {
+		if err := authority.Validate(); err != nil {
+			return managedcapabilities.Surface{}, err
+		}
+		if !actor.Identity.IsZero() {
+			return managedcapabilities.Surface{}, fmt.Errorf("selected-fork preparation cannot project a live actor into a runless probe")
+		}
+	}
 	var actorIdentity runtimeagentidentity.Identity
 	if authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork {
 		identity, err := actor.ConcreteIdentity()
