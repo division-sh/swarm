@@ -16,12 +16,6 @@ func runtimeTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtime
 	if strings.TrimSpace(cfg.FlowID) == "" && cfg.CanonicalFlowPath() == "" {
 		cfg.FlowID = "."
 	}
-	if strings.TrimSpace(cfg.ResolvedLLMBackend) == "" {
-		cfg.ResolvedLLMBackend = strings.TrimSpace(cfg.LLMBackend)
-		if cfg.ResolvedLLMBackend == "" {
-			cfg.ResolvedLLMBackend = "anthropic"
-		}
-	}
 	if cfg.Intent.Empty() {
 		resolved, err := runtimeagentintent.Resolve(
 			runtimeagentintent.SourceInline,

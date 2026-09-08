@@ -923,7 +923,7 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 			ExecutionPosture: executionposture.MockOnly,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "mock_only") {
+	if err == nil || !strings.Contains(err.Error(), "command-selected mock execution rejects live execution") {
 		t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want exact live source-mode rejection", result, err)
 	}
 	if result.Materialization.ForkRunID != "" {

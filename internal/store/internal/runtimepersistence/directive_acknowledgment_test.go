@@ -22,6 +22,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -497,6 +499,15 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 		}),
 		Status: "active",
 	}
+	profile, err := selection.ResolveLiveBackend("anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, rec.Config)
+	if err != nil {
+		t.Fatalf("select directive fixture execution: %v", err)
+	}
+	rec.Config = descriptor.Actor
 	if err := agentfixture.UpsertStatic(t, testAuthorActivityContext(), backend.store, rec); err != nil {
 		t.Fatalf("persist agent: %v", err)
 	}

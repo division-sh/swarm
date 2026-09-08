@@ -680,7 +680,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	}
 }
 
-func TestLLMForkChatExecutorRederivesSourceAgentAgainstCurrentRuntimeSet(t *testing.T) {
+func TestLLMForkChatExecutorRefusesConflictingStoredBackendWithoutReselection(t *testing.T) {
 	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendOpenAIResponses)
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
@@ -718,14 +718,14 @@ func TestLLMForkChatExecutorRederivesSourceAgentAgainstCurrentRuntimeSet(t *test
 		LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
 	}
 	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.RuntimeScope(uuid.NewString()))
-	if _, err := NewLLMForkChatExecutor(runtimes).ExecuteForkChat(ctx, prepared, "inspect"); err != nil {
-		t.Fatalf("ExecuteForkChat: %v", err)
+	if _, err := NewLLMForkChatExecutor(runtimes).ExecuteForkChat(ctx, prepared, "inspect"); err == nil || !strings.Contains(err.Error(), `persisted backend "anthropic" conflicts`) {
+		t.Fatalf("ExecuteForkChat conflict refusal: %v", err)
 	}
-	if rt.actorAuthoredBackend != "" {
-		t.Fatalf("forkchat authored llm_backend = %q, want preserved blank intent", rt.actorAuthoredBackend)
+	if rt.startAgentID != "" {
+		t.Fatal("conflicting stored descriptor started a provider session")
 	}
-	if rt.actorResolvedBackend != llmselection.BackendOpenAIResponses {
-		t.Fatalf("forkchat resolved llm backend = %q, want %q", rt.actorResolvedBackend, llmselection.BackendOpenAIResponses)
+	if prepared.Snapshot.SourceAgent.ResolvedLLMBackend != llmselection.BackendAnthropic {
+		t.Fatal("fork-chat read rewrote the persisted backend")
 	}
 }
 

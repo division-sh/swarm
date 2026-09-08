@@ -7408,7 +7408,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "serve-abandon", "agent-a")
 	requireServeTestAgentFixtureForSource(t, sqliteStore, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
-		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
+		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Authored(true),
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,

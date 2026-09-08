@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
@@ -64,7 +63,7 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	}
 	contracts := filepath.Join(root, "contracts")
 	// L: exercise public live process ownership without claiming agent execution.
-	copyReleaseTree(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), contracts)
+	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "routing", "root-ingress"), contracts)
 	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-sqlite-possession-e2e\n\ngo 1.23.0\n")
 	store := goldenSQLiteStore(root)
 	configPath := filepath.Join(root, "config", "swarm.yaml")
@@ -304,7 +303,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			if err := os.MkdirAll(test.root, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			copyReleaseTree(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), filepath.Join(test.root, "contracts"))
+			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "routing", "root-ingress"), filepath.Join(test.root, "contracts"))
 			writeReleaseFile(t, filepath.Join(test.root, ".swarm", "swarm.yaml"), goldenRuntimeConfig(goldenStoreSelection{name: "sqlite", configYAML: "store:\n  backend: sqlite\n"}))
 			writeReleaseFile(t, filepath.Join(test.root, "api-token"), goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, test.root, "", 0)
@@ -361,7 +360,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 		}
 		contracts := filepath.Join(projectRoot, "contracts")
-		copyReleaseTree(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), contracts)
+		copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "routing", "root-ingress"), contracts)
 		invocationEnv := goldenProcessEnv(t, invocationRoot, "", 0)
 		assertGoldenProcessHasNoExternalExecutables(t, invocationEnv)
 

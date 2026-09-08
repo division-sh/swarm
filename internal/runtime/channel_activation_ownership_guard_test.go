@@ -16,7 +16,6 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 	want := []string{
 		"internal/channelonboarding/model.go",
 		"internal/channelonboarding/publication.go",
-		"internal/cliapp/verify_runtime.go",
 		"internal/runtime/channelactivation/owner.go",
 		"internal/runtime/context_manager.go",
 		"internal/runtime/engine/types.go",
@@ -99,6 +98,21 @@ func TestEffectiveSourceHasNoChannelDeploymentInterpreter(t *testing.T) {
 	}
 }
 
+func TestStructuralReadersDoNotConstructChannelActivation(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	for _, relative := range []string{"internal/cliapp/verify_runtime.go", "internal/cliapp/test_command.go"} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"NewDeclaredOnlyChannelActivationPublication", "LoadBundlePackRuntime"} {
+			if strings.Contains(string(raw), forbidden) {
+				t.Errorf("pre-execution source reader %s regained deployment activation via %s", relative, forbidden)
+			}
+		}
+	}
+}
+
 func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	checks := map[string][]string{
@@ -111,7 +125,6 @@ func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
 		"internal/serveapp/public_ingress.go":          {"AcquireChannelActivationPublication"},
 		"internal/serveapp/channel_onboarding.go":      {"NewChannelActivationPublication", "AcquireChannelActivationPublication"},
 		"internal/serveapp/main.go":                    {"NewDeclaredOnlyChannelActivationPublication"},
-		"internal/cliapp/verify_runtime.go":            {"NewDeclaredOnlyChannelActivationPublication"},
 	}
 	for relative, required := range checks {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relative)))

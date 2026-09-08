@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -19,7 +20,8 @@ func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 	cfg := &config.Config{}
 	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{
 		Config: cfg, Options: RuntimeOptions{
-			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
+			ExecutionPosture: executionposture.Live,
+			SelfCheck:        false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			SourceArtifactFact: testSourceArtifactFact(t, runtimeTestBundleHash),
 			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),
@@ -55,7 +57,8 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 			LifecycleCensus: selected,
 		},
 		Options: RuntimeOptions{
-			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
+			ExecutionPosture: executionposture.Live,
+			SelfCheck:        false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			SourceArtifactFact: fact, ProcessWorkOwner: runtimeTestProcessWorkOwner(t),
 		},
