@@ -339,3 +339,13 @@ SQLite diagnostic journey is queued through swarm-test; it does not replay the
 previous failed delivery. Its log is /tmp/agent-g-2321-live-sqlite-6.log.
 The root cause is not yet established. No production repair, broader-class
 absorption, new gate approval or full live proof is claimed.
+
+The expanded diagnostic run subsequently failed in 29.334s. It confirms the
+successful connector result and locates the turn failure at
+claude_cli_capability_validation. The deterministic parser-to-validator probe
+reproduces an empty-native-to-canonical-MCP fallback defect 3/3 on this branch and
+3/3 on current origin/master@05528a92e. Mixed native+MCP and missing/unexpected
+native controls behave as expected. See issue-2321-mcp-only-capability-escalation.md
+and the adjacent executable probe text for exact evidence, consumer census and
+requested bounded lead disposition. No further Telegram sends are needed for
+classification, and no production capability change is authorized or implemented.

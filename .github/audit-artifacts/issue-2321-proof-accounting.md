@@ -232,3 +232,11 @@ failed delivery. Root cause and durable completion remain unresolved; no restart
 or L matrix pass is credited. Public failure-evidence capture has been expanded
 before cleanup, and a fresh isolated diagnostic journey is queued, not a replay
 of the failed delivery. Runtime code and #2432's frozen gate remain unchanged.
+
+Expanded capture now pins the repeated live failure to capability validation:
+the reader substitutes canonical MCP names when exact provider-native names are
+empty. A deterministic probe fails 3/3 on the branch and 3/3 on fresh master;
+mixed/native-negative controls pass. The separate bounded escalation artifact
+records this pre-existing capability defect for explicit lead disposition before
+production repair. L remains blocked; external-send success is not turn acceptance,
+retained restart, PostgreSQL L, or final-suite closure.
