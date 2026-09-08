@@ -4258,6 +4258,7 @@ handler_specification:
           JSONB payload.'
         read_model:
           schema_owner: The exact effective event-source structural schema is resolved before expression checking; authored, connected, imported, provider, generated, platform, and finite wildcard sources may not fall back to dyn when a payload reader is reachable.
+          execution_binding: Exact receiver handlers consume their handler-local structural schema, including concrete template callbacks. Local wildcard handlers consume the concrete event schema only after the canonical subscription owner confirms that event resolves to the executing handler. The execution frame passes this schema to every expression reader; evaluators do not independently reinterpret sender event names as receiver schemas.
           required_field: A required field has its declared CEL type and may be read directly.
           optional_field: '`payload.?field` has stock CEL `optional<T>` type. Direct `payload.field` is valid only where checked-AST control flow proves that exact field path present on every incoming path.'
           decisions: '`payload.?field.orValue(default)`, `has(payload.field) ? payload.field : default`, and the logically equivalent negated conditional are supported when types agree.'
