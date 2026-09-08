@@ -274,7 +274,6 @@ scan:
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 dispatcher:
-  id: dispatcher
   execution_type: system_node
   event_handlers:
     scan.corpus_dispatch:
@@ -304,7 +303,6 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string)
 `
 	}
 	return nodeID + `:
-  id: ` + nodeID + `
   execution_type: system_node
   event_handlers:
     ` + trigger + `:
@@ -319,7 +317,6 @@ func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEv
 		return ""
 	}
 	return nodeID + `:
-  id: ` + nodeID + `
   execution_type: system_node
   event_handlers:
     ` + trigger + `:
@@ -344,7 +341,6 @@ func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, succes
 		return ""
 	}
 	return nodeID + `:
-  id: ` + nodeID + `
   execution_type: system_node
   event_handlers:
     ` + trigger + `:
@@ -362,7 +358,6 @@ func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string 
 		return ""
 	}
 	return nodeID + `:
-  id: ` + nodeID + `
   execution_type: system_node
   event_handlers:
     ` + trigger + `:

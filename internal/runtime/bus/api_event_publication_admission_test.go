@@ -150,7 +150,7 @@ func staticAPIEventPublicationSource() semanticview.Source {
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-worker": {
-				ID: "child-worker", SubscribesTo: []string{"work.requested"},
+				SubscribesTo:  []string{"work.requested"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {}},
 			},
 		},
@@ -160,7 +160,7 @@ func staticAPIEventPublicationSource() semanticview.Source {
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"sibling-worker": {
-				ID: "sibling-worker", SubscribesTo: []string{"work.requested"},
+				SubscribesTo:  []string{"work.requested"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {}},
 			},
 		},

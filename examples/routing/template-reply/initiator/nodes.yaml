@@ -1,5 +1,4 @@
 initiator-node:
-  id: initiator-node
   execution_type: system_node
   subscribes_to: [requester.setup.requested, request.submitted]
   produces: [requester.setup, requester.requested]

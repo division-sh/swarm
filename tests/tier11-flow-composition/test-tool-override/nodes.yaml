@@ -1,5 +1,4 @@
 root-node:
-  id: root-node
   execution_type: system_node
   subscribes_to: [task.requested, child.done]
   produces: [task.done, child/child.start]

@@ -60,13 +60,11 @@ func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
 		"  - event: account.setup\n    from: producer\n    to: account\n  - event: account.ready\n    from: producer\n    to: account\n",
 		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.create\n  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n")
 	writeClosedVariantFile(t, root, "account/nodes.yaml", `account-setup-node:
-  id: account-setup-node-{instance_id}
   execution_type: system_node
   subscribes_to: [account.create]
   event_handlers:
     account.create: {}
 account-ready-node:
-  id: account-ready-node-{instance_id}
   execution_type: system_node
   subscribes_to: [account.ready]
   event_handlers:
@@ -81,7 +79,6 @@ func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectExisting)
 	writeClosedVariantFile(t, root, "account/nodes.yaml", `account-setup-node:
-  id: account-setup-node-{instance_id}
   execution_type: system_node
   subscribes_to: [account.setup]
   event_handlers:
@@ -145,8 +142,6 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	}
 	root := CopyExample(t, TemplateSelectExisting)
 	accountSchema := filepath.Join(root, "account", "schema.yaml")
-	applyClosedReplacement(t, filepath.Join(root, "account", "nodes.yaml"),
-		"  id: account-node\n", "  id: account-node-{instance_id}\n")
 	selectedPin := "      - event: account.ready\n        resolution:\n          mode: " + mode + "\n"
 	applyClosedReplacement(t, accountSchema,
 		"      - event: account.ready\n        resolution:\n          mode: select\n",

@@ -117,7 +117,7 @@ func TestActiveHandlerResolutionRejectsQualifiedExactRawBundleFallback(t *testin
 	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "tasks"}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": handler}},
+			"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": handler}},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 			"listener": {"child/task.done": handler},
@@ -208,7 +208,6 @@ score.dimension_complete:
 `)
 	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  id: scoring-node
   execution_type: system_node
   event_handlers:
     score.dimension_complete:

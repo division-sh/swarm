@@ -27,7 +27,6 @@ complete.no_match: {swarm: {source: external}}
 direct: {swarm: {source: external}}
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `selection-node:
-  id: selection-node
   execution_type: system_node
   subscribes_to: [rules.selected, rules.no_match, rules.evaluation_failed, complete.selected, complete.no_match, direct]
   event_handlers:
@@ -97,7 +96,6 @@ pins:
     value: text
 `
 	joinNodes := `join-node:
-  id: join-node
   execution_type: system_node
   subscribes_to: [item.completed]
   event_handlers:
@@ -153,7 +151,6 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "timer_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
-  id: controller
   execution_type: system_node
   subscribes_to: [timer.cancel]
   event_handlers:
@@ -181,7 +178,6 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "root_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
-  id: root-receiver
   execution_type: system_node
   subscribes_to: [deploy.done]
   event_handlers:

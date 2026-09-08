@@ -1,5 +1,4 @@
 admitter:
-  id: admitter
   execution_type: system_node
   subscribes_to: [slot.requested]
   produces: [slot.granted]

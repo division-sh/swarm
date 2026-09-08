@@ -1,5 +1,4 @@
 worker:
-  id: worker
   execution_type: system_node
   subscribes_to: [task.assigned, task.feedback]
   produces: [task.result]

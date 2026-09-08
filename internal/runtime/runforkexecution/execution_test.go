@@ -4435,7 +4435,7 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 
 func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDeliveryRoutes(t *testing.T) {
 	node := runtimecontracts.SystemNodeContract{
-		ID: "test-node", ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
+		ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.received": {}},
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{

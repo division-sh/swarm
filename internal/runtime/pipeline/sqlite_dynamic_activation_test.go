@@ -538,9 +538,9 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"fanout-node":        {ID: "fanout-node", ExecutionType: "system_node"},
-			"spawn-node":         {ID: "spawn-node", ExecutionType: "system_node"},
-			"nested-fanout-node": {ID: "nested-fanout-node", ExecutionType: "system_node"},
+			"fanout-node":        {ExecutionType: "system_node"},
+			"spawn-node":         {ExecutionType: "system_node"},
+			"nested-fanout-node": {ExecutionType: "system_node"},
 		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{

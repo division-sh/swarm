@@ -1,5 +1,4 @@
 beta-intake:
-  id: beta-intake
   execution_type: system_node
   subscribes_to: [work.begin]
   produces: []

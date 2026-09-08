@@ -1,4 +1,6 @@
 artifacts:
+  - {root: internal/releasee2e/testdata/node_identity, disposition: canonical-overlay, owner: releasee2e.node_identity, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestNodeIdentityFixtureLoadsAndVerifies}
+  - {root: internal/releasee2e/testdata/node_identity_activity, disposition: different-concept, owner: releasee2e.node_identity_activity, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestNodeIdentityActivityFixtureLoadsAndVerifies}
   - {root: examples/routing/root-ingress, disposition: canonical-owner, owner: examples.routing.root_ingress, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExamplesLoadAndVerify}
   - {root: examples/routing/parent-connect, disposition: canonical-owner, owner: examples.routing.parent_connect, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExamplesLoadAndVerify}
   - {root: examples/routing/template-select-existing, disposition: canonical-owner, owner: examples.routing.template_select_existing, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExamplesLoadAndVerify}

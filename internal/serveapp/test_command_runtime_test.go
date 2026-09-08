@@ -1125,7 +1125,6 @@ func writeGeneratedTelegramScenarioFixture(t *testing.T, providerURL string) str
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-input-observer:
-  id: telegram-input-observer
   execution_type: system_node
   subscribes_to: [inbound.telegram.text_message]
   event_handlers:
@@ -1145,7 +1144,6 @@ func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 	root := canonicalrouting.CopyTelegramChatWithoutIngress(t)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-responder:
-  id: telegram-responder
   execution_type: system_node
   subscribes_to: [telegram.reply_requested]
   event_handlers:
@@ -1158,7 +1156,6 @@ telegram-responder:
           chat_id: {cel: payload.chat_id}
           text: {cel: payload.text}
 telegram-revision:
-  id: telegram-revision
   execution_type: system_node
   subscribes_to: [telegram_send_message.revision_requested]
   event_handlers:

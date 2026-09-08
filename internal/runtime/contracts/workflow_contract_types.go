@@ -1739,7 +1739,6 @@ type GuardActionEntry struct {
 	Emits           string `yaml:"emits"`
 }
 type SystemNodeContract struct {
-	ID               string                            `yaml:"id"`
 	Description      string                            `yaml:"description"`
 	ExecutionType    string                            `yaml:"execution_type"`
 	Implementation   string                            `yaml:"-"`

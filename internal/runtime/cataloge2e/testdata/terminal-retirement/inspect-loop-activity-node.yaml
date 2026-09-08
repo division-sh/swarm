@@ -1,5 +1,4 @@
 inspect-node:
-  id: inspect-node
   execution_type: system_node
   subscribes_to: [worker.inspect]
   event_handlers:
@@ -10,7 +9,6 @@ inspect-node:
         event: worker.execute
         fields: {revision_id: "loop.revision_id"}
 activity-node:
-  id: activity-node
   execution_type: system_node
   subscribes_to: [worker.execute]
   event_handlers:
@@ -22,7 +20,6 @@ activity-node:
         tool: terminal_probe
         input: {}
 activity-result-node:
-  id: activity-result-node
   execution_type: system_node
   subscribes_to: [terminal_probe.succeeded]
   event_handlers:
@@ -30,7 +27,6 @@ activity-result-node:
       loop: {close: inspection, from: executing}
       advances_to: complete
 activity-repeat-node:
-  id: activity-repeat-node
   execution_type: system_node
   subscribes_to: [worker.retry]
   event_handlers:

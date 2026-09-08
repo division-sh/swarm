@@ -379,7 +379,7 @@ func targetOwnerArcFixture(
 		inputs: []runtimecontracts.FlowInputEventPin{{Event: localEvent}},
 		nodes: map[string]runtimecontracts.SystemNodeContract{
 			"arc-receiver": {
-				ID: "arc-receiver", SubscribesTo: []string{localEvent},
+				SubscribesTo: []string{localEvent},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					localEvent: targetOwnerArcHandler(test.receiverMode),
 				},
@@ -613,7 +613,7 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 			id: id, path: "fanout/" + id, mode: mode,
 			inputs: []runtimecontracts.FlowInputEventPin{{Event: eventName}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
-				id + "-node": {ID: id + "-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: handler}},
+				id + "-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: handler}},
 			},
 		}
 	}

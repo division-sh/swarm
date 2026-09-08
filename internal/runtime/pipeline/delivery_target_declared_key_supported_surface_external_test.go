@@ -225,7 +225,7 @@ func targetedDeclaredKeyExecutionSource(t *testing.T, acquisition string) (seman
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.keyed": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"key-consumer": {
-				ID: "key-consumer", SubscribesTo: []string{"work.keyed"},
+				SubscribesTo:  []string{"work.keyed"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.keyed": handler},
 			},
 		},

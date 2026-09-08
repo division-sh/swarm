@@ -1212,7 +1212,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 		}},
 		nodes: map[string]runtimecontracts.SystemNodeContract{
 			"review-finalize": {
-				ID: "review-finalize", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"assessment.reported": {}},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"assessment.reported": {}},
 			},
 		},
 	}}, nil)
@@ -1912,7 +1912,6 @@ func emitRoutePlanSource(t testing.TB, connects []runtimecontracts.FlowConnect) 
 			}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
-					ID:            "consumer-node",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": {}},
 				},
 			},

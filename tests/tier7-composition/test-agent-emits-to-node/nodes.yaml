@@ -1,5 +1,4 @@
 assign-node:
-  id: assign-node
   execution_type: system_node
   subscribes_to: [task.assigned]
   produces: [task.acknowledged]
@@ -9,7 +8,6 @@ assign-node:
       emit: task.acknowledged
 
 complete-node:
-  id: complete-node
   execution_type: system_node
   subscribes_to: [task.completed]
   produces: [task.finalized]

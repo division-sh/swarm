@@ -891,7 +891,7 @@ func loadMailboxWriteSupportedSurfaceBundle(t *testing.T, conditional bool) *run
 	writeRunCompletionFixtureFile(t, root+"/schema.yaml", "name: "+name+"\ninitial_state: new\nterminal_states:\n"+terminal+"states:\n"+states+"pins:\n  inputs:\n    events: [thing.created]\n")
 	writeRunCompletionFixtureFile(t, root+"/events.yaml", "thing.created:\n  amount: integer\n  who: string\n")
 	writeRunCompletionFixtureFile(t, root+"/entities.yaml", "review:\n  amount: integer\n  who: string\n")
-	writeRunCompletionFixtureFile(t, root+"/nodes.yaml", "reviewer:\n  id: reviewer\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n"+handler)
+	writeRunCompletionFixtureFile(t, root+"/nodes.yaml", "reviewer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n"+handler)
 	repoRoot := runCompletionRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

@@ -1,5 +1,4 @@
 scout-coordinator:
-  id: scout-coordinator
   execution_type: system_node
   subscribes_to: [scout.setup, scout.member.done]
   event_handlers:

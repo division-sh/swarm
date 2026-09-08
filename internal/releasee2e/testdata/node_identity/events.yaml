@@ -1,0 +1,8 @@
+entry.root:
+  marker: text
+work.processed:
+  marker: text
+  origin: text
+work.routed:
+  marker: text
+  origin: text

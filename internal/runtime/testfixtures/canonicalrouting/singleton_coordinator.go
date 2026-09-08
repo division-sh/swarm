@@ -53,7 +53,6 @@ pins:
 		entities := "state: {}\n"
 		nodes := `
 shared-node:
-  id: shared-node
   execution_type: system_node
   subscribes_to: [item.received]
   event_handlers:
@@ -63,7 +62,6 @@ shared-node:
 			entities = "state:\n  items:\n    type: '[text]'\n    initial: []\n"
 			nodes = `
 shared-node:
-  id: shared-node
   execution_type: system_node
   subscribes_to: [item.received]
   event_handlers:
@@ -134,7 +132,6 @@ lead.observed:
 `)
 	nodes := `
 coordinator-indexer:
-  id: coordinator-indexer
   execution_type: system_node
   subscribes_to: [lead.observed]
   event_handlers:
@@ -177,7 +174,6 @@ job.received:
 `)
 	writeSingletonCoordinatorFile(t, root, "coordinator/nodes.yaml", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:

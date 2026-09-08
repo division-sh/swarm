@@ -86,7 +86,6 @@ provider.send:
 	if includeActivity {
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 stub-agent-node:
-  id: stub-agent-node
   execution_type: system_node
   subscribes_to: [task.requested]
   produces: [task.completed]

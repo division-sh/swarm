@@ -1,5 +1,4 @@
 child-checker:
-  id: child-checker
   execution_type: system_node
   subscribes_to: [check.requested]
   produces: [check.passed]

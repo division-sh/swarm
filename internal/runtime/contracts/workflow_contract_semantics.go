@@ -185,10 +185,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		if err != nil {
 			continue
 		}
-		nodeID := nodeRef.NodeID()
 		node := record.Entry
 		effective := SystemNodeEffectiveSemantics{
-			ID:                   EffectiveSystemNodeID(nodeID, node),
+			ID:                   nodeRef.NodeID(),
 			ExecutionType:        EffectiveSystemNodeExecutionType(node),
 			RuntimeSubscriptions: EffectiveSystemNodeSubscriptions(node),
 			Produces:             EffectiveSystemNodeProduces(node),

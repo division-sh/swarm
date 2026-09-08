@@ -1,5 +1,4 @@
 inspect-node:
-  id: inspect-node
   execution_type: system_node
   subscribes_to: [worker.inspect]
   event_handlers:
@@ -9,7 +8,6 @@ inspect-node:
         tool: terminal_probe
         input: {}
 activity-result-node:
-  id: activity-result-node
   execution_type: system_node
   subscribes_to: [terminal_probe.succeeded]
   event_handlers:

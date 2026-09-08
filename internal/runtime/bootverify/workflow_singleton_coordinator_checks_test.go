@@ -118,7 +118,6 @@ pins:
     events: [job.received]
 `, singletonCoordinatorEntitiesYAML(), "", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -187,7 +186,6 @@ coordinator_state:
 `,
 			nodes: `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -210,7 +208,6 @@ coordinator_state:
 `,
 			nodes: `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -228,7 +225,6 @@ coordinator-node:
 			entities: "coordinator_state: {}\n",
 			nodes: `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -297,7 +293,6 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -409,7 +404,6 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -450,7 +444,6 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -482,7 +475,6 @@ pins:
 `
 	const nodes = `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:

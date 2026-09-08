@@ -240,7 +240,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			bundle := &runtimecontracts.WorkflowContractBundle{
 				RootEntities: testEntityContractsForType("test_entity"),
 				Nodes: map[string]runtimecontracts.SystemNodeContract{
-					"node-a": {ID: "node-a", ExecutionType: "system_node"},
+					"node-a": {ExecutionType: "system_node"},
 				},
 				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 					"handler_retry_base_seconds": {Value: int(retryBase / time.Second)},
@@ -402,7 +402,7 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 			"source.evt": {},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "delivery-authority", Version: "v-test",

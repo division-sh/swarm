@@ -1290,7 +1290,7 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			bundle := workflowTimerOwnerBundle(false)
-			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{"timer-owner": {ID: "timer-owner", ExecutionType: "system_node"}}
+			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{"timer-owner": {ExecutionType: "system_node"}}
 			bundle.Semantics.Timers[0].Stage = ""
 			bundle.Semantics.Timers[0].StageOwned = false
 			bundle.Semantics.Timers[0].Node = pipelineNode(t, "", "timer-owner")
@@ -2622,7 +2622,7 @@ func workflowTimerProgressedSourceRevisionBundle(revised bool) *runtimecontracts
 		}
 	}
 	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
-		"timer-owner": {ID: "timer-owner", ExecutionType: "system_node"},
+		"timer-owner": {ExecutionType: "system_node"},
 	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-progressed-revision", Version: "1.0.0", InitialStage: "waiting",
 		Timers: timers,
@@ -2632,7 +2632,7 @@ func workflowTimerProgressedSourceRevisionBundle(revised bool) *runtimecontracts
 func workflowTimerInitialAndEventBundle() *runtimecontracts.WorkflowContractBundle {
 	timerNode := mustPipelineNode("", "timer-owner")
 	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
-		"timer-owner": {ID: "timer-owner", ExecutionType: "system_node"},
+		"timer-owner": {ExecutionType: "system_node"},
 	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-initial-event", Version: "1.0.0", InitialStage: "waiting",
 		Timers: []runtimecontracts.WorkflowTimerContract{
@@ -2676,7 +2676,7 @@ func workflowTimerFlowScopedBundle() *runtimecontracts.WorkflowContractBundle {
 
 func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{RootEntities: testEntityContractsForType("test_entity"), Nodes: map[string]runtimecontracts.SystemNodeContract{
-		"observer": {ID: "observer", ExecutionType: "system_node"},
+		"observer": {ExecutionType: "system_node"},
 	}, Events: map[string]runtimecontracts.EventCatalogEntry{
 		"timer.state_entry": {}, "timer.event_armed": {},
 	}, Semantics: runtimecontracts.WorkflowSemanticView{
@@ -2696,7 +2696,7 @@ func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContra
 
 func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{RootEntities: testEntityContractsForType("test_entity"), Nodes: map[string]runtimecontracts.SystemNodeContract{
-		"observer": {ID: "observer", ExecutionType: "system_node"},
+		"observer": {ExecutionType: "system_node"},
 	}, Events: map[string]runtimecontracts.EventCatalogEntry{
 		"timer.event_armed": {},
 	}, Semantics: runtimecontracts.WorkflowSemanticView{
@@ -2733,7 +2733,7 @@ func workflowTimerHandledOutcomeBundle() *runtimecontracts.WorkflowContractBundl
 		events[declaration.Event] = runtimecontracts.EventCatalogEntry{}
 	}
 	return &runtimecontracts.WorkflowContractBundle{RootEntities: testEntityContractsForType("test_entity"), Nodes: map[string]runtimecontracts.SystemNodeContract{
-		"observer": {ID: "observer", ExecutionType: "system_node"},
+		"observer": {ExecutionType: "system_node"},
 	}, Events: events, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
 		Timers: timers,

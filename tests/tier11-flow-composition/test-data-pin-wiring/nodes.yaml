@@ -1,5 +1,4 @@
 config-writer:
-  id: config-writer
   execution_type: system_node
   subscribes_to: [job.start]
   produces: [processor/process.run]
@@ -15,7 +14,6 @@ config-writer:
       emit: processor/process.run
 
 result-listener:
-  id: result-listener
   execution_type: system_node
   subscribes_to: [process.done]
   produces: []

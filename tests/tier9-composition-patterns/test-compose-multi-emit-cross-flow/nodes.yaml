@@ -1,5 +1,4 @@
 notifier:
-  id: notifier
   execution_type: system_node
   subscribes_to: [task.completed]
   produces: [task.logged, task.record]

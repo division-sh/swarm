@@ -1,0 +1,12 @@
+worker:
+  execution_type: system_node
+  subscribes_to: [entry.right, work.processed]
+  produces: [work.processed]
+  event_handlers:
+    entry.right:
+      advances_to: working
+      emit:
+        event: work.processed
+        fields: {marker: payload.marker, origin: '"right"'}
+    work.processed:
+      advances_to: done

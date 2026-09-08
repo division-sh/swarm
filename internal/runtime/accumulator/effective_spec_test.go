@@ -53,7 +53,7 @@ func accumulatorFanInSource(t testing.TB, inputPins []runtimecontracts.FlowInput
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "worker"},
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputPins}}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"worker-node": {ID: "worker-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items"}}}},
+			"worker-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items"}}}},
 		},
 		Path: "worker",
 	}

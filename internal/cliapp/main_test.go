@@ -3672,7 +3672,6 @@ timer.reminder: {}
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 support-node:
-  id: support-node
   execution_type: system_node
   subscribes_to: [timer.reminder]
   timers:
@@ -3784,7 +3783,6 @@ task.assigned: {}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 closer:
-  id: closer
   execution_type: system_node
   subscribes_to: [task.assigned]
   event_handlers:
@@ -3821,7 +3819,6 @@ func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
-  id: accumulator
   execution_type: system_node
   state_schema:
     fields:
@@ -3940,7 +3937,6 @@ item.arrived:`+sourceBlock+`
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item: {}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
-  id: accumulator
   execution_type: system_node
   subscribes_to: [item.arrived]
   event_handlers:

@@ -140,7 +140,7 @@ func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
 			handler = existingOwnerHandlerFixture()
 		}
 		node := runtimecontracts.SystemNodeContract{
-			ID: nodeID, ExecutionType: "system_node", SubscribesTo: []string{fixture.event},
+			ExecutionType: "system_node", SubscribesTo: []string{fixture.event},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{fixture.event: handler},
 		}
 		if fixture.flowID == "root" {

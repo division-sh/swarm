@@ -334,7 +334,7 @@ func selectedDeferredWorkDynamicFlowActionTestSource() semanticview.Source {
 			Version: "v1",
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"creator": {ID: "creator", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.ready": handler}},
+			"creator": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.ready": handler}},
 		},
 	})
 }

@@ -218,7 +218,6 @@ item.received:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "nodes.yaml"), `
 shared-node:
-  id: shared-node
   execution_type: system_node
   subscribes_to: [item.received]
   event_handlers:

@@ -39,14 +39,12 @@ states: [new, waiting, done]
               item_id: payload.item_id
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `item-observer:
-  id: item-observer
   execution_type: system_node
   subscribes_to: [item.processed]
   event_handlers:
     item.processed:
       advances_to: done
 `, `item-observer:
-  id: item-observer
   execution_type: system_node
   subscribes_to: [item.processed]
   event_handlers:
@@ -206,7 +204,6 @@ opco.product_review_requested:
 `)
 	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested, opco.product_review_requested]
   event_handlers:
@@ -256,7 +253,6 @@ component_scaffold.spawn_requested:
 `)
 	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   produces: [component_scaffold.spawn_requested]
@@ -273,7 +269,6 @@ lifecycle-orchestrator:
           product_id: payload.product_id
       advances_to: spawning
 component-scaffold:
-  id: component-scaffold
   execution_type: system_node
   subscribes_to: [component_scaffold.spawn_requested]
   event_handlers:
@@ -330,7 +325,6 @@ opco.spinup_requested:
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    item.processed:\n      advances_to: done\n", `    item.processed:
       advances_to: done
 portfolio-bootstrap:
-  id: portfolio-bootstrap
   execution_type: system_node
   subscribes_to: [opco.bootstrap_requested]
   event_handlers:
@@ -342,7 +336,6 @@ portfolio-bootstrap:
             target_field: owner
       advances_to: waiting
 portfolio-node:
-  id: portfolio-node
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
   event_handlers:

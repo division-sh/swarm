@@ -1,5 +1,4 @@
 gatekeeper:
-  id: gatekeeper
   execution_type: system_node
   subscribes_to: [admission.requested]
   produces: [admission.granted]

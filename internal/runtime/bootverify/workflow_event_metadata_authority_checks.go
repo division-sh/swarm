@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -107,7 +106,7 @@ func eventMetadataInternalActorNames(source semanticview.Source) eventMetadataNa
 			continue
 		}
 		names.add(node.Key(), fmt.Sprintf("system node %s", node.Key()))
-		if id := runtimecontracts.EffectiveSystemNodeID(node.NodeID(), record.Entry); id != "" {
+		if id := node.NodeID(); id != "" {
 			names.add(id, fmt.Sprintf("system node %s", node.Key()))
 		}
 	}
@@ -272,7 +271,7 @@ func eventMetadataAddNodeRole(source semanticview.Source, names eventMetadataNam
 	if source == nil || !nodeRef.Valid() {
 		return
 	}
-	record, ok := source.ExecutableNode(nodeRef)
+	_, ok := source.ExecutableNode(nodeRef)
 	if !ok {
 		return
 	}
@@ -282,7 +281,7 @@ func eventMetadataAddNodeRole(source semanticview.Source, names eventMetadataNam
 		role = "topology"
 	}
 	names.add(nodeKey, fmt.Sprintf("system node %s %s", nodeKey, role))
-	if id := runtimecontracts.EffectiveSystemNodeID(nodeRef.NodeID(), record.Entry); id != "" {
+	if id := nodeRef.NodeID(); id != "" {
 		names.add(id, fmt.Sprintf("system node %s %s", id, role))
 	}
 }

@@ -416,7 +416,6 @@ func TestSystemNodeHandlerDecodeJoinCanonicalShape(t *testing.T) {
 	var nodes map[string]SystemNodeContract
 	err := yaml.Unmarshal([]byte(`
 coordinator:
-  id: coordinator
   execution_type: system_node
   event_handlers:
     item.completed:
@@ -2041,7 +2040,6 @@ func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T
 func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T) {
 	var node SystemNodeContract
 	if err := yaml.Unmarshal([]byte(`
-id: worker
 description: Worker node
 execution_type: system_node
 subscribes_to: [task.requested]
@@ -2211,7 +2209,7 @@ func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var node SystemNodeContract
-			err := yaml.Unmarshal([]byte("id: worker\n"+tc.field+"\n"), &node)
+			err := yaml.Unmarshal([]byte(tc.field+"\n"), &node)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
 			}

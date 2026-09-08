@@ -1,5 +1,4 @@
 retrier:
-  id: retrier
   execution_type: system_node
   subscribes_to: [retry.requested]
   produces: [limit.reached]

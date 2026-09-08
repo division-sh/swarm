@@ -1,5 +1,4 @@
 relay:
-  id: relay
   execution_type: system_node
   subscribes_to: [work.begin]
   produces: [grandchild/task.start]
@@ -9,7 +8,6 @@ relay:
       emit: grandchild/task.start
 
 listener:
-  id: listener
   execution_type: system_node
   subscribes_to: [task.done]
   produces: []

@@ -62,7 +62,6 @@ pins:
 	writeClosedVariantFile(t, root, "producer/entities.yaml", "producer_request:\n  vertical_id:\n    type: string\n    _unused_reason: select_entity demotion producer proof field\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "deploy.requested:\n  vertical_id: string\ndeploy.done:\n  key: vertical_id\n  vertical_id: string\n")
 	writeClosedVariantFile(t, root, "producer/nodes.yaml", `producer-node:
-  id: producer-node
   execution_type: system_node
   event_handlers:
     deploy.requested:
@@ -86,7 +85,7 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "other_consumer/events.yaml", "deploy.done:\n  vertical_id: string\n")
 	writeClosedVariantFile(t, root, "other_consumer/entities.yaml", "deployment:\n  vertical_id:\n    type: string\n    indexed: true\n    _unused_reason: select_entity demotion other receiver route-key proof field\n")
-	writeClosedVariantFile(t, root, "other_consumer/nodes.yaml", "other-consumer-node:\n  id: other-consumer-node\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done: {advances_to: done}\n")
+	writeClosedVariantFile(t, root, "other_consumer/nodes.yaml", "other-consumer-node:\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done: {advances_to: done}\n")
 }
 
 func writeSelectEntityDemotionConsumer(t testing.TB, root string, opts SelectEntityDemotionOptions) {
@@ -123,5 +122,5 @@ func writeSelectEntityDemotionConsumer(t testing.TB, root string, opts SelectEnt
 	default:
 		t.Fatalf("unsupported select-entity acquisition %d", opts.Acquisition)
 	}
-	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  id: consumer-node\n  execution_type: system_node\n  subscribes_to: ["+eventName+"]\n  event_handlers:\n    "+eventName+":\n"+acquisition+"      advances_to: done\n")
+	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  execution_type: system_node\n  subscribes_to: ["+eventName+"]\n  event_handlers:\n    "+eventName+":\n"+acquisition+"      advances_to: done\n")
 }

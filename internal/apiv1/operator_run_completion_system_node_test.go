@@ -364,7 +364,6 @@ flow.started:
 `)
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "nodes.yaml"), `
 pipeline:
-  id: pipeline
   execution_type: system_node
   subscribes_to:
     - flow.started

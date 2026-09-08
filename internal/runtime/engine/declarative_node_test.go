@@ -48,7 +48,6 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {
-				ID: "node-a",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.completed": {AdvancesTo: "done"},
 				},
@@ -136,7 +135,7 @@ func TestResolvedExecutionHandlerRejectsQualifiedExactRawBundleFallback(t *testi
 	handler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": handler}},
+			"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": handler}},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 			"listener": {"child/task.done": handler},

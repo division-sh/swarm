@@ -1,5 +1,4 @@
 support-node:
-  id: support-node
   execution_type: system_node
   subscribes_to: [ticket.opened, ticket.closed]
   event_handlers:
