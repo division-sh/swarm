@@ -2,9 +2,7 @@ package testtiming
 
 import (
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
+
 	"os"
 	"path/filepath"
 	"regexp"
@@ -335,49 +333,12 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 
 func assertGoProofPartition(t *testing.T, dir string, patterns []*regexp.Regexp) {
 	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	runs := make([]string, len(patterns))
+	for i, pattern := range patterns {
+		runs[i] = pattern.String()
+	}
+	if err := testplanning.ValidateGoProofPartition(dir, runs); err != nil {
 		t.Fatal(err)
-	}
-	matchedPatterns := make([]bool, len(patterns))
-	proofs := 0
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, entry.Name()), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", entry.Name(), err)
-		}
-		for _, declaration := range file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Recv != nil || function.Name == nil {
-				continue
-			}
-			name := function.Name.Name
-			if name == "TestMain" || (!strings.HasPrefix(name, "Test") && !strings.HasPrefix(name, "Example") && !strings.HasPrefix(name, "Fuzz")) {
-				continue
-			}
-			proofs++
-			matches := 0
-			for index, pattern := range patterns {
-				if pattern.MatchString(name) {
-					matches++
-					matchedPatterns[index] = true
-				}
-			}
-			if matches != 1 {
-				t.Errorf("runtime-persistence proof %s matches %d store partitions, want exactly one", name, matches)
-			}
-		}
-	}
-	if proofs == 0 {
-		t.Fatal("runtime-persistence proof inventory is empty")
-	}
-	for index, matched := range matchedPatterns {
-		if !matched {
-			t.Errorf("store partition %d matches no runtime-persistence proof", index+1)
-		}
 	}
 }
 

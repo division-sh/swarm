@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -21,8 +22,12 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 	binary := buildReleaseBinary(t, releaseRoot)
 	var baseline map[string]map[string]any
 	var baselineHash string
+	var baselineMu sync.Mutex
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			// Stores, authored trees and processes are independent. Only the
+			// immutable expected semantic output is shared between backends.
+			t.Parallel()
 			base := filepath.Join(releaseRoot, backend)
 			root := filepath.Join(base, "bundle")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/static_data_invocation"), root)
@@ -89,18 +94,24 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 					if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
 						t.Fatalf("runtime.identity differs from health: %#v", identity)
 					}
+					baselineMu.Lock()
 					if baselineHash == "" {
 						baselineHash = hash
 					}
-					if hash != baselineHash {
-						t.Fatalf("hash = %s, want %s", hash, baselineHash)
+					wantHash := baselineHash
+					baselineMu.Unlock()
+					if hash != wantHash {
+						t.Fatalf("hash = %s, want %s", hash, wantHash)
 					}
 					observed := runStaticDataRead(t, process, hash, cell.name, "")
+					baselineMu.Lock()
 					if baseline == nil {
 						baseline = observed
 					}
-					if !reflect.DeepEqual(observed, baseline) {
-						t.Fatalf("readback differs: %#v; baseline %#v", observed, baseline)
+					wantReadback := baseline
+					baselineMu.Unlock()
+					if !reflect.DeepEqual(observed, wantReadback) {
+						t.Fatalf("readback differs: %#v; baseline %#v", observed, wantReadback)
 					}
 					// Every geometry proves the same hash, IDs and actual read bytes.
 					// Grant rejection/recovery is independent of the spelling used to
@@ -109,7 +120,7 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 						foreign := observed["registry/child.completed"]["static_id"].(string)
 						runStaticDataRead(t, process, hash, cell.name+"-foreign", foreign)
 						healthy := runStaticDataRead(t, process, hash, cell.name+"-healthy", "")
-						if !reflect.DeepEqual(healthy, baseline) {
+						if !reflect.DeepEqual(healthy, wantReadback) {
 							t.Fatalf("own-ID healthy read after foreign denial differs: %#v", healthy)
 						}
 						foreignProven = true
