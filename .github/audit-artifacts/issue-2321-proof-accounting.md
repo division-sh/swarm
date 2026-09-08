@@ -176,11 +176,19 @@ A deterministic production-projector probe reproduced duplicate emission plus
 one mark conflict in three of three executions. Ten real SQLite focused retries
 passed, which does not erase the full-profile failure. The reproduction and exact
 evidence/limitations are in the adjacent progress artifact and probe source. This
-new diagnostic convergence finding is awaiting lead classification; it is not
-silently absorbed into command-owned execution or repaired by weakening failure
-handling. The relevant production projector and store CAS are unchanged.
+diagnostic finding is now classified by the lead as separate prerequisite #2432:
+convergence plus provenance, including sequential failed acknowledgement retry and
+cross-manager attribution. Its independent pre-audit is posted at
+https://github.com/division-sh/swarm/issues/2432#issuecomment-5588649360;
+repair approval is pending. #2321's existing gate remains approved. The relevant
+production projector and store CAS are unchanged here; this is not silently
+absorbed into command selection or repaired by weakening failure handling.
 
 Remaining independent work includes the next integrated result and final-head
 verification. External acceptance
-still requires the provisioned L environment and #2319 proof. No final audit or
+still requires completing the planned L serve/restart journey, its provisioned
+environment, and #2319 proof. Docker is present but Claude and the workspace image
+are absent; the existing paid Claude test does not cover the entire planned L matrix.
+After #2432 integration the full-profile rerun uses an explicit 30-minute package
+timeout without relaxing scenario deadlines. No final audit or
 review-ready PR exists. This checklist must not be submitted as proof of closure.

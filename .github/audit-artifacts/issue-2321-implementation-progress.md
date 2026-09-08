@@ -151,3 +151,36 @@ Lifecycle diagnostic convergence is distinct from command-owned selection and
 needs lead tracker/scope disposition before production remediation. No projector,
 store CAS, lifecycle ownership, or diagnostic failure policy was changed here.
 No new issue or reopening of a closed tracker has been performed by this work.
+
+## Lead Disposition And Separate Repair Gate
+
+The preceding request for classification is superseded by the lead ruling on
+#2321: https://github.com/division-sh/swarm/issues/2321#issuecomment-5588210838.
+#2321 keeps its approval. The lead created separate acceptance prerequisite #2432
+for lifecycle diagnostic projection convergence AND provenance, including sequential
+acknowledgement failure and cross-manager caller-context contamination. #1927 stays
+closed; #2250 retains broader phase-ownership debt.
+
+Agent G posted the bounded #2432 Pre-Implementation Coverage Audit at
+https://github.com/division-sh/swarm/issues/2432#issuecomment-5588649360,
+with checked-in artifact at 5e303a531 on agent-g/2432-diagnostic-audit, based on
+fresh origin/master 496498457. It requests an independent repair gate for one
+selected-store atomic projection/ack operation, exact persisted mode/provenance,
+and auxiliary-error separation. Production diagnostic repair remains unstarted.
+The existing watchlist refinement swarm-docs@12e94ca was consumed. No additional
+watchlist change or issue is proposed.
+
+Independent #2321 work remains authorized. F's #2319 is still open; a current
+gate/activation schedule and PR reference have been requested on its thread.
+Live-provider provisioning was rechecked: Docker exists, but this box has neither
+Claude nor a Swarm workspace image (only Go and PostgreSQL images). No external
+provider execution is claimed. The exact planned TestCommandLiveServeAndRestartParity
+journey still needs implementation and execution; the existing paid Claude lifecycle
+test is not an automatic replacement for the approved serve/dev/restart matrix.
+An environment/configuration location, not credential values, has been requested.
+
+After integrating the separately gated repair, rerun the failing conformance family
+and dual-store lifecycle proof, then the whole suite with explicit package budget:
+`SWARM_TEST_PROOF_PROFILE=full go run ./cmd/swarm-test -- -timeout=30m ./...`.
+Individual scenario deadlines remain enforced; a repeated timeout requires diagnosis.
+No final proof audit, review-ready PR, whole-suite pass or runtime closure is claimed.
