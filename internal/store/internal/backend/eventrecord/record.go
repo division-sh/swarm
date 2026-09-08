@@ -70,7 +70,6 @@ type Record struct {
 	Scope                      events.EventScope
 	Payload                    []byte
 	PayloadSchemaBundleHash    string
-	PayloadSchemaBundleSource  string
 	PayloadSchemaFlowID        string
 	PayloadSchemaEventKey      string
 	PayloadSchemaDigest        string
@@ -106,33 +105,32 @@ func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettleme
 	}
 	payloadBinding := payloadAdmission.Binding()
 	record := Record{
-		Class:                     event.AdmissionClass(),
-		EventID:                   event.ID(),
-		RunID:                     event.RunID(),
-		EventName:                 string(event.Type()),
-		TaskID:                    event.TaskID(),
-		EntityID:                  envelope.EntityID,
-		FlowInstance:              envelope.FlowInstance,
-		Scope:                     envelope.Scope,
-		Payload:                   payloadAdmission.Payload(),
-		PayloadSchemaBundleHash:   payloadBinding.BundleHash(),
-		PayloadSchemaBundleSource: payloadBinding.BundleSource(),
-		PayloadSchemaFlowID:       payloadBinding.FlowID(),
-		PayloadSchemaEventKey:     payloadBinding.EventKey(),
-		PayloadSchemaDigest:       payloadBinding.SchemaDigest(),
-		PayloadSchemaClass:        payloadBinding.SchemaClass(),
-		ExecutionMode:             event.ExecutionMode(),
-		ChainDepth:                event.ChainDepth(),
-		ProducedBy:                event.Producer().ID(),
-		ProducedByType:            event.Producer().Type(),
-		SourceEventID:             event.ParentEventID(),
-		CreatedAt:                 event.CreatedAt().UTC().Truncate(time.Microsecond),
-		RoutingSourceKind:         event.RoutingSource().Kind().StorageCode(),
-		RoutingSourceAuthority:    event.RoutingSource().Authority().StorageCode(),
-		SourceRoute:               marshalRoute(event.RoutingSource().Route()),
-		TargetRoute:               marshalRoute(envelope.Target),
-		TargetSet:                 marshalRouteSet(envelope.TargetSet),
-		RouteSettlement:           marshalSettlement(settlement),
+		Class:                   event.AdmissionClass(),
+		EventID:                 event.ID(),
+		RunID:                   event.RunID(),
+		EventName:               string(event.Type()),
+		TaskID:                  event.TaskID(),
+		EntityID:                envelope.EntityID,
+		FlowInstance:            envelope.FlowInstance,
+		Scope:                   envelope.Scope,
+		Payload:                 payloadAdmission.Payload(),
+		PayloadSchemaBundleHash: payloadBinding.BundleHash(),
+		PayloadSchemaFlowID:     payloadBinding.FlowID(),
+		PayloadSchemaEventKey:   payloadBinding.EventKey(),
+		PayloadSchemaDigest:     payloadBinding.SchemaDigest(),
+		PayloadSchemaClass:      payloadBinding.SchemaClass(),
+		ExecutionMode:           event.ExecutionMode(),
+		ChainDepth:              event.ChainDepth(),
+		ProducedBy:              event.Producer().ID(),
+		ProducedByType:          event.Producer().Type(),
+		SourceEventID:           event.ParentEventID(),
+		CreatedAt:               event.CreatedAt().UTC().Truncate(time.Microsecond),
+		RoutingSourceKind:       event.RoutingSource().Kind().StorageCode(),
+		RoutingSourceAuthority:  event.RoutingSource().Authority().StorageCode(),
+		SourceRoute:             marshalRoute(event.RoutingSource().Route()),
+		TargetRoute:             marshalRoute(envelope.Target),
+		TargetSet:               marshalRouteSet(envelope.TargetSet),
+		RouteSettlement:         marshalSettlement(settlement),
 	}
 	if provenance, ok := event.OperatorReference(); ok {
 		record.OperatorReferencedEventID = provenance.ReferencedEventID()
@@ -169,8 +167,8 @@ func (r Record) Validate() error {
 		"selected_fork_source_event_id": r.SelectedForkSourceEventID,
 		"selected_fork_authority_stamp": r.SelectedForkAuthorityStamp,
 		"scope":                         string(r.Scope), "execution_mode": string(r.ExecutionMode),
-		"payload_schema_bundle_hash": r.PayloadSchemaBundleHash, "payload_schema_bundle_source": r.PayloadSchemaBundleSource,
-		"payload_schema_flow_id": r.PayloadSchemaFlowID, "payload_schema_event_key": r.PayloadSchemaEventKey,
+		"payload_schema_bundle_hash": r.PayloadSchemaBundleHash,
+		"payload_schema_flow_id":     r.PayloadSchemaFlowID, "payload_schema_event_key": r.PayloadSchemaEventKey,
 		"payload_schema_digest": r.PayloadSchemaDigest, "payload_schema_class": string(r.PayloadSchemaClass),
 	} {
 		if value != strings.TrimSpace(value) {
@@ -209,7 +207,7 @@ func (r Record) Validate() error {
 		return fmt.Errorf("event record payload must be valid JSON")
 	}
 	payloadBinding, err := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
-		BundleHash: r.PayloadSchemaBundleHash, BundleSource: r.PayloadSchemaBundleSource, FlowID: r.PayloadSchemaFlowID,
+		BundleHash: r.PayloadSchemaBundleHash, FlowID: r.PayloadSchemaFlowID,
 		EventKey: r.PayloadSchemaEventKey, SchemaDigest: r.PayloadSchemaDigest, SchemaClass: r.PayloadSchemaClass,
 	})
 	if err != nil {
@@ -377,7 +375,7 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 		selectedFork = &value
 	}
 	payloadBinding, err := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
-		BundleHash: r.PayloadSchemaBundleHash, BundleSource: r.PayloadSchemaBundleSource, FlowID: r.PayloadSchemaFlowID,
+		BundleHash: r.PayloadSchemaBundleHash, FlowID: r.PayloadSchemaFlowID,
 		EventKey: r.PayloadSchemaEventKey, SchemaDigest: r.PayloadSchemaDigest, SchemaClass: r.PayloadSchemaClass,
 	})
 	if err != nil {
@@ -424,7 +422,6 @@ func (r Record) Equal(other Record) bool {
 		r.Scope == other.Scope &&
 		bytes.Equal(r.Payload, other.Payload) &&
 		r.PayloadSchemaBundleHash == other.PayloadSchemaBundleHash &&
-		r.PayloadSchemaBundleSource == other.PayloadSchemaBundleSource &&
 		r.PayloadSchemaFlowID == other.PayloadSchemaFlowID &&
 		r.PayloadSchemaEventKey == other.PayloadSchemaEventKey &&
 		r.PayloadSchemaDigest == other.PayloadSchemaDigest &&

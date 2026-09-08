@@ -2203,7 +2203,7 @@ func (e *Executor) executionPayloadType(req ExecutionRequest) *runtimecontracts.
 	}
 	flowID := strings.TrimSpace(req.ExecutionFlowID.String())
 	if flowID == "" {
-		flowID = strings.TrimSpace(req.Node.FlowID())
+		flowID = strings.TrimSpace(req.Node.FlowPath())
 	}
 	resolution := semanticview.ResolveEventSchema(e.deps.Source, flowID, eventType)
 	if !resolution.HasStructural {

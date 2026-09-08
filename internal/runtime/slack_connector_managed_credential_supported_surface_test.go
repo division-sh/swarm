@@ -403,12 +403,14 @@ func declareTelegramTextMessageProviderImport(t testing.TB, bundle *runtimecontr
 	if bundle == nil {
 		t.Fatal("bounded Telegram bundle is required")
 	}
-	if len(bundle.PackageTree) != 1 {
-		t.Fatalf("bounded Telegram package tree = %d, want one package", len(bundle.PackageTree))
+	flow, ok := bundle.FlowViewByID(boundedProviderFlowID)
+	if !ok {
+		t.Fatal("bounded Telegram flow is required")
 	}
-	bundle.PackageTree[0].Manifest.ProviderTriggerEvents = runtimecontracts.ProviderTriggerEventImports{Imports: []runtimecontracts.ProviderTriggerEventImport{{
+	flow.Schema.Imports.ProviderTriggerEvents = []runtimecontracts.ProviderTriggerEventImport{{
 		Provider: "telegram", Event: "inbound.telegram.text_message",
-	}}}
+	}}
+	bundle.FlowSchemas[boundedProviderFlowID] = flow.Schema
 }
 
 func withTelegramTextMessageProviderSchema(t testing.TB, source semanticview.Source) semanticview.Source {

@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 func TestResolveHandlerCollectionItemTypeOwnsDirectAndIntermediateSources(t *testing.T) {

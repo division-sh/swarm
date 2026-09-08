@@ -885,7 +885,7 @@ contract_formats:
           effective event schema before route planning, instance-key/window/dedup
           extraction, event identity, delivery planning, or selected-store
           mutation. Admission returns one immutable value containing the exact
-          normalized payload bytes and schema binding: bundle hash/source, flow
+          normalized payload bytes and schema binding: immutable source-artifact hash, flow
           identity when applicable, effective event key, schema digest, and
           source class. Public ingress, normal EventBus publication, direct and
           recipient-plan preflight, internal/generated/platform publication, and
@@ -899,6 +899,8 @@ contract_formats:
           has the same event identity, source class, and acceptance-schema digest.
           Missing or disagreeing bindings fail closed; route planning never chooses or
           rewrites payload schema authority.
+          Source provenance consumes the current source-artifact owner; there is no
+          persisted/ephemeral discriminator or fallback to retired source models.
         normalization: |
           Admission recursively lowers external null on an optional field to
           omission, rejects null on a required field, rejects null list elements,
@@ -13387,7 +13389,7 @@ platform_tables:
         runtime recovery, admin commands). source_route, target_route, and target_set are the canonical pin-routing
         identities; legacy entity_id and flow_instance are receiver-context projections. idempotency_key for external
         dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
-        and fork/replay. payload_bytes plus the six payload_schema_* coordinates are the authoritative exact admitted
+        and fork/replay. payload_bytes plus the five payload_schema_* coordinates are the authoritative exact admitted
         payload and pinned schema evidence used by identity, hydration, retry, recovery, replay, and fork. payload is an
         atomically derived JSON query projection only and cannot become execution or duplicate authority. execution_mode
         is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it
@@ -13405,8 +13407,7 @@ platform_tables:
             scope                       TEXT NOT NULL CHECK (scope IN ('entity', 'flow', 'global')),
             payload                     JSONB NOT NULL,
             payload_bytes               BYTEA NOT NULL,
-            payload_schema_bundle_hash  TEXT NOT NULL CHECK (payload_schema_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
-            payload_schema_bundle_source TEXT NOT NULL CHECK (payload_schema_bundle_source IN ('persisted', 'ephemeral')),
+            payload_schema_bundle_hash  TEXT NOT NULL CHECK (payload_schema_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             payload_schema_flow_id       TEXT CHECK (payload_schema_flow_id IS NULL OR payload_schema_flow_id = TRIM(payload_schema_flow_id)),
             payload_schema_event_key     TEXT NOT NULL CHECK (payload_schema_event_key = TRIM(payload_schema_event_key) AND NULLIF(payload_schema_event_key, '') IS NOT NULL),
             payload_schema_digest        TEXT NOT NULL CHECK (payload_schema_digest ~ '^sha256:[0-9a-f]{64}$'),

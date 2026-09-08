@@ -184,7 +184,9 @@ func TestValidateEventTypedViewDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 		SourceNode:      identitytest.FlowNode(t, "child", "scorer"),
 		SourceEventType: "score.completed",
 		AccumulatorName: "scores",
-		SourceNamedType: runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+		SourceType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "score", TypeRef: "integer", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
+		}},
 	}
 
 	issues := validateEventTypedView(semanticview.Wrap(bundle), runtimecontracts.TypeCatalogDocument{}, binding)

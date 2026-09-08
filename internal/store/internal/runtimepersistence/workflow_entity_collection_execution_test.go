@@ -98,7 +98,7 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 			ctx := runtimecorrelation.WithRunID(baseCtx, runID)
 			execute := func(label string) int {
 				t.Helper()
-				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "child", "selector")
+				node, err := runtimeidentity.AdmitExecutableNodeDeclaration("child", "selector")
 				if err != nil {
 					t.Fatal(err)
 				}

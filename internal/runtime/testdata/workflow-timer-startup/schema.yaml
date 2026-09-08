@@ -1,9 +1,0 @@
-name: workflow-timer-startup
-initial_state: waiting
-states: [waiting, done]
-terminal_states: [done]
-pins:
-  inputs:
-    events:
-      - event: generic.tick
-        source: external

@@ -399,7 +399,7 @@ func handlerEmitExpressionsForSource(source semanticview.Source, node runtimeide
 				ItemAlias:  strings.TrimSpace(itemAlias),
 				AllowJoin:  strings.HasPrefix(strings.TrimSpace(kindPrefix), "handler.join."),
 			}
-			resolution := semanticview.ResolveEventSchema(source, node.FlowID(), spec.EventType())
+			resolution := semanticview.ResolveEventSchema(source, node.FlowPath(), spec.EventType())
 			if resolution.HasStructural {
 				if field, ok := resolution.StructuralType.FieldPath(key); ok {
 					ref.ResultType = field.Type.Clone()
@@ -548,7 +548,7 @@ func executablePayloadStructuralType(source semanticview.Source, node runtimeide
 	if strings.Contains(eventType, "*") {
 		return executableWildcardPayloadStructuralType(source, node, eventType)
 	}
-	resolution := semanticview.ResolveEventSchema(source, node.FlowID(), eventType)
+	resolution := semanticview.ResolveEventSchema(source, node.FlowPath(), eventType)
 	if !resolution.HasStructural {
 		return nil, fmt.Errorf("event %s has no exact structural schema", strings.TrimSpace(eventType))
 	}
@@ -559,11 +559,6 @@ func executablePayloadStructuralType(source semanticview.Source, node runtimeide
 func executableWildcardPayloadStructuralType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) (*runtimecontracts.ResolvedCatalogType, error) {
 	eventType = runtimeeventidentity.Normalize(eventType)
 	relations := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveTypedPubSubRelations()
-	for _, issue := range relations.Issues {
-		if issue.Consumer.Node.Equal(node) && runtimeeventidentity.Normalize(issue.Consumer.HandlerEvent) == eventType {
-			return nil, fmt.Errorf("wildcard event %s has ambiguous producer schema authority: %s", eventType, issue.Message())
-		}
-	}
 	seen := map[string]struct{}{}
 	var selected *runtimecontracts.ResolvedCatalogType
 	for _, match := range relations.Matches {

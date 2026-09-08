@@ -39,7 +39,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableD
 		TemplateInstancePlanner:   templateInstancePlanner,
 		FlowActivationFinalizer:   flowActivationFinalizer,
 		PayloadAdmitter:           payloadAdmitter,
-		SourceArtifactFact:          sourceArtifactFact,
+		SourceArtifactFact:        sourceArtifactFact,
 		RuntimeInstanceID:         strings.TrimSpace(runtimeInstanceID),
 		WorkOwner:                 workOwner,
 		ReceiverExecution:         eventreceiver.NormalExecution(),
@@ -57,8 +57,8 @@ func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableD
 // NewRuntimePayloadAdmitter is the single event payload admission owner. It
 // resolves only against the runtime's pinned semantic source and returns the
 // normalized bytes together with immutable schema provenance.
-func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source, bundleFact runtimecorrelation.BundleSourceFact) runtimebus.PayloadAdmitter {
-	bundleHash, bundleSource := bundleFact.StorageValues()
+func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source, bundleFact runtimecorrelation.SourceArtifactFact) runtimebus.PayloadAdmitter {
+	bundleHash := bundleFact.BundleHash()
 	return func(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 		eventType := strings.TrimSpace(string(event.Type()))
 		if eventType == "" {
@@ -146,7 +146,7 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			}
 		}
 		binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-			BundleHash: bundleHash, BundleSource: bundleSource, FlowID: strings.TrimSpace(flowID),
+			BundleHash: bundleHash, FlowID: strings.TrimSpace(flowID),
 			EventKey: eventKey, SchemaDigest: schemaDigest, SchemaClass: bindingClass,
 		})
 		if err != nil {

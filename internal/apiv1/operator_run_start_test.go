@@ -392,7 +392,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-			ContractBundle:   source,
+			ContractBundle:     source,
 			SourceArtifactFact: runStartTestSourceArtifactFact(),
 			PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
 				if event.Type() != "scan.requested" {

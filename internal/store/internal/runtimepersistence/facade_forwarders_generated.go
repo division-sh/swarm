@@ -943,6 +943,10 @@ func (s *PostgresStore) QueryEntityStates(ctx context.Context, query tools.Entit
 	return s.entityPostgresOwner.QueryEntityStates(ctx, query)
 }
 
+func (s *PostgresStore) QueryWorkflowEntityCollection(ctx context.Context, owner pipeline.WorkflowEntityCollectionOwner) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return s.pipelinePostgresOwner.QueryWorkflowEntityCollection(ctx, owner)
+}
+
 func (s *PostgresStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority) error {
 	return s.runForkPostgresOwner.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority)
 }
@@ -1181,10 +1185,6 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 
 func (s *PostgresStore) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
 	return s.pipelinePostgresOwner.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
-}
-
-func (s *PostgresStore) QueryWorkflowEntityCollection(ctx context.Context, owner pipeline.WorkflowEntityCollectionOwner) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelinePostgresOwner.QueryWorkflowEntityCollection(ctx, owner)
 }
 
 func (s *PostgresStore) SelectActiveWorkflowInstances(ctx context.Context, runID string, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
@@ -2155,6 +2155,10 @@ func (s *SQLiteRuntimeStore) QueryEntityStates(ctx context.Context, query tools.
 	return s.entitySQLiteOwner.QueryEntityStates(ctx, query)
 }
 
+func (s *SQLiteRuntimeStore) QueryWorkflowEntityCollection(ctx context.Context, owner pipeline.WorkflowEntityCollectionOwner) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return s.pipelineSQLiteOwner.QueryWorkflowEntityCollection(ctx, owner)
+}
+
 func (s *SQLiteRuntimeStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority) error {
 	return s.runForkSQLiteOwner.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority)
 }
@@ -2393,10 +2397,6 @@ func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, auth
 
 func (s *SQLiteRuntimeStore) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
 	return s.pipelineSQLiteOwner.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
-}
-
-func (s *SQLiteRuntimeStore) QueryWorkflowEntityCollection(ctx context.Context, owner pipeline.WorkflowEntityCollectionOwner) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelineSQLiteOwner.QueryWorkflowEntityCollection(ctx, owner)
 }
 
 func (s *SQLiteRuntimeStore) SelectActiveWorkflowInstances(ctx context.Context, runID string, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {

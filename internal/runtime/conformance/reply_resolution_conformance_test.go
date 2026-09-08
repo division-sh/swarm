@@ -102,7 +102,7 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 		t.Fatalf("materialize requester route: %v", err)
 	}
 	request := replyConformanceEventForRun(source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent), uuid.NewString(), runID, templatereply.RequesterFlowID, templatereply.RequesterFlowID+"/account-a", map[string]any{
-		"account_id":          "account-a",
+		"account_id": "account-a",
 	})
 	if err := eb.Publish(ctx, request); err != nil {
 		t.Fatalf("Publish: %v", err)

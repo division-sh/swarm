@@ -242,8 +242,7 @@ type ExecutionRequest struct {
 	EntityID    identity.EntityID
 	Node        identity.ExecutableNode
 	// ExecutionFlowID is the runtime flow scope selected for this exact node.
-	// It is distinct from Node.FlowID(): root declarations intentionally carry
-	// an empty owning flow while executing in the bundle's root flow.
+	// Node.FlowPath() remains the filesystem declaration identity, including "." for root.
 	ExecutionFlowID identity.FlowID
 	// Route is the exact workflow-instance persistence identity selected by
 	// the runtime boundary. ProducerSource remains event-source authority.
