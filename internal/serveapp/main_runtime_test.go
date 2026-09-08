@@ -8710,9 +8710,9 @@ func (serveRuntimeWorkspaceStub) InspectManagedContainer(context.Context, string
 	return runtimedestructivereset.ManagedContainerInspection{}, nil
 }
 
-func (s serveRuntimeWorkspaceStub) StopManagedContainer(_ context.Context, name string) error {
+func (s serveRuntimeWorkspaceStub) StopManagedContainer(_ context.Context, target runtimedestructivereset.ContainerRef) error {
 	if s.stoppedContainers != nil {
-		*s.stoppedContainers = append(*s.stoppedContainers, name)
+		*s.stoppedContainers = append(*s.stoppedContainers, target.Name)
 	}
 	return nil
 }

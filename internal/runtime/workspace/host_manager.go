@@ -368,7 +368,7 @@ func (m *HostManager) InspectManagedContainer(context.Context, string) (runtimed
 	return runtimedestructivereset.ManagedContainerInspection{}, nil
 }
 
-func (m *HostManager) StopManagedContainer(context.Context, string) error {
+func (m *HostManager) StopManagedContainer(context.Context, runtimedestructivereset.ContainerRef) error {
 	return nil
 }
 

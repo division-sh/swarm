@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
+	"github.com/division-sh/swarm/internal/runtime/containeridentity"
 )
 
 type ManagedContainerStopper struct {
@@ -71,11 +71,11 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 			result.Missing = append(result.Missing, withContainerAction(planned, ContainerActionMissing))
 			continue
 		}
-		if !inspection.HasIdentity || !resetEligibleManagedIdentity(inspection.Identity) || strings.TrimSpace(inspection.Identity.ContainerName) != strings.TrimSpace(planned.Name) {
+		if !inspection.HasIdentity || inspection.Identity.BundleHash == "" || inspection.Identity.Validate() != nil || !inspection.Identity.ResetEligibleManaged() || !inspection.Identity.Equal(planned.Identity()) {
 			result.Preserved = append(result.Preserved, preservedContainerRef(planned, inspection.Identity))
 			continue
 		}
-		ref := containerRefFromIdentity(inspection.Identity, ContainerActionStop)
+		ref := ContainerRefFromIdentity(inspection.Identity, ContainerActionStop)
 		if !inspection.Running {
 			result.AlreadyStopped = append(result.AlreadyStopped, withContainerAction(ref, ContainerActionAlreadyStopped))
 			continue
@@ -84,7 +84,7 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 		if req.Result.DryRun {
 			continue
 		}
-		if err := s.Runtime.StopManagedContainer(ctx, ref.Name); err != nil {
+		if err := s.Runtime.StopManagedContainer(ctx, ref); err != nil {
 			result.Failed = append(result.Failed, ContainerStopFailure{
 				Container: withContainerAction(ref, ContainerActionFailed),
 				Error:     err.Error(),
@@ -103,47 +103,34 @@ func (s ManagedContainerStopper) now() time.Time {
 	return time.Now().UTC()
 }
 
-func resetEligibleManagedIdentity(identity ContainerIdentity) bool {
-	canonical := runtimecontaineridentity.Identity{
-		Owner: identity.Owner, Kind: identity.Kind, ResetEligible: identity.ResetEligible,
-		CreationSource: identity.CreationSource, ContainerName: identity.ContainerName,
-		WorkspaceScope: identity.WorkspaceScope, RunID: identity.RunID,
-		AgentIdentity: identity.AgentIdentity, FlowInstance: identity.FlowInstance,
-	}.Normalized()
-	return canonical.Validate() == nil && canonical.ResetEligibleManaged()
-}
-
-func containerRefFromIdentity(identity ContainerIdentity, action string) ContainerRef {
+func ContainerRefFromIdentity(identity containeridentity.Identity, action string) ContainerRef {
+	identity = identity.Normalized()
 	return ContainerRef{
-		Name:           strings.TrimSpace(identity.ContainerName),
-		Kind:           strings.TrimSpace(identity.Kind),
-		Action:         strings.TrimSpace(action),
-		ResetEligible:  identity.ResetEligible,
-		CreationSource: strings.TrimSpace(identity.CreationSource),
-		WorkspaceScope: strings.TrimSpace(identity.WorkspaceScope),
-		RunID:          strings.TrimSpace(identity.RunID),
-		AgentIdentity:  identity.AgentIdentity.Normalize(),
-		FlowInstance:   strings.Trim(strings.TrimSpace(identity.FlowInstance), "/"),
+		Owner:            identity.Owner,
+		Name:             strings.TrimSpace(identity.ContainerName),
+		Kind:             strings.TrimSpace(identity.Kind),
+		Action:           strings.TrimSpace(action),
+		ResetEligible:    identity.ResetEligible,
+		CreationSource:   strings.TrimSpace(identity.CreationSource),
+		WorkspaceScope:   strings.TrimSpace(identity.WorkspaceScope),
+		RunID:            strings.TrimSpace(identity.RunID),
+		AgentIdentity:    identity.AgentIdentity.Normalize(),
+		FlowInstance:     strings.Trim(strings.TrimSpace(identity.FlowInstance), "/"),
+		BundleHash:       identity.BundleHash,
+		SourceProjection: identity.SourceProjection,
+		DataProjection:   identity.DataProjection,
 	}
 }
 
-func preservedContainerRef(planned ContainerRef, identity ContainerIdentity) ContainerRef {
+func preservedContainerRef(planned ContainerRef, identity containeridentity.Identity) ContainerRef {
 	if strings.TrimSpace(identity.ContainerName) == "" {
 		return withContainerAction(planned, ContainerActionUnowned)
 	}
-	return withContainerAction(containerRefFromIdentity(identity, ContainerActionUnowned), ContainerActionUnowned)
+	return ContainerRefFromIdentity(identity, ContainerActionUnowned)
 }
 
 func withContainerAction(ref ContainerRef, action string) ContainerRef {
-	ref.Name = strings.TrimSpace(ref.Name)
-	ref.Kind = strings.TrimSpace(ref.Kind)
-	ref.Action = strings.TrimSpace(action)
-	ref.CreationSource = strings.TrimSpace(ref.CreationSource)
-	ref.WorkspaceScope = strings.TrimSpace(ref.WorkspaceScope)
-	ref.RunID = strings.TrimSpace(ref.RunID)
-	ref.AgentIdentity = ref.AgentIdentity.Normalize()
-	ref.FlowInstance = strings.Trim(strings.TrimSpace(ref.FlowInstance), "/")
-	return ref
+	return ContainerRefFromIdentity(ref.Identity(), action)
 }
 
 func copyContainerResetResult(result ContainerResetResult) ContainerResetResult {

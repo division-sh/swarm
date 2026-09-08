@@ -2324,20 +2324,17 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 			return result
 		}
 		result.Changed = true
-		if entry.context != nil {
-			runtimeToShutdown = entry.runtime
-			for _, occurrence := range entry.standing {
-				occurrence.Retire()
-				standingToRetire = append(standingToRetire, occurrence)
-			}
-			entry.standing = nil
-			if runtimeToShutdown != nil {
-				runtimeToShutdown.CloseAdmission()
-			}
-		}
 	}
-	if runtimeToShutdown == nil && entry.context != nil {
+	if entry.context != nil {
 		runtimeToShutdown = entry.runtime
+		for _, occurrence := range entry.standing {
+			occurrence.Retire()
+			standingToRetire = append(standingToRetire, occurrence)
+		}
+		entry.standing = nil
+		if runtimeToShutdown != nil {
+			runtimeToShutdown.CloseAdmission()
+		}
 	}
 	m.mu.Unlock()
 	for _, occurrence := range standingToRetire {
@@ -2378,12 +2375,41 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 	if m == nil {
 		return nil
 	}
-	m.mu.RLock()
+	m.mu.Lock()
 	hashes := append([]string(nil), m.order...)
-	m.mu.RUnlock()
+	updates := make([]runtimeContextVisibilityUpdate, 0, len(hashes))
+	changed := make(map[string]bool, len(hashes))
+	for _, hash := range hashes {
+		entry := m.contexts[hash]
+		if runtimeContextEntryLoaded(entry) {
+			updates = append(updates, runtimeContextVisibilityUpdate{entry: entry, state: RuntimeContextStateUnloaded, cause: normalizeRuntimeContextDeactivationCause(cause)})
+			changed[hash] = true
+		}
+	}
+	if err := m.publishRuntimeContextVisibilityLocked(updates...); err != nil {
+		m.mu.Unlock()
+		return []RuntimeContextDeactivationResult{{ShutdownErr: err}}
+	}
+	// Withdraw the whole selectable set and fence every occurrence before the
+	// first join. Draining one context must not leave a sibling admitting work.
+	for _, hash := range hashes {
+		entry := m.contexts[hash]
+		if entry == nil {
+			continue
+		}
+		if entry.runtime != nil {
+			entry.runtime.CloseAdmission()
+		}
+		for _, occurrence := range entry.standing {
+			occurrence.Retire()
+		}
+	}
+	m.mu.Unlock()
 	results := make([]RuntimeContextDeactivationResult, 0, len(hashes))
 	for _, bundleHash := range hashes {
-		results = append(results, m.DeactivateBundleHashWithOptions(bundleHash, cause, opts))
+		result := m.DeactivateBundleHashWithOptions(bundleHash, cause, opts)
+		result.Changed = result.Changed || changed[bundleHash]
+		results = append(results, result)
 	}
 	return results
 }

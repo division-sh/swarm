@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -1309,8 +1310,45 @@ func (m *DockerManager) StopContainer(ctx context.Context, name string) error {
 	return nil
 }
 
-func (m *DockerManager) StopManagedContainer(ctx context.Context, name string) error {
-	return m.StopContainer(ctx, name)
+func (m *DockerManager) StopManagedContainer(ctx context.Context, target runtimedestructivereset.ContainerRef) error {
+	expected := target.Identity()
+	if err := expected.Validate(); err != nil {
+		return fmt.Errorf("invalid reset container target: %w", err)
+	}
+	if !expected.ResetEligibleManaged() {
+		return fmt.Errorf("container %s is not reset eligible", target.Name)
+	}
+	if expected.BundleHash == "" {
+		return fmt.Errorf("reset container %s has no admitted source projection", target.Name)
+	}
+	inspection, err := m.InspectManagedContainer(ctx, expected.ContainerName)
+	if err != nil {
+		return err
+	}
+	if !inspection.Exists {
+		return nil
+	}
+	if !inspection.HasIdentity || !inspection.Identity.Equal(expected) {
+		return fmt.Errorf("reset container %s ownership changed", expected.ContainerName)
+	}
+	if !inspection.Running {
+		return nil
+	}
+	if inspection.RuntimeID == "" {
+		return fmt.Errorf("reset container %s has no immutable Docker ID", expected.ContainerName)
+	}
+	// Names can be reused between inspect and stop. Dispatch only to the exact
+	// inspected object, and reconcile a lost acknowledgment against that object.
+	if _, err := m.RunDocker(ctx, "stop", inspection.RuntimeID); err != nil {
+		readbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		settled, readErr := m.InspectManagedContainer(readbackCtx, inspection.RuntimeID)
+		if readErr == nil && (!settled.Exists || (settled.HasIdentity && settled.Identity.Equal(expected) && !settled.Running)) {
+			return nil
+		}
+		return errors.Join(err, readErr)
+	}
+	return nil
 }
 
 func (m *DockerManager) ManagedResetContainerInventory(ctx context.Context) ([]runtimedestructivereset.ContainerRef, error) {
@@ -1333,14 +1371,14 @@ func (m *DockerManager) ManagedResetContainerInventory(ctx context.Context) ([]r
 		if err != nil {
 			return nil, fmt.Errorf("inspect managed reset container %s: %w", name, err)
 		}
-		identity := containerIdentityFromResetInspection(inspection)
+		identity := inspection.Identity
 		if !inspection.Exists || !inspection.HasIdentity || !identity.ResetEligibleManaged() {
 			continue
 		}
 		if strings.TrimSpace(identity.ContainerName) != name {
 			continue
 		}
-		refs = append(refs, managedContainerRef(identity, runtimedestructivereset.ContainerActionStop))
+		refs = append(refs, runtimedestructivereset.ContainerRefFromIdentity(identity, runtimedestructivereset.ContainerActionStop))
 	}
 	sort.Slice(refs, func(i, j int) bool {
 		if refs[i].Kind != refs[j].Kind {
@@ -1361,6 +1399,7 @@ func (m *DockerManager) InspectManagedContainer(ctx context.Context, name string
 		return runtimedestructivereset.ManagedContainerInspection{}, err
 	}
 	var doc struct {
+		ID    string `json:"Id"`
 		State struct {
 			Running bool `json:"Running"`
 		} `json:"State"`
@@ -1381,69 +1420,12 @@ func (m *DockerManager) InspectManagedContainer(ctx context.Context, name string
 		}, nil
 	}
 	return runtimedestructivereset.ManagedContainerInspection{
+		RuntimeID:   doc.ID,
 		Exists:      true,
 		Running:     doc.State.Running,
 		HasIdentity: ok,
-		Identity:    resetContainerIdentity(identity),
+		Identity:    identity,
 	}, nil
-}
-
-func resetContainerIdentity(identity runtimecontaineridentity.Identity) runtimedestructivereset.ContainerIdentity {
-	identity = identity.Normalized()
-	return runtimedestructivereset.ContainerIdentity{
-		Owner:          identity.Owner,
-		Kind:           identity.Kind,
-		ResetEligible:  identity.ResetEligible,
-		CreationSource: identity.CreationSource,
-		ContainerName:  identity.ContainerName,
-		WorkspaceScope: identity.WorkspaceScope,
-		RunID:          identity.RunID,
-		AgentIdentity:  identity.AgentIdentity,
-		FlowInstance:   identity.FlowInstance,
-	}
-}
-
-func containerIdentityFromResetInspection(inspection runtimedestructivereset.ManagedContainerInspection) runtimecontaineridentity.Identity {
-	identity := inspection.Identity
-	return runtimecontaineridentity.Identity{
-		Owner:          identity.Owner,
-		Kind:           identity.Kind,
-		ResetEligible:  identity.ResetEligible,
-		CreationSource: identity.CreationSource,
-		ContainerName:  identity.ContainerName,
-		WorkspaceScope: identity.WorkspaceScope,
-		RunID:          identity.RunID,
-		AgentIdentity:  identity.AgentIdentity,
-		FlowInstance:   identity.FlowInstance,
-	}.Normalized()
-}
-
-func managedContainerRef(identity runtimecontaineridentity.Identity, action string) runtimedestructivereset.ContainerRef {
-	identity = identity.Normalized()
-	return runtimedestructivereset.ContainerRef{
-		Name:           identity.ContainerName,
-		Kind:           identity.Kind,
-		Action:         strings.TrimSpace(action),
-		ResetEligible:  identity.ResetEligible,
-		CreationSource: identity.CreationSource,
-		WorkspaceScope: identity.WorkspaceScope,
-		RunID:          identity.RunID,
-		AgentIdentity:  identity.AgentIdentity,
-		FlowInstance:   identity.FlowInstance,
-	}
-}
-
-func containerRefWithAction(ref runtimedestructivereset.ContainerRef, action string) runtimedestructivereset.ContainerRef {
-	ref.Action = strings.TrimSpace(action)
-	return ref
-}
-
-func preservedManagedContainerRef(fallback runtimedestructivereset.ContainerRef, identity runtimecontaineridentity.Identity) runtimedestructivereset.ContainerRef {
-	identity = identity.Normalized()
-	if strings.TrimSpace(identity.ContainerName) == "" {
-		return containerRefWithAction(fallback, runtimedestructivereset.ContainerActionPreserve)
-	}
-	return managedContainerRef(identity, runtimedestructivereset.ContainerActionPreserve)
 }
 
 func (m *DockerManager) InspectContainer(ctx context.Context, name string) (bool, bool, error) {

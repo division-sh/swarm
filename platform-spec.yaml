@@ -35936,7 +35936,8 @@ agent_lifecycle_authority:
   recovery:
     rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.
   destructive_cleanup_quiescence:
-    runtime_nuke: Apply-mode runtime.nuke closes admission and awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
+    runtime_nuke: Apply-mode runtime.nuke withdraws the complete affected context set and fences every runtime and standing occurrence before waiting for any predecessor to drain. It awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
+    reset_container_identity: Reset inventory and serialized outcomes retain the complete canonical container identity, including admitted bundle hash, source projection, and data projection. Settlement compares the exact planned identity; names and reset-eligible labels alone never authorize stopping a successor or foreign projection. Docker stop targets the immutable inspected object ID, not its reusable name. A lost acknowledgment is reconciled against that exact object; a still-running, foreign, or uninspectable target remains a failure. Retired entity containers are not reset targets.
     other_ordering: Manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Selected-store compatibility migration and backfill paths do not exist.
   forbidden:
     - direct lifecycle map writes outside the coordinator
