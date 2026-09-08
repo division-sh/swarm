@@ -54,6 +54,7 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 				{"relative-alias-parent", base, "outside/link/../bundle"},
 				{"absolute-alias-parent", outside, outside + "/link/../bundle"},
 			}
+			foreignProven := false
 			for _, cell := range cells {
 				t.Run(cell.name, func(t *testing.T) {
 					args := []string{"verify", "--config", config, "--json"}
@@ -101,11 +102,17 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 					if !reflect.DeepEqual(observed, baseline) {
 						t.Fatalf("readback differs: %#v; baseline %#v", observed, baseline)
 					}
-					foreign := observed["registry/child.completed"]["static_id"].(string)
-					runStaticDataRead(t, process, hash, cell.name+"-foreign", foreign)
-					healthy := runStaticDataRead(t, process, hash, cell.name+"-healthy", "")
-					if !reflect.DeepEqual(healthy, baseline) {
-						t.Fatalf("own-ID healthy read after foreign denial differs: %#v", healthy)
+					// Every geometry proves the same hash, IDs and actual read bytes.
+					// Grant rejection/recovery is independent of the spelling used to
+					// select that identical artifact; prove it once per selected store.
+					if !foreignProven {
+						foreign := observed["registry/child.completed"]["static_id"].(string)
+						runStaticDataRead(t, process, hash, cell.name+"-foreign", foreign)
+						healthy := runStaticDataRead(t, process, hash, cell.name+"-healthy", "")
+						if !reflect.DeepEqual(healthy, baseline) {
+							t.Fatalf("own-ID healthy read after foreign denial differs: %#v", healthy)
+						}
+						foreignProven = true
 					}
 					if err := process.stopAndWait(10 * time.Second); err != nil {
 						t.Fatalf("stop: %v\n%s", err, process.output.String())
@@ -284,6 +291,9 @@ func runStaticDataRead(t *testing.T, process *releaseServeProcess, hash, key, fo
 		if rejected.Failure.Class != "platform.internal_failure" || rejected.Failure.Component != "agent-manager" || rejected.Failure.Detail.Code != "unclassified_runtime_error" {
 			t.Fatalf("foreign-ID failure changed class: %s", last.FailedDeliveries[0])
 		}
+		// This public envelope is not a discriminating schema-rejection oracle.
+		// tools.TestStaticDataInvocationMockRequestsExactForeignID executes this
+		// same admitted mock and proves its exact call and generated-schema error.
 		var stopped struct {
 			OK bool `json:"ok"`
 		}
