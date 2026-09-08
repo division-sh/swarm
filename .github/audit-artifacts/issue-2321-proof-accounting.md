@@ -224,3 +224,11 @@ mock expectation before approval or outbound delivery. The helper now checks the
 explicit expected mode, with passing local RPC regression cases for mock and
 live. The corrected real SQLite run is queued. Card creation is partial live
 evidence only; no Telegram-send, restart or L matrix pass is credited yet.
+
+The next SQLite attempt passed the repaired approval but failed inbound delivery
+completion with unclassified_runtime_error (22.624s after the queue). The user
+confirmed receipt of the test message, establishing an external send despite the
+failed delivery. Root cause and durable completion remain unresolved; no restart
+or L matrix pass is credited. Public failure-evidence capture has been expanded
+before cleanup, and a fresh isolated diagnostic journey is queued, not a replay
+of the failed delivery. Runtime code and #2432's frozen gate remain unchanged.

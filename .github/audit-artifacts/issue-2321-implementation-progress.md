@@ -321,3 +321,21 @@ This local helper regression is not L proof. No runtime code changed.
 The repaired real SQLite journey is first in the shared swarm-test queue at this
 checkpoint; /tmp/agent-g-2321-live-sqlite-5.log owns its result. Telegram delivery,
 live restart, PostgreSQL L and final whole-suite completion remain unproven.
+
+## Post-Approval Live Failure Investigation
+
+The repaired SQLite journey acquired a slot after 25m50s and failed after 22.624s.
+It passed live approval, but the inbound telegram delivery terminally dead-lettered
+with agent-manager/process_event.on_event unclassified_runtime_error. The user
+independently confirmed receiving the lifecycle 1001 Telegram message. That is
+external-send evidence, not a successful provider-turn/delivery completion or
+restart result. Do not automatically retry that failed delivery.
+
+The original temporary store was cleaned up by the test. Failure-only capture now
+reads the existing public runtime.logs, event.list, conversation.list and per-session
+conversation.list_turns in addition to run.diagnose, before process/store cleanup.
+Every rendered response uses the existing supplied-secret redactor. A fresh isolated
+SQLite diagnostic journey is queued through swarm-test; it does not replay the
+previous failed delivery. Its log is /tmp/agent-g-2321-live-sqlite-6.log.
+The root cause is not yet established. No production repair, broader-class
+absorption, new gate approval or full live proof is claimed.

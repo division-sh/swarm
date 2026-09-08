@@ -220,19 +220,41 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		var diagnosis map[string]any
-		if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": standing.RunID}, &diagnosis); err != nil {
-			t.Logf("failure diagnosis unavailable: %v", err)
-			return
+		queries := []struct {
+			method string
+			params map[string]any
+		}{
+			{"run.diagnose", map[string]any{"run_id": standing.RunID}},
+			{"runtime.logs", map[string]any{"run_id": standing.RunID, "limit": 100, "order": "desc"}},
+			{"event.list", map[string]any{"filter": map[string]any{"run_id": standing.RunID}, "limit": 200}},
+			{"conversation.list", map[string]any{"run_id": standing.RunID, "limit": 100}},
 		}
-		raw, err := json.Marshal(diagnosis)
-		if err != nil {
-			t.Logf("encode failure diagnosis: %v", err)
-			return
+		for i := 0; i < len(queries); i++ {
+			query := queries[i]
+			var result json.RawMessage
+			if err := process.rpc.call(ctx, query.method, query.params, &result); err != nil {
+				t.Logf("failure evidence %s unavailable: %v", query.method, err)
+				continue
+			}
+			output := &releaseProcessOutput{secrets: spec.RedactValues}
+			_, _ = output.Write(result)
+			t.Logf("sanitized public %s: %s", query.method, output.String())
+			if query.method == "conversation.list" {
+				var page struct {
+					Conversations []goldenConversation `json:"conversations"`
+				}
+				if err := json.Unmarshal(result, &page); err != nil {
+					t.Logf("decode failure conversations: %v", err)
+					continue
+				}
+				for _, conversation := range page.Conversations {
+					queries = append(queries, struct {
+						method string
+						params map[string]any
+					}{"conversation.list_turns", map[string]any{"session_id": conversation.SessionID, "limit": 100}})
+				}
+			}
 		}
-		output := &releaseProcessOutput{secrets: spec.RedactValues}
-		_, _ = output.Write(raw)
-		t.Logf("sanitized public run diagnosis: %s", output.String())
 	})
 	id, firstReceipt := send(process)
 	first := converge(process, standing, 1, id, firstReceipt)
