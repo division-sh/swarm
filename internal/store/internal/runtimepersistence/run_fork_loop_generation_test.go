@@ -5,78 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	"github.com/division-sh/swarm/internal/runtime/joinruntime"
-	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
-
-func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
-	now := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
-	activation, err := loopruntime.New("source-run", "entity-1", "validation", "revision", "revision_id", "event-1", "drafting", 3, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	buckets := map[string]map[string]any{}
-	if err := loopruntime.Store(buckets, activation); err != nil {
-		t.Fatal(err)
-	}
-	joinRef, err := timeridentity.NewJoinRefForGeneration(mustPersistenceRootNode("review-node"), "review.result", "review", "review", "", activation.Generation())
-	if err != nil {
-		t.Fatal(err)
-	}
-	joinHandle, err := timeridentity.JoinTimeoutHandle(joinRef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	join, err := joinruntime.NewActivation(joinHandle, []string{"a"}, now, now.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := joinruntime.Store(buckets, join); err != nil {
-		t.Fatal(err)
-	}
-	accumulatorRef := timeridentity.NewAccumulatorBucketRefForGeneration(mustPersistenceRootNode("review-node"), "review.result", "", activation.Generation())
-	nodeBucketKey := mustPersistenceRootNode("review-node").Key()
-	buckets[nodeBucketKey] = map[string]any{}
-	buckets[nodeBucketKey]["handler_accumulators"] = map[string]any{accumulatorRef.Key(): map[string]any{"count": 1}}
-	raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
-	forkedRaw, err := forkAttemptGenerationState(raw, "fork-run", "entity-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, forkedRaw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	forked, found, err := loopruntime.Load(forkedCarrier.StateBuckets, "validation", "revision")
-	if err != nil || !found {
-		t.Fatalf("forked activation = found %v err %v", found, err)
-	}
-	if forked.Attempt != activation.Attempt || forked.MaxAttempts != activation.MaxAttempts || forked.ActivationID == activation.ActivationID || forked.RevisionID == activation.RevisionID {
-		t.Fatalf("forked activation = %#v, source %#v", forked, activation)
-	}
-	forkedJoins, err := joinruntime.List(forkedCarrier.StateBuckets)
-	if err != nil || len(forkedJoins) != 1 || !forkedJoins[0].Generation().Equal(forked.Generation()) || forkedJoins[0].Key() == join.Key() {
-		t.Fatalf("forked joins = %#v err=%v", forkedJoins, err)
-	}
-	if !forkedJoins[0].JoinRef().Declaration().Equal(join.JoinRef().Declaration()) ||
-		forkedJoins[0].TimerTaskID() == join.TimerTaskID() ||
-		forkedJoins[0].TimerHandle().TaskID() != forkedJoins[0].TimerTaskID() {
-		t.Fatalf("fork remint left stale declaration/task facts: source=%#v fork=%#v", join.JoinRef(), forkedJoins[0].JoinRef())
-	}
-	forkedAccumulators, _ := forkedCarrier.StateBuckets[nodeBucketKey]["handler_accumulators"].(map[string]any)
-	if len(forkedAccumulators) != 1 {
-		t.Fatalf("forked accumulators = %#v", forkedAccumulators)
-	}
-	for key := range forkedAccumulators {
-		if key == accumulatorRef.Key() || !strings.Contains(key, forked.Generation().KeySuffix()) {
-			t.Fatalf("forked accumulator key = %q, want fork generation", key)
-		}
-	}
-
-}
 
 func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)

@@ -915,15 +915,22 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 		return AccumulatorBucketRef{}, false
 	}
 	generation := attemptgeneration.Generation{}
+	original := key
+	generationSuffix := ""
 	if base, encoded, ok := strings.Cut(key, "@generation="); ok {
-		key = strings.TrimSpace(base)
-		generation, _ = attemptgeneration.ParseKeySuffix(strings.TrimSpace(encoded))
+		var valid bool
+		generation, valid = attemptgeneration.ParseKeySuffix(encoded)
+		if !valid {
+			return AccumulatorBucketRef{}, false
+		}
+		key = base
+		generationSuffix = "@generation=" + encoded
 	}
 	window := ""
 	if base, encoded, ok := strings.Cut(key, "@window="); ok {
-		key = strings.TrimSpace(base)
-		decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(encoded))
-		if err != nil {
+		key = base
+		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil || base64.RawURLEncoding.EncodeToString(decoded) != encoded {
 			return AccumulatorBucketRef{}, false
 		}
 		window = string(decoded)
@@ -937,7 +944,13 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 		return AccumulatorBucketRef{}, false
 	}
 	bucket := NewAccumulatorBucketRefForGeneration(node, eventType, window, generation)
-	return bucket, bucket.Valid()
+	// A key omits revision_field. Preserve its partial reference for the admitted
+	// loop owner to complete; never disguise malformed generation as non-loop.
+	base := NewAccumulatorBucketRefForGeneration(node, eventType, window, attemptgeneration.Generation{})
+	if !bucket.Valid() || base.Key()+generationSuffix != original {
+		return AccumulatorBucketRef{}, false
+	}
+	return bucket, true
 }
 
 func (r AccumulatorBucketRef) Normalize() AccumulatorBucketRef {

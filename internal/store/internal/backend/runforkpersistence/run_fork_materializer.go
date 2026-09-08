@@ -634,7 +634,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	if err != nil {
 		return fmt.Errorf("encode fork gates for entity %s: %w", entityID, err)
 	}
-	forkAccumulator, err := forkAttemptGenerationState(entity.Accumulator, forkRunID, entityID)
+	forkAccumulator, correspondence, err := projectRunForkAttemptGenerationState(entity.Accumulator, forkRunID, entityID)
 	if err != nil {
 		return fmt.Errorf("fork loop state for entity %s: %w", entityID, err)
 	}
@@ -670,7 +670,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	if materializeProposed == nil {
 		return fmt.Errorf("fork proposed-effect materialization owner is required")
 	}
-	if err := materializeProposed(ctx, tx, story, plan.SourceRunID, forkRunID, projection, plan.ForkPoint, now); err != nil {
+	if err := materializeProposed(ctx, tx, story, plan.SourceRunID, forkRunID, projection, plan.ForkPoint, correspondence, now); err != nil {
 		return err
 	}
 	if insertDiff == nil {

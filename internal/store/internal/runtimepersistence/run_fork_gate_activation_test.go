@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -178,6 +179,11 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 }
 
 func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runForkGateSelectedStore, sourceRunID, forkRunID string, decisionProjection, effectProjection runForkEntityProjection, sourceActivation, forkActivation gateruntime.Activation, point runfork.RunForkPoint, now time.Time) error {
+	// These fixtures explicitly have no source loops or generation-bearing effect.
+	correspondence, err := loopruntime.NewForkCorrespondence(nil, forkRunID, effectProjection.Fork.EntityID)
+	if err != nil {
+		return err
+	}
 	operation := func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, decisionMaterializer func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error, effectMaterializer func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		if err := decisionMaterializer(txctx, tx, story); err != nil {
 			return err
@@ -192,7 +198,7 @@ func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runF
 					return store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(ctx, tx, story, forkRunID, decisionProjection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now)
 				},
 				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-					return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRunID, forkRunID, effectProjection, point, now)
+					return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRunID, forkRunID, effectProjection, point, correspondence, now)
 				})
 		})
 	case *SQLiteRuntimeStore:
@@ -202,7 +208,7 @@ func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runF
 					return store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(ctx, tx, story, forkRunID, decisionProjection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now)
 				},
 				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-					return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRunID, forkRunID, effectProjection, point, now)
+					return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRunID, forkRunID, effectProjection, point, correspondence, now)
 				})
 		})
 	default:
@@ -668,8 +674,12 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	correspondence, err := loopruntime.NewForkCorrespondence(nil, forkRunID, projection.Fork.EntityID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cards.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return cards.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, tx, story, sourceRunID, forkRunID, projection, point, now.Add(2*time.Minute))
+		return cards.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, tx, story, sourceRunID, forkRunID, projection, point, correspondence, now.Add(2*time.Minute))
 	}); err != nil {
 		t.Fatal(err)
 	}
