@@ -68,7 +68,7 @@ must be rebound to the final integrated head before the final audit is posted.
 | M12 | `TestPrivateTestDoesNotSelectConcurrentLiveRuntime`, `TestPrivateTestAdmissionPrecedesResourceAcquisition`; private API shared-client boundary guard. |
 | M13 | `TestServedParityHarnessDerivedScenarioLifecycle`, `TestServedParityHarnessGeneratedInputFixtureLifecycle`, `TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsAndModes`; public fresh authored/derived proof must remain separately credited. |
 | M14 | `TestPrivateTestSessionJoinedCleanupAndPrivateTransport` covers success, failure, cancellation and scenario deadline; `TestPrivateTestStartupFailureUnwindsAcquiredResources`, `TestPrivateTestRootCleanupRemovesImmutableProjectionsWithoutFollowingLinks`; resource-by-resource mapping and executed listener, late-readiness, projection and ownership failures are tabulated below. |
-| M15 | Private transport test proves auth and absent ingress; `TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP`, controlled provider capability matrix, H exact connector/timer/card outcomes. Final no-external-effect counter map still required. |
+| M15 | Private transport proves auth/absent ingress; the registered-adapter fence proves zero authorized external attempts; activity proof checks zero journal attempts, credential reads and HTTP requests. Deployment isolation checks zero ambient API calls. Exact counter map below; H outcomes remain separate from provisioned L. |
 | M16 | `TestCommandConfigRecoveryDefaultsAndExplicitFalse`, H J1-J4 and exact startup refusal tests; provisioned L retained-recovery parity pending. |
 | M17 | `TestGoldenInvocationRootDevReadiness` L and `TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch` H, existing scratch-path/borrowed-store refusals. L repeated epoch/retained sentinel proof pending. |
 | M18 | `TestCommandConfigRejectsMaskedExecutionSelectors` plus existing config/path provenance and precedence tests. |
@@ -78,7 +78,7 @@ must be rebound to the final integrated head before the final audit is posted.
 | M22 | Split / tracked separately: F-owned `#2319`, open at latest check. Combined dormant-to-activated webhook acceptance remains blocked, not waived. |
 | M23 | Split / tracked separately: `#1801`; existing non-posture config-layer precedence stays authoritative. |
 | M24 | Split / tracked separately: `#2284`; genuine native/Claude/Docker prerequisites preserved. |
-| M25 | `TestGenericScheduleExecutionModeSurvivesReplayAndStoreReconstructionOnBothStores`, `TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores`, standing census, pipeline preflight/claim negatives, external-effect recovery and directive/conversation-fork exact-mode matrices. Final replay/resume/decision consumer map still required. |
+| M25 | `TestGenericScheduleExecutionModeSurvivesReplayAndStoreReconstructionOnBothStores`, `TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores`, standing census, pipeline preflight/claim negatives, external-effect recovery and directive/conversation-fork exact-mode matrices. Replay/resume/decision consumer map and focused execution results below. |
 | M26 | `TestStructuralReadersShareAdmittedSource`, `TestStructuralReadersRetainPostBootInvalidity`, `TestStructuralReadersDoNotConstructChannelActivation`; compiled reader proof on untouched source. |
 | M27 | Structural check census and no-deployment-observation tests; output explicitly says structural/not_evaluated, preserves production_valid harness meaning, removes operational capability fields. |
 | M28 | `TestCommandOwnedSelectionRefusesMissingPurposeAndRetiredSelectors`, provider/pin/model table, descriptor corruption tests, masked-config rejection. |
@@ -124,6 +124,28 @@ results must still be recorded. `agent.replay_backlog` is already retired on the
 integrated baseline; only its forbidden-consumer guard remains. It is not a live
 interpreter to preserve or reintroduce for this migration.
 
+Additional focused reintroduction proof passed after `a4229f1c8` (only the new test
+digest gained its canonical sha256 prefix): apiv1 3.143s, runcontrol 0.024s,
+ingress 0.010s, runtimepersistence 23.091s. This is not a provisioned live-provider
+result. The exact coverage, rather than shared-owner credit, is:
+
+| Consumer / forbidden effect | Executed proof and observation |
+|---|---|
+| Every registered external adapter | `TestMockEffectFenceRejectsEveryExternalAdapterBeforeAuthorization` enumerates the registration owner, rejects every non-mock_python adapter, and checks zero authorized attempts. |
+| Live activity in a mock command | `TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP` checks zero persisted attempts, zero credential reads and zero counted HTTP calls. |
+| Ambient target/deployment resources | `TestPrivateTestIgnoresDeploymentResources` checks zero calls to the counted ambient API and unchanged retained store/workspace sentinels for both deployment store selections. |
+| Public event.replay / agent.replay | `TestOperatorReplayMockOnlyRejectsLiveOriginalBeforeMutation` exercises both API methods on PostgreSQL, checks unchanged event/delivery counts and zero idempotency reservations. It is not labelled a dual-store negative. |
+| Run continue and ingress resume ordering | `TestControllerContinuePreflightsQueueBeforeRunMutation` and `TestResumePreflightsQueueBeforeRuntimeStateMutation` prove their distinct mutation entrances stop at the failed preflight. |
+| Run/runtime queue admission on both stores | `TestMockOnlyPipelinePreflightRejectsLiveQueuesWithoutClaimOnSQLiteAndPostgres` checks raw, immediate decision and future decision work, both scopes, unchanged decision snapshots and no receipt creation; `TestMockOnlyPipelinePreflightAdmitsExactMockQueueWithoutClaimOnSQLiteAndPostgres` preserves the positive. |
+| Recovery claim on both stores | `TestMockOnlyPipelineScanRejectsPersistedLiveWorkBeforeClaimOnSQLiteAndPostgres` rejects the mock claim, then proves the live owner can claim the same untouched exact event. |
+| Decision and deferral preparation | `TestMockOnlyPostureRejectsLiveDecisionAndDeferralBeforeMutationPreparation` exercises both mutation kinds, allowing only the canonical card read before refusal. |
+| Directive transition on both stores | `TestDirectiveExecutionAdmitsExactPersistedModeBeforeTransitionOnSQLiteAndPostgres` proves a live operation remains prepared/unclaimed and an exact mock operation proceeds. |
+| Conversation fork-chat admission | `TestConversationForkChatAdmitsExactSourceActorModeBeforeMutation` checks the persisted source actor's mode before fork mutation. |
+| Standing reconstruction on both stores | `TestStandingServicePostureCensusAdmitsExactMockWork` executes the exact persisted-mode census on SQLite and PostgreSQL. |
+
+These close the previously unnamed M14/M15/M25 proof-accounting gaps, not the
+outstanding final-head/full-profile and provisioned L acceptance obligations.
+
 ## Honest Completion Boundary
 
 The first unfiltered swarm-test run failed in nine packages. No runtime blocker was
@@ -145,7 +167,7 @@ it is not passing evidence. The new dual-store descriptor proof passed (1.807s).
 Another integrated run with the full proof profile is required; no whole-suite
 pass is claimed yet.
 
-Remaining independent work includes the next integrated result, the explicit M15/
-M25 accounting/proof gaps above and final-head verification. External acceptance
+Remaining independent work includes the next integrated result and final-head
+verification. External acceptance
 still requires the provisioned L environment and #2319 proof. No final audit or
 review-ready PR exists. This checklist must not be submitted as proof of closure.

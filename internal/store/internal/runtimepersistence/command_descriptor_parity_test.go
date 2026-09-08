@@ -31,7 +31,7 @@ func TestCommandDescriptorBothStoresPreserveSelectionAndRefuseCorruption(t *test
 					Type: "worker", Role: "test", Model: "custom-at-write", LLMBackend: profile.ID,
 					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{}`),
 					Mock: mockperformance.Performance{Kind: mockperformance.KindPython, Module: "mocks/worker.py",
-						Source: performance, Digest: runtimeeffects.Fingerprint(performance)},
+						Source: performance, Digest: "sha256:" + runtimeeffects.Fingerprint(performance)},
 				})
 				before := source
 				selected, err := runtimellm.ResolveAgentExecution(purpose, profile, selection.ModelAliases{
