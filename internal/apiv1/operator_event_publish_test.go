@@ -1425,11 +1425,11 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 					bundle.FlowSchemas["operating"] = runtimecontracts.FlowSchemaDocument{Mode: "template"}
 					bundle.FlowTree.Root.Children[0].Schema = bundle.FlowSchemas["operating"]
 					consumer := runtimecontracts.SystemNodeContract{
-						ID: "lower-precedence-consumer", ExecutionType: "system_node",
+						ExecutionType: "system_node",
 						SubscribesTo:  []string{"review.requested"},
 						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": {}},
 					}
-					bundle.FlowTree.Root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{consumer.ID: consumer}
+					bundle.FlowTree.Root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{"lower-precedence-consumer": consumer}
 					mustCompileEventPublishTestBundle(bundle)
 					source := semanticview.Wrap(bundle)
 					bus, err := newScopedAPITestEventBus(t, f.store, runStartTestEventBusOptions(source))
@@ -2400,7 +2400,6 @@ func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontra
 			},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				nodeID: {
-					ID:           nodeID,
 					SubscribesTo: []string{eventName},
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 						eventName: {},
@@ -2433,7 +2432,6 @@ func eventPublishFollowUpTestBundle() *runtimecontracts.WorkflowContractBundle {
 		"scan.unhandled": {},
 	}
 	node := runtimecontracts.SystemNodeContract{
-		ID:           "scan-orchestrator",
 		SubscribesTo: []string{"scan.requested", "scan.followup"},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"scan.requested": {},
@@ -2570,7 +2568,6 @@ func eventPublishTemplateInputTestBundle(eventName string, authoredRoot bool) *r
 		return mustCompileEventPublishTestBundle(bundle)
 	}
 	rootNode := runtimecontracts.SystemNodeContract{
-		ID:           "root-orchestrator",
 		SubscribesTo: []string{eventName},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			eventName: {},
@@ -2588,7 +2585,6 @@ func eventPublishCreateEntityTestBundle() *runtimecontracts.WorkflowContractBund
 	const eventName = "thing.created"
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	node := runtimecontracts.SystemNodeContract{
-		ID:           "thing-writer",
 		SubscribesTo: []string{eventName},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			eventName: handler,

@@ -1365,7 +1365,7 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 		}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			nodeID: {
-				ID: nodeID, ExecutionType: "system_node", SubscribesTo: []string{eventType},
+				ExecutionType: "system_node", SubscribesTo: []string{eventType},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventType: handler},
 			},
 		},
@@ -1466,7 +1466,7 @@ func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.Event
 	t.Helper()
 	event := strings.TrimSpace(string(eventType))
 	node := runtimecontracts.SystemNodeContract{
-		ID: nodeID, ExecutionType: "system_node", SubscribesTo: []string{event},
+		ExecutionType: "system_node", SubscribesTo: []string{event},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: {}},
 	}
 	rootSchema := runtimecontracts.FlowSchemaDocument{Name: "root"}
@@ -1522,7 +1522,7 @@ func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string, eventTy
 	identity := agentidentitytest.RootRuntime(t, agentID, "eventbus-target-test")
 	event := strings.TrimSpace(string(eventType))
 	node := runtimecontracts.SystemNodeContract{
-		ID: nodeID, ExecutionType: "system_node", SubscribesTo: []string{event},
+		ExecutionType: "system_node", SubscribesTo: []string{event},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: {}},
 	}
 	rootSchema := runtimecontracts.FlowSchemaDocument{Name: "root"}
@@ -2408,14 +2408,14 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 		Path: "component-scaffold", Paths: runtimecontracts.FlowContractPaths{FlowPath: "component-scaffold"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"opco.repo_scaffold_requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"component-node": {ID: "component-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
+			"component-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
 		},
 	}
 	repositoryFlow := runtimecontracts.FlowContractView{
 		Path: "repo-scaffold", Paths: runtimecontracts.FlowContractPaths{FlowPath: "repo-scaffold"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"opco.repo_scaffold_requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"repo-scaffold-node": {ID: "repo-scaffold-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
+			"repo-scaffold-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{componentFlow, repositoryFlow}}
@@ -2502,7 +2502,7 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 		Path: "child/grandchild", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child/grandchild"},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"grandchild-worker": {
-				ID: "grandchild-worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"micro.start": existingOwnerHandlerFixture(),
 				},
 			},
@@ -3051,7 +3051,6 @@ func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContract
 		Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"entity-writer": {
-				ID:            "entity-writer",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"thing.created"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -3087,7 +3086,7 @@ func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Sour
 			Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"shared-writer": {
-					ID: "shared-writer", ExecutionType: "system_node", SubscribesTo: []string{"thing.created"},
+					ExecutionType: "system_node", SubscribesTo: []string{"thing.created"},
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()},
 				},
 			},
@@ -3748,7 +3747,6 @@ version: 1.0.0
   entity_id: string
 `,
 		"nodes.yaml": `portfolio-node:
-  id: portfolio-node
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
   event_handlers:
@@ -3779,7 +3777,6 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"entity-writer": {
-				ID:            "entity-writer",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"thing.created"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -3818,7 +3815,6 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 		"schema.yaml":   "name: top-level-project-node\npins:\n  inputs:\n    events: [thing.created]\n",
 		"events.yaml":   "thing.created:\n  entity_id: string\n",
 		"nodes.yaml": `reviewer:
-  id: reviewer
   execution_type: system_node
   subscribes_to: [thing.created]
   event_handlers:
@@ -3845,7 +3841,6 @@ func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"lifecycle-orchestrator": {
-				ID:            "lifecycle-orchestrator",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"opco.product_initialization_requested"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -3886,7 +3881,6 @@ func routedCallbackTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"repo-scaffold-node": {
-				ID:            "repo-scaffold-node",
 				ExecutionType: "system_node",
 				SubscribesTo: []string{
 					"repo_scaffold.repo_commit_succeeded",
@@ -3922,7 +3916,6 @@ func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"entity-writer": {
-				ID:            "entity-writer",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"thing.reviewed"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -3954,7 +3947,6 @@ func routedNodeStaticChildBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-intake": {
-				ID:            "child-intake",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"child.start"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{

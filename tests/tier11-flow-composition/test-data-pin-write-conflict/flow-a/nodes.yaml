@@ -1,5 +1,4 @@
 a-node:
-  id: a-node
   execution_type: system_node
   subscribes_to: [a.start]
   produces: []

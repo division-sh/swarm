@@ -1,5 +1,4 @@
 classifier:
-  id: classifier
   execution_type: system_node
   subscribes_to: [eval.submitted]
   produces: [eval.tier_b]

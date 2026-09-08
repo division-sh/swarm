@@ -1,5 +1,4 @@
 gatekeeper:
-  id: gatekeeper
   execution_type: system_node
   subscribes_to: [candidate.submitted]
   produces: [candidate.accepted]

@@ -1,5 +1,4 @@
 lifecycle:
-  id: lifecycle
   execution_type: system_node
   subscribes_to: [phase.init, phase.activate, phase.start, phase.stabilize, phase.wind_down, phase.close]
   produces: [lifecycle.complete]

@@ -1,5 +1,4 @@
 child-relay:
-  id: child-relay
   execution_type: system_node
   subscribes_to: [step.begin, micro.done]
   produces: [micro.start, micro.relayed]

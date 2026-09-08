@@ -49,7 +49,6 @@ fulfillment.requested:
 `,
 		"fulfillment/nodes.yaml": `
 complete-request:
-  id: complete-request
   execution_type: system_node
   subscribes_to: [fulfillment.requested]
   event_handlers:

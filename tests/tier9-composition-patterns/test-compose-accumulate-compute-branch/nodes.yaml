@@ -1,5 +1,4 @@
 scorer:
-  id: scorer
   execution_type: system_node
   subscribes_to: [score.submitted]
   produces: [result.high]

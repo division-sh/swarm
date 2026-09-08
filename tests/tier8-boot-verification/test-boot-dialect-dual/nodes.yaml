@@ -1,5 +1,4 @@
 dual-dialect-node:
-  id: dual-dialect-node
   execution_type: system_node
   subscribes_to: [check.requested]
   produces: []

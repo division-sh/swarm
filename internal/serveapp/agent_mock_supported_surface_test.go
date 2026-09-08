@@ -196,7 +196,6 @@ func addCanonicalTelegramApprovalOverlay(t testing.TB, sourceRoot string) {
 	}
 	revisionConsumer := `
 telegram-revision:
-  id: telegram-revision
   execution_type: system_node
   subscribes_to: [telegram_send_message.revision_requested]
   event_handlers:

@@ -1,5 +1,4 @@
 provider-node:
-  id: provider-node
   execution_type: system_node
   subscribes_to: [provider.requested]
   produces: [provider.replied]

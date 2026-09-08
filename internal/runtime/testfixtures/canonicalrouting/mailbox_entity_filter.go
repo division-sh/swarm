@@ -25,7 +25,6 @@ pins:
 	writeClosedVariantFile(t, root, "entities.yaml", "review_item:\n  item_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "review.requested:\n  item_id: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `reviewer:
-  id: reviewer
   execution_type: system_node
   subscribes_to: [review.requested]
   event_handlers:

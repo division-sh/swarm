@@ -610,7 +610,7 @@ func mixedPubsubConnectStaticSource() semanticview.Source {
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"local-observer": {
-					ID: "local-observer", SubscribesTo: []string{"deploy.done"},
+					SubscribesTo:  []string{"deploy.done"},
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": existingOwnerHandlerFixture()},
 				},
 			},
@@ -620,7 +620,6 @@ func mixedPubsubConnectStaticSource() semanticview.Source {
 			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.completed"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
-					ID:            "consumer-node",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": existingOwnerHandlerFixture()},
 				},
 			},
@@ -640,7 +639,7 @@ func mixedPubsubConnectNoMatchSource() semanticview.Source {
 			},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"local-observer": {
-					ID: "local-observer", SubscribesTo: []string{"local.done"},
+					SubscribesTo:  []string{"local.done"},
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"local.done": existingOwnerHandlerFixture()},
 				},
 			},
@@ -650,7 +649,6 @@ func mixedPubsubConnectNoMatchSource() semanticview.Source {
 			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.completed"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
-					ID:            "consumer-node",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": existingOwnerHandlerFixture()},
 				},
 			},
@@ -667,7 +665,7 @@ func mixedPubsubConnectFailureSource() semanticview.Source {
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"local-observer": {
-					ID: "local-observer", SubscribesTo: []string{"deploy.done"},
+					SubscribesTo:  []string{"deploy.done"},
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": existingOwnerHandlerFixture()},
 				},
 			},
@@ -769,7 +767,7 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 		}
 	} else {
 		consumer.nodes = map[string]runtimecontracts.SystemNodeContract{
-			"receiver": {ID: "receiver", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"receiver": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"work.accepted": existingOwnerHandlerFixture(),
 				"work.audited":  existingOwnerHandlerFixture(),
 			}},
@@ -822,14 +820,14 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.audited"},
 	}
 	nodes := map[string]runtimecontracts.SystemNodeContract{
-		"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
-		"audit-node":  {ID: "audit-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.audited": existingOwnerHandlerFixture()}},
+		"accept-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
+		"audit-node":  {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.audited": existingOwnerHandlerFixture()}},
 	}
 	if shape == "duplicate_edge" {
 		inputs = inputs[:1]
 		connects[1] = connects[0]
 		nodes = map[string]runtimecontracts.SystemNodeContract{
-			"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
+			"accept-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
 		}
 	}
 	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
@@ -1899,10 +1897,10 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.done"}}},
 		{id: "consumer-a", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.done"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
-			"consumer-a-node": {ID: "consumer-a-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
+			"consumer-a-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
 		}},
 		{id: "consumer-b", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "work.done"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
-			"consumer-b-node": {ID: "consumer-b-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
+			"consumer-b-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
 		}},
 	}, []runtimecontracts.FlowConnect{
 		{Event: "work.done", From: "producer", To: "consumer-a"},
@@ -1984,7 +1982,6 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.completed"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
-					ID: "consumer-node",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 						"deploy.*": existingOwnerHandlerFixture(),
 					},
@@ -4194,7 +4191,6 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 			}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"producer-node": {
-					ID:            "producer-node",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": {}},
 				},
 			},
@@ -4857,7 +4853,6 @@ func connectRoutePlanStaticSource(connect runtimecontracts.FlowConnect) semantic
 			}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
-					ID:            "consumer-node",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": existingOwnerHandlerFixture()},
 				},
 			},

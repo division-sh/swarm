@@ -551,7 +551,6 @@ repo_scaffold.repo_commit_failed:
   request_copy: string?
 `,
 		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
-  id: repo-scaffold-node
   execution_type: system_node
   subscribes_to:
     - repo_scaffold.repo_commit_requested

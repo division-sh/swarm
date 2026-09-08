@@ -81,7 +81,6 @@ opco.spend_recorded:
 		t.Fatalf("unsupported static retirement handler %d", handler)
 	}
 	writeClosedVariantFile(t, root, "treasury/nodes.yaml", `treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -129,7 +128,6 @@ subject.observed:
 	switch handler {
 	case RootStaticMaterialize:
 		nodes = `root-writer:
-  id: root-writer
   execution_type: system_node
   subscribes_to: [subject.created]
   event_handlers:
@@ -141,7 +139,6 @@ subject.observed:
 `
 	case RootStaticObserve:
 		nodes = `root-observer:
-  id: root-observer
   execution_type: system_node
   subscribes_to: [subject.created]
   produces: [subject.observed]
@@ -209,7 +206,6 @@ fork.probe:
   marker: text
 `,
 		"nodes.yaml": `starter:
-  id: starter
   execution_type: system_node
   subscribes_to: [order.started]
   event_handlers:
@@ -222,14 +218,12 @@ fork.probe:
           - {source_field: dispatch_id, target_field: dispatch_id}
       advances_to: dispatching
 dispatcher:
-  id: dispatcher
   execution_type: system_node
   subscribes_to: [order.dispatched]
   event_handlers:
     order.dispatched:
       advances_to: awaiting
 join-node:
-  id: join-node
   execution_type: system_node
   subscribes_to: [item.completed]
   event_handlers:
@@ -242,7 +236,6 @@ join-node:
         on_complete: {advances_to: ready}
         timeout: {after: 1h, advances_to: attention}
 fork-probe:
-  id: fork-probe
   execution_type: system_node
   subscribes_to: [fork.probe]
   event_handlers:
@@ -270,7 +263,7 @@ terminal_states: [done]
 states: [new, done]
 `,
 		"events.yaml": "scan.requested:\n  swarm: {source: external}\n  topic: text\n",
-		"nodes.yaml":  "scan-orchestrator:\n  id: scan-orchestrator\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
+		"nodes.yaml":  "scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
 		"operating/schema.yaml": `name: operating
 mode: static
 initial_state: initializing
@@ -288,7 +281,6 @@ states: [initializing, waiting, ready]
 		"operating/types.yaml":  "types:\n  Brief:\n    summary: text\n  Feature:\n    name: text\n",
 		"operating/events.yaml": "opco.product_review_requested:\n  swarm: {source: external}\n  note: text\n",
 		"operating/nodes.yaml": `reviewer:
-  id: reviewer
   execution_type: system_node
   subscribes_to: [opco.product_review_requested]
   gate_state:
@@ -332,7 +324,7 @@ pins:
         resolution: {mode: select-or-create}
 `,
 		"consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
-		"consumer/nodes.yaml":    "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)
@@ -356,7 +348,6 @@ opco.spinup_requested:
   product_id: string?
 `,
 		"nodes.yaml": `approval-router:
-  id: approval-router
   execution_type: system_node
   subscribes_to: [approval.completed]
   produces: [opco.spinup_requested]
@@ -368,7 +359,6 @@ opco.spinup_requested:
           instance_id: payload.instance_id
           product_id: payload.product_id
 portfolio-node:
-  id: portfolio-node
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
   event_handlers:
@@ -395,7 +385,6 @@ component_scaffold.spawn_requested:
   product_id: string?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   produces: [component_scaffold.spawn_requested]
@@ -419,7 +408,7 @@ func CopyProviderRollback(t testing.TB, withHandler bool) string {
 	root := CopyExample(t, TemplateSelectOrCreate)
 	nodes := ""
 	if withHandler {
-		nodes = "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    inbound.telegram.text_message: {}\n"
+		nodes = "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    inbound.telegram.text_message: {}\n"
 	}
 	files := map[string]string{
 		"manifest.yaml": `name: provider-rollback-proof

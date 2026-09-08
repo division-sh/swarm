@@ -380,7 +380,7 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 			"component.scaffolded": {},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"component-node": {ID: "component-node"},
+			"component-node": {},
 		},
 	}
 	repo := runtimecontracts.FlowContractView{
@@ -4537,7 +4537,7 @@ join:
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"dispatcher": {ID: "dispatcher", ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
+			"dispatcher": {ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"batch.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[text]"}}}},
@@ -4664,7 +4664,7 @@ join:
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"dispatcher": {ID: "dispatcher", ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
+			"dispatcher": {ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"batch.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[text]"}}}},
@@ -4760,7 +4760,7 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"fan-out-node": {ID: "fan-out-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.ready": qualified}},
+			"fan-out-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.ready": qualified}},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 			"fan-out-node": {"batch.ready": qualified},
@@ -7162,7 +7162,6 @@ vertical.scored:
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  id: scoring-node
   execution_type: system_node
   event_handlers:
     score.dimension_complete:
@@ -7221,7 +7220,6 @@ job.received:
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "nodes.yaml"), `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   event_handlers: {}
 `)

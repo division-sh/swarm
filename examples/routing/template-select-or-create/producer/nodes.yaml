@@ -1,5 +1,4 @@
 producer-node:
-  id: producer-node
   execution_type: system_node
   subscribes_to: [account.requested]
   produces: [account.ready]

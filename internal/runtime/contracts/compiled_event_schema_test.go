@@ -126,7 +126,6 @@ func TestCompiledEventSchemasExcludeGeneratedEvents(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "source.requested:\n  url: text\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 scanner:
-  id: scanner
   execution_type: system_node
   subscribes_to: [source.requested]
   event_handlers:

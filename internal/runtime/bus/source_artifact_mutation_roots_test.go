@@ -320,7 +320,6 @@ func sourceMutationRouteSource() semanticview.Source {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
-				ID:           "worker-{instance_id}",
 				Produces:     []string{"task.completed"},
 				SubscribesTo: []string{"task.requested"},
 			},

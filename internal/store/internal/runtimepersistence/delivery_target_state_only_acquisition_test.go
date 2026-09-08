@@ -662,11 +662,11 @@ func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) seman
 		Events: map[string]runtimecontracts.EventCatalogEntry{"test.node_emitted": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"selector": {
-				ID: "selector", SubscribesTo: []string{"test.node_emitted"},
+				SubscribesTo:  []string{"test.node_emitted"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: binding}}},
 			},
 			"upserter": {
-				ID: "upserter", SubscribesTo: []string{"test.node_emitted"},
+				SubscribesTo:  []string{"test.node_emitted"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}}},
 			},
 		},
@@ -699,11 +699,11 @@ func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childI
 			Events: map[string]runtimecontracts.EventCatalogEntry{"test.node_emitted": {}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"selector": {
-					ID: "selector", SubscribesTo: []string{"test.node_emitted"},
+					SubscribesTo:  []string{"test.node_emitted"},
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: binding}}},
 				},
 				"upserter": {
-					ID: "upserter", SubscribesTo: []string{"test.node_emitted"},
+					SubscribesTo:  []string{"test.node_emitted"},
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}}},
 				},
 			},
@@ -746,11 +746,11 @@ func stateOnlyAcquisitionFlow(flowID, path, mode string) runtimecontracts.FlowCo
 		Events: map[string]runtimecontracts.EventCatalogEntry{"test.node_emitted": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"selector": {
-				ID: "selector", SubscribesTo: []string{"test.node_emitted"},
+				SubscribesTo:  []string{"test.node_emitted"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: binding}}},
 			},
 			"upserter": {
-				ID: "upserter", SubscribesTo: []string{"test.node_emitted"},
+				SubscribesTo:  []string{"test.node_emitted"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}}},
 			},
 		},

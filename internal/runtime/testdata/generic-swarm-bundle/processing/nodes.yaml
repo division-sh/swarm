@@ -1,5 +1,4 @@
 processing-node:
-  id: processing-node
   execution_type: system_node
   state_table: processing_node_state
   subscribes_to:

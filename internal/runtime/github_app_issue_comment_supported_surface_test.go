@@ -370,7 +370,6 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 	}
 	const nodeID = "github-issue-comment-responder"
 	node := runtimecontracts.SystemNodeContract{
-		ID:            nodeID,
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"inbound.github.issue_comment": handler,

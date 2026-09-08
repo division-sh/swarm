@@ -1,5 +1,4 @@
 recorder:
-  id: recorder
   execution_type: system_node
   subscribes_to: [task.record]
   produces: []

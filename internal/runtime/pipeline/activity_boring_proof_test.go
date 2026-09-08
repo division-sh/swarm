@@ -518,7 +518,6 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 		},
 	}
 	node := runtimecontracts.SystemNodeContract{
-		ID:            "scanner",
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		SubscribesTo:  []string{"source.requested"},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{

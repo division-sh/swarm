@@ -2652,7 +2652,7 @@ func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
 
 		"schema.yaml":   "initial_state: ready\nterminal_states: [ready]\nstates: [ready]\n",
 		"entities.yaml": "test_entity: {}\n",
-		"nodes.yaml":    "artifact-node:\n  id: artifact-node\n  execution_type: system_node\n",
+		"nodes.yaml":    "artifact-node:\n  execution_type: system_node\n",
 		"types.yaml": `types:
   ArtifactProvenance:
     artifact_type: text

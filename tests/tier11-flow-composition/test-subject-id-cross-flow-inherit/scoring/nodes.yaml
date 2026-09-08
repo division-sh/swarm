@@ -1,5 +1,4 @@
 score-handler:
-  id: score-handler
   execution_type: system_node
   subscribes_to: [score.requested]
   produces: [score.done]

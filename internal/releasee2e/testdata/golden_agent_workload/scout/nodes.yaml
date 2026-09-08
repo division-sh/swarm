@@ -1,5 +1,4 @@
 scout-intake:
-  id: scout-intake
   execution_type: system_node
   subscribes_to: [scout.requested]
   produces: [scout.work.requested]
@@ -14,7 +13,6 @@ scout-intake:
           candidate_ids: payload.candidate_ids
 
 scout-completion:
-  id: scout-completion
   execution_type: system_node
   subscribes_to: [scout.completed]
   event_handlers:

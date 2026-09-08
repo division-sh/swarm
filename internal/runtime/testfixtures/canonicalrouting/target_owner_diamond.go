@@ -27,7 +27,6 @@ connect:
 `,
 		"events.yaml": "branch.start:\n  key: branch_id\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
-  id: root-collector
   execution_type: system_node
   event_handlers:
     branch.done:
@@ -59,7 +58,6 @@ connect:
 		"branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
 		"branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
 		"branch/nodes.yaml": `branch-worker:
-  id: branch-worker
   execution_type: system_node
   event_handlers:
     branch.start:
@@ -76,7 +74,6 @@ pins:
       - work.ready
 `,
 		"branch/worker/result-static/nodes.yaml": `static-result-node:
-  id: static-result-node
   execution_type: system_node
   event_handlers:
     work.ready:
@@ -92,7 +89,6 @@ pins:
       - work.ready
 `,
 		"branch/worker/result/nodes.yaml": `singleton-result-node:
-  id: singleton-result-node
   execution_type: system_node
   event_handlers:
     work.ready:
@@ -114,7 +110,6 @@ pins:
       - work.ready
 `,
 		"unrelated/worker/result/nodes.yaml": `hostile-node:
-  id: hostile-node
   execution_type: system_node
   event_handlers:
     work.ready:

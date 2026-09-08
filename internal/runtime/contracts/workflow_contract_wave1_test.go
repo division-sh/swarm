@@ -10,7 +10,7 @@ import (
 
 func TestWorkflowContractBundleNodeContractSourceUsesCanonicalRootNodeTable(t *testing.T) {
 	bundle := &WorkflowContractBundle{Nodes: map[string]SystemNodeContract{
-		"root-node": {ID: "root-node"},
+		"root-node": {},
 	}}
 
 	record, ok := bundle.ExecutableNode(identitytest.RootNode(t, "root-node"))
@@ -157,7 +157,7 @@ func TestWorkflowContractBundleScopedNodeRecordsUseLoadedDeclarationMapKey(t *te
 	source := ContractItemSource{FlowPath: "flow", Family: "nodes", File: "flow/nodes.yaml"}
 	bundle := &WorkflowContractBundle{
 		scopedNodes: map[string]SystemNodeContract{
-			contractScopeKey(source, "declared-node"): {ID: "non-authoritative-embedded-id"},
+			contractScopeKey(source, "declared-node"): {},
 		},
 		scopedNodeSources: map[string]ContractItemSource{
 			contractScopeKey(source, "declared-node"): source,

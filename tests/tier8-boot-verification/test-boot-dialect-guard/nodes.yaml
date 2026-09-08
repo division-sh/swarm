@@ -1,5 +1,4 @@
 string-guard-node:
-  id: string-guard-node
   execution_type: system_node
   subscribes_to: [check.requested]
   produces: []

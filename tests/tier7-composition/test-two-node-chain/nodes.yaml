@@ -1,5 +1,4 @@
 node-a:
-  id: node-a
   execution_type: system_node
   subscribes_to: [task.started]
   produces: [task.progressed]
@@ -9,7 +8,6 @@ node-a:
       emit: task.progressed
 
 node-b:
-  id: node-b
   execution_type: system_node
   subscribes_to: [task.progressed]
   produces: [task.finished]

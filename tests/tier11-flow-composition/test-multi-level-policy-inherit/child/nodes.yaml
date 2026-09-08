@@ -1,5 +1,4 @@
 child-node:
-  id: child-node
   execution_type: system_node
   subscribes_to: [child.check]
   produces: []

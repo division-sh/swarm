@@ -1165,7 +1165,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.started": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"target-node": {ID: "target-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.started": {}}},
+			"target-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.started": {}}},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}

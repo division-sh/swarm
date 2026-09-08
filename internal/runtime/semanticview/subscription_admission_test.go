@@ -171,7 +171,6 @@ func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.completed": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
-				ID: "listener",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"*.completed":    {},
 					"task.completed": {},
@@ -199,7 +198,7 @@ func TestResolveFlowNodeSubscriptionHandlerRejectsBareSubscriptionAsExecutableHa
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"task.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"listener": {ID: "listener", SubscribesTo: []string{"task.requested"}},
+			"listener": {SubscribesTo: []string{"task.requested"}},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
@@ -224,7 +223,7 @@ func TestResolveNodeSubscriptionHandlerScopesLocalWildcardToOwnerFlow(t *testing
 				Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
 				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
 				Nodes: map[string]runtimecontracts.SystemNodeContract{
-					"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}},
+					"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}},
 				},
 			}
 			sibling := runtimecontracts.FlowContractView{

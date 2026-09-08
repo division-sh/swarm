@@ -1,0 +1,15 @@
+worker:
+  execution_type: system_node
+  subscribes_to: [entry.root, work.processed]
+  produces: [work.processed, work.routed]
+  event_handlers:
+    entry.root:
+      advances_to: working
+      emit:
+        event: work.processed
+        fields: {marker: payload.marker, origin: '"."'}
+    work.processed:
+      advances_to: done
+      emit:
+        event: work.routed
+        fields: {marker: payload.marker, origin: '"."'}

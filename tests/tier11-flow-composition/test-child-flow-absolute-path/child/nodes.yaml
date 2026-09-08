@@ -1,5 +1,4 @@
 child-worker:
-  id: child-worker
   execution_type: system_node
   subscribes_to: [task.requested]
   produces: [task.done]

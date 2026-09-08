@@ -1,5 +1,4 @@
 task-runner:
-  id: task-runner
   execution_type: system_node
   subscribes_to: [task.assign]
   produces: []

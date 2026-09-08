@@ -110,7 +110,6 @@ func TestCredentialChecksRetainAllMockToolUsedByLiveWorkflowActivity(t *testing.
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"provider-sender": {
-			ID: "provider-sender",
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"provider.requested": {Activity: runtimecontracts.ActivitySpec{ID: "provider_send", Tool: "provider.send"}},
 				"provider.rule_requested": {Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -154,7 +153,6 @@ func TestMockOnlyPostureRequiresMockAgentsAndExactActivityResponses(t *testing.T
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"provider-sender": {
-			ID: "provider-sender",
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"provider.requested": {Activity: runtimecontracts.ActivitySpec{ID: "provider_send", Tool: "provider.send"}},
 			},
@@ -363,7 +361,6 @@ func scopedAliasMockConnectorFixtureOptions(t *testing.T, includeLive, includeIn
 	writeBootverifyFixtureFile(t, filepath.Join(root, "mocks", "root-mock.py"), "def handle(input):\n    return {'text': 'mock'}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 root-node:
-  id: root-node
   execution_type: system_node
   event_handlers: {}
 `)
@@ -432,7 +429,6 @@ func scopedReachabilityNativeTools(enabled bool) string {
 func scopedReachabilityNodeYAML() string {
 	return `
 shared-sender:
-  id: shared-sender
   execution_type: system_node
   event_handlers: {}
 `
@@ -455,7 +451,6 @@ func addScopedAliasActivities(t *testing.T, source semanticview.Source) {
 
 func scopedReachabilityActivityNode() runtimecontracts.SystemNodeContract {
 	return runtimecontracts.SystemNodeContract{
-		ID:            "shared-sender",
 		ExecutionType: "system_node",
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"provider.requested": {

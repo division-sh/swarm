@@ -661,17 +661,11 @@ func (c *checkerContext) appendInvalidExecutableNodeFindings(record runtimecontr
 	if nodeID == "" {
 		c.invalidFindings = append(c.invalidFindings, Finding{
 			CheckID: "invalid_field_detection", Severity: "error",
-			Message: fmt.Sprintf("node in scope %s missing required field id", scopeLabel), Location: scopeLabel,
+			Message: fmt.Sprintf("node in scope %s requires a nonempty map key", scopeLabel), Location: scopeLabel,
 		})
 		return
 	}
 	nodeLabel := scopedObjectLabel(scopeLabel, nodeID)
-	if authoredID := strings.TrimSpace(record.Entry.ID); !runtimecontracts.SystemNodeIDMatchesKey(nodeID, authoredID) {
-		c.invalidFindings = append(c.invalidFindings, Finding{
-			CheckID: "invalid_field_detection", Severity: "error",
-			Message: fmt.Sprintf("node %s id %q must match map key", nodeLabel, authoredID), Location: nodeLabel,
-		})
-	}
 	if strings.TrimSpace(record.Entry.ExecutionType) != "" {
 		if err := runtimecontracts.ValidateSystemNodeExecutionType(record.Entry.ExecutionType); err != nil {
 			c.invalidFindings = append(c.invalidFindings, Finding{

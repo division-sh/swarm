@@ -1,5 +1,4 @@
 beta-worker:
-  id: beta-worker
   execution_type: system_node
   subscribes_to: [beta.start]
   produces: []

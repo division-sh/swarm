@@ -1,5 +1,4 @@
 item-handler:
-  id: item-handler
   execution_type: system_node
   subscribes_to: [item.received]
   produces: [item.processed]
@@ -11,7 +10,6 @@ item-handler:
         fields:
           item_id: payload.item_id
 item-observer:
-  id: item-observer
   execution_type: system_node
   subscribes_to: [item.processed]
   event_handlers:

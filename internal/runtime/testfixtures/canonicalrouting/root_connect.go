@@ -34,7 +34,6 @@ pins:
   topic: text?
 `,
 		"nodes.yaml": `bootstrap-node:
-  id: bootstrap-node
   execution_type: system_node
   subscribes_to: [bootstrap.requested]
   event_handlers:
@@ -61,7 +60,6 @@ pins:
   topic: text?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   event_handlers:
@@ -96,7 +94,7 @@ platform_version: ">=0.7.0 <0.8.0"
 		if emit != RootConnectCanonicalEmit {
 			t.Fatalf("unsupported root connect emitter %d", emit)
 		}
-		rootNodes = "root-node:\n  id: root-node\n  execution_type: system_node\n  event_handlers:\n    root.start:\n" + emitBody
+		rootNodes = "root-node:\n  execution_type: system_node\n  event_handlers:\n    root.start:\n" + emitBody
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs:\n    events: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
 	writeClosedVariantFile(t, root, "events.yaml", "root.start:\n  entity_id: text\nroot.ready:\n  entity_id: text\n")
@@ -109,7 +107,6 @@ pins:
   inputs:
     events: [root.ready]
 `, "", "consumer_state:\n  entity_id: text\n", `consumer-node:
-  id: consumer-node
   execution_type: system_node
   subscribes_to: [root.ready]
   event_handlers:
@@ -152,7 +149,6 @@ pins:
   inputs:
     events: [root.ready]
 `, "", "consumer_state:\n  entity_id: text\n", `consumer-node:
-  id: consumer-node
   execution_type: system_node
   subscribes_to: [root.ready]
   event_handlers:
@@ -174,7 +170,6 @@ func CopyRootOutputSingletonArc(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(receiverDir, "schema.yaml"), "name: consumer\n", "name: receiver\n")
 	applyClosedReplacement(t, filepath.Join(receiverDir, "entities.yaml"), "consumer_state:", "receiver_state:")
 	applyClosedReplacement(t, filepath.Join(receiverDir, "nodes.yaml"), "consumer-node", "arc-receiver")
-	applyClosedReplacement(t, filepath.Join(receiverDir, "nodes.yaml"), "  id: consumer-node", "  id: arc-receiver")
 	return root
 }
 
@@ -197,7 +192,6 @@ connect:
     to: .
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
-  id: root-collector
   execution_type: system_node
   subscribes_to: [scout.completed]
   event_handlers:
@@ -239,7 +233,6 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "work.ping:\n  turn: integer\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-boomerang:
-  id: root-boomerang
   execution_type: system_node
   subscribes_to: [work.pong]
   event_handlers:
@@ -256,7 +249,6 @@ pins:
   outputs:
     events: [work.pong]
 `, "work.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
-  id: boomerang-worker
   execution_type: system_node
   subscribes_to: [work.ping]
   event_handlers:

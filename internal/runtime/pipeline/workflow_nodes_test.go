@@ -38,7 +38,6 @@ func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *test
 		Path: "discovery",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
-				ID:           "scan-orchestrator",
 				SubscribesTo: []string{"scan.requested"},
 			},
 		},
@@ -113,7 +112,6 @@ func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProdu
 		Path: "validation",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"validation-orchestrator": {
-				ID:           "validation-orchestrator",
 				SubscribesTo: []string{"vertical.shortlisted"},
 			},
 		},
@@ -220,7 +218,6 @@ func TestWorkflowNodeProjectionPreservesLocalExactHandler(t *testing.T) {
 
 func workflowNodeExactSubscriptionSource(authored string) semanticview.Source {
 	node := runtimecontracts.SystemNodeContract{
-		ID:            "listener",
 		SubscribesTo:  []string{authored},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}},
 	}
@@ -313,7 +310,6 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 		Path: "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
-				ID:       "consumer-node",
 				Produces: []string{"scan.completed"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.requested": {
@@ -403,7 +399,6 @@ func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T
 
 func TestLoadWorkflowNodes_NestedChildFlowUsesOwningFlowForSubscriptionAndEmission(t *testing.T) {
 	nodeContract := runtimecontracts.SystemNodeContract{
-		ID: "shared",
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
 		},
@@ -769,7 +764,6 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 		Path: "receiver", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"receiver-node": {
-				ID:           "receiver-node",
 				SubscribesTo: []string{"deploy.requested"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"deploy.requested": {},
@@ -853,7 +847,7 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 		},
 		Path: "receiver", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.accepted": {}, "deploy.audited": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"receiver-node": {ID: "receiver-node", EventHandlers: receiverHandlers},
+			"receiver-node": {EventHandlers: receiverHandlers},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{producer, receiver}}
@@ -947,7 +941,6 @@ func workflowNodeDirectTemplateDeliverySource() semanticview.Source {
 		Path: "account_case",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"account-case-worker": {
-				ID:           "account-case-worker",
 				SubscribesTo: []string{"account.ready"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"account.ready": {},

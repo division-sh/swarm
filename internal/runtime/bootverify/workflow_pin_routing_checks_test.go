@@ -94,7 +94,6 @@ func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsume
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"producer": {
-				ID:            "producer",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"request.started"},
 				Produces:      []string{"result.ready"},
@@ -106,7 +105,6 @@ func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsume
 	}
 	if sameFlowConsumer {
 		bundle.Nodes["consumer"] = runtimecontracts.SystemNodeContract{
-			ID:            "consumer",
 			ExecutionType: "system_node",
 			SubscribesTo:  []string{"result.ready"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{

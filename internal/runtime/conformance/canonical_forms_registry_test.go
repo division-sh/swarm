@@ -60,9 +60,34 @@ type canonicalFormsInventory struct {
 }
 
 type canonicalFormsRow struct {
-	ID       string                 `yaml:"id"`
-	Ruled    string                 `yaml:"ruled"`
-	Spelling canonicalFormsSpelling `yaml:"spelling"`
+	ID                 string                 `yaml:"id"`
+	Ruled              string                 `yaml:"ruled"`
+	Spelling           canonicalFormsSpelling `yaml:"spelling"`
+	IdentityRetirement string                 `yaml:"identity_retirement"`
+}
+
+func TestCanonicalFormsRegistryPinsNodeIDRetirement(t *testing.T) {
+	registry := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
+	for _, row := range registry.Rows {
+		if row.ID != "node.identity_defaults_projections" {
+			continue
+		}
+		if !strings.Contains(row.IdentityRetirement, "#2308") || !strings.Contains(row.IdentityRetirement, "Other projections in this row remain open") {
+			t.Fatalf("identity-only closure not recorded: %#v", row)
+		}
+		if !reflect.DeepEqual(row.Spelling.RetiredDuplicates, []string{"node.id", "execution_type_system_node", "subscribes_to_equal_to_handler_keys", "produces_equal_to_emit_sites"}) {
+			t.Fatalf("node retirement classification: %#v", row.Spelling)
+		}
+		if _, ok := reflect.TypeOf(runtimecontracts.SystemNodeContract{}).FieldByName("ID"); ok {
+			t.Fatal("retired node ID carrier restored")
+		}
+		var nodes map[string]runtimecontracts.SystemNodeContract
+		if err := yaml.Unmarshal([]byte("worker:\n  id: worker\n  event_handlers: {}\n"), &nodes); err == nil || !strings.Contains(err.Error(), "node.id is retired; the map key is the identity.") {
+			t.Fatalf("node ID admitted: %v", err)
+		}
+		return
+	}
+	t.Fatal("node identity registry row missing")
 }
 
 type canonicalFormsSpelling struct {

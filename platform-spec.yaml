@@ -1413,11 +1413,12 @@ contract_formats:
             sole source-side admission fact: target routes, EventEnvelope fields, FlowInstance/EntityID shape, qualified suffix,
             and leaf equivalence cannot repair absent or contradictory source provenance.
         executable_node_identity: |
-          Every executable workflow-node declaration has one opaque immutable identity consisting of its exact flow_path,
-          owning flow_id, and local node_id. A root declaration carries flow_path "." and an explicitly empty flow_id;
-          that declaration coordinate is distinct from the selected run or execution-flow route. Local node_id, runtime
+          Every executable workflow-node declaration consumes DeclarationIdentity with its exact flow_path, family=node,
+          and semantic_path equal to the node map key. ExecutableNode is its strict {flow_path, node_id} projection;
+          a root declaration carries flow_path ".". There is no additional flow_id coordinate. This declaration
+          coordinate is distinct from the selected run or execution-flow route. A bare local node_id, runtime
           naming, source-event scope, flow-instance text, and descriptor lookup are never executable-node authority. Contract
-          loading mints this identity once, and routing, delivery, handler execution, joins, timers, activities, replay,
+          loading admits this identity, and routing, delivery, handler execution, joins, timers, activities, replay,
           selected-contract fork, recovery, and readback preserve it without reconstruction. Node subscriber_id and other
           durable compact forms are strict canonical codecs of the complete tuple: missing coordinates, alternate spellings,
           unknown fields, malformed keys, or disagreement with the selected declaration fail before mutation. Existing
@@ -4215,9 +4216,6 @@ handler_specification:
       required:
         event_handlers: map of event_name → handler declaration
       optional:
-        id: string — migration spelling for the node identifier; if omitted, the YAML map key is the effective node id.
-          If present as a plain value, it must exactly match the YAML map key. Existing rendered runtime-id templates such
-          as node-key-{instance_id} are subscriber naming templates, not a separate semantic node identity owner.
         execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
         subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
           event_handlers keys when omitted. Join timeout delivery is platform-owned and derived from effective join plans.
@@ -4233,8 +4231,10 @@ handler_specification:
           timer authoring for flows using `stages:` is owned by
           `stages.<stage>.timers`, not node-level state timers.
         gate_state: map — gate field definitions for this node (boolean flags on entity)
+      retired:
+        id: 'Any node-level id presence is rejected before value decoding: node.id is retired; the map key is the identity.'
       effective_semantics:
-        id: YAML map key, with same-value explicit id accepted during migration
+        id: YAML map key only, scoped by the existing declaration identity. No authored override or template spelling.
         execution_type: system_node
         runtime_subscriptions: union of explicit subscribes_to entries, event_handlers keys, and intrinsic platform runtime
           events required by declared handler primitives such as platform.join_timeout
@@ -7944,7 +7944,7 @@ engine:
       severity: error
       scope: contract
       trigger: A declaration uses an unsupported or malformed field in a fail-closed contract surface. This includes node
-        top-level fields outside the defined node_fields set (id, execution_type, description, subscribes_to, event_handlers,
+        top-level fields outside the defined node_fields set (execution_type, description, subscribes_to, event_handlers,
         state_schema, state_table, timers, gate_state, produces) and malformed external tool-provider dispatch
         rate-limit declarations on HTTP tools, MCP servers, or policy.web_search_provider.
       when: boot-only

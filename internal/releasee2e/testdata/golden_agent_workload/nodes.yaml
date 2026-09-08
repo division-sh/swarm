@@ -1,5 +1,4 @@
 search-intake:
-  id: search-intake
   execution_type: system_node
   subscribes_to: [search.requested]
   produces: [scout.requested]
@@ -13,7 +12,6 @@ search-intake:
           query: payload.query
           candidate_ids: payload.candidate_ids
 scout-collector:
-  id: scout-collector
   execution_type: system_node
   subscribes_to: [scout.completed]
   produces: [candidate.requested]
@@ -36,7 +34,6 @@ scout-collector:
             batch_id: payload.batch_id
             candidate_id: candidate_id
 candidate-collector:
-  id: candidate-collector
   execution_type: system_node
   subscribes_to: [candidate.completed]
   event_handlers:
