@@ -5,29 +5,20 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type selectedContractProjectedWorkflowOwner struct {
-	entityID    string
-	flowID      string
-	addressKind runfork.RunForkSelectedContractWorkflowStateAddressKind
-	route       runtimeflowidentity.Route
-}
-
-// This ephemeral correspondence is minted by the source-event workflow-state
-// projection. It does not replace the persisted, runless selected evidence.
+// Root recipient binding is independent of the producer's entity ownership.
+// The source-event admission supplies event membership, not receiver state.
 type selectedContractWorkflowProjection struct {
-	childRunID    string
-	bySourceEvent map[string]selectedContractProjectedWorkflowOwner
+	root         semanticview.RootExecutionCoordinate
+	sourceEvents map[string]struct{}
 }
 
 func (p selectedContractWorkflowProjection) requireChildRun(runID string) error {
-	if p.childRunID == "" || runID != p.childRunID {
-		return fmt.Errorf("selected-contract recipient projection requires exact child run %q; got %q", p.childRunID, runID)
+	if !p.root.Valid() || runID != p.root.RunID() {
+		return fmt.Errorf("selected-contract recipient projection requires exact child run %q; got %q", p.root.RunID(), runID)
 	}
 	return nil
 }
@@ -38,7 +29,7 @@ func (p selectedContractWorkflowProjection) BindRecipient(sourceEventID string, 
 		return forkrecipient.Evidence{}, err
 	}
 	selected = canonical[0]
-	if err := p.requireChildRun(p.childRunID); err != nil {
+	if err := p.requireChildRun(p.root.RunID()); err != nil {
 		return forkrecipient.Evidence{}, err
 	}
 	// Agent coordinates remain the canonical full Plan; only Plan.Live binds run.
@@ -46,28 +37,19 @@ func (p selectedContractWorkflowProjection) BindRecipient(sourceEventID string, 
 	if !node.Valid() {
 		return selected, nil
 	}
-	owner, ok := p.bySourceEvent[strings.TrimSpace(sourceEventID)]
+	_, ok := p.sourceEvents[strings.TrimSpace(sourceEventID)]
 	if !ok {
 		// Absence supplies no path equivalence. Actual evidence must still agree
 		// exactly with the unchanged blueprint.
 		return selected, nil
 	}
-	if owner.entityID == "" || owner.flowID != node.FlowPath() {
-		return forkrecipient.Evidence{}, fmt.Errorf("selected-contract recipient %s has no matching admitted workflow/entity correspondence", node.Key())
+	if node.FlowPath() != p.root.FlowID() {
+		return selected, nil
 	}
-	switch owner.addressKind {
-	case runfork.RunForkSelectedContractWorkflowStateRunScope:
-		if selected.Path != owner.flowID {
-			return forkrecipient.Evidence{}, fmt.Errorf("selected-contract run-scope recipient %s path %q disagrees with admitted workflow %q", node.Key(), selected.Path, owner.flowID)
-		}
-		selected.Path = owner.route.InstancePath
-	case runfork.RunForkSelectedContractWorkflowStateExact:
-		if selected.Path != owner.route.InstancePath {
-			return forkrecipient.Evidence{}, fmt.Errorf("selected-contract exact recipient %s path %q disagrees with admitted workflow route %q", node.Key(), selected.Path, owner.route.InstancePath)
-		}
-	default:
-		return forkrecipient.Evidence{}, fmt.Errorf("selected-contract recipient projection has unsupported address kind %q", owner.addressKind)
+	if selected.Path != p.root.FlowID() {
+		return forkrecipient.Evidence{}, fmt.Errorf("selected-contract run-scope recipient %s path %q disagrees with admitted root %q", node.Key(), selected.Path, p.root.FlowID())
 	}
+	selected.Path = p.root.RunID()
 	return selected, selected.Validate()
 }
 

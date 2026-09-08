@@ -12,19 +12,23 @@ type runForkMaterializedEntitySnapshotMetadataAdmission struct {
 	Blockers     []runfork.RunForkUnsupportedBlocker
 }
 
-type runForkSourceEntityStateMetadata struct {
-	FlowInstance string
-	EntityType   string
-	Slug         string
-	Name         string
-	Exists       bool
-}
-
 func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState) ([]runfork.RunForkEntityState, runForkMaterializedEntitySnapshotMetadataAdmission, error) {
+	if err := validateRunForkEntityMetadataOwners(snapshot); err != nil {
+		return nil, runForkMaterializedEntitySnapshotMetadataAdmission{}, err
+	}
+	seen := make(map[string]struct{}, len(entities))
+	for _, entity := range entities {
+		entityID := strings.TrimSpace(entity.EntityID)
+		if _, duplicate := seen[entityID]; duplicate {
+			return nil, runForkMaterializedEntitySnapshotMetadataAdmission{}, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("duplicate reconstructed entity owner %q", entityID))
+		}
+		seen[entityID] = struct{}{}
+	}
 	out := make([]runfork.RunForkEntityState, len(entities))
 	copy(out, entities)
 	admission := runForkMaterializedEntitySnapshotMetadataAdmission{}
 	for i := range out {
+		out[i].MaterializationMetadata = nil
 		entityID := strings.TrimSpace(out[i].EntityID)
 		if entityID == "" {
 			blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerEntitySnapshotMetadataUnproven)
@@ -48,18 +52,22 @@ func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSn
 
 func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entity runfork.RunForkEntityState) (runfork.RunForkMaterializedEntitySnapshotMetadata, string, bool) {
 	entityID := strings.TrimSpace(entity.EntityID)
-	eventFlow := loadRunForkEntityEventFlowInstance(snapshot, entityID)
-	sourceState := loadRunForkSourceEntityStateMetadata(snapshot, entityID)
-
-	flowInstance := strings.TrimSpace(eventFlow)
-	source := runfork.RunForkMaterializedEntitySnapshotMetadataSourceEvent
-	if flowInstance == "" {
-		flowInstance = strings.TrimSpace(sourceState.FlowInstance)
-		source = runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState
+	if err := validateRunForkEntityMetadataOwners(snapshot); err != nil {
+		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, err.Error(), false
 	}
-	if !sourceState.Exists {
+	var sourceState *runForkRevisionEntityMetadata
+	if snapshot != nil {
+		for i := range snapshot.EntityMetadata {
+			if strings.TrimSpace(snapshot.EntityMetadata[i].EntityID) == entityID {
+				sourceState = &snapshot.EntityMetadata[i]
+				break
+			}
+		}
+	}
+	if sourceState == nil {
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision entity metadata for entity %s", entityID), false
 	}
+	flowInstance := strings.TrimSpace(sourceState.FlowInstance)
 	entityType := strings.TrimSpace(sourceState.EntityType)
 	if flowInstance == "" || entityType == "" {
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
@@ -70,41 +78,26 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		EntityType:   entityType,
 		Slug:         strings.TrimSpace(sourceState.Slug),
 		Name:         strings.TrimSpace(sourceState.Name),
-		Source:       source,
+		Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
 	}, "", true
 }
 
-func loadRunForkEntityEventFlowInstance(snapshot *runForkRevisionSnapshot, entityID string) string {
+func validateRunForkEntityMetadataOwners(snapshot *runForkRevisionSnapshot) error {
 	if snapshot == nil {
-		return ""
+		return nil
 	}
-	for index := len(snapshot.Events) - 1; index >= 0; index-- {
-		event := snapshot.Events[index]
-		if strings.TrimSpace(event.EntityID) == strings.TrimSpace(entityID) && strings.TrimSpace(event.FlowInstance) != "" {
-			return strings.TrimSpace(event.FlowInstance)
-		}
-	}
-	return ""
-}
-
-func loadRunForkSourceEntityStateMetadata(snapshot *runForkRevisionSnapshot, entityID string) runForkSourceEntityStateMetadata {
-	if snapshot == nil {
-		return runForkSourceEntityStateMetadata{}
-	}
+	seen := make(map[string]struct{}, len(snapshot.EntityMetadata))
 	for _, fact := range snapshot.EntityMetadata {
-		if strings.TrimSpace(fact.EntityID) != strings.TrimSpace(entityID) {
-			continue
+		entityID := strings.TrimSpace(fact.EntityID)
+		if entityID == "" {
+			return runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, "snapshot metadata requires an exact entity owner")
 		}
-		entityType := strings.TrimSpace(fact.EntityType)
-		return runForkSourceEntityStateMetadata{
-			FlowInstance: strings.TrimSpace(fact.FlowInstance),
-			EntityType:   entityType,
-			Slug:         strings.TrimSpace(fact.Slug),
-			Name:         strings.TrimSpace(fact.Name),
-			Exists:       true,
+		if _, duplicate := seen[entityID]; duplicate {
+			return runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("duplicate snapshot metadata entity owner %q", entityID))
 		}
+		seen[entityID] = struct{}{}
 	}
-	return runForkSourceEntityStateMetadata{}
+	return nil
 }
 
 func runForkMaterializedEntitySnapshotMetadataBlockerDisposition(entityID, message string) runfork.RunForkReplayResumeDisposition {

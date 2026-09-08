@@ -560,7 +560,10 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 	for _, entity := range plan.Entities {
 		entityID := strings.TrimSpace(entity.EntityID)
 		if entityID == "" {
-			return nil, fmt.Errorf("fork entity_id is required")
+			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, "fork entity_id is required")
+		}
+		if _, duplicate := out[entityID]; duplicate {
+			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("duplicate fork entity owner %q", entityID))
 		}
 		if entity.MaterializationMetadata == nil {
 			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("fork materialization cannot prove source-at-T flow_instance/entity_type metadata for entity %s", entityID))
@@ -569,6 +572,9 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 		if metadataOwner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner {
 			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("fork materialization metadata for entity %s must be owned by %s", entityID, runfork.RunForkMaterializedEntitySnapshotMetadataOwner))
 		}
+		if entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
+			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("fork materialization metadata for entity %s requires fixed-revision entity state metadata", entityID))
+		}
 		meta := runForkEntityMetadata{
 			FlowInstance: strings.TrimSpace(entity.MaterializationMetadata.FlowInstance),
 			EntityType:   strings.TrimSpace(entity.MaterializationMetadata.EntityType),
@@ -576,35 +582,21 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 			Name:         strings.TrimSpace(entity.MaterializationMetadata.Name),
 		}
 		if meta.FlowInstance == "" || meta.EntityType == "" {
-			return nil, fmt.Errorf("source entity_state metadata for entity %s must include flow_instance and entity_type", entityID)
+			return nil, runForkReplayResumeError(runfork.RunForkBlockerEntitySnapshotMetadataUnproven, runfork.RunForkReplayResumeFactEntityStateSnapshot, fmt.Sprintf("source entity_state metadata for entity %s must include flow_instance and entity_type", entityID))
 		}
 		out[entityID] = meta
 	}
 	return out, nil
 }
 
-type runForkEntityIdentity struct {
-	EntityID     string
-	FlowInstance string
-}
+type runForkEntityIdentity = runfork.EntityIdentity
 
-type runForkEntityProjection struct {
-	Source runForkEntityIdentity
-	Fork   runForkEntityIdentity
-}
+type runForkEntityProjection = runfork.EntityProjection
 
 type RunForkEntityProjection = runForkEntityProjection
 
 func projectRunForkEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance string) (runForkEntityProjection, error) {
-	source := runForkEntityIdentity{
-		EntityID:     strings.TrimSpace(entityID),
-		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
-	}
-	fork, err := projectRunForkEntityIdentity(sourceRunID, forkRunID, source.EntityID, source.FlowInstance)
-	if err != nil {
-		return runForkEntityProjection{}, err
-	}
-	return runForkEntityProjection{Source: source, Fork: fork}, nil
+	return runfork.ProjectEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance)
 }
 
 func ProjectRunForkEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance string) (RunForkEntityProjection, error) {
@@ -612,23 +604,8 @@ func ProjectRunForkEntityOwnership(sourceRunID, forkRunID, entityID, flowInstanc
 }
 
 func projectRunForkEntityIdentity(sourceRunID, forkRunID, entityID, flowInstance string) (runForkEntityIdentity, error) {
-	sourceRunID = strings.TrimSpace(sourceRunID)
-	forkRunID = strings.TrimSpace(forkRunID)
-	entityID = strings.TrimSpace(entityID)
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if sourceRunID == "" || forkRunID == "" || entityID == "" || flowInstance == "" {
-		return runForkEntityIdentity{}, fmt.Errorf("fork entity identity requires source run, fork run, entity, and flow instance")
-	}
-	if entityID != sourceRunID {
-		if flowInstance == sourceRunID {
-			return runForkEntityIdentity{}, fmt.Errorf("fork source entity %s uses root flow_instance %s without canonical root entity identity", entityID, sourceRunID)
-		}
-		return runForkEntityIdentity{EntityID: entityID, FlowInstance: flowInstance}, nil
-	}
-	if flowInstance != sourceRunID {
-		return runForkEntityIdentity{}, fmt.Errorf("fork root entity %s has flow_instance %q; want source run identity", entityID, flowInstance)
-	}
-	return runForkEntityIdentity{EntityID: forkRunID, FlowInstance: forkRunID}, nil
+	projection, err := runfork.ProjectEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance)
+	return projection.Fork, err
 }
 
 func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisionMaterializer, materializeProposed runForkProposedEffectMaterializer, insertDiff runForkEntityStateDiffWriter, tx *sql.Tx, story runtimeauthoractivity.Mutation, runLifecycle privatemutationlog.ActiveRunSourceOwner, effects *privaterunforkrevision.Effects, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {

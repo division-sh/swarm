@@ -30,6 +30,7 @@ import (
 	runcontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -341,7 +342,7 @@ type stopAfterSelectedForkCommit struct {
 	forkexecution.SelectedContractForkLifecycle
 }
 
-func (s stopAfterSelectedForkCommit) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error) {
+func (s stopAfterSelectedForkCommit) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
 	result, err := s.SelectedContractForkLifecycle.MaterializeRunForkForSelectedContractExecution(ctx, req)
 	if err != nil {
 		return result, err
@@ -475,6 +476,7 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 								})
 								if !refused {
 									if activateErr != nil || !activated.Activated || activated.ExecutedEventCount != 1 {
+										logSelectedForkRecoveryFailure(t, ctx, h, forkRun, activateErr)
 										t.Fatalf("admitted recovery: activated=%t count=%d fork=%s err=%v", activated.Activated, activated.ExecutedEventCount, forkRun, activateErr)
 									}
 									continue

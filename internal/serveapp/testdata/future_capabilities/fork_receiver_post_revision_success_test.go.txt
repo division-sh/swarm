@@ -1,0 +1,959 @@
+package serveapp
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/servedparity"
+)
+
+type forkReceiverRow struct {
+	ID, Flow, Type, State string
+	Fields                map[string]any
+}
+
+type forkReceiverJourneyOptions struct {
+	nested          bool
+	selectedMissing bool
+	repeated        bool
+}
+
+type forkReceiverProducerEvidence struct {
+	Source     events.RoutingSource
+	Name, Mode string
+}
+
+func readForkReceiverProducerEvidence(t *testing.T, rt servedControlProofRuntime, runID, eventID string) forkReceiverProducerEvidence {
+	t.Helper()
+	var evidence forkReceiverProducerEvidence
+	var kind, authority, routeJSON string
+	if err := rt.DB.QueryRow(`SELECT routing_source_kind,COALESCE(routing_source_authority,''),CAST(source_route AS TEXT),event_name,execution_mode FROM events WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&kind, &authority, &routeJSON, &evidence.Name, &evidence.Mode); err != nil {
+		t.Fatal(err)
+	}
+	var route events.RouteIdentity
+	if err := json.Unmarshal([]byte(routeJSON), &route); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	evidence.Source, err = events.RestoreRoutingSource(kind, route, authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evidence
+}
+
+func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for time.Now().Before(deadline) {
+		var incomplete int
+		// Successful pipeline settlement owns the handoff stamp and receipt in
+		// one transaction, after recursive child publication has returned.
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
+			(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
+			(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&incomplete); err != nil {
+			t.Fatal(err)
+		}
+		if incomplete == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("source pipeline completion did not finish: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+}
+
+// Refusal snapshots cover all application base tables, not merely the child
+// tables that a successful fork would populate. Internal DB objects are excluded.
+func snapshotForkReceiverApplication(t *testing.T, rt servedControlProofRuntime) map[string][]string {
+	t.Helper()
+	opts := &sql.TxOptions{ReadOnly: true}
+	query := `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
+	if rt.Backend == "postgres" {
+		opts.Isolation = sql.LevelRepeatableRead
+		query = `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`
+	}
+	tx, err := rt.DB.BeginTx(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	out := map[string][]string{}
+	for _, table := range tables {
+		rows, err := tx.Query(`SELECT * FROM "` + strings.ReplaceAll(table, `"`, `""`) + `"`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(columns)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[table+"/columns"] = []string{string(encoded)}
+		out[table] = []string{}
+		for rows.Next() {
+			values, pointers := make([]any, len(columns)), make([]any, len(columns))
+			for i := range values {
+				pointers[i] = &values[i]
+			}
+			if err := rows.Scan(pointers...); err != nil {
+				t.Fatal(err)
+			}
+			for i, value := range values {
+				if raw, ok := value.([]byte); ok {
+					values[i] = string(raw)
+				}
+			}
+			encoded, err := json.Marshal(values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[table] = append(out[table], string(encoded))
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
+		sort.Strings(out[table])
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func readForkReceiverRows(t *testing.T, rt servedControlProofRuntime, runID string) map[string]forkReceiverRow {
+	t.Helper()
+	rows, err := rt.DB.Query(`SELECT entity_id,flow_instance,entity_type,current_state,CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 ORDER BY entity_id`, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]forkReceiverRow{}
+	for rows.Next() {
+		var row forkReceiverRow
+		var raw string
+		if err := rows.Scan(&row.ID, &row.Flow, &row.Type, &row.State, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(raw), &row.Fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, duplicate := out[row.Flow]; duplicate {
+			t.Fatalf("fixture has duplicate owner rows for %s", row.Flow)
+		}
+		out[row.Flow] = row
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func readForkReceiverCompanions(t *testing.T, rt servedControlProofRuntime, runID string) map[string][]string {
+	t.Helper()
+	out := map[string][]string{}
+	for _, table := range []string{"flow_instances", "flow_instance_runtime_readiness"} {
+		rows, err := rt.DB.Query(`SELECT * FROM `+table+` WHERE run_id=$1`, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[table] = []string{}
+		for rows.Next() {
+			values, pointers := make([]any, len(columns)), make([]any, len(columns))
+			for i := range values {
+				pointers[i] = &values[i]
+			}
+			if err := rows.Scan(pointers...); err != nil {
+				t.Fatal(err)
+			}
+			for i, value := range values {
+				if raw, ok := value.([]byte); ok {
+					values[i] = string(raw)
+				}
+			}
+			encoded, err := json.Marshal(values)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[table] = append(out[table], string(encoded))
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
+		sort.Strings(out[table])
+	}
+	return out
+}
+
+func requireForkReceiverEffect(t *testing.T, rt servedControlProofRuntime, runID, sourceEvent, path, label, kind, entityID string) events.DeliveryRoute {
+	t.Helper()
+	var matched []servedForkDeliveryEvidence
+	var deliveryID string
+	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+		node, ok := delivery.route.Recipient.Node()
+		if delivery.eventID == sourceEvent && ok && node.FlowPath() == path && node.NodeID() == "collector" {
+			matched = append(matched, delivery)
+			deliveryID = id
+		}
+	}
+	if len(matched) != 1 {
+		t.Fatalf("%s/%s: got %d exact receiver deliveries", runID, path, len(matched))
+	}
+	route := matched[0].route
+	handler, local, ok := route.ConnectClaim.NodeHandlerOwner()
+	if !ok || handler.FlowPath() != path || handler.NodeID() != "collector" || local != "work.ready" {
+		t.Fatalf("lost exact selected handler/local event: %+v", route)
+	}
+	if target := route.Target.Route(); route.Target.Code() != kind || target.FlowID != path || target.FlowInstance != path || target.EntityID != entityID {
+		t.Fatalf("%s/%s: target=%+v kind=%s; want %s entity=%s; rows=%+v", runID, path, target, route.Target.Code(), kind, entityID, readForkReceiverRows(t, rt, runID))
+	}
+	var status, outcome, failure string
+	var claim, outcomeClaim, outcomes int
+	if err := rt.DB.QueryRow(`SELECT d.status,d.claim_version,o.claim_version,o.outcome,COALESCE(CAST(o.failure AS TEXT),'') FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&status, &claim, &outcomeClaim, &outcome, &failure); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1`, deliveryID).Scan(&outcomes); err != nil {
+		t.Fatal(err)
+	}
+	if status != "delivered" || outcome != "delivered" || claim != 1 || outcomeClaim != 1 || outcomes != 1 {
+		logServedForkHandlerDiagnostics(t, rt)
+		t.Fatalf("%s/%s: final settlement status=%s outcome=%s claim=%d/%d count=%d failure=%s", runID, path, status, outcome, claim, outcomeClaim, outcomes, failure)
+	}
+	var public operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": sourceEvent}, &public)
+	found := false
+	for _, delivery := range public.Deliveries {
+		if delivery.DeliveryID == deliveryID {
+			found = true
+			want := operatorread.OperatorDeliveryTarget{Kind: kind, FlowID: path, FlowInstance: path, EntityID: entityID}
+			if delivery.Target != want || delivery.Status != "delivered" || public.RunID != runID {
+				t.Fatalf("public receiver authority: %+v want %+v", delivery, want)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("public readback omitted receiver delivery")
+	}
+	var effectID, rawSource, payload string
+	if err := rt.DB.QueryRow(`SELECT event_id,CAST(source_route AS TEXT),CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3`, runID, path+"/receiver.finished", sourceEvent).Scan(&effectID, &rawSource, &payload); err != nil {
+		t.Fatalf("%s final effect: %v", path, err)
+	}
+	var effectSource events.RouteIdentity
+	var effectPayload map[string]any
+	if err := json.Unmarshal([]byte(rawSource), &effectSource); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(payload), &effectPayload); err != nil {
+		t.Fatal(err)
+	}
+	if effectSource.FlowID != path || effectSource.FlowInstance != path || effectSource.EntityID != entityID || effectPayload["owner"] != label || effectPayload["token"] != "receiver-proof" {
+		t.Fatalf("receiver final effect borrowed ownership: source=%+v payload=%v", effectSource, effectPayload)
+	}
+	var count int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3`, runID, path+"/receiver.finished", sourceEvent).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("final effect count=%d err=%v", count, err)
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": effectID}, &public)
+	if public.RunID != runID || len(public.Deliveries) != 0 || public.NoDelivery == nil || len(public.DeadLetters) != 0 {
+		t.Fatalf("external final effect public disposition: %+v", public)
+	}
+	return route
+}
+
+func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend, receivers []canonicalrouting.ForkReceiver, entitylessProducer bool, options ...forkReceiverJourneyOptions) {
+	t.Helper()
+	var option forkReceiverJourneyOptions
+	if len(options) != 0 {
+		option = options[0]
+	}
+	var selected *selectedStoreOwner
+	previous := projectRuntimePersistenceForServe
+	projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+		selected = owner
+		return previous(owner)
+	}
+	t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+	root := canonicalrouting.CopyForkReceiverOwnership(t, receivers, entitylessProducer)
+	if option.repeated {
+		root = canonicalrouting.CopyForkReceiverRepeatedOwnership(t, receivers)
+	}
+	prefix, seedName, requestName := "", "start.seeded", "start.requested"
+	if option.nested {
+		root = canonicalrouting.CopyForkReceiverNestedOwnership(t, receivers)
+		prefix, seedName, requestName = "branch/", "outer.seeded", "outer.requested"
+	}
+	rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name": seedName, "bundle_hash": rt.BundleHash,
+		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed",
+	})
+	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+	request := map[string]any{"event_name": requestName, "run_id": seed.RunID, "source_event_id": seed.EventID,
+		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-request"}
+	started := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
+	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+	if started.RunID != seed.RunID {
+		t.Fatal("second source ingress escaped the seeded run")
+	}
+	var frontier string
+	if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, seed.RunID, prefix+"producer/work.ready").Scan(&frontier); err != nil {
+		t.Fatalf("actual producer did not emit fork frontier: %v", err)
+	}
+	frontiers := []string{frontier}
+	if option.repeated {
+		request["idempotency_key"] = "ownership-request-second"
+		second := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
+		if second.EventID == started.EventID || second.RunID != seed.RunID {
+			t.Fatal("distinct source occurrence collapsed")
+		}
+		waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+		waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+		if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND event_id<>$3`, seed.RunID, prefix+"producer/work.ready", frontier).Scan(&frontier); err != nil {
+			t.Fatal(err)
+		}
+		frontiers = append(frontiers, frontier)
+		beforeDuplicate := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+		duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
+		if !reflect.DeepEqual(second, duplicate) || !reflect.DeepEqual(beforeDuplicate, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
+			t.Fatal("duplicate ingress rematerialized a source occurrence")
+		}
+	}
+	sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+	producerEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
+	producer, producerExists := sourceRows[prefix+"producer"]
+	if producerExists == entitylessProducer || (producerExists && (producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
+		t.Fatalf("source producer prerequisite: %+v", sourceRows)
+	}
+	producerRoute := producerEvidence.Source.Route()
+	if producerEvidence.Source.Kind() != events.RoutingSourceStaticFlow || producerRoute.FlowID != prefix+"producer" || producerRoute.FlowInstance != prefix+"producer" || producerRoute.EntityID != producer.ID {
+		t.Fatalf("source event lacks independently expected producer ownership: %+v rows=%+v", producerEvidence, sourceRows)
+	}
+	sourceRoutes := map[string]events.DeliveryRoute{}
+	for _, receiver := range receivers {
+		path := prefix + receiver.Path
+		kind, id := "entityless_receiver", ""
+		if receiver.Policy != canonicalrouting.ForkReceiverOptionalAbsent {
+			row, exists := sourceRows[path]
+			marker := receiver.Path + "-owned"
+			kind = "existing_entity"
+			if receiver.Policy == canonicalrouting.ForkReceiverAutoMaterializing || receiver.Policy == canonicalrouting.ForkReceiverExplicitCreate {
+				kind, marker = "materializing_entity", receiver.Path+"-created"
+			}
+			if !exists || row.ID == producer.ID || row.Type != "receipt" || row.State != "active" || row.Fields["marker"] != marker {
+				t.Fatalf("independent source receiver prerequisite: %s %+v", receiver.Path, sourceRows)
+			}
+			id = row.ID
+		} else if _, exists := sourceRows[path]; exists {
+			t.Fatalf("optional source receiver invented state: %+v", sourceRows)
+		}
+		for _, occurrence := range frontiers {
+			sourceRoutes[path] = requireForkReceiverEffect(t, rt, seed.RunID, occurrence, path, receiver.Path, kind, id)
+		}
+	}
+	if option.repeated {
+		family, ok := selected.RunFork()
+		if !ok {
+			t.Fatal("missing source planner")
+		}
+		plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, occurrence := range frontiers {
+			if got := readForkReceiverProducerEvidence(t, rt, seed.RunID, occurrence); got != producerEvidence {
+				t.Fatalf("same-owner occurrence lost producer or execution mode: first=%+v got=%+v", producerEvidence, got)
+			}
+			for _, receiver := range receivers {
+				matches := 0
+				for _, item := range plan.PendingWork {
+					node, isNode := item.DeliveryRoute.Recipient.Node()
+					if item.EventID == occurrence && isNode && node.FlowPath() == receiver.Path && node.NodeID() == "collector" {
+						matches++
+						if !reflect.DeepEqual(item.DeliveryRoute.Normalized(), sourceRoutes[receiver.Path]) {
+							t.Fatalf("fixed snapshot collapsed same-owner delivery evidence: %+v", item)
+						}
+					}
+				}
+				if matches != 1 {
+					t.Fatalf("fixed snapshot event=%s receiver=%s associations=%d, want one", occurrence, receiver.Path, matches)
+				}
+			}
+		}
+	}
+	t.Logf("source success reached: run=%s frontier=%s receivers=%d", seed.RunID, frontier, len(receivers))
+	if option.nested {
+		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
+			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
+		waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, siblingSeed.RunID)
+		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
+		requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": requestName, "run_id": siblingSeed.RunID, "source_event_id": siblingSeed.EventID,
+			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-request"})
+		waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, siblingSeed.RunID)
+		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
+		if siblingSeed.RunID == seed.RunID {
+			t.Fatal("independent sibling run collapsed")
+		}
+		var siblingFrontier string
+		if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, siblingSeed.RunID, prefix+"producer/work.ready").Scan(&siblingFrontier); err != nil {
+			t.Fatal(err)
+		}
+		siblingRows := readForkReceiverRows(t, rt, siblingSeed.RunID)
+		for _, receiver := range receivers {
+			path := prefix + receiver.Path
+			if siblingRows[path].ID != sourceRows[path].ID || siblingRows[path].Flow != path {
+				t.Fatalf("sibling fixture did not exercise same entity ID in separate run: source=%+v sibling=%+v", sourceRows[path], siblingRows[path])
+			}
+			requireForkReceiverEffect(t, rt, siblingSeed.RunID, siblingFrontier, path, receiver.Path, "existing_entity", siblingRows[path].ID)
+		}
+		siblingDomain, siblingCompanions := readServedForkRecipientSourceDomain(t, rt, siblingSeed.RunID), readForkReceiverCompanions(t, rt, siblingSeed.RunID)
+		defer func() {
+			if !reflect.DeepEqual(siblingDomain, readServedForkRecipientSourceDomain(t, rt, siblingSeed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt, siblingSeed.RunID)) {
+				t.Error("fork mutated the independently executed sibling run")
+			}
+		}()
+	}
+	before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+	beforeCompanions := readForkReceiverCompanions(t, rt, seed.RunID)
+	defer func() {
+		if after := readServedForkRecipientSourceDomain(t, rt, seed.RunID); !reflect.DeepEqual(before, after) {
+			t.Errorf("fork mutated source domain: before=%v after=%v", before, after)
+		}
+		if after := readForkReceiverCompanions(t, rt, seed.RunID); !reflect.DeepEqual(beforeCompanions, after) {
+			t.Errorf("fork mutated source companion/readiness rows: before=%v after=%v", beforeCompanions, after)
+		}
+	}()
+	params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "confirm_source_freeze": true, "idempotency_key": "ownership-fork"}
+	if option.selectedMissing {
+		// This is changed-selected execution through the actual owner, not a
+		// mutation of the successful source bundle or a forged route plan.
+		selectedRoot := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredMissing}}, false)
+		bundle := loadWorkflowValidationBundleAt(t, selectedRoot)
+		if selected == nil {
+			t.Fatal("missing selected store owner")
+		}
+		seedStandingRuntimeContextBundle(t, selected.SourceArtifactWriter(), bundle)
+		selectedHash := servedEventPublishFixtureBundleHash(t, selectedRoot)
+		family, ok := selected.RunFork()
+		if !ok {
+			t.Fatal("missing actual fork executor")
+		}
+		beforeRefusal := snapshotForkReceiverApplication(t, rt)
+		for attempt := 0; attempt < 2; attempt++ {
+			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runforkexecution.SelectedContractExecutionRequest{
+				SourceRunID: seed.RunID, At: frontier, ConfirmSourceFreeze: true, ExpectedBundleHash: selectedHash,
+				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
+				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},
+				AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
+			})
+			if err == nil || !strings.Contains(err.Error(), "receiver target owner is missing") || !strings.Contains(err.Error(), "consumer") || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
+				t.Fatalf("required missing receiver must reject before materialization: result=%+v err=%v", result, err)
+			}
+			if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, after) {
+				t.Fatalf("required-missing attempt %d changed application state", attempt)
+			}
+		}
+		return
+	}
+	var fork, replay apiv1.RunForkExecutionResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
+	if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
+		t.Fatalf("fork identity: %+v", fork)
+	}
+	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+	childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
+	childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
+	// This persisted child event has passed backend source-event loading and
+	// container preparation/publication. Compare their composition, not helpers.
+	childProducer := readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent)
+	if childProducer != producerEvidence {
+		t.Fatalf("backend/container composition changed immutable non-root producer: source=%+v child=%+v", producerEvidence, childProducer)
+	}
+	if producerRoute.EntityID != "" {
+		row := childRows[producerRoute.FlowInstance]
+		if row.ID != producerRoute.EntityID || row.Type != producer.Type || row.Flow != producer.Flow {
+			t.Fatalf("child producer route has no exact physical owner: route=%+v row=%+v", producerRoute, row)
+		}
+	}
+	for _, receiver := range receivers {
+		path := prefix + receiver.Path
+		sourceRoute := sourceRoutes[path]
+		id := sourceRoute.Target.Route().EntityID
+		kind := sourceRoute.Target.Code()
+		childRoute := requireForkReceiverEffect(t, rt, fork.ForkRunID, childEvent, path, receiver.Path, kind, id)
+		if !reflect.DeepEqual(childRoute.ConnectClaim, sourceRoute.ConnectClaim) {
+			t.Fatalf("fork changed exact compiled connect claim: source=%+v child=%+v", sourceRoute, childRoute)
+		}
+		if id == "" {
+			var companions int
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, fork.ForkRunID, path).Scan(&companions); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := childRows[path]; exists || companions != 0 {
+				t.Fatalf("optional child fabricated entity/companion: %+v count=%d", childRows, companions)
+			}
+		} else if got := childRows[path]; !reflect.DeepEqual(got, sourceRows[path]) {
+			t.Fatalf("receiver state transferred or changed: source=%+v child=%+v", sourceRows[path], got)
+		}
+	}
+	if producerExists && !reflect.DeepEqual(childRows[prefix+"producer"], producer) {
+		t.Fatalf("producer state was rehomed: source=%+v child=%+v", producer, childRows)
+	}
+	if entitylessProducer {
+		if _, exists := childRows[prefix+"producer"]; exists {
+			t.Fatalf("entityless producer acquired state: %+v", childRows)
+		}
+	}
+	rootRow := childRows[fork.ForkRunID]
+	if rootRow.ID != fork.ForkRunID || rootRow.Type != "root" || rootRow.Fields["marker"] != "root-owned" || rootRow.State != "active" {
+		t.Fatalf("root remap/restoration: %+v", childRows)
+	}
+	childBefore := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
+	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)) {
+		t.Fatal("same-key fork replay changed response, committed targets, or final effects")
+	}
+}
+
+func TestSelectedForkCanonicalReceiverAcquisitionBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend)+"/auto_materializing", func(t *testing.T) {
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverAutoMaterializing}}, false)
+		})
+		t.Run(string(backend)+"/explicit_create", func(t *testing.T) {
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverExplicitCreate}}, false)
+		})
+	}
+}
+
+func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend)+"/template_resolution_create", func(t *testing.T) {
+			root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID})
+			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "producer/validation.triggered", "bundle_hash": rt.BundleHash,
+				"payload": map[string]any{"candidate": "fork-capability"}, "idempotency_key": "capability-source"})
+			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			var frontier, entityID, instancePath string
+			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/validation.requested'`, seed.RunID).Scan(&frontier); err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.DB.QueryRow(`SELECT entity_id,flow_instance FROM entity_state WHERE run_id=$1 AND entity_type='validation_case'`, seed.RunID).Scan(&entityID, &instancePath); err != nil {
+				t.Fatal(err)
+			}
+			if entityID == "" || !strings.HasPrefix(instancePath, "validator/") {
+				t.Fatalf("source did not actually create validator: %s/%s", entityID, instancePath)
+			}
+			var incomplete int
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status<>'delivered'`, seed.RunID).Scan(&incomplete); err != nil || incomplete != 0 {
+				t.Fatalf("dynamic source did not settle: %d %v", incomplete, err)
+			}
+			requireReceiverPublicReadback(t, rt, seed.RunID)
+			before := snapshotForkReceiverApplication(t, rt)
+			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "confirm_source_freeze": true, "idempotency_key": "capability-fork"}
+			for attempt := 0; attempt < 2; attempt++ {
+				rpcErr := requireServedJSONRPCError(t, rt.Endpoint, "run.fork", params)
+				details, ok := rpcErr.Data["details"].(map[string]any)
+				if rpcErr.Code != -32603 || !ok {
+					t.Fatalf("unexpected capability RPC refusal: %+v", rpcErr)
+				}
+				failure := decodeServedFailureEnvelope(t, details["failure"])
+				if string(failure.Class) != "platform.dependency_unavailable" || failure.Detail.Code != "selected_contract_deferred_work_owner_unavailable" || failure.Component != "selected-contract-run-fork" || failure.Operation != "admit-deferred-work-ownership" || !failure.Retryable || failure.Deterministic {
+					t.Fatalf("wrong typed capability refusal: %+v", failure)
+				}
+				raw, err := json.Marshal(failure.Detail.Attributes["capabilities"])
+				if err != nil || string(raw) != `["dynamic_flow_instance_creation"]` {
+					t.Fatalf("wrong exact capability set: %s error=%v", raw, err)
+				}
+				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+					t.Fatalf("capability refusal attempt %d changed application tables", attempt)
+				}
+			}
+		})
+	}
+}
+
+func TestSelectedForkReceiverPolicyPermutationBothStores(t *testing.T) {
+	receivers := []canonicalrouting.ForkReceiver{
+		{Path: "observer", Policy: canonicalrouting.ForkReceiverOptionalAbsent},
+		{Path: "optional", Policy: canonicalrouting.ForkReceiverOptionalExisting},
+		{Path: "required", Policy: canonicalrouting.ForkReceiverRequiredExisting},
+	}
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		for _, order := range [][3]int{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}} {
+			t.Run(fmt.Sprintf("%s/recipient_permutations/%d%d%d", backend, order[0], order[1], order[2]), func(t *testing.T) {
+				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{receivers[order[0]], receivers[order[1]], receivers[order[2]]}, false)
+			})
+		}
+		t.Run(string(backend)+"/materializing_mixed", func(t *testing.T) {
+			runForkReceiverOwnershipJourney(t, backend, append(append([]canonicalrouting.ForkReceiver{}, receivers...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverAutoMaterializing}), false)
+		})
+		t.Run(string(backend)+"/same_owner_two_events_and_duplicate", func(t *testing.T) {
+			runForkReceiverOwnershipJourney(t, backend, receivers, false, forkReceiverJourneyOptions{repeated: true})
+		})
+	}
+}
+
+func TestSelectedForkReceiverStaticAcquisitionBootRefusal(t *testing.T) {
+	root := canonicalrouting.CopyForkReceiverStaticAcquisitionRefusal(t)
+	bundle := loadWorkflowValidationBundleAt(t, root)
+	report := bootverify.Run(context.Background(), semanticview.Wrap(bundle), bootverify.Options{})
+	findings := fmt.Sprint(report.Errors())
+	if !strings.Contains(findings, "flow_boundary_create_entity_validation") || !strings.Contains(findings, "stateful static multi-row entity ownership is retired") {
+		t.Fatalf("retired static acquisition did not reject at real boot: %s", findings)
+	}
+}
+
+func TestSelectedForkReceiverCreateCompilationIsNotDynamicFlowCreation(t *testing.T) {
+	for _, policy := range []canonicalrouting.ForkReceiverPolicy{canonicalrouting.ForkReceiverExplicitCreate, canonicalrouting.ForkReceiverAutoMaterializing} {
+		t.Run(fmt.Sprint(policy), func(t *testing.T) {
+			source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: policy}}, false)))
+			found := false
+			for _, record := range source.ExecutableNodeRecords() {
+				node, err := record.Identity()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for event, handler := range source.ExecutableNodeEventHandlers(node) {
+					if handler.Action.ID != "" || len(handler.Rules) != 0 || len(handler.OnComplete) != 0 || handler.Join != nil {
+						t.Fatalf("fixture unexpectedly carries dynamic action candidates: %s/%s %+v", node.FlowPath(), event, handler)
+					}
+					if node.FlowPath() == "consumer" && event == "work.ready" {
+						found = true
+						if handler.CreateEntity != (policy == canonicalrouting.ForkReceiverExplicitCreate) {
+							t.Fatalf("compiled create_entity fact differs: %+v", handler)
+						}
+						t.Logf("consumer/work.ready CreateEntity=%t Action.ID=%q", handler.CreateEntity, handler.Action.ID)
+					}
+				}
+			}
+			for flowID := range source.FlowSchemaEntries() {
+				for _, pin := range source.FlowInputEventPins(flowID) {
+					if pin.Resolution().Mode != runtimecontracts.FlowInputResolutionModeNone {
+						t.Fatalf("ordinary create fixture gained resolution: %s %+v", flowID, pin.Resolution())
+					}
+				}
+			}
+			if !found {
+				t.Fatal("compiled consumer handler absent")
+			}
+		})
+	}
+}
+
+func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
+				"payload": map[string]any{"work_id": "no-fork-completion"}, "idempotency_key": "no-fork-seed"})
+			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			early := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			settled := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+			columnsRows, err := rt.DB.Query(`SELECT * FROM event_deliveries WHERE 1=0`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			columns, err := columnsRows.Columns()
+			columnsRows.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			handoff := -1
+			for i, column := range columns {
+				if column == "continuation_handoff_at" {
+					handoff = i
+				}
+			}
+			if handoff < 0 {
+				t.Fatal("missing delivery handoff fact")
+			}
+			if len(early["event_deliveries"]) != len(settled["event_deliveries"]) {
+				t.Fatal("no-fork observation added or removed deliveries")
+			}
+			for i, raw := range early["event_deliveries"] {
+				var beforeRow, afterRow []any
+				if err := json.Unmarshal([]byte(raw), &beforeRow); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal([]byte(settled["event_deliveries"][i]), &afterRow); err != nil {
+					t.Fatal(err)
+				}
+				if beforeRow[handoff] != nil && !reflect.DeepEqual(beforeRow[handoff], afterRow[handoff]) {
+					t.Fatal("no-fork completion rewrote an existing handoff")
+				}
+				if afterRow[handoff] == nil {
+					t.Fatal("pipeline completion left absent handoff")
+				}
+				beforeRow[handoff] = afterRow[handoff]
+				if !reflect.DeepEqual(beforeRow, afterRow) {
+					t.Fatalf("no-fork delivery changed beyond handoff stamp: %v / %v", beforeRow, afterRow)
+				}
+			}
+			for _, receipt := range early["event_receipts"] {
+				found := false
+				for _, after := range settled["event_receipts"] {
+					if receipt == after {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("no-fork completion rewrote an existing receipt")
+				}
+			}
+			var nonPipeline int
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id IN (SELECT event_id FROM events WHERE run_id=$1) AND (subscriber_type<>'platform' OR subscriber_id<>'pipeline' OR outcome<>'success' OR reason_code<>'pipeline_persisted')`, seed.RunID).Scan(&nonPipeline); err != nil || nonPipeline != 0 {
+				t.Fatalf("unexpected source receipts: count=%d err=%v", nonPipeline, err)
+			}
+			var changed []string
+			for table, rows := range early {
+				if !reflect.DeepEqual(rows, settled[table]) {
+					changed = append(changed, table)
+					if table != "event_receipts" && table != "event_deliveries" {
+						t.Fatalf("no-fork source changed business domain %s: before=%v after=%v", table, rows, settled[table])
+					}
+				}
+			}
+			sort.Strings(changed)
+			t.Logf("NO FORK INVOKED: delivery-only quiescence -> pipeline completion changed=%v receipts=%d->%d", changed, len(early["event_receipts"]), len(settled["event_receipts"]))
+			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			if after := readServedForkRecipientSourceDomain(t, rt, seed.RunID); !reflect.DeepEqual(settled, after) {
+				t.Fatal("source continued changing after exact pipeline handoff/receipt boundary")
+			}
+		})
+	}
+}
+
+func TestSelectedForkNestedStaticReceiverIsolationBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{
+				{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting},
+				{Path: "sibling", Policy: canonicalrouting.ForkReceiverOptionalExisting},
+			}, false, forkReceiverJourneyOptions{nested: true})
+		})
+	}
+}
+
+func TestSelectedForkOptionalReceiverOwnershipBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		for _, test := range []struct {
+			name   string
+			policy canonicalrouting.ForkReceiverPolicy
+		}{{"entityless", canonicalrouting.ForkReceiverOptionalAbsent}, {"existing", canonicalrouting.ForkReceiverOptionalExisting}} {
+			t.Run(fmt.Sprintf("%s/%s", backend, test.name), func(t *testing.T) {
+				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: test.policy}}, false)
+			})
+		}
+	}
+}
+
+func TestSelectedForkRequiredReceiverOwnershipBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend)+"/existing", func(t *testing.T) {
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, false)
+		})
+		t.Run(string(backend)+"/missing_selected", func(t *testing.T) {
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverOptionalAbsent}}, false, forkReceiverJourneyOptions{selectedMissing: true})
+		})
+	}
+}
+
+func requireForkReceiverBusinessMutation(t *testing.T, rt servedControlProofRuntime, runID, eventID, entityID string) events.DeliveryRoute {
+	t.Helper()
+	var exact []servedForkDeliveryEvidence
+	var deliveryID string
+	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+		if node, ok := delivery.route.Recipient.Node(); delivery.eventID == eventID && ok && node.FlowPath() == "consumer" && node.NodeID() == "collector" {
+			exact = append(exact, delivery)
+			deliveryID = id
+		}
+	}
+	if len(exact) != 1 {
+		t.Fatalf("business receiver deliveries=%d", len(exact))
+	}
+	route := exact[0].route
+	handler, local, ok := route.ConnectClaim.NodeHandlerOwner()
+	wantTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}
+	if !ok || handler.FlowPath() != "consumer" || handler.NodeID() != "collector" || local != "work.ready" || route.Target.Code() != "existing_entity" || route.Target.Route() != wantTarget {
+		t.Fatalf("business receiver authority: %+v", route)
+	}
+	var status, outcome string
+	var claim, outcomeClaim, outcomes int
+	if err := rt.DB.QueryRow(`SELECT d.status,d.claim_version,o.outcome,o.claim_version FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&status, &claim, &outcome, &outcomeClaim); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1`, deliveryID).Scan(&outcomes); err != nil {
+		t.Fatal(err)
+	}
+	if status != "delivered" || outcome != "delivered" || claim != 1 || outcomeClaim != 1 || outcomes != 1 {
+		t.Fatalf("business receiver settlement: %s/%s claims=%d/%d outcomes=%d", status, outcome, claim, outcomeClaim, outcomes)
+	}
+	var public operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &public)
+	if public.RunID != runID || len(public.Deliveries) != 1 || public.Deliveries[0].DeliveryID != deliveryID || public.Deliveries[0].Status != "delivered" || public.Deliveries[0].Target != (operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}) {
+		t.Fatalf("public business receiver evidence: %+v", public)
+	}
+	var oldJSON, newJSON, writerType, writerID, step string
+	if err := rt.DB.QueryRow(`SELECT CAST(old_value AS TEXT),CAST(new_value AS TEXT),writer_type,writer_id,handler_step FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND domain='authored_field' AND path='processed_token'`, runID, entityID, eventID).Scan(&oldJSON, &newJSON, &writerType, &writerID, &step); err != nil {
+		t.Fatal(err)
+	}
+	var oldValue, newValue string
+	if err := json.Unmarshal([]byte(oldJSON), &oldValue); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(newJSON), &newValue); err != nil {
+		t.Fatal(err)
+	}
+	if oldValue != "seeded" || newValue != "receiver-proof" || writerType != "platform" || writerID != "workflow_engine" || step != "mutate" {
+		t.Fatalf("receiver business mutation: old=%q new=%q writer=%s/%s step=%s", oldValue, newValue, writerType, writerID, step)
+	}
+	var mutations, emitted int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND caused_by_event=$2 AND domain='authored_field' AND path='processed_token'`, runID, eventID).Scan(&mutations); err != nil {
+		t.Fatal(err)
+	}
+	// Runtime log records are admitted diagnostics, not authored emissions.
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2 AND NOT (event_class=$3 AND event_name=$4)`, runID, eventID, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog)).Scan(&emitted); err != nil {
+		t.Fatal(err)
+	}
+	if mutations != 1 || emitted != 0 {
+		t.Fatalf("business effect census: mutations=%d emitted=%d", mutations, emitted)
+	}
+	var extraDeliveries int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.source_event_id=$2`, runID, eventID).Scan(&extraDeliveries); err != nil || extraDeliveries != 0 {
+		t.Fatalf("effect-only consumer produced executable downstream work: deliveries=%d err=%v", extraDeliveries, err)
+	}
+	return route
+}
+
+func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		for _, entityless := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/entityless_producer=%t", backend, entityless), func(t *testing.T) {
+				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, entityless))
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
+				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				seedRows := readForkReceiverRows(t, rt, seed.RunID)
+				if got := seedRows["consumer"]; got.Type != "receipt" || got.State != "active" || got.Fields["marker"] != "consumer-owned" || got.Fields["processed_token"] != "seeded" {
+					t.Fatalf("receiver seed ownership: %+v", seedRows)
+				}
+				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-request"})
+				if started.RunID != seed.RunID {
+					t.Fatal("source request escaped seeded run")
+				}
+				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				var frontier string
+				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
+					t.Fatal(err)
+				}
+				sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+				consumer := sourceRows["consumer"]
+				if consumer.ID != seedRows["consumer"].ID || consumer.Fields["marker"] != "consumer-owned" || consumer.Fields["processed_token"] != "receiver-proof" || consumer.State != "active" {
+					t.Fatalf("source receiver effect ownership: %+v", sourceRows)
+				}
+				producer, exists := sourceRows["producer"]
+				if exists == entityless || (exists && (producer.ID == consumer.ID || producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
+					t.Fatalf("source producer ownership: %+v", sourceRows)
+				}
+				sourceEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
+				if sourceEvidence.Source.Kind() != events.RoutingSourceStaticFlow || sourceEvidence.Source.Route() != (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producer.ID}) {
+					t.Fatalf("immutable producer evidence: %+v", sourceEvidence)
+				}
+				sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, consumer.ID)
+				before, companions := readServedForkRecipientSourceDomain(t, rt, seed.RunID), readForkReceiverCompanions(t, rt, seed.RunID)
+				defer func() {
+					if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
+						t.Error("business fork changed settled source domain or companions")
+					}
+				}()
+				params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "confirm_source_freeze": true, "idempotency_key": "business-fork"}
+				var fork, replay apiv1.RunForkExecutionResult
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
+				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
+					t.Fatalf("business fork identity: %+v", fork)
+				}
+				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+				childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
+				childRoute := requireForkReceiverBusinessMutation(t, rt, fork.ForkRunID, childEvent, consumer.ID)
+				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
+					t.Fatal("business fork changed compiled consumer or immutable producer evidence")
+				}
+				childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
+				if !reflect.DeepEqual(childRows["consumer"], consumer) || !reflect.DeepEqual(childRows["producer"], producer) {
+					t.Fatalf("business fork rehomed producer/receiver: source=%+v child=%+v", sourceRows, childRows)
+				}
+				root := childRows[fork.ForkRunID]
+				if root.ID != fork.ForkRunID || root.Type != "root" || root.Fields["marker"] != "root-owned" {
+					t.Fatalf("business fork root remapping: %+v", childRows)
+				}
+				childBefore := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
+				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)) {
+					t.Fatal("business fork replay repeated execution or changed response")
+				}
+			})
+		}
+	}
+}
+
+func TestSelectedForkIndependentProducerReceiverEntitiesBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		for _, entityless := range []bool{false, true} {
+			name := "distinct"
+			if entityless {
+				name = "entityless_producer"
+			}
+			t.Run(string(backend)+"/"+name, func(t *testing.T) {
+				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, entityless)
+			})
+		}
+	}
+}
+

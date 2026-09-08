@@ -35,6 +35,7 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -407,20 +408,8 @@ func bindSelectedContractWorkspaceProjection(loaded LoadedSelectedContractSource
 	return options, &selectedContractWorkspaceProjection{lifecycle: rebound}, nil
 }
 
-func selectedContractStaticAgentBlueprints(source semanticview.Source) ([]runtimemanager.AgentMaterializationBlueprint, error) {
-	staticRecords, err := runtimemanager.StaticAgentMaterializationBlueprints(source)
-	if err != nil {
-		return nil, err
-	}
-	requiredRecords, err := runtimemanager.StaticFlowRequiredAgentMaterializationBlueprints(source)
-	if err != nil {
-		return nil, err
-	}
-	return append(staticRecords, requiredRecords...), nil
-}
-
 func selectedContractStaticAgentRecords(runID string, source semanticview.Source) ([]runtimemanager.PersistedAgent, error) {
-	blueprints, err := selectedContractStaticAgentBlueprints(source)
+	blueprints, err := runforkreadiness.StaticAgentBlueprints(source)
 	if err != nil {
 		return nil, err
 	}

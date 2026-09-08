@@ -55,6 +55,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -4330,7 +4331,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesEventMappingRejectsD
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, selectedContractWorkflowProjection{childRunID: "fork-run"})
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, testWorkflowRecipientProjection(t, nil))
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4374,7 +4375,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsSyntheticProjectionWith
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, selectedContractWorkflowProjection{childRunID: "fork-run"})
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, testWorkflowRecipientProjection(t, nil))
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4416,15 +4417,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsSyntheticProjectionWith
 }
 
 func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDeliveryRoutes(t *testing.T) {
-	node := runtimecontracts.SystemNodeContract{
-		ID: "test-node", ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.received": {}},
-	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "selected-workflow", Version: "v1"},
-		Nodes:     map[string]runtimecontracts.SystemNodeContract{"test-node": node},
-		Events:    map[string]runtimecontracts.EventCatalogEntry{"item.received": {}},
-	})
+	source := testWorkflowRecipientSource(t)
 	planning := runfork.RunForkSelectedContractRecipientPlanning{
 		Owner:                      runfork.RunForkSelectedContractRecipientPlanningOwner,
 		FutureExecutionOwner:       runfork.RunForkSelectedContractExecutionOwner,
@@ -4441,7 +4434,11 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, source, selectedContractWorkflowProjection{childRunID: "fork-run"})
+	root, err := semanticview.AdmitRootExecutionCoordinate(source, "fork-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, source, selectedContractWorkflowProjection{root: root})
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4490,7 +4487,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapEventMap
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, selectedContractWorkflowProjection{childRunID: "fork-run"}, runfork.RunForkHistoricalReplayContractSwapBootResumeOwner)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, testWorkflowRecipientProjection(t, nil), runfork.RunForkHistoricalReplayContractSwapBootResumeOwner)
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4531,7 +4528,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, selectedContractWorkflowProjection{childRunID: "fork-run"})
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, testWorkflowRecipientProjection(t, nil))
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4838,22 +4835,50 @@ func materializeSelectedExecutionForkForTest(
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
-	workflowStates, err := selectedContractWorkflowStateProjection(plan, loaded.Source, *model.RecipientPlanning)
+	_, eventIDs, _, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
 	if err != nil {
-		t.Fatalf("selectedContractWorkflowStateProjection: %v", err)
+		t.Fatal(err)
 	}
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	modes, err := pg.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, eventIDs)
+	if err != nil || len(modes) != len(eventIDs) {
+		t.Fatalf("load complete frontier modes: %v, %v", modes, err)
+	}
+	sourceModes := make(map[string]executionmode.Mode, len(eventIDs))
+	for i, eventID := range eventIDs {
+		sourceModes[eventID] = modes[i]
+	}
+	readiness, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
+		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: selection,
+			SourceArtifactFact: loaded.SourceArtifactFact, FrontierAdmission: frontier,
+			EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
+			RecipientPlanning:       *model.RecipientPlanning, SourceModes: sourceModes},
+		Source: loaded.Source,
+	})
+	if err != nil {
+		t.Fatalf("admit selected-contract readiness: %v", err)
+	}
+	prepared, err := readiness.Projection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection, SourceArtifactFact: loaded.SourceArtifactFact,
-		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, WorkflowStates: workflowStates,
+		EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
+		FrontierAdmission:       frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, Readiness: readiness,
 	})
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	db := storetest.DatabaseForTest(pg)
-	for _, state := range workflowStates {
+	for _, state := range prepared.States {
 		routePath := state.Route.InstancePath
+		entityID := state.EntityID
 		if state.AddressKind == runfork.RunForkSelectedContractWorkflowStateRunScope {
+			if state.EntityID != sourceRunID {
+				t.Fatalf("root readiness has non-root source entity %s", state.EntityID)
+			}
 			routePath = materialized.ForkRunID
+			entityID = materialized.ForkRunID
 		}
 		var workflowName, mode, status string
 		var rows int
@@ -4862,7 +4887,7 @@ func materializeSelectedExecutionForkForTest(
 			FROM entity_state es
 			JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 			WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid AND es.flow_instance = $3
-		`, materialized.ForkRunID, state.EntityID, routePath).Scan(&rows, &workflowName, &mode, &status); err != nil {
+		`, materialized.ForkRunID, entityID, routePath).Scan(&rows, &workflowName, &mode, &status); err != nil {
 			t.Fatalf("load selected-contract workflow state companion: %v", err)
 		}
 		if rows != 1 || workflowName != state.FlowID || mode != state.Mode || status != "active" {
@@ -4997,7 +5022,7 @@ func seedSelectedExecutionRootSourceRun(
 	event := seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		agentRoute, nil,
-		eventtest.RootRoutingSource(entityID), events.EventEnvelope{Scope: events.EventScopeGlobal}, sourceFacts...,
+		eventtest.RootRoutingSource(sourceRunID), events.EventEnvelope{Scope: events.EventScopeGlobal}, sourceFacts...,
 	)
 	if _, err := db.ExecContext(runForkTestContext(t), `
 		UPDATE entity_state

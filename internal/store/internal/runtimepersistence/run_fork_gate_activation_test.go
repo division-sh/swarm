@@ -714,12 +714,26 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
 			ctx := testAuthorActivityContext()
-			sourceRunID, forkRunID := uuid.NewString(), uuid.NewString()
+			sourceRunID := uuid.NewString()
 			now := time.Date(2026, 7, 14, 19, 0, 0, 0, time.UTC)
 			requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
-			requireRunningPostgresRunForTest(t, ctx, db, forkRunID, now)
 			cards := admitTestPostgresStore(t, db)
-			card, continuation := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
+			card, continuation := newRootProposedEffectTestCard(t, sourceRunID, now)
+			if err := commitSemanticParentFixture(ctx, cards, sourceRunID, continuation.SourceEventID, now); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO entity_state (
+					run_id, entity_id, flow_instance, entity_type, current_state,
+					gates, fields, accumulator, entered_state_at, created_at, updated_at
+				) VALUES ($1::uuid, $1::uuid, $1::text, 'default', 'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, $2, $2, $2)
+			`, sourceRunID, now); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at) VALUES ($1,$1,'lifecycle_state','','null','"pending"',$2,'platform','proposed-effect-fixture','seed',$3)`, sourceRunID, continuation.SourceEventID, now); err != nil {
+				t.Fatal(err)
+			}
+			captureFanOutBarrierForkRevision(t, ctx, db, sourceRunID, true)
 			if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {
 				t.Fatal(err)
 			}
@@ -728,15 +742,6 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
 				ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
 			}); err != nil {
-				t.Fatal(err)
-			}
-			completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
-			if _, err := db.ExecContext(ctx, `
-				INSERT INTO entity_state (
-					run_id, entity_id, flow_instance, entity_type, current_state,
-					gates, fields, accumulator, entered_state_at, created_at, updated_at
-				) VALUES ($1::uuid, $2::uuid, 'root', 'default', 'operating', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, $3, $3, $3)
-			`, forkRunID, continuation.EntityID, now); err != nil {
 				t.Fatal(err)
 			}
 			owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
@@ -769,7 +774,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 					started_at, completed_at, updated_at
 				) VALUES (
-					$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'root', $5, $6,
+					$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, $2::text, $5, $6,
 					$7, $8, 'non_idempotent_write', 1, $9, $10, $11,
 					$12::uuid, $13, $14::jsonb, $15::jsonb, 'input-hash', '{}'::jsonb, '', $16, $17, $16
 				)
@@ -784,25 +789,55 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				"effect_class": string(continuation.EffectClass), "success_event": continuation.SuccessEvent,
 				"failure_event": continuation.FailureEvent, "fork_policy": string(continuation.ForkPolicy),
 				"entity_id": continuation.EntityID, "node_id": continuation.NodeID, "flow_id": continuation.FlowID,
+				"flow_instance":     continuation.FlowInstance,
 				"handler_event_key": continuation.HandlerEventKey, "source_event_id": continuation.SourceEventID,
 				"source_run_id": sourceRunID, "attempt": 1,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
+			anchor, err := card.Anchor.ProposedEffect()
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := events.NewChildEvent(events.ChildEventInput{
+				Facts: events.EventFacts{ID: continuation.RequestEventID, Type: runForkActivityRequestEvent,
+					Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "workflow"},
+					Payload:  payload, ChainDepth: 1, RoutingSource: anchor.Source,
+					CreatedAt: now.Add(2 * time.Minute)},
+				Lineage: events.EventLineage{RunID: sourceRunID, ParentEventID: continuation.SourceEventID, ExecutionMode: continuation.ExecutionMode},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, request); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := cards.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			child := materializeSelectedActivityFixture(t, ctx, cards, sourceRunID, request.ID())
+			if child.MaterializedEntityCount != 1 || child.SelectedContractBinding == nil {
+				t.Fatalf("approved-effect fixture requires its bound source state: %#v", child)
+			}
+			forkRunID := child.ForkRunID
 			var prepared runfork.RunForkSelectedContractSourceEvent
 			err = cards.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 				var inner error
 				prepared, inner = prepareRunForkSelectedContractSourceEvent(txctx, tx, story, forkRunID, runfork.RunForkSelectedContractSourceEvent{
 					SourceEventID: continuation.RequestEventID, EventName: runForkActivityRequestEvent,
-					ExecutionMode: continuation.ExecutionMode,
-					EntityID:      continuation.EntityID, FlowInstance: "root", Payload: payload,
+					ExecutionMode: request.ExecutionMode(), Scope: string(request.Scope()),
+					RoutingSource: request.RoutingSource(), Payload: request.Payload(),
 				})
 				return inner
 			})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("prepare error = %v, want %q", err, tc.wantErr)
+				}
+				var copied int
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`, forkRunID).Scan(&copied); err != nil || copied != 0 {
+					t.Fatalf("rejected evidence copied child attempts: count=%d err=%v", copied, err)
 				}
 				return
 			}
@@ -813,6 +848,9 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			if err := json.Unmarshal(prepared.Payload, &forkPayload); err != nil {
 				t.Fatal(err)
 			}
+			if prepared.RoutingSource != eventtest.RootRoutingSource(forkRunID) || forkPayload.EntityID != forkRunID || forkPayload.SourceRunID != forkRunID || forkPayload.ForkPolicy != string(runtimecontracts.ActivityForkRequireConfirmation) {
+				t.Fatalf("approved effect lost root identity or confirmation policy: source=%#v payload=%#v", prepared.RoutingSource, forkPayload)
+			}
 			forkOwner, err := activityidentity.ParseOwnerKey(forkPayload.NodeID)
 			if err != nil {
 				t.Fatal(err)
@@ -822,12 +860,12 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				EntityID: forkPayload.EntityID, Owner: forkOwner, ExecutionFlowID: forkPayload.FlowID,
 				HandlerEventKey: forkPayload.HandlerEventKey, ActivityID: forkPayload.ActivityID, Tool: forkPayload.Tool, Attempt: 1,
 			})
-			var copiedStatus string
-			if err := db.QueryRowContext(ctx, `SELECT status FROM activity_attempts WHERE request_event_id = $1::uuid`, forkRequestID).Scan(&copiedStatus); err != nil {
+			var copiedStatus, copiedEntity, copiedFlow string
+			if err := db.QueryRowContext(ctx, `SELECT status, entity_id::text, flow_instance FROM activity_attempts WHERE request_event_id = $1::uuid`, forkRequestID).Scan(&copiedStatus, &copiedEntity, &copiedFlow); err != nil {
 				t.Fatal(err)
 			}
-			if !tc.wantCopied || copiedStatus != tc.status {
-				t.Fatalf("copied status = %q", copiedStatus)
+			if !tc.wantCopied || copiedStatus != tc.status || copiedEntity != forkRunID || copiedFlow != forkRunID {
+				t.Fatalf("copied status=%q entity=%q flow=%q", copiedStatus, copiedEntity, copiedFlow)
 			}
 		})
 	}

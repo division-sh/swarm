@@ -44,6 +44,7 @@ import (
 	replycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runcontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runfork "github.com/division-sh/swarm/internal/runtime/runfork"
+	runforkreadiness "github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	sessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -798,8 +799,8 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEventModes(ctx context.
 	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, workflowStates []runfork.RunForkSelectedContractWorkflowState) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, workflowStates)
+func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs)
 }
 
 func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
@@ -878,7 +879,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 	return s.runForkPostgresOwner.MaterializeRunFork(ctx, req)
 }
 
-func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error) {
+func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
 	return s.runForkPostgresOwner.MaterializeRunForkForSelectedContractExecution(ctx, req)
 }
 
@@ -1986,8 +1987,8 @@ func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, workflowStates []runfork.RunForkSelectedContractWorkflowState) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, workflowStates)
+func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs)
 }
 
 func (s *SQLiteRuntimeStore) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
@@ -2066,7 +2067,7 @@ func (s *SQLiteRuntimeStore) MaterializeRunFork(ctx context.Context, req runfork
 	return s.runForkSQLiteOwner.MaterializeRunFork(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error) {
+func (s *SQLiteRuntimeStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
 	return s.runForkSQLiteOwner.MaterializeRunForkForSelectedContractExecution(ctx, req)
 }
 

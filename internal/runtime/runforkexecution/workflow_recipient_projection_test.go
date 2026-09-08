@@ -14,33 +14,57 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func testWorkflowRecipientProjection(t *testing.T, states []runfork.RunForkSelectedContractWorkflowState, sourceEvents []runfork.RunForkSelectedContractSourceEvent) selectedContractWorkflowProjection {
+func testWorkflowRecipientProjection(t *testing.T, sourceEvents []runfork.RunForkSelectedContractSourceEvent) selectedContractWorkflowProjection {
 	t.Helper()
-	_, projection, err := projectSelectedContractSourceEventWorkflowStates("fork-run", states, sourceEvents)
+	_, projection, err := projectSelectedContractSourceEvents("source-run", testWorkflowRecipientRoot(t), sourceEvents)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return projection
 }
 
-func testRootRecipientWorkflowState() runfork.RunForkSelectedContractWorkflowState {
-	return runfork.RunForkSelectedContractWorkflowState{
-		SourceEventID: "source-event", EntityID: "entity-one", FlowID: mustRunForkRootNode("test-node").FlowPath(),
-		AddressKind: runfork.RunForkSelectedContractWorkflowStateRunScope,
+func testWorkflowRecipientSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"test-node": {
+			ID: "test-node", ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.received": {}},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"item.received": {}},
 	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics:  runtimecontracts.WorkflowSemanticView{Name: "selected-workflow", Version: "v1"},
+		RootSchema: &root.Schema,
+		FlowTree: runtimecontracts.FlowTree{Root: &root,
+			ByPath: map[string]*runtimecontracts.FlowContractView{".": &root},
+			ByID:   map[string]*runtimecontracts.FlowContractView{".": &root}},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func testWorkflowRecipientRoot(t *testing.T) semanticview.RootExecutionCoordinate {
+	t.Helper()
+	root, err := semanticview.AdmitRootExecutionCoordinate(testWorkflowRecipientSource(t), "fork-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }
 
 func testRecipientWorkflowSourceEvent() runfork.RunForkSelectedContractSourceEvent {
 	return runfork.RunForkSelectedContractSourceEvent{
-		SourceEventID: "source-event", EntityID: "entity-one", EventName: "item.received",
-		RoutingSource: eventtest.RootRoutingSource("entity-one"),
+		SourceEventID: "source-event", EventName: "item.received",
+		RoutingSource: eventtest.RootRoutingSource("source-run"),
 	}
 }
 
@@ -55,13 +79,12 @@ func testRecipientProjectionPlanning(recipients ...forkrecipient.Evidence) runfo
 }
 
 func TestSelectedContractWorkflowRecipientProjectionBindsRootWithoutMutatingSelectedEvidence(t *testing.T) {
-	state := testRootRecipientWorkflowState()
 	sourceEvent := testRecipientWorkflowSourceEvent()
-	projection := testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractWorkflowState{state}, []runfork.RunForkSelectedContractSourceEvent{sourceEvent})
+	projection := testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractSourceEvent{sourceEvent})
 	node := mustRunForkRootNode("test-node")
 	input := forkrecipient.Input{
 		Recipient: events.MustNodeDeliveryRecipient(node), HandlerNode: node,
-		HandlerEvent: "item.received", Path: state.FlowID, RouteSource: "subscription",
+		HandlerEvent: "item.received", Path: node.FlowPath(), RouteSource: "subscription",
 	}
 	local, err := forkrecipient.NewLocal(input)
 	if err != nil {
@@ -106,26 +129,19 @@ func TestSelectedContractWorkflowRecipientProjectionBindsRootWithoutMutatingSele
 }
 
 func TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence(t *testing.T) {
-	root := testRootRecipientWorkflowState()
 	event := testRecipientWorkflowSourceEvent()
-	selected := testNodeFrontierRecipient(mustRunForkRootNode("test-node"), "item.received", root.FlowID, "subscription")
-	for _, name := range []string{"absent state", "different entity", "different source event", "entityless event"} {
+	selected := testNodeFrontierRecipient(mustRunForkRootNode("test-node"), "item.received", testWorkflowRecipientRoot(t).FlowID(), "subscription")
+	for _, name := range []string{"absent source event", "different source event"} {
 		t.Run(name, func(t *testing.T) {
-			states := []runfork.RunForkSelectedContractWorkflowState{root}
-			e := event
+			sourceEvents := []runfork.RunForkSelectedContractSourceEvent{event}
 			lookup := "source-event"
 			switch name {
-			case "absent state":
-				states = nil
-			case "different entity":
-				states[0].EntityID = "other-entity"
+			case "absent source event":
+				sourceEvents = nil
 			case "different source event":
 				lookup = "unknown-event"
-			case "entityless event":
-				e.EntityID = ""
-				e.RoutingSource = events.NoRoutingSource()
 			}
-			projection := testWorkflowRecipientProjection(t, states, []runfork.RunForkSelectedContractSourceEvent{e})
+			projection := testWorkflowRecipientProjection(t, sourceEvents)
 			bound, err := projection.BindRecipient(lookup, selected)
 			if err != nil || !reflect.DeepEqual(bound, selected) {
 				t.Fatalf("absence must not manufacture correspondence: bound=%#v err=%v", bound, err)
@@ -137,13 +153,31 @@ func TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence(
 			}
 		})
 	}
-	wrong := root
-	wrong.FlowID = "other-workflow"
-	projection := testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractWorkflowState{wrong}, []runfork.RunForkSelectedContractSourceEvent{event})
-	if _, err := projection.BindRecipient("source-event", selected); err == nil {
-		t.Fatal("different workflow authorized root binding")
+	for _, name := range []string{"foreign root entity", "missing event identity", "missing routing authority", "duplicate source event"} {
+		t.Run(name, func(t *testing.T) {
+			e := event
+			switch name {
+			case "foreign root entity":
+				e.RoutingSource = eventtest.RootRoutingSource("other-entity")
+			case "missing event identity":
+				e.SourceEventID = ""
+			case "missing routing authority":
+				e.RoutingSource = events.NoRoutingSource()
+			}
+			inputs := []runfork.RunForkSelectedContractSourceEvent{e}
+			if name == "duplicate source event" {
+				inputs = append(inputs, e)
+			}
+			if _, _, err := projectSelectedContractSourceEvents("source-run", testWorkflowRecipientRoot(t), inputs); err == nil {
+				t.Fatal("invalid source event acquired recipient correspondence")
+			}
+		})
 	}
-	projection = testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractWorkflowState{root}, []runfork.RunForkSelectedContractSourceEvent{event})
+	projection := selectedContractWorkflowProjection{sourceEvents: map[string]struct{}{"source-event": {}}}
+	if _, err := projection.BindRecipient("source-event", selected); err == nil {
+		t.Fatal("missing selected root owner authorized root binding")
+	}
+	projection = testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractSourceEvent{event})
 	padded := selected
 	padded.Path = " " + selected.Path + " "
 	if bound, err := projection.BindRecipient("source-event", padded); err != nil || bound.Path != "fork-run" || padded.Path != " "+selected.Path+" " {
@@ -153,25 +187,21 @@ func TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence(
 		other := selected
 		other.Path = path
 		if _, err := projection.BindRecipient("source-event", other); err == nil {
-			t.Fatalf("run-scope state rewrote unselected path %q", path)
+			t.Fatalf("root binding rewrote unselected path %q", path)
 		}
 	}
-	// States are deduplicated by entity, not by their representative source ID.
+	// Every admitted event ID binds independently; no recipient state is needed.
 	otherEvent := event
 	otherEvent.SourceEventID = "same-entity-another-event"
-	projection = testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractWorkflowState{root}, []runfork.RunForkSelectedContractSourceEvent{event, otherEvent})
+	projection = testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractSourceEvent{event, otherEvent})
 	if bound, err := projection.BindRecipient(otherEvent.SourceEventID, selected); err != nil || bound.Path != "fork-run" {
 		t.Fatalf("lawful shared-entity correspondence rejected: %#v, %v", bound, err)
 	}
 }
 
 func TestSelectedContractWorkflowRecipientProjectionKeepsNonRootAndAgentAxesStrict(t *testing.T) {
-	state := testRootRecipientWorkflowState()
-	state.FlowID = "review"
-	state.AddressKind = runfork.RunForkSelectedContractWorkflowStateExact
-	state.Route = runtimeflowidentity.StoredRoute("review", "case-one", "review/case-one")
-	projection := testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractWorkflowState{state}, []runfork.RunForkSelectedContractSourceEvent{testRecipientWorkflowSourceEvent()})
-	node := testNodeFrontierRecipient(mustRunForkNode("review", "receive"), "item.received", state.Route.InstancePath, "selected")
+	projection := testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractSourceEvent{testRecipientWorkflowSourceEvent()})
+	node := testNodeFrontierRecipient(mustRunForkNode("review", "receive"), "item.received", "review/case-one", "selected")
 	bound, err := projection.BindRecipient("source-event", node)
 	if err != nil || !reflect.DeepEqual(bound, node) {
 		t.Fatalf("exact nonroot path changed: %#v, %v", bound, err)
@@ -179,8 +209,12 @@ func TestSelectedContractWorkflowRecipientProjectionKeepsNonRootAndAgentAxesStri
 	for _, path := range []string{"review/other", "review", "fork-run"} {
 		other := node
 		other.Path = path
-		if _, err := projection.BindRecipient("source-event", other); err == nil {
-			t.Fatalf("exact workflow state rewrote wrong path %q", path)
+		unchanged, err := projection.BindRecipient("source-event", other)
+		if err != nil || !reflect.DeepEqual(unchanged, other) {
+			t.Fatalf("root-only binding rewrote nonroot path %q: %#v, %v", path, unchanged, err)
+		}
+		if err := bound.Satisfies("fork-run", unchanged, agentidentity.Identity{}); err == nil {
+			t.Fatalf("exact recipient relation admitted wrong nonroot path %q", path)
 		}
 	}
 	name, err := agentidentity.DeclaredName("reviewer", "selected/review")
@@ -226,21 +260,13 @@ func TestSelectedContractWorkflowRecipientProjectionKeepsNonRootAndAgentAxesStri
 }
 
 func TestSelectedContractWorkflowRecipientProjectionGuardUsesBoundCopyAndExactChildRun(t *testing.T) {
-	state := testRootRecipientWorkflowState()
-	projection := testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractWorkflowState{state}, []runfork.RunForkSelectedContractSourceEvent{testRecipientWorkflowSourceEvent()})
-	planning := testRecipientProjectionPlanning(testNodeFrontierRecipient(mustRunForkRootNode("test-node"), "item.received", state.FlowID, "subscription"))
+	projection := testWorkflowRecipientProjection(t, []runfork.RunForkSelectedContractSourceEvent{testRecipientWorkflowSourceEvent()})
+	planning := testRecipientProjectionPlanning(testNodeFrontierRecipient(mustRunForkRootNode("test-node"), "item.received", testWorkflowRecipientRoot(t).FlowID(), "subscription"))
 	before, err := json.Marshal(planning)
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "selected-workflow", Version: "v1"},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{"test-node": {
-			ID: "test-node", ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.received": {}},
-		}},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"item.received": {}},
-	})
+	source := testWorkflowRecipientSource(t)
 	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, source, projection)
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +353,7 @@ func TestSelectedContractWorkflowRecipientProjectionAgentDeclarationPath(t *test
 	if _, err := selectedContractAgentRecipientPath(source, invalid); err == nil {
 		t.Fatal("contradictory root/present plan admitted")
 	}
-	projection := testWorkflowRecipientProjection(t, nil, nil)
+	projection := testWorkflowRecipientProjection(t, nil)
 	selected := testAgentFrontierRecipient(rootPlan, "item.received", semanticview.RootExecutionFlowID(source), "subscription")
 	bound, err := projection.BindRecipient("source-event", selected)
 	if err != nil || !reflect.DeepEqual(bound, selected) {

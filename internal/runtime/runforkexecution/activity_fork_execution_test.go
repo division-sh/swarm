@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -24,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -138,18 +138,17 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				seedSelectedContractActivityAttempt(t, db, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
 			}
 
-			source := selectedContractActivitySource(server.URL, tt.effectClass)
-			descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
+			selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
+			loaded := selectedContractActivityDeclaredSource(t, server.URL, tt.effectClass, selection)
+			admitSelectedExecutionSourceArtifact(t, ctx, db, loaded.SourceArtifactFact.BundleHash())
+			descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loaded.Source)
 			if err != nil {
 				t.Fatalf("project activity event descriptors: %v", err)
 			}
 			if !selectedContractActivityDescriptorExists(descriptors, tt.resultEventType) {
 				t.Fatalf("selected activity source has no descriptor for %s: %#v", tt.resultEventType, descriptors)
 			}
-			selection := runfork.RunForkContractSelection{
-				Mode: "selected_contracts",
-			}
-			loader := &fakeSelectedContractSourceLoader{loaded: selectedContractActivityLoadedSource(source, selection)}
+			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRunID, At: sourceRequestEventID, ConfirmSourceFreeze: true, Owner: selectedContractExecutionOwnerForTest(t, pg),
 				SourceLoader: loader, ContractSelection: selection,
@@ -268,6 +267,49 @@ func selectedContractActivitySource(serverURL string, effectClass runtimecontrac
 	return selectedContractActivitySourceWithMode(serverURL, effectClass, runtimecontracts.FlowModeStatic)
 }
 
+func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, effectClass runtimecontracts.ActivityEffectClass, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
+	t.Helper()
+	root := t.TempDir()
+	for path, contents := range map[string]string{
+		"schema.yaml":          "name: activity-fork-proof\nstages:\n  pending: {initial: true}\n",
+		"entities.yaml":        "root: {}\n",
+		"flow_a/schema.yaml":   "name: flow_a\nmode: static\nstages:\n  pending: {initial: true}\n",
+		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
+		"flow_a/events.yaml":   "review.requested: {}\n",
+		"flow_a/nodes.yaml": `test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [review.requested]
+  event_handlers:
+    review.requested:
+      activity: {id: connector, tool: provider.connector}
+`,
+		"tools.yaml": fmt.Sprintf(`provider.connector:
+  handler_type: http
+  effect_class: %s
+  input_schema: {type: object}
+  output_schema: {type: object}
+  http: {method: POST, url: %q}
+`, effectClass, serverURL),
+	} {
+		writeSelectedContractFixtureFile(t, filepath.Join(root, path), contents)
+	}
+	repoRoot := runForkExecutionRepoRoot(t)
+	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}).LoadRunForkSelectedContractSource(context.Background(), selection)
+	if err != nil {
+		t.Fatalf("load declared activity producer fixture: %v", err)
+	}
+	bundle, ok := semanticview.Bundle(loaded.Source)
+	if !ok {
+		t.Fatal("activity fixture requires its admitted source bundle")
+	}
+	entityType, _, ok := bundle.FlowPrimaryEntityContract("flow_a")
+	if !ok || entityType != "test_entity" {
+		t.Fatalf("activity fixture must declare its producer entity in flow_a: %q, present=%v", entityType, ok)
+	}
+	return loaded
+}
+
 func selectedContractActivitySourceWithMode(serverURL string, effectClass runtimecontracts.ActivityEffectClass, mode string) semanticview.Source {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Activity: runtimecontracts.ActivitySpec{ID: "connector", Tool: "provider.connector"},
@@ -304,21 +346,6 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 		},
 	}
 	return semanticview.Wrap(bundle)
-}
-
-func selectedContractActivityLoadedSource(source semanticview.Source, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
-	workflow := runtimepipeline.NewWorkflowDefinition("activity-fork-proof", []runtimepipeline.WorkflowStage{{Name: "pending"}}, nil)
-	nodes := []runtimepipeline.WorkflowNode{{
-		Node: mustRunForkNode("flow_a", "test-node"), ExecutionType: runtimecontracts.SystemNodeExecutionType,
-	}}
-	fact := testEphemeralSourceArtifactFact(runForkTestBundleHash)
-	return LoadedSelectedContractSource{
-		Selection: selection, Source: source, SourceArtifactFact: fact, EffectiveSourceIdentity: testEffectiveSourceIdentity(fact),
-		Module: selectedContractWorkflowModule{
-			source: source, workflow: workflow, nodes: nodes,
-			guardRegistry: runtimepipeline.NewContractGuardRegistry(source), actionRegistry: runtimepipeline.NewContractActionRegistry(source),
-		},
-	}
 }
 
 func seedSelectedContractActivityLoop(t *testing.T, db *sql.DB, runID, entityID, requestEventID string, activation loopruntime.Activation, at time.Time) {

@@ -250,12 +250,17 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
-		agentRuntime, workflowStates, err := prepareSelectedContractWorkflowReadiness(
-			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, plan, sourceEventIDs, req.AgentRuntime,
+		agentRuntime, readiness, err := prepareSelectedContractWorkflowReadiness(
+			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, plan, frontier, sourceEventIDs, req.AgentRuntime,
 		)
 		if err != nil {
 			return result, err
 		}
+		prepared, err := readiness.Projection()
+		if err != nil {
+			return result, err
+		}
+		workflowStates := prepared.States
 		agentRuntime, err = bindRecoveredSelectedContractAgentRuntime(
 			ctx, executionPorts.workflow, forkRunID, loadedSource, workflowStates, agentRuntime,
 		)
@@ -271,7 +276,6 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			ForkRunID:             forkRunID,
 			ForkEventID:           plan.ForkPoint.EventID,
 			SourceEvents:          sourceEventIDs,
-			WorkflowStates:        workflowStates,
 			ExecutionOwner:        runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
 			DeferredWorkAdmission: deferredWorkAdmission,
 			AgentRuntime:          agentRuntime,

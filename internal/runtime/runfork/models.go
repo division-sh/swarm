@@ -183,7 +183,6 @@ type RunForkDeliveryEventReplayResult struct {
 const (
 	RunForkMaterializedEntitySnapshotMetadataOwner = "runtime.run_fork.materialized_entity_snapshot_metadata"
 
-	RunForkMaterializedEntitySnapshotMetadataSourceEvent       = "source_event"
 	RunForkMaterializedEntitySnapshotMetadataSourceEntityState = "source_entity_state"
 )
 
@@ -1012,20 +1011,6 @@ const (
 	RunForkSelectedContractExecutionLineageOwner = "store.run_fork.selected_contract_execution_lineage"
 )
 
-type RunForkSelectedContractExecutionMaterializeRequest struct {
-	SourceRunID             string
-	At                      string
-	ContractSelection       RunForkContractSelection
-	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
-	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
-	FrontierAdmission       RunForkContractFrontierAdmission
-	RouteTopology           RunForkSelectedContractRouteTopology
-	RecipientPlanning       RunForkSelectedContractRecipientPlanning
-	WorkflowStates          []RunForkSelectedContractWorkflowState
-	DataPinOverrides        []durabledata.ExplicitPin
-	FanOutPlanRefs          []runtimecontracts.FanOutPlanRef
-}
-
 type RunForkSelectedContractWorkflowStateAddressKind string
 
 const (
@@ -1034,16 +1019,25 @@ const (
 )
 
 type RunForkSelectedContractWorkflowState struct {
+	// SourceEventID is the canonical first association for diagnostics only.
+	// SourceEvents retains every admitted occurrence and its execution posture.
 	SourceEventID   string
+	SourceEvents    []RunForkSelectedContractWorkflowStateSourceEvent
 	EntityID        string
+	EntityType      string
 	FlowID          string
 	WorkflowVersion string
-	ExecutionMode   executionmode.Mode
+	ExecutionMode   executionmode.Mode // Template readiness generation only; static state has no execution mode.
 	Mode            string
 	AddressKind     RunForkSelectedContractWorkflowStateAddressKind
 	Route           runtimeflowidentity.Route
 	Config          map[string]any
 	Agents          []RunForkSelectedContractAgentExpectation
+}
+
+type RunForkSelectedContractWorkflowStateSourceEvent struct {
+	SourceEventID string
+	ExecutionMode executionmode.Mode
 }
 
 // RunForkSelectedContractAgentExpectation is a runless declaration fact. The
@@ -1074,8 +1068,6 @@ type RunForkSelectedContractSourceEvent struct {
 	SourceEventID string               `json:"source_event_id"`
 	EventName     string               `json:"event_name"`
 	ExecutionMode executionmode.Mode   `json:"execution_mode"`
-	EntityID      string               `json:"entity_id,omitempty"`
-	FlowInstance  string               `json:"flow_instance,omitempty"`
 	Scope         string               `json:"scope,omitempty"`
 	RoutingSource events.RoutingSource `json:"routing_source"`
 	Payload       json.RawMessage      `json:"payload,omitempty"`

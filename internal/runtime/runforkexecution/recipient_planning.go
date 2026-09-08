@@ -309,7 +309,7 @@ func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelect
 	if err := validateSelectedContractRecipientPlanningForPublish(planning); err != nil {
 		return nil, err
 	}
-	if err := projection.requireChildRun(projection.childRunID); err != nil {
+	if err := projection.requireChildRun(projection.root.RunID()); err != nil {
 		return nil, err
 	}
 	if len(sourceAgents) == 0 {
@@ -417,7 +417,7 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 		if !exists {
 			return fmt.Errorf("selected-contract publish has an unselected execution authority for source event %s", sourceEventID)
 		}
-		if err := want.Satisfies(g.workflowProjection.childRunID, projected, actual.Route().AgentIdentity); err != nil {
+		if err := want.Satisfies(g.workflowProjection.root.RunID(), projected, actual.Route().AgentIdentity); err != nil {
 			return fmt.Errorf("selected-contract recipient for source event %s: %w", sourceEventID, err)
 		}
 		delete(remaining, key)

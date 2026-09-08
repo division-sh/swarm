@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -25,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -400,13 +402,37 @@ func materializeSelectedContractForkCleanupProbe(
 	if model.RecipientPlanning == nil {
 		t.Fatal("cleanup-probe execution model has no recipient planning")
 	}
-	return pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID:       sourceRunID,
-		At:                forkAt,
-		ContractSelection: selection,
-		FrontierAdmission: frontier,
-		RouteTopology:     topology,
-		RecipientPlanning: *model.RecipientPlanning,
+	var eventIDs []string
+	for _, event := range model.RecipientPlanning.RecipientPlanEvents {
+		eventIDs = append(eventIDs, event.SourceEventID)
+	}
+	modes, err := pg.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, eventIDs)
+	if err != nil || len(modes) != len(eventIDs) {
+		t.Fatalf("load cleanup-probe source modes: %v, %v", modes, err)
+	}
+	sourceModes := make(map[string]executionmode.Mode, len(eventIDs))
+	for i, eventID := range eventIDs {
+		sourceModes[eventID] = modes[i]
+	}
+	readiness, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
+		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: selection,
+			SourceArtifactFact: loaded.SourceArtifactFact, EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
+			FrontierAdmission: frontier, RecipientPlanning: *model.RecipientPlanning, SourceModes: sourceModes},
+		Source: loaded.Source,
+	})
+	if err != nil {
+		t.Fatalf("admit cleanup-probe readiness: %v", err)
+	}
+	return pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
+		SourceRunID:             sourceRunID,
+		At:                      forkAt,
+		ContractSelection:       selection,
+		SourceArtifactFact:      loaded.SourceArtifactFact,
+		EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
+		FrontierAdmission:       frontier,
+		RouteTopology:           topology,
+		RecipientPlanning:       *model.RecipientPlanning,
+		Readiness:               readiness,
 	})
 }
 

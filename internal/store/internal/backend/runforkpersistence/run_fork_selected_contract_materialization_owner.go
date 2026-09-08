@@ -10,11 +10,16 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
@@ -44,7 +49,7 @@ type runForkSelectedContractMaterializationPort struct {
 	now                 func() time.Time
 }
 
-func materializeRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionMaterializeRequest, port runForkSelectedContractMaterializationPort) (materialization runfork.RunForkMaterialization, err error) {
+func materializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest, port runForkSelectedContractMaterializationPort) (materialization runfork.RunForkMaterialization, err error) {
 	if port.requireCurrent == nil || port.runMutation == nil || port.lockSourceStatus == nil || port.plan == nil ||
 		port.deliveries == nil || port.loadSource == nil || port.activeForkSource == nil || port.admitProfile == nil || port.loadSnapshot == nil ||
 		port.requireProfile == nil || port.durableData == nil || port.insertRun == nil || port.ensureProfile == nil ||
@@ -110,7 +115,18 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		workflowStates, err := selectedContractWorkflowStates(plan, forkRunID, selection, req.RecipientPlanning, req.WorkflowStates)
+		sourceModes, err := selectedContractWorkflowSourceModes(txctx, tx, port.postgres, plan.SourceRunID, req.FrontierAdmission)
+		if err != nil {
+			return err
+		}
+		if err := req.Readiness.ValidateAgainst(runforkreadiness.Binding{
+			Plan: plan, ContractSelection: selection, SourceArtifactFact: identity.SourceArtifactFact,
+			EffectiveSourceIdentity: req.EffectiveSourceIdentity,
+			FrontierAdmission:       req.FrontierAdmission, RecipientPlanning: req.RecipientPlanning, SourceModes: sourceModes,
+		}); err != nil {
+			return err
+		}
+		workflowStates, err := selectedContractAdmittedWorkflowStates(plan, forkRunID, req.Readiness)
 		if err != nil {
 			return err
 		}
@@ -127,14 +143,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			existing.AgentTopologies = nil
 			for _, state := range workflowStates {
-				_, topologies, encoded, err := selectedContractWorkflowReadiness(identity.SourceArtifactFact, state)
+				topologies, err := requireSelectedContractWorkflowState(txctx, tx, port.postgres, identity.SourceArtifactFact, state)
 				if err != nil {
 					return err
-				}
-				if encoded != nil {
-					if err := requireSelectedContractWorkflowReadiness(txctx, tx, port.postgres, state, encoded); err != nil {
-						return err
-					}
 				}
 				existing.AgentTopologies = append(existing.AgentTopologies, topologies...)
 			}
@@ -229,6 +240,45 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		return nil
 	})
 	return materialization, err
+}
+
+func selectedContractWorkflowSourceModes(ctx context.Context, tx *sql.Tx, postgres bool, sourceRunID string, frontier runfork.RunForkContractFrontierAdmission) (map[string]executionmode.Mode, error) {
+	_, ids, _, bindingErr := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	if bindingErr != nil {
+		return nil, bindingErr
+	}
+	modes := make(map[string]executionmode.Mode, len(ids))
+	if len(ids) == 0 {
+		return modes, nil
+	}
+	var records []eventrecord.Record
+	var err error
+	if postgres {
+		records, err = eventrecordpostgres.LoadMany(ctx, tx, ids)
+	} else {
+		records, err = eventrecordsqlite.LoadMany(ctx, tx, ids)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load selected-contract workflow source associations: %w", err)
+	}
+	for _, record := range records {
+		admitted, err := record.Decode()
+		if err != nil {
+			return nil, fmt.Errorf("decode selected-contract workflow source association: %w", err)
+		}
+		event := admitted.Event()
+		if event.RunID() != sourceRunID {
+			return nil, fmt.Errorf("selected-contract workflow source event %s belongs to another run", event.ID())
+		}
+		if _, duplicate := modes[event.ID()]; duplicate {
+			return nil, fmt.Errorf("selected-contract workflow source event %s has duplicate records", event.ID())
+		}
+		modes[event.ID()] = event.ExecutionMode()
+	}
+	if len(modes) != len(ids) {
+		return nil, fmt.Errorf("selected-contract workflow source associations require every persisted event")
+	}
+	return modes, nil
 }
 
 func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner) runForkSelectedContractMaterializationPort {

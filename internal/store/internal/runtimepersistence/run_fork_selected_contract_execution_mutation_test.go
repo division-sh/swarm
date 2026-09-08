@@ -12,13 +12,21 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -33,20 +41,14 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002400, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
 	_, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("MaterializeRunFork error = %v, want non-agent blocker", err)
 	}
 
-	request := runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	}
+	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{})
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
@@ -79,7 +81,7 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	`, materialized.ForkRunID).Scan(&forkBundleHash); err != nil {
 		t.Fatalf("load selected fork bundle identity: %v", err)
 	}
-	if forkBundleHash != authorActivityTestBundleHash {
+	if forkBundleHash != mustCanonicalSelectedContractStoreHash(t) {
 		t.Fatalf("selected fork bundle identity = hash:%q, want inherited canonical identity", forkBundleHash)
 	}
 	var replayRows int
@@ -118,23 +120,21 @@ func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002402, 0).UTC()
-	targetArtifact := storeTestSourceArtifact("selected-contract-execution")
+	repo := canonicalrouting.RepoRoot(t)
+	targetBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopySelectedStoreExecutionTarget(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetArtifact := targetBundle.SourceArtifact
 	bundleHash := targetArtifact.BundleHash()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 	seedStoreTestPersistedArtifact(t, db, targetArtifact)
 
 	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatalf("NewSourceArtifactFact: %v", err)
 	}
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID:        sourceRunID,
-		At:                 eventID,
-		SourceArtifactFact: bundleSource,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundleHash}, bundleSource))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002405, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
 		UPDATE events
 		SET flow_instance = ''
@@ -169,7 +169,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
-		SET flow_instance = 'selected-state-flow/at-T',
+		SET flow_instance = 'selected-state-flow/at-t',
 		    entity_type = 'selected_case',
 		    updated_at = $3
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
@@ -189,13 +189,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 		t.Fatalf("metadata source = %q, want source entity_state", got)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -210,7 +204,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	`, materialized.ForkRunID, entityID).Scan(&flowInstance, &entityType); err != nil {
 		t.Fatalf("load selected fork entity_state: %v", err)
 	}
-	if flowInstance != "selected-state-flow/at-T" || entityType != "selected_case" {
+	if flowInstance != "selected-state-flow/at-t" || entityType != "selected_case" {
 		t.Fatalf("selected fork metadata = flow:%s type:%s", flowInstance, entityType)
 	}
 }
@@ -225,7 +219,7 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 	laterEventID := "00000000-0000-4000-8000-000000000001"
 	earlierAt := time.Unix(1700002406, 0).UTC()
 	laterAt := earlierAt.Add(time.Second)
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, earlierEventID, earlierAt)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, earlierEventID, earlierAt)
 	laterEvent := semanticEventRecordFixture(
 		laterEventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),
 		semanticEventRecordFixtureEnvelope(entityID, ""), laterAt,
@@ -250,18 +244,12 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          laterEventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, laterEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 
-	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{earlierEventID, laterEventID}, nil)
+	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{earlierEventID, laterEventID})
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSourceEvents: %v", err)
 	}
@@ -279,7 +267,7 @@ func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *te
 	eventID := uuid.NewString()
 	at := time.Unix(1700002408, 0).UTC()
 	payload := []byte("{\n  \"numeric\": 1.0, \"ordered\": {\"b\": 2, \"a\": 1}\n}")
-	seedSelectedContractExecutionStoreSourceRawWithPayload(
+	seedCanonicalSelectedContractExecutionStoreSourceRawWithPayload(
 		t, db, sourceRunID, entityID, eventID, at,
 		[]events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")}, payload,
 	)
@@ -293,17 +281,11 @@ func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *te
 		t.Fatalf("test fixture did not diverge JSONB query projection %q from raw bytes %q", queryProjection, payload)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
-	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{eventID}, nil)
+	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{eventID})
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSourceEvents: %v", err)
 	}
@@ -326,7 +308,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 	auditID := uuid.NewString()
 	turnID := uuid.NewString()
 	at := time.Unix(1700002410, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -344,13 +326,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 		}
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -395,9 +371,9 @@ func TestSelectedContractExecutionMaterializationKeepsCanonicalReplayScopesSourc
 			eventID := uuid.NewString()
 			at := time.Unix(1700002415, 0).UTC()
 			if tc.reasonCode == replayScopeReasonDirect {
-				seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, eventID, at)
+				seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, eventID, at)
 			} else {
-				seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+				seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 			}
 			captureRunForkTestRevision(t, db, sourceRunID)
 			var sourceScope string
@@ -417,13 +393,7 @@ func TestSelectedContractExecutionMaterializationKeepsCanonicalReplayScopesSourc
 				t.Fatalf("plan blockers = %#v, canonical replay scope is an admitted initial fact", plan.UnsupportedBlockers)
 			}
 
-			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-				SourceRunID: sourceRunID,
-				At:          eventID,
-				ContractSelection: runfork.RunForkContractSelection{
-					Mode: "selected_contracts",
-				},
-			})
+			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 			if err != nil {
 				t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 			}
@@ -446,7 +416,7 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002420, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	sessionID := uuid.NewString()
 	activeClaim := seedSelectedContractSourceConversationHistoryWithActiveDelivery(t, db, sourceRunID, entityID, eventID, sessionID, uuid.NewString(), uuid.NewString(), at)
 	if _, err := pg.BindAgentSession(ctx, activeClaim, sessionID); err != nil {
@@ -454,7 +424,8 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	// This backend history refusal must precede readiness admission.
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
@@ -487,22 +458,16 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 	turnID := uuid.NewString()
 	at := time.Unix(1700002425, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, sourceEvent, sourceRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
-		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
+		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          forkPointEventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -553,7 +518,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	turnID := uuid.NewString()
 	at := time.Unix(1700002427, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
@@ -562,10 +527,11 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
-		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
+		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	// This backend history refusal must precede readiness admission.
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
 		ContractSelection: runfork.RunForkContractSelection{
@@ -596,17 +562,18 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	forkPointEventID := uuid.NewString()
 	at := time.Unix(1700002428, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
 	unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("unrelated-agent")}
 	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
-		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
+		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	// This backend history refusal must precede readiness admission.
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          forkPointEventID,
 		ContractSelection: runfork.RunForkContractSelection{
@@ -636,7 +603,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	auditID := uuid.NewString()
 	turnID := uuid.NewString()
 	at := time.Unix(1700002430, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
 	terminalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("terminal-agent")}
 	terminalEvent := commitPostgresDeliveryFixture(t, ctx, db, eventID, terminalRoute)
@@ -651,13 +618,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -687,17 +648,11 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	unrelatedEventID := uuid.NewString()
 	at := time.Unix(1700002435, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
-		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
+		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          forkPointEventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -738,7 +693,7 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 		Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	at := time.Unix(1700002500, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload, routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a', '1', 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
@@ -748,7 +703,8 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 		t.Fatalf("seed timer: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	// This backend history refusal must precede readiness admission.
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
@@ -799,7 +755,7 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 			entityID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700003525, 0).UTC()
-			seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+			seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 			activation := admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
 				t, sourceRunID, "agent-a", "flow-a/1", entityID, "selected-"+strings.ReplaceAll(tc.name, " ", "-"), tc.due,
 			))
@@ -808,7 +764,8 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 			}
 			captureRunForkTestRevision(t, db, sourceRunID)
 
-			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+			// This backend history refusal must precede readiness admission.
+			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 				SourceRunID: sourceRunID,
 				At:          eventID,
 				ContractSelection: runfork.RunForkContractSelection{
@@ -835,7 +792,7 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003550, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	timer := admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
 		t, sourceRunID, "agent-a", "flow-a/1", entityID, "selected-vanishing-timer", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
 	))
@@ -859,7 +816,8 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	if !runForkTestHasPlanBlocker(repeatedPlan, runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("repeated fixed-revision plan lost timer blocker: %#v", repeatedPlan.ReplayResumeAdmission)
 	}
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	// This backend history refusal must precede readiness admission.
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
@@ -880,15 +838,9 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003600, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -956,7 +908,7 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	at := time.Unix(1700003605, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 	identity := mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
 	seedTestAgentRow(t, ctx, db, true, identity, "active")
@@ -976,13 +928,7 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1018,16 +964,10 @@ func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t 
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	at := time.Unix(1700003608, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 	seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1047,15 +987,9 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003610, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1160,17 +1094,11 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	at := time.Unix(1700003615, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedRunForkSessionProjection(t, db, sourceRunID, "selected-session-agent", sessionID, "terminated", at)
 	selectedRevision := captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1279,16 +1207,10 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			entityID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700003620, 0).UTC()
-			seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+			seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"), "active")
 
-			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-				SourceRunID: sourceRunID,
-				At:          eventID,
-				ContractSelection: runfork.RunForkContractSelection{
-					Mode: "selected_contracts",
-				},
-			})
+			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 			if err != nil {
 				t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 			}
@@ -1335,21 +1257,15 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 	turnID := uuid.NewString()
 	at := time.Unix(1700003622, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, sourceEvent, sourceRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
-		"validation/vertical.ready_for_review", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
+		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          forkPointEventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1388,15 +1304,9 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	at := time.Unix(1700003623, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1425,15 +1335,9 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003627, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1542,15 +1446,9 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003630, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1585,15 +1483,9 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003631, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1622,15 +1514,9 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003632, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1658,15 +1544,9 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003633, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1694,15 +1574,9 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003635, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1730,15 +1604,9 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700003634, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1767,15 +1635,9 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	eventID := "00000000-0000-0000-0000-000000000001"
 	afterEventID := "00000000-0000-0000-0000-000000000002"
 	at := time.Unix(1700003626, 0).UTC()
-	seedSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1821,7 +1683,7 @@ func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocke
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700002525, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
 		UPDATE events
 		SET flow_instance = 'flow-a/1'
@@ -1830,7 +1692,8 @@ func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocke
 		t.Fatalf("seed selected event route identity: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	// This backend history refusal must precede readiness admission.
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          eventID,
 		ContractSelection: runfork.RunForkContractSelection{
@@ -1845,6 +1708,177 @@ func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocke
 		t.Fatalf("materialized fork despite route blocker: %#v", materialized)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
+}
+
+// Preparation uses the actual persisted selected artifact and event modes.
+// Missing source declarations are fixture errors, not invented readiness facts.
+func canonicalSelectedContractExecutionStoreRequest(t *testing.T, ctx context.Context, pg *PostgresStore, sourceRunID, at string, selection runfork.RunForkContractSelection, fact runtimecorrelation.SourceArtifactFact) runforkreadiness.MaterializeRequest {
+	t.Helper()
+	req := runforkreadiness.MaterializeRequest{SourceRunID: sourceRunID, At: at, ContractSelection: selection, SourceArtifactFact: fact}
+	repo := canonicalrouting.RepoRoot(t)
+	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: pg}
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
+		SourceRunID: req.SourceRunID, BundleHash: req.SourceArtifactFact.BundleHash(), SourceArtifactFact: req.SourceArtifactFact, Selection: req.ContractSelection,
+	})
+	if err != nil {
+		t.Fatalf("prepare selected-store fixture source: %v", err)
+	}
+	if loaded.Cleanup != nil {
+		t.Cleanup(func() {
+			if err := loaded.Cleanup(); err != nil {
+				t.Errorf("release selected-store fixture source: %v", err)
+			}
+		})
+	}
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: req.SourceRunID, At: req.At})
+	if err != nil {
+		t.Fatalf("plan selected-store fixture readiness: %v", err)
+	}
+	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: loaded.Source, ContractSelection: req.ContractSelection})
+	if err != nil {
+		t.Fatalf("admit selected-store fixture frontier: %v", err)
+	}
+	routes, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: loaded.Source, ContractSelection: req.ContractSelection, FrontierAdmission: frontier})
+	if err != nil {
+		t.Fatalf("admit selected-store fixture routes: %v", err)
+	}
+	topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: routes})
+	if err != nil {
+		t.Fatalf("build selected-store fixture topology: %v", err)
+	}
+	model, err := runforkexecution.BuildSelectedContractExecutionModel(runforkexecution.SelectedContractExecutionModelRequest{Admission: frontier, RouteAdmission: routes, RouteTopology: topology})
+	if err != nil {
+		t.Fatalf("build selected-store fixture execution model: %v", err)
+	}
+	_, eventIDs, _, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modes, err := pg.LoadRunForkSelectedContractSourceEventModes(ctx, req.SourceRunID, eventIDs)
+	if err != nil || len(modes) != len(eventIDs) {
+		t.Fatalf("load selected-store fixture exact event modes: modes=%v events=%v err=%v", modes, eventIDs, err)
+	}
+	sourceModes := make(map[string]executionmode.Mode, len(eventIDs))
+	for i, eventID := range eventIDs {
+		sourceModes[eventID] = modes[i]
+	}
+	admitted, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
+		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: req.ContractSelection, SourceArtifactFact: loaded.SourceArtifactFact,
+			EffectiveSourceIdentity: loaded.EffectiveSourceIdentity, FrontierAdmission: frontier, RecipientPlanning: *model.RecipientPlanning, SourceModes: sourceModes},
+		Source: loaded.Source,
+	})
+	if err != nil {
+		t.Fatalf("admit selected-store fixture readiness: %v", err)
+	}
+	req.SourceArtifactFact, req.EffectiveSourceIdentity = loaded.SourceArtifactFact, loaded.EffectiveSourceIdentity
+	req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning, req.Readiness = frontier, topology, *model.RecipientPlanning, admitted
+	return req
+}
+
+func TestSelectedContractExecutionStoreFixtureBootAdmission(t *testing.T) {
+	report := bootverify.Run(context.Background(), semanticview.Wrap(loadCanonicalSelectedContractStoreSource(t)), bootverify.Options{})
+	if report.HasErrors() {
+		t.Fatalf("canonical selected-store fixture boot: %v", report.Errors())
+	}
+}
+
+func loadCanonicalSelectedContractStoreSource(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopySelectedStoreExecution(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("compile declared selected-store source: %v", err)
+	}
+	return bundle
+}
+
+func mustCanonicalSelectedContractStoreHash(t *testing.T) string {
+	t.Helper()
+	hash, err := runtimecontracts.BundleHash(loadCanonicalSelectedContractStoreSource(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hash
+}
+
+func seedCanonicalSelectedContractExecutionStoreSource(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
+	captureRunForkTestRevision(t, db, sourceRunID)
+}
+
+func seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	seedCanonicalSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")})
+}
+
+func seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
+	seedCanonicalSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, nil)
+	captureRunForkTestRevision(t, db, sourceRunID)
+}
+
+func seedCanonicalSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute) {
+	seedCanonicalSelectedContractExecutionStoreSourceRawWithPayload(t, db, sourceRunID, entityID, eventID, at, routes, []byte(`{}`))
+}
+
+func seedCanonicalSelectedContractExecutionStoreSourceRawWithPayload(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
+	t.Helper()
+	bundle := loadCanonicalSelectedContractStoreSource(t)
+	hash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := testAuthorActivityContextForBundle(hash)
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: hash, Artifact: bundle.SourceArtifact})
+	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	selected.acceptCurrentSchemaForTest()
+	event := semanticEventRecordFixture(
+		eventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), payload,
+		semanticEventRecordFixtureEnvelope(entityID, ""), at,
+	)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin source fact transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
+	if err != nil {
+		t.Fatalf("begin source story transaction: %v", err)
+	}
+	if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, selected, tx, story, event, routes); err != nil {
+		t.Fatalf("seed source event and delivery obligations: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO entity_mutations (
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'selected-store-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Selected Store Entity"'::jsonb, $3::uuid, 'platform', 'selected-store-test', 'seed', $4)
+	`, sourceRunID, entityID, eventID, at); err != nil {
+		t.Fatalf("seed mutations: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Selected Store Entity',
+			'pending', '{}'::jsonb, '{"name":"Selected Store Entity"}'::jsonb, '{}'::jsonb, 1,
+			$3, $3, $3
+		)
+	`, sourceRunID, entityID, at); err != nil {
+		t.Fatalf("seed entity_state: %v", err)
+	}
+	if err := story.Finalize(ctx); err != nil {
+		t.Fatalf("finalize source story transaction: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit source facts: %v", err)
+	}
 }
 
 func seedSelectedContractExecutionStoreSource(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {

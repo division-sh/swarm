@@ -35,15 +35,15 @@ func recipientBoundaryAllowances() map[string]recipientBoundaryAllowance {
 		"runtime/runfork::EqualSelectedContractRouteTopology/raw_aggregate_equality":                                     {1, "metadata-only comparison after canonical keys are compared and both cloned topology evidence fields cleared"},
 		"runtime/runfork::EqualSelectedContractFrontierEvents/raw_aggregate_equality":                                    {1, "metadata-only comparison after canonical keys are compared and cloned frontier recipient fields cleared"},
 		"store/internal/backend/runforkpersistence::decodeRunForkSelectedContractRouteRecoveryModels/raw_authority_json": {2, "strict typed topology/planning decoding after verifying each payload integrity hash; semantic comparison uses the shared owner"},
-		"runtime/runforkexecution::selectedContractWorkflowProjection.BindRecipient/evidence_field:Path":                 {5, "bind execution copy through admitted workflow/entity correspondence; preserve persisted selected identity"},
+		"runtime/runforkexecution::selectedContractWorkflowProjection.BindRecipient/evidence_field:Path":                 {3, "bind root execution copy through admitted root coordinate and source-event membership; no producer-state transfer"},
 		"runtime/runforkexecution::selectedContractNodeDeliveryRoutes/evidence_field:Recipient":                          {2, "typed node materialization, not recipient-set identity"},
 		"runtime/runforkexecution::selectedContractNodeDeliveryRoutes/evidence_field:Path":                               {1, "exact node target blueprint"},
 		"runtime/runforkexecution::selectedContractPlannedAgentRecipientPlans/evidence_field:Recipient":                  {1, "agent subset classification"},
 		"runtime/runforkexecution::selectedContractPlannedAgentRecipientPlans/evidence_field:AgentPlan":                  {1, "full canonical runless agent plan selection"},
-		"runtime/runforkexecution::selectedContractWorkflowStateProjectionWithReadiness/evidence_field:Recipient":        {2, "node/agent workflow-state projection"},
-		"runtime/runforkexecution::selectedContractWorkflowStateProjectionWithReadiness/evidence_field:Path":             {1, "exact workflow-state route projection"},
-		"runtime/runforkexecution::selectedContractTemplateAgentWorkflowState/evidence_field:Path":                       {1, "existing selected template workflow-state owner"},
-		"runtime/runforkexecution::selectedContractTemplateAgentWorkflowState/evidence_field:AgentPlan":                  {1, "full plan correspondence, not a reduced recipient key"},
+		"runtime/runforkreadiness::Project/evidence_field:Recipient":                                                     {2, "node/agent workflow-state projection"},
+		"runtime/runforkreadiness::Project/evidence_field:Path":                                                          {1, "exact workflow-state route projection"},
+		"runtime/runforkreadiness::selectedContractTemplateAgentWorkflowState/evidence_field:Path":                       {1, "existing selected template workflow-state owner"},
+		"runtime/runforkreadiness::selectedContractTemplateAgentWorkflowState/evidence_field:AgentPlan":                  {1, "full plan correspondence, not a reduced recipient key"},
 		"runtime/runforkexecution::selectedContractDynamicTopologyEvidence/evidence_field:Path":                          {2, "nonmutating dynamic topology corroboration"},
 	}
 }
@@ -59,6 +59,7 @@ func TestSelectedForkRecipientAuthorityConsumers(t *testing.T) {
 		t.Fatal(err)
 	}
 	patterns := []string{
+		"./internal/runtime/runforkreadiness",
 		"./internal/runtime/runfork",
 		"./internal/runtime/runforkadmission",
 		"./internal/runtime/runforkexecution",

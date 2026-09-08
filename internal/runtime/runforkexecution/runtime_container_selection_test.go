@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -16,39 +18,70 @@ import (
 
 func TestSelectedContractSourceProjectionPreservesProducerRoutingAcrossDifferentRecipientOwner(t *testing.T) {
 	producer := eventtest.ConcreteTemplateRoutingSource("producer", "producer/one", "entity-one")
-	states := []runfork.RunForkSelectedContractWorkflowState{{
-		SourceEventID: "source-event", EntityID: "entity-one", FlowID: "root",
-		AddressKind: runfork.RunForkSelectedContractWorkflowStateRunScope,
-	}}
 	eventsIn := []runfork.RunForkSelectedContractSourceEvent{{
-		SourceEventID: "source-event", EventName: "work.ready", EntityID: "entity-one", RoutingSource: producer,
+		SourceEventID: "source-event", EventName: "work.ready", RoutingSource: producer, ExecutionMode: executionmode.Live,
 	}}
 
-	projected, _, err := projectSelectedContractSourceEventWorkflowStates("fork-run", states, eventsIn)
+	projected, projection, err := projectSelectedContractSourceEvents("source-run", testWorkflowRecipientRoot(t), eventsIn)
 	if err != nil {
 		t.Fatalf("project selected-contract source event: %v", err)
 	}
 	if len(projected) != 1 || projected[0].RoutingSource != producer {
 		t.Fatalf("projected producer routing = %#v, want exact persisted source %#v", projected, producer)
 	}
-	if projected[0].FlowInstance != "fork-run" {
-		t.Fatalf("projected execution target = %q, want fork-run", projected[0].FlowInstance)
+	if !reflect.DeepEqual(projected, eventsIn) {
+		t.Fatalf("recipient ownership rehomed producer entity/flow: got %#v want %#v", projected, eventsIn)
+	}
+	rootRecipient := testNodeFrontierRecipient(mustRunForkRootNode("test-node"), "work.ready", ".", "subscription")
+	bound, err := projection.BindRecipient("source-event", rootRecipient)
+	if err != nil || bound.Path != "fork-run" {
+		t.Fatalf("independent root recipient binding failed: %#v, %v", bound, err)
+	}
+	if !reflect.DeepEqual(projected, eventsIn) || eventsIn[0].RoutingSource != producer {
+		t.Fatal("root recipient binding changed producer ownership")
+	}
+	forkEvent, err := selectedContractForkEvent("source-run", "fork-run", "fork-event", projected[0], runfork.RunForkSelectedContractExecutionOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forkEvent.RoutingSource() != producer || forkEvent.SourceRoute() != producer.Route() {
+		t.Fatalf("fork event lost producer identity: %#v", forkEvent.RoutingSource())
+	}
+	if forkEvent.HasTargetRoute() || len(forkEvent.TargetRoutes()) != 0 {
+		t.Fatalf("fork event promoted producer or recipient ownership into historical targets: %#v", forkEvent.NormalizedEnvelope())
 	}
 }
 
 func TestSelectedContractSourceProjectionRejectsMissingProducerRoutingAuthority(t *testing.T) {
-	_, _, err := projectSelectedContractSourceEventWorkflowStates(
-		"fork-run",
-		[]runfork.RunForkSelectedContractWorkflowState{{
-			SourceEventID: "source-event", EntityID: "entity-one", FlowID: "root",
-			AddressKind: runfork.RunForkSelectedContractWorkflowStateRunScope,
-		}},
+	_, _, err := projectSelectedContractSourceEvents(
+		"source-run", testWorkflowRecipientRoot(t),
 		[]runfork.RunForkSelectedContractSourceEvent{{
-			SourceEventID: "source-event", EventName: "work.ready", EntityID: "entity-one", RoutingSource: events.NoRoutingSource(),
+			SourceEventID: "source-event", EventName: "work.ready", RoutingSource: events.NoRoutingSource(),
 		}},
 	)
 	if err == nil || !strings.Contains(err.Error(), "persisted producer routing authority") {
 		t.Fatalf("missing producer routing error = %v", err)
+	}
+}
+
+func TestSelectedContractSourceProjectionIsIdempotentAndDoesNotMutateInput(t *testing.T) {
+	root := testWorkflowRecipientRoot(t)
+	input := []runfork.RunForkSelectedContractSourceEvent{testRecipientWorkflowSourceEvent()}
+	before := append([]runfork.RunForkSelectedContractSourceEvent(nil), input...)
+	first, _, err := projectSelectedContractSourceEvents("source-run", root, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || first[0].RoutingSource != eventtest.RootRoutingSource("fork-run") || first[0].RoutingSource.Route().EntityID != "fork-run" || first[0].RoutingSource.Route().FlowInstance != "" {
+		t.Fatalf("root source was not projected exactly: %#v", first)
+	}
+	second, projection, err := projectSelectedContractSourceEvents("source-run", root, first)
+	if err != nil || !reflect.DeepEqual(first, second) || !reflect.DeepEqual(input, before) {
+		t.Fatalf("double projection changed source evidence: first=%#v second=%#v err=%v", first, second, err)
+	}
+	selected := testNodeFrontierRecipient(mustRunForkRootNode("test-node"), "item.received", ".", "subscription")
+	if bound, err := projection.BindRecipient("source-event", selected); err != nil || bound.Path != "fork-run" {
+		t.Fatalf("already-projected source lost admitted membership: %#v, %v", bound, err)
 	}
 }
 

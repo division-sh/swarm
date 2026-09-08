@@ -20,6 +20,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 )
 
 // SelectedContractForkLifecycle owns planning, materialization, activation,
@@ -27,7 +28,7 @@ import (
 type SelectedContractForkLifecycle interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-	MaterializeRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error)
+	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	DiscardMaterializedSelectedContractExecutionFork(context.Context, string) error
 	ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 	LoadRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, bool, error)
@@ -52,7 +53,7 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 type SelectedContractReplayPersistence interface {
 	EnsureRunForkNoPostForkCommittedReplayScopeMarkers(context.Context, string, string) error
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, []runfork.RunForkSelectedContractWorkflowState) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 

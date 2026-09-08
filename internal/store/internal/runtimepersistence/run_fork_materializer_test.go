@@ -646,8 +646,8 @@ func TestRunForkPlanner_TypedSourceMetadataWinsOverAuthoredEntityTypeCollision(t
 		t.Fatalf("plan entities = %#v, want one typed source-at-revision metadata owner", plan.Entities)
 	}
 	entity := plan.Entities[0]
-	if entity.MaterializationMetadata.EntityType != "source_case" || entity.MaterializationMetadata.FlowInstance != "event-flow/at-T" ||
-		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEvent {
+	if entity.MaterializationMetadata.EntityType != "source_case" || entity.MaterializationMetadata.FlowInstance != "state-flow/at-T" ||
+		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
 		t.Fatalf("typed source metadata = %#v", entity.MaterializationMetadata)
 	}
 	if entity.Fields["entity_type"] != "field_case" {

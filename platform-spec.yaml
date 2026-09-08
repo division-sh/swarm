@@ -16218,9 +16218,11 @@ run_model:
       rows start a new fork-local revision sequence at revision=1; source entity_state.revision at the selected event revision is not
       copied because revision is a current-row commit counter, not append-only historical state in entity_mutations.
       Materialization MUST consume runtime.run_fork.materialized_entity_snapshot_metadata for every reconstructed
-      entity before writing fork-local entity_state. That owner may use event flow evidence present in the fixed revision,
-      or source entity_state creation metadata present in that revision, for flow_instance. Entity_type
-      MUST come from source entity_state creation metadata present in that revision; reconstructed
+      entity before writing fork-local entity_state. The fixed revision entity_metadata record is the sole authority
+      for flow_instance and entity_type. Event flow context is not entity ownership and MUST NOT override
+      metadata or fill a missing metadata owner. Metadata and reconstructed entity collections MUST reject duplicate
+      identities before indexing, including identical duplicates; neither ordering nor first/last-record selection
+      may choose an owner. Reconstructed
       fields.entity_type is projection state and MUST NOT authorize materialization, though a conflicting reconstructed
       value may fail closed. The owner MUST NOT read source current_state, gates, fields, accumulator, revision, or updated_at
       as fork-point projection truth. If flow_instance/entity_type cannot be proven for a reconstructed entity,
@@ -16292,6 +16294,34 @@ run_model:
       {source_run_id, source_run_id} and fork coordinates are {fork_run_id, fork_run_id}; one coordinate MUST NOT be
       reused for both lookup and projection. Both stores must prove that copied root stage-gate and proposed-effect
       authority remains executable through the canonical decision/effect operations.
+      A non-root entity retains its fixed-revision flow and type. Selected recipient flow, event flow, and activity
+      payload are not permission to reassign that entity. Persistent source-event preparation and the runtime container
+      consume one idempotent producer-coordinate projection; root projection is the only source-to-child entity-owner
+      substitution. Activity execution coordinates must agree with admitted producer authority, and arbitrary business
+      payload fields retain their values, including numeric values and ordinary fields named source_run_id,
+      source_event_id, parent_event_id, or loop_generation. Only declared generation revision fields and typed activity
+      execution/lineage fields authorize reminting. Producer-state presence is established by the bound fixed-revision
+      snapshot, not by a root routing coordinate or a later child row. An ordinary producer without state needs no
+      generation lookup; a producer with state requires the exact projected child state, including a valid empty
+      generation set. Missing or corrupt projected state remains an error, and state-dependent activity requires
+      fixed-revision producer ownership.
+    selected_contract_receiver_preparation: >
+      Snapshot restoration and receiver acquisition are independent decisions. Node, agent, and activity preparation
+      consume fixed-revision entity metadata and canonical selected-source ownership, entity contract, and handler
+      requirements. A producer entity is never paired with a different recipient flow. A receiving handler uses its own
+      existing entity, materializes its own canonical entity, or executes entityless when its execution semantics permit
+      that. Flow membership alone proves neither entity type nor lifecycle readiness. Every retained frontier event
+      association and its execution mode remains explicit; duplicate or conflicting projections cannot elect an owner.
+      A child companion and its readiness are fresh work admitted through the canonical selected declaration and
+      materialization owners, not a copy of historical flow status, readiness, configuration, or execution authority.
+      Runtime preparation and persistence consume one complete admitted receiver relation, bound to the fixed snapshot,
+      selected declaration, full frontier event/mode relation, and resolved agent configuration. Caller-supplied subsets,
+      substituted configuration, and independently supplied agent expectations cannot authorize materialization or reuse.
+      Configuration requiring inputs that the admitted evidence cannot prove fails closed, without current-source or
+      default inference. Reusing an existing child validates its exact entity owner, companion status, configuration,
+      readiness, and agent identity; it never revives or repairs a contradictory aggregate. These rules introduce no new
+      historical family and do not expand staged node/activity or dynamic-fork execution support. Validation failures
+      before commit leave no partial child state; failures after activation use existing claim settlement and cleanup.
     mutation_locking: >
       PostgreSQL fork materialization, selected-contract runtime issuance, source-event preparation, and activation use
       READ COMMITTED transactions plus the canonical source/fork lifecycle row locks, owner-specific binding locks,
@@ -16944,8 +16974,9 @@ run_model:
         hashes may include diagnostic bytes, but agreement with regenerated execution evidence uses the semantic
         recipient relation rather than equality of those hashes. Agent Plan remains runless; executable agent
         Identity is composed with the admitted child run, never copied from historical source-run identity.
-        Binding a root declaration to its concrete child route consumes the existing admitted workflow-state
-        correspondence and affects only an execution copy of selected evidence. Missing correspondence cannot
+        Binding a root declaration to its concrete child route consumes the selected source''s admitted root execution
+        coordinate and admitted source-event membership, independently of entity state, and affects only an execution
+        copy of selected evidence. Missing correspondence cannot
         authorize a path rewrite; source or sibling runs cannot satisfy that child binding. This relation does not
         acquire receiver state or transfer a producer entity to a receiving flow.
         EventBus supplies actual authority from persistent delivery intents, retaining handler and plan evidence

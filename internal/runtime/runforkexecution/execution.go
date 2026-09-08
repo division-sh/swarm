@@ -18,6 +18,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 )
 
@@ -168,8 +169,8 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{}, err
 	}
 	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
-	agentRuntime, workflowStates, err := prepareSelectedContractWorkflowReadiness(
-		ctx, ports.replay, loadedSource, *model.RecipientPlanning, plan, sourceEventIDs, req.AgentRuntime,
+	agentRuntime, readiness, err := prepareSelectedContractWorkflowReadiness(
+		ctx, ports.replay, loadedSource, *model.RecipientPlanning, plan, frontier, sourceEventIDs, req.AgentRuntime,
 	)
 	if err != nil {
 		return SelectedContractExecutionResult{
@@ -178,7 +179,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}, err
 	}
 	defer func() { _ = agentRuntime.releaseWorkspaceProjection() }()
-	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
 		SourceRunID:             plan.SourceRunID,
 		At:                      plan.ForkPoint.EventID,
 		ContractSelection:       selection,
@@ -187,7 +188,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		FrontierAdmission:       frontier,
 		RouteTopology:           routeTopology,
 		RecipientPlanning:       *model.RecipientPlanning,
-		WorkflowStates:          workflowStates,
+		Readiness:               readiness,
 		DataPinOverrides:        req.DataPinOverrides,
 		FanOutPlanRefs:          deferredWorkAdmission.fanOutPlanRefs,
 	})
@@ -236,7 +237,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ForkRunID:             materialization.ForkRunID,
 		ForkEventID:           plan.ForkPoint.EventID,
 		SourceEvents:          sourceEventIDs,
-		WorkflowStates:        workflowStates,
 		ExecutionOwner:        runfork.RunForkSelectedContractExecutionOwner,
 		DeferredWorkAdmission: deferredWorkAdmission,
 	})
@@ -353,7 +353,6 @@ type publishSelectedContractForkEventsRequest struct {
 	ForkRunID             string
 	ForkEventID           string
 	SourceEvents          []string
-	WorkflowStates        []runfork.RunForkSelectedContractWorkflowState
 	ExecutionOwner        string
 	RuntimeInstanceID     string
 	DeferredWorkAdmission selectedContractDeferredWorkAdmission
@@ -365,9 +364,7 @@ func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourc
 		payload = append(json.RawMessage(nil), sourceEvent.Payload...)
 	}
 	envelope := events.EventEnvelope{
-		EntityID:     strings.TrimSpace(sourceEvent.EntityID),
-		FlowInstance: strings.Trim(strings.TrimSpace(sourceEvent.FlowInstance), "/"),
-		Scope:        events.EventScope(strings.TrimSpace(sourceEvent.Scope)),
+		Scope: events.EventScope(strings.TrimSpace(sourceEvent.Scope)),
 	}
 	routingSource := sourceEvent.RoutingSource
 	if sourceRoute := routingSource.Route(); !sourceRoute.Empty() && routingSource.Kind() != events.RoutingSourceExternalIngress {
