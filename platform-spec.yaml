@@ -12849,6 +12849,7 @@ platform_tables:
       - Sequence ranges MUST be assigned only while the singleton is locked. BIGSERIAL, allocation-order cursors, timestamps, UUID order, post-commit appends, and fallback readers are forbidden.
       - Replayed source identities MUST return the existing identical occurrence or fail on conflict. ON CONFLICT DO NOTHING MUST NOT hide a conflicting story registration.
       - Mutable source helpers MUST report whether the authoritative source transition changed. A semantic no-op or duplicate receipt MUST NOT draft, append, or rewrite author activity; only a real source transition may produce an occurrence.
+      - Activity Start/Claim, Complete and MarkUncertain MUST use the actual insert/update disposition for story eligibility after mandatory validation. Duplicate starts and terminal no-ops return existing authoritative evidence without drafting, including fork-copied terminal attempts with no local started occurrence. Story deduplication is not proof of a source transition.
       - No domain mutation may occur after story finalization.
     read_contract:
       cursor: author_activity_occurrences.sequence
@@ -16436,7 +16437,9 @@ run_model:
         Shared fork current-row readers decode PostgreSQL native timestamps and SQLite timestamp text through the same
         timestamp-value decoder, preserving exact UTC instants and stored precision. Terminal activity evidence requires
         valid nonzero started_at, completed_at and updated_at values; decoding does not relax recorded-result reuse or
-        approved-effect policy. Exact repeated fan-out materialization requires valid nonzero outcome created_at values
+        approved-effect policy. Fork copying writes all three activity timestamps as UTC RFC3339Nano values accepted by
+        the ordinary journal reader without compatibility parsing or precision loss.
+        Exact repeated fan-out materialization requires valid nonzero outcome created_at values
         and SQL NULL lease_expires_at and last_served_at. Any non-NULL claim/service time remains a conflict, including
         empty or zero representations; malformed timestamp values fail closed. No timestamp is replaced with a default,
         used to select historical membership, or discarded to admit advanced child state.

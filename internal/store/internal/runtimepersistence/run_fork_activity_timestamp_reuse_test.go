@@ -124,6 +124,21 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 							sort.Strings(changed)
 							t.Fatalf("duplicate copied request changed persisted tables: %v", changed)
 						}
+						for _, op := range []string{"start", "claim", "complete", "uncertain"} {
+							t.Run("copied_noop/"+op, func(t *testing.T) {
+								request := activityStoryRequest(t, copied, op)
+								spy := &activityStorySpy{}
+								got, inserted, err := activityStoryKernel(t, fixture, backend.name == "postgres", op, request, spy)
+								if err != nil || inserted || !reflect.DeepEqual(got, copied) || len(spy.drafts) != 0 {
+									t.Fatalf("copied no-op kernel: err=%v inserted=%v drafts=%d got=%#v", err, inserted, len(spy.drafts), got)
+								}
+								got, inserted, err = activityStoryOuter(fixture, op, request)
+								if err != nil || inserted || !reflect.DeepEqual(got, copied) {
+									t.Fatalf("copied no-op outer: err=%v inserted=%v got=%#v", err, inserted, got)
+								}
+								assertActivityStoryTablesUnchanged(t, fixture, backend.name == "postgres", afterFirst)
+							})
+						}
 					})
 				}
 			}
@@ -151,6 +166,63 @@ func TestRunForkActivityTimestampRejectsIncompleteReuseBothStores(t *testing.T) 
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			postgres := backend.name == "postgres"
+			child, event, source := seedActivityTimestampReuse(t, fixture, postgres, false, "succeeded")
+			fraction := 123456789
+			if postgres {
+				fraction = 123456000
+			}
+			start := time.Date(2026, 8, 1, 12, 0, 0, fraction, time.FixedZone("offset", 90*60))
+			completed, updated := start.Add(17*time.Second), start.Add(19*time.Second)
+			// The source is writer-created. This explicit representation probe
+			// substitutes store-supported fractional/offset values; it does not
+			// claim SQLite CURRENT_TIMESTAMP emits fractional seconds itself.
+			if _, err := fixture.db.Exec(`UPDATE activity_attempts SET started_at=$1, completed_at=$2, updated_at=$3 WHERE request_event_id=$4`, start.Format(time.RFC3339Nano), completed.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano), source.RequestEventID); err != nil {
+				t.Fatal(err)
+			}
+			ctx := testAuthorActivityContext()
+			journal := fixture.store.(activityTimestampJournal)
+			original, found, err := journal.LoadActivityAttempt(ctx, source.RequestEventID)
+			if err != nil || !found || !original.StartedAt.Equal(start) || original.CompletedAt == nil || !original.CompletedAt.Equal(completed) || !original.UpdatedAt.Equal(updated) {
+				t.Fatalf("source precision fixture: %#v err=%v", original, err)
+			}
+			store := fixture.store.(selectedActivityProjectionStore)
+			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}); err != nil {
+				t.Fatal(err)
+			}
+			var copiedID string
+			if err := fixture.db.QueryRow(`SELECT request_event_id FROM activity_attempts WHERE run_id=$1`, child.ForkRunID).Scan(&copiedID); err != nil {
+				t.Fatal(err)
+			}
+			copied, found, err := journal.LoadActivityAttempt(ctx, copiedID)
+			if err != nil || !found || !copied.StartedAt.Equal(start) || copied.CompletedAt == nil || !copied.CompletedAt.Equal(completed) || !copied.UpdatedAt.Equal(updated) {
+				t.Fatalf("copy lost stored precision: %#v err=%v", copied, err)
+			}
+			if !postgres {
+				var a, b, c string
+				if err := fixture.db.QueryRow(`SELECT started_at,completed_at,updated_at FROM activity_attempts WHERE request_event_id=$1`, copiedID).Scan(&a, &b, &c); err != nil {
+					t.Fatal(err)
+				}
+				if a != start.UTC().Format(time.RFC3339Nano) || b != completed.UTC().Format(time.RFC3339Nano) || c != updated.UTC().Format(time.RFC3339Nano) {
+					t.Fatalf("noncanonical copied representations: %q %q %q", a, b, c)
+				}
+			}
+			before := snapshotForkHistoricalExecutionTables(t, fixture.db, postgres)
+			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}); err != nil {
+				t.Fatal(err)
+			}
+			if _, inserted, err := journal.StartActivityAttempt(ctx, copied); err != nil || inserted {
+				t.Fatalf("precision retry: inserted=%v err=%v", inserted, err)
+			}
+			assertActivityStoryTablesUnchanged(t, fixture, postgres, before)
 		})
 	}
 }

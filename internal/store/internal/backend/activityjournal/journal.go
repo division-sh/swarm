@@ -136,8 +136,10 @@ func start(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 	if story == nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt story owner is required")
 	}
-	if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusStarted)); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	if rows > 0 {
+		if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusStarted)); err != nil {
+			return runtimepipeline.ActivityAttemptRecord{}, false, err
+		}
 	}
 	return actual, rows > 0, nil
 }
@@ -202,8 +204,10 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun
 	if story == nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt story owner is required")
 	}
-	if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, actual.Status)); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+	if rows > 0 {
+		if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, actual.Status)); err != nil {
+			return runtimepipeline.ActivityAttemptRecord{}, err
+		}
 	}
 	return actual, nil
 }
@@ -242,8 +246,13 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 			WHERE request_event_id = $5::uuid AND execution_mode = $6 AND status = 'started'
 		`
 	}
-	if _, err := tx.ExecContext(ctx, query, record.ResultEventID, record.ResultEventType, string(payload), failure, record.RequestEventID, record.ExecutionMode); err != nil {
+	result, err := tx.ExecContext(ctx, query, record.ResultEventID, record.ResultEventType, string(payload), failure, record.RequestEventID, record.ExecutionMode)
+	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("mark activity attempt %s uncertain: %w", record.RequestEventID, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("read activity attempt uncertain disposition %s: %w", record.RequestEventID, err)
 	}
 	actual, found, err := Load(ctx, tx, dialect, record.RequestEventID)
 	if err != nil {
@@ -258,8 +267,10 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 	if story == nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt story owner is required")
 	}
-	if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusUncertain)); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+	if rows > 0 {
+		if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusUncertain)); err != nil {
+			return runtimepipeline.ActivityAttemptRecord{}, err
+		}
 	}
 	return actual, nil
 }
