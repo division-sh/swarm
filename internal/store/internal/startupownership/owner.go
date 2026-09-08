@@ -425,8 +425,31 @@ func (s *sqliteSession) CommitSourceSet(ctx context.Context, req runtimeagenttop
 	return result, err
 }
 
-func (s *sqliteSession) ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
-	return runtimedestructivereset.CleanupResult{}, errors.New("destructive reset is unsupported by the SQLite selected-store composition")
+func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (result runtimedestructivereset.CleanupResult, err error) {
+	err = s.owner.backend.RunTransaction(ctx, "commit destructive reset cleanup", func(txctx context.Context, tx *sql.Tx) error {
+		if !req.Result.DryRun {
+			previous, err := storeadmin.ReadResetCleanupTx(txctx, tx, req)
+			if err != nil {
+				return err
+			}
+			if previous != nil {
+				result = *previous
+				return nil
+			}
+		}
+		if topology != nil {
+			if _, err := commitSourceSetTx(txctx, tx, *topology, true); err != nil {
+				return err
+			}
+		}
+		var err error
+		result, err = storeadmin.ApplyDestructiveResetSQLiteCleanupInRetainedTransaction(txctx, tx, req)
+		if err == nil && !req.Result.DryRun {
+			err = storeadmin.CommitResetCleanupTx(txctx, tx, req, result, true)
+		}
+		return err
+	})
+	return result, err
 }
 
 func (s *sqliteSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {

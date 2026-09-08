@@ -98,6 +98,13 @@ func (o Operation) Validate() error {
 		!o.Plan.PlannedAt.Equal(o.Request.RequestedAt) || !o.Plan.Plan.CleanupRunSetKnown) {
 		return errors.New("reset operation plan does not match admitted request")
 	}
+	if o.Plan != nil {
+		for _, target := range o.Plan.Plan.ManagedContainers {
+			if target.Name == "" || target.RuntimeID == "" {
+				return errors.New("reset operation container intent requires its exact immutable target")
+			}
+		}
+	}
 	if o.Quiescence != nil && (o.Quiescence.DryRun || o.Quiescence.OperationName != DefaultOperationName) {
 		return errors.New("reset operation quiescence is invalid")
 	}

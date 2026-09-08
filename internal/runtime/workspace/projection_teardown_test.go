@@ -51,7 +51,7 @@ func (f *projectionDockerFixture) run(_ context.Context, args ...string) (string
 				body, err := json.Marshal(identity.Labels())
 				return string(body), err
 			default:
-				return strings.Replace(managedContainerInspectJSON(identity.Labels(), true), "{", fmt.Sprintf(`{"Id":%q,`, id), 1), nil
+				return managedContainerInspectJSON(id, identity.Labels(), true), nil
 			}
 		}
 		return "", fmt.Errorf("no such object: %s", name)

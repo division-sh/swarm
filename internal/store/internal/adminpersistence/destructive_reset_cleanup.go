@@ -3,6 +3,7 @@ package adminpersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,7 +25,7 @@ func (s *DestructiveResetPostgresOwner) ApplyDestructiveResetCleanup(ctx context
 	if err != nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("begin destructive reset cleanup tx: %w", err)
 	}
-	out, err := applyDestructiveResetCleanupTx(ctx, tx, req)
+	out, err := applyDestructiveResetCleanupTx(ctx, tx, req, false)
 	if err != nil {
 		_ = tx.Rollback()
 		return destructivereset.CleanupResult{}, err
@@ -42,12 +43,16 @@ func ApplyDestructiveResetCleanupInRetainedTransaction(s *DestructiveResetPostgr
 	if s == nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("postgres destructive reset owner is required")
 	}
-	return applyDestructiveResetCleanupTx(ctx, tx, req)
+	return applyDestructiveResetCleanupTx(ctx, tx, req, false)
+}
+
+func ApplyDestructiveResetSQLiteCleanupInRetainedTransaction(ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
+	return applyDestructiveResetCleanupTx(ctx, tx, req, true)
 }
 
 // applyDestructiveResetCleanupTx is the retained-session operation used when
 // cleanup and the complete topology plan must share one commit.
-func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
+func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest, sqlite bool) (destructivereset.CleanupResult, error) {
 	if tx == nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("destructive reset retained transaction is required")
 	}
@@ -71,32 +76,32 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 	}
 	if req.Result.DryRun {
 		out.RunIDs = runIDs
-		out.Tables, err = destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeSourceArtifacts)
+		out.Tables, err = destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeSourceArtifacts, sqlite)
 		return out, err
 	}
 
-	if err := lockDestructiveResetCleanupRuns(ctx, tx, runIDs); err != nil {
+	if err := lockDestructiveResetCleanupRuns(ctx, tx, runIDs, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
-	if err := GuardSourceForkDependencies(ctx, tx, runIDs); err != nil {
+	if err := guardSourceForkDependencies(ctx, tx, runIDs, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
-	if err := guardDestructiveResetDirectiveAuthority(ctx, tx, runIDs, now); err != nil {
+	if err := guardDestructiveResetDirectiveAuthority(ctx, tx, runIDs, now, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
-	if err := guardDestructiveResetProviderAuthority(ctx, tx, runIDs); err != nil {
+	if err := guardDestructiveResetProviderAuthority(ctx, tx, runIDs, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
 	if req.Result.IncludeSourceArtifacts {
-		if err := prepareDestructiveResetSourceArtifactDelete(ctx, tx, runIDs); err != nil {
+		if err := prepareDestructiveResetSourceArtifactDelete(ctx, tx, runIDs, sqlite); err != nil {
 			return destructivereset.CleanupResult{}, err
 		}
 	}
-	if err := destructiveResetCleanupSeverPreservedReferences(ctx, tx, runIDs); err != nil {
+	if err := destructiveResetCleanupSeverPreservedReferences(ctx, tx, runIDs, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
 	out.RunIDs = runIDs
-	rows, err := destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeSourceArtifacts)
+	rows, err := destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeSourceArtifacts, sqlite)
 	if err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
@@ -104,7 +109,7 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 		if rows[i].TableKind == destructivereset.CleanupTableKindGenerated {
 			continue
 		}
-		deleted, err := destructiveResetCleanupDeleteTable(ctx, tx, rows[i].Table, runIDs, req.Result.IncludeSourceArtifacts)
+		deleted, err := destructiveResetCleanupDeleteTable(ctx, tx, rows[i].Table, runIDs, req.Result.IncludeSourceArtifacts, sqlite)
 		if err != nil {
 			return destructivereset.CleanupResult{}, err
 		}
@@ -202,17 +207,22 @@ func destructiveResetCleanupRunIDsFromPlan(plan destructivereset.Plan) ([]string
 	return out, nil
 }
 
-func lockDestructiveResetCleanupRuns(ctx context.Context, tx *sql.Tx, runIDs []string) error {
+func lockDestructiveResetCleanupRuns(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	if sqlite {
+		// The retained SQLite write transaction excludes concurrent writers.
+		return nil
+	}
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
 	if len(runIDs) == 0 {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT run_id::text
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
+		SELECT CAST(run_id AS TEXT)
 		FROM runs
-		WHERE run_id = ANY($1::uuid[])
-		ORDER BY run_id::text
+		WHERE run_id IN %[1]s
+		ORDER BY CAST(run_id AS TEXT)
 		FOR UPDATE
-	`, pq.Array(runIDs))
+	`, runSet), runArg)
 	if err != nil {
 		return fmt.Errorf("lock destructive reset cleanup run set: %w", err)
 	}
@@ -230,18 +240,23 @@ func lockDestructiveResetCleanupRuns(ctx context.Context, tx *sql.Tx, runIDs []s
 }
 
 func GuardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []string) error {
+	return guardSourceForkDependencies(ctx, tx, runIDs, false)
+}
+
+func guardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
 	if len(runIDs) == 0 {
 		return nil
 	}
 	var forkRunID, sourceRunID string
-	err := tx.QueryRowContext(ctx, `
-		SELECT fork.run_id::text, fork.forked_from_run_id::text
+	err := tx.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT CAST(fork.run_id AS TEXT), CAST(fork.forked_from_run_id AS TEXT)
 		FROM runs fork
-		WHERE fork.forked_from_run_id = ANY($1::uuid[])
-		  AND NOT (fork.run_id = ANY($1::uuid[]))
+		WHERE fork.forked_from_run_id IN %[1]s
+		  AND NOT (fork.run_id IN %[1]s)
 		ORDER BY fork.run_id
 		LIMIT 1
-	`, pq.Array(runIDs)).Scan(&forkRunID, &sourceRunID)
+	`, runSet), runArg).Scan(&forkRunID, &sourceRunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -251,27 +266,32 @@ func GuardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []strin
 	return fmt.Errorf("%w: cannot delete source run %s while dependent fork %s remains outside the cleanup set", destructivereset.ErrInvalidRequest, sourceRunID, forkRunID)
 }
 
-func guardDestructiveResetDirectiveAuthority(ctx context.Context, tx *sql.Tx, runIDs []string, now time.Time) error {
+func guardDestructiveResetDirectiveAuthority(ctx context.Context, tx *sql.Tx, runIDs []string, now time.Time, sqlite bool) error {
+	expired := "expires_at <= $2"
+	if sqlite {
+		expired = "julianday(expires_at) <= julianday($2)"
+	}
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
 	if len(runIDs) == 0 {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		DELETE FROM agent_directive_operations
-		WHERE resolved_run_id = ANY($1::uuid[])
+		WHERE resolved_run_id IN %[1]s
 		  AND state IN ('succeeded', 'failed')
-		  AND expires_at <= $2
-	`, pq.Array(runIDs), now.UTC()); err != nil {
+		  AND %[2]s
+	`, runSet, expired), runArg, now.UTC()); err != nil {
 		return fmt.Errorf("expire terminal directive authority before destructive reset: %w", err)
 	}
 	var operationID, state string
-	var expiresAt sql.NullTime
-	err := tx.QueryRowContext(ctx, `
-		SELECT operation_id::text, state, expires_at
+	var expiresAt sql.NullString
+	err := tx.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT CAST(operation_id AS TEXT), state, CAST(expires_at AS TEXT)
 		FROM agent_directive_operations
-		WHERE resolved_run_id = ANY($1::uuid[])
+		WHERE resolved_run_id IN %[1]s
 		ORDER BY created_at, operation_id
 		LIMIT 1
-	`, pq.Array(runIDs)).Scan(&operationID, &state, &expiresAt)
+	`, runSet), runArg).Scan(&operationID, &state, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -280,31 +300,32 @@ func guardDestructiveResetDirectiveAuthority(ctx context.Context, tx *sql.Tx, ru
 	}
 	detail := fmt.Sprintf("operation_id=%s state=%s", operationID, state)
 	if expiresAt.Valid {
-		detail += " expires_at=" + expiresAt.Time.UTC().Format(time.RFC3339Nano)
+		detail += " expires_at=" + expiresAt.String
 	}
 	return fmt.Errorf("%w: runtime.nuke cannot delete retained agent directive authority (%s)", destructivereset.ErrInvalidRequest, detail)
 }
 
-func guardDestructiveResetProviderAuthority(ctx context.Context, tx *sql.Tx, runIDs []string) error {
+func guardDestructiveResetProviderAuthority(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
 	if len(runIDs) == 0 {
 		return nil
 	}
 	var authorityKind, authorityID, state string
-	err := tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT authority_kind,authority_id,state
 		FROM (
-			SELECT 'attempt'::text AS authority_kind,attempt_id::text AS authority_id,state,authorized_at AS ordered_at
+			SELECT 'attempt' AS authority_kind,CAST(attempt_id AS TEXT) AS authority_id,state,authorized_at AS ordered_at
 			FROM runtime_external_effect_attempts
-			WHERE origin_run_id=ANY($1::uuid[])
+			WHERE origin_run_id IN %[1]s
 			  AND state IN ('authorized','launched','response_observed')
 			UNION ALL
-			SELECT 'drain'::text AS authority_kind,drain_id::text AS authority_id,state,captured_at AS ordered_at
+			SELECT 'drain' AS authority_kind,CAST(drain_id AS TEXT) AS authority_id,state,captured_at AS ordered_at
 			FROM runtime_provider_attempt_drains
-			WHERE origin_run_id=ANY($1::uuid[]) AND state='pending'
+			WHERE origin_run_id IN %[1]s AND state='pending'
 		) retained
 		ORDER BY ordered_at,authority_kind,authority_id
 		LIMIT 1
-	`, pq.Array(runIDs)).Scan(&authorityKind, &authorityID, &state)
+	`, runSet), runArg).Scan(&authorityKind, &authorityID, &state)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -317,17 +338,18 @@ func guardDestructiveResetProviderAuthority(ctx context.Context, tx *sql.Tx, run
 	)
 }
 
-func prepareDestructiveResetSourceArtifactDelete(ctx context.Context, tx *sql.Tx, runIDs []string) error {
-	if err := lockDestructiveResetRunCreationTx(ctx, tx); err != nil {
+func prepareDestructiveResetSourceArtifactDelete(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
+	if err := lockDestructiveResetRunCreationTx(ctx, tx, sqlite); err != nil {
 		return fmt.Errorf("lock runtime.nuke source artifact cleanup: %w", err)
 	}
 	var outOfPlan int
-	if err := tx.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT COUNT(*)
 		FROM runs
 		WHERE NULLIF(bundle_hash, '') IS NOT NULL
-		  AND NOT (run_id = ANY($1::uuid[]))
-	`, pq.Array(runIDs)).Scan(&outOfPlan); err != nil {
+		  AND NOT (run_id IN %[1]s)
+	`, runSet), runArg).Scan(&outOfPlan); err != nil {
 		return fmt.Errorf("validate runtime.nuke source artifact cleanup run snapshot: %w", err)
 	}
 	if outOfPlan > 0 {
@@ -336,14 +358,18 @@ func prepareDestructiveResetSourceArtifactDelete(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-func lockDestructiveResetRunCreationTx(ctx context.Context, tx *sql.Tx) error {
+func lockDestructiveResetRunCreationTx(ctx context.Context, tx *sql.Tx, sqlite bool) error {
+	if sqlite {
+		return nil
+	}
 	if _, err := tx.ExecContext(ctx, `LOCK TABLE runs IN SHARE ROW EXCLUSIVE MODE`); err != nil {
 		return fmt.Errorf("lock destructive reset run creation: %w", err)
 	}
 	return nil
 }
 
-func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sql.Tx, runIDs []string) error {
+func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
 	if len(runIDs) == 0 {
 		return nil
 	}
@@ -356,50 +382,50 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sq
 			query: `
 				UPDATE managed_agent_capability_surfaces
 				SET run_id = NULL
-				WHERE run_id = ANY($1::uuid[])
+				WHERE run_id IN %[1]s
 			`,
 		},
 		{
 			name: "agent_sessions.successor_session_id",
 			query: `
-				UPDATE agent_sessions preserved
+				UPDATE agent_sessions AS preserved
 				SET successor_session_id = NULL
 				WHERE preserved.successor_session_id IS NOT NULL
-				  AND (preserved.run_id IS NULL OR NOT (preserved.run_id = ANY($1::uuid[])))
+				  AND (preserved.run_id IS NULL OR NOT (preserved.run_id IN %[1]s))
 				  AND EXISTS (
 					SELECT 1
 					FROM agent_sessions cleanup
 					WHERE cleanup.session_id = preserved.successor_session_id
-					  AND cleanup.run_id = ANY($1::uuid[])
+					  AND cleanup.run_id IN %[1]s
 				  )
 			`,
 		},
 		{
 			name: "runtime_ingress_state.transition_event_id",
 			query: `
-				UPDATE runtime_ingress_state preserved
+				UPDATE runtime_ingress_state AS preserved
 				SET transition_event_id = NULL
 				WHERE preserved.transition_event_id IS NOT NULL
 				  AND EXISTS (
 					SELECT 1
 					FROM events cleanup_event
 					WHERE cleanup_event.event_id = preserved.transition_event_id
-					  AND cleanup_event.run_id = ANY($1::uuid[])
+					  AND cleanup_event.run_id IN %[1]s
 				  )
 			`,
 		},
 		{
 			name: "entity_mutations.caused_by_event",
 			query: `
-				UPDATE entity_mutations preserved
+				UPDATE entity_mutations AS preserved
 				SET caused_by_event = NULL
-				WHERE NOT (preserved.run_id = ANY($1::uuid[]))
+				WHERE NOT (preserved.run_id IN %[1]s)
 				  AND preserved.caused_by_event IS NOT NULL
 				  AND EXISTS (
 					SELECT 1
 					FROM events cleanup_event
 					WHERE cleanup_event.event_id = preserved.caused_by_event
-					  AND cleanup_event.run_id = ANY($1::uuid[])
+					  AND cleanup_event.run_id IN %[1]s
 				  )
 			`,
 		},
@@ -409,16 +435,16 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sq
 				WITH cleanup_timers AS (
 					SELECT cleanup.timer_id
 					FROM timers cleanup
-					WHERE cleanup.run_id = ANY($1::uuid[])
-					   OR cleanup.forked_from_run_id = ANY($1::uuid[])
+					WHERE cleanup.run_id IN %[1]s
+					   OR cleanup.forked_from_run_id IN %[1]s
 					   OR EXISTS (
 							SELECT 1
 							FROM events cleanup_event
 							WHERE cleanup_event.event_id = cleanup.forked_from_event_id
-							  AND cleanup_event.run_id = ANY($1::uuid[])
+							  AND cleanup_event.run_id IN %[1]s
 					   )
 				)
-				UPDATE timers preserved
+				UPDATE timers AS preserved
 				SET source_timer_id = NULL
 				WHERE preserved.source_timer_id IN (SELECT timer_id FROM cleanup_timers)
 				  AND NOT EXISTS (
@@ -431,27 +457,27 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sq
 		{
 			name: "mailbox.reply_context_id",
 			query: `
-				UPDATE mailbox preserved
+				UPDATE mailbox AS preserved
 				SET reply_context_id = NULL
 				WHERE preserved.reply_context_id IS NOT NULL
 				  AND EXISTS (
 					SELECT 1
 					FROM reply_contexts cleanup
 					WHERE cleanup.reply_context_id = preserved.reply_context_id
-					  AND cleanup.run_id = ANY($1::uuid[])
+					  AND cleanup.run_id IN %[1]s
 				  )
 			`,
 		},
 	}
 	for _, stmt := range statements {
-		if _, err := tx.ExecContext(ctx, stmt.query, pq.Array(runIDs)); err != nil {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(stmt.query, runSet), runArg); err != nil {
 			return fmt.Errorf("sever destructive reset preserved reference %s: %w", stmt.name, err)
 		}
 	}
 	return nil
 }
 
-func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs []string, includeSourceArtifacts bool) ([]destructivereset.CleanupTableResult, error) {
+func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs []string, includeSourceArtifacts bool, sqlite bool) ([]destructivereset.CleanupTableResult, error) {
 	catalog := destructivereset.CleanupCatalogForPolicy(destructivereset.CleanupPolicy{IncludeSourceArtifacts: includeSourceArtifacts})
 	out := make([]destructivereset.CleanupTableResult, 0, len(catalog))
 	for _, entry := range catalog {
@@ -466,7 +492,7 @@ func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs
 			out = append(out, result)
 			continue
 		}
-		count, err := destructiveResetCleanupCountTable(ctx, tx, entry, runIDs, includeSourceArtifacts)
+		count, err := destructiveResetCleanupCountTable(ctx, tx, entry, runIDs, includeSourceArtifacts, sqlite)
 		if err != nil {
 			return nil, err
 		}
@@ -481,8 +507,8 @@ func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs
 	return out, nil
 }
 
-func destructiveResetCleanupCountTable(ctx context.Context, tx *sql.Tx, entry destructivereset.CleanupCatalogEntry, runIDs []string, includeSourceArtifacts bool) (int64, error) {
-	statements, err := destructiveResetCleanupStatementsForTable(entry.Table, runIDs, includeSourceArtifacts)
+func destructiveResetCleanupCountTable(ctx context.Context, tx *sql.Tx, entry destructivereset.CleanupCatalogEntry, runIDs []string, includeSourceArtifacts bool, sqlite bool) (int64, error) {
+	statements, err := destructiveResetCleanupStatementsForTable(entry.Table, runIDs, includeSourceArtifacts, sqlite)
 	if err != nil {
 		return 0, err
 	}
@@ -493,8 +519,8 @@ func destructiveResetCleanupCountTable(ctx context.Context, tx *sql.Tx, entry de
 	return count, nil
 }
 
-func destructiveResetCleanupDeleteTable(ctx context.Context, tx *sql.Tx, table string, runIDs []string, includeSourceArtifacts bool) (int64, error) {
-	statements, err := destructiveResetCleanupStatementsForTable(table, runIDs, includeSourceArtifacts)
+func destructiveResetCleanupDeleteTable(ctx context.Context, tx *sql.Tx, table string, runIDs []string, includeSourceArtifacts bool, sqlite bool) (int64, error) {
+	statements, err := destructiveResetCleanupStatementsForTable(table, runIDs, includeSourceArtifacts, sqlite)
 	if err != nil {
 		return 0, err
 	}
@@ -518,161 +544,71 @@ type destructiveResetCleanupStatements struct {
 	args   []any
 }
 
-func destructiveResetCleanupStatementsForTable(table string, runIDs []string, includeSourceArtifacts bool) (destructiveResetCleanupStatements, error) {
+func destructiveResetCleanupStatementsForTable(table string, runIDs []string, includeSourceArtifacts bool, sqlite bool) (destructiveResetCleanupStatements, error) {
 	table = strings.TrimSpace(table)
 	if destructiveResetCleanupPreservesTable(table, includeSourceArtifacts) {
-		return destructiveResetCleanupStatements{count: fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table))}, nil
+		return destructiveResetCleanupStatements{count: fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdent(table))}, nil
 	}
 	if table == "source_artifacts" && includeSourceArtifacts {
-		return destructiveResetCleanupStatements{count: `SELECT COUNT(*) FROM source_artifacts`, delete: `DELETE FROM source_artifacts`}, nil
+		return destructiveResetCleanupStatements{count: "SELECT COUNT(*) FROM source_artifacts", delete: "DELETE FROM source_artifacts"}, nil
 	}
 	switch table {
 	case "connected_channel_activations", "channel_onboarding_operations", "standing_service_journal", "standing_service_generations", "standing_services":
-		return destructiveResetCleanupStatements{
-			count:  fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table)),
-			delete: fmt.Sprintf(`DELETE FROM %s`, quoteIdent(table)),
-		}, nil
+		return destructiveResetCleanupStatements{count: fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdent(table)), delete: fmt.Sprintf("DELETE FROM %s", quoteIdent(table))}, nil
 	}
 	if len(runIDs) == 0 {
-		return destructiveResetCleanupStatements{count: `SELECT 0`}, nil
+		return destructiveResetCleanupStatements{count: "SELECT 0"}, nil
 	}
-	args := []any{pq.Array(runIDs)}
-	statements := destructiveResetCleanupStatements{args: args}
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
+	var predicate string
 	switch table {
 	case "inbound_publication_events":
-		statements.count = `SELECT COUNT(*) FROM inbound_publication_events c WHERE EXISTS (SELECT 1 FROM inbound_publications p WHERE p.publication_id = c.publication_id AND p.resolved_run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM inbound_publication_events c USING inbound_publications p WHERE c.publication_id = p.publication_id AND p.resolved_run_id = ANY($1::uuid[])`
-	case "inbound_publications":
-		statements.count = `SELECT COUNT(*) FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`
-		statements.delete = `DELETE FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`
+		predicate = "EXISTS (SELECT 1 FROM inbound_publications p WHERE p.publication_id = target.publication_id AND p.resolved_run_id IN %[1]s)"
+	case "inbound_publications", "agent_directive_operations":
+		predicate = "target.resolved_run_id IN %[1]s"
 	case "event_receipts":
-		statements.count = `SELECT COUNT(*) FROM event_receipts r WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = r.event_id AND e.run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM event_receipts r USING events e WHERE r.event_id = e.event_id AND e.run_id = ANY($1::uuid[])`
+		predicate = "EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.event_id AND e.run_id IN %[1]s)"
 	case "event_delivery_handler_rule_selections", "event_delivery_attempts", "event_delivery_outcomes":
-		statements.count = fmt.Sprintf(`SELECT COUNT(*) FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table))
-		statements.delete = fmt.Sprintf(`DELETE FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table))
+		predicate = "EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = target.delivery_id AND (d.run_id IN %[1]s OR e.run_id IN %[1]s))"
 	case "dead_letters":
-		statements.count = `SELECT COUNT(*) FROM dead_letters d WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.original_event_id AND e.run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM dead_letters d USING events e WHERE d.original_event_id = e.event_id AND e.run_id = ANY($1::uuid[])`
-	case "event_deliveries":
-		statements.count = `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`
-	case "committed_replay_scopes":
-		statements.count = `SELECT COUNT(*) FROM committed_replay_scopes s WHERE s.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = s.event_id AND e.run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM committed_replay_scopes s WHERE s.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = s.event_id AND e.run_id = ANY($1::uuid[]))`
-	case "routing_rules":
-		statements.count = `SELECT COUNT(*) FROM routing_rules WHERE run_id = ANY($1::uuid[])`
-		statements.delete = `DELETE FROM routing_rules WHERE run_id = ANY($1::uuid[])`
-	case "fan_out_obligation_barriers", "fan_out_outcomes", "fan_out_intents", "resource_version_pins", "author_activity_occurrences", "run_fork_fact_revisions", "run_fork_revisions", "run_fork_revision_heads", "activity_attempts", "agent_turns", "agent_conversation_audits", "agent_sessions", "agents", "decision_card_route_obligations", "decision_card_changes", "decision_card_input_drafts", "proposed_effect_continuations", "human_task_continuations", "decision_cards", "entity_mutations", "entity_state", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "flow_instances", "run_control_state", "reply_contexts", "run_scenario_execution_profiles", "events", "runs":
-		statements.count = fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table))
-		statements.delete = fmt.Sprintf(`DELETE FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table))
-	case "agent_directive_operations":
-		statements.count = `SELECT COUNT(*) FROM agent_directive_operations WHERE resolved_run_id = ANY($1::uuid[])`
+		predicate = "EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.original_event_id AND e.run_id IN %[1]s)"
+	case "event_deliveries", "committed_replay_scopes":
+		predicate = "target.run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.event_id AND e.run_id IN %[1]s)"
+	case "fan_out_obligation_barriers", "fan_out_outcomes", "fan_out_intents", "resource_version_pins", "author_activity_occurrences", "run_fork_fact_revisions", "run_fork_revisions", "run_fork_revision_heads", "activity_attempts", "agent_turns", "agent_conversation_audits", "agent_sessions", "agents", "flow_instances", "routing_rules", "decision_card_route_obligations", "decision_card_changes", "decision_card_input_drafts", "proposed_effect_continuations", "human_task_continuations", "decision_cards", "entity_mutations", "entity_state", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "run_control_state", "reply_contexts", "run_scenario_execution_profiles", "events", "runs":
+		predicate = "target.run_id IN %[1]s"
 	case "conversation_forks":
-		statements.count = `SELECT COUNT(*) FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`
-		statements.delete = `DELETE FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`
-	case "conversation_fork_snapshots":
-		statements.count = `SELECT COUNT(*) FROM conversation_fork_snapshots s WHERE EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id = s.fork_id AND f.source_run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM conversation_fork_snapshots s USING conversation_forks f WHERE s.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`
-	case "conversation_fork_turns":
-		statements.count = `SELECT COUNT(*) FROM conversation_fork_turns t WHERE EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id = t.fork_id AND f.source_run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM conversation_fork_turns t USING conversation_forks f WHERE t.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`
+		predicate = "target.source_run_id IN %[1]s"
+	case "conversation_fork_snapshots", "conversation_fork_turns":
+		predicate = "EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id = target.fork_id AND f.source_run_id IN %[1]s)"
 	case "conversation_fork_turn_completions":
-		statements.count = `SELECT COUNT(*) FROM conversation_fork_turn_completions c WHERE EXISTS (SELECT 1 FROM conversation_fork_turns t JOIN conversation_forks f ON f.fork_id = t.fork_id WHERE t.fork_turn_id = c.fork_turn_id AND f.source_run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM conversation_fork_turn_completions c USING conversation_fork_turns t, conversation_forks f WHERE c.fork_turn_id = t.fork_turn_id AND t.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`
+		predicate = "EXISTS (SELECT 1 FROM conversation_fork_turns t JOIN conversation_forks f ON f.fork_id = t.fork_id WHERE t.fork_turn_id = target.fork_turn_id AND f.source_run_id IN %[1]s)"
 	case "run_fork_delivery_event_replays":
-		statements.count = `
-				SELECT COUNT(*)
-				FROM run_fork_delivery_event_replays r
-				WHERE r.fork_run_id = ANY($1::uuid[])
-				   OR r.source_run_id = ANY($1::uuid[])
-				   OR EXISTS (
-						SELECT 1
-						FROM events e
-						WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
-						  AND e.run_id = ANY($1::uuid[])
-				   )
-				   OR EXISTS (
-						SELECT 1
-						FROM event_deliveries d
-						LEFT JOIN events e ON e.event_id = d.event_id
-						WHERE d.delivery_id IN (r.source_delivery_id, r.fork_delivery_id)
-						  AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[]))
-				   )
-			`
-		statements.delete = `
-			DELETE FROM run_fork_delivery_event_replays r
-			WHERE r.fork_run_id = ANY($1::uuid[])
-			   OR r.source_run_id = ANY($1::uuid[])
-			   OR EXISTS (
-					SELECT 1
-					FROM events e
-					WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
-					  AND e.run_id = ANY($1::uuid[])
-			   )
-			   OR EXISTS (
-					SELECT 1
-					FROM event_deliveries d
-					LEFT JOIN events e ON e.event_id = d.event_id
-					WHERE d.delivery_id IN (r.source_delivery_id, r.fork_delivery_id)
-					  AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[]))
-			   )
-		`
+		predicate = "target.fork_run_id IN %[1]s OR target.source_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id IN (target.source_event_id, target.fork_event_id) AND e.run_id IN %[1]s) OR EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id IN (target.source_delivery_id, target.fork_delivery_id) AND (d.run_id IN %[1]s OR e.run_id IN %[1]s))"
 	case "run_fork_selected_contract_executions":
-		statements.count = `
-				SELECT COUNT(*)
-				FROM run_fork_selected_contract_executions r
-				WHERE r.fork_run_id = ANY($1::uuid[])
-				   OR r.source_run_id = ANY($1::uuid[])
-				   OR EXISTS (
-						SELECT 1
-						FROM events e
-						WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
-						  AND e.run_id = ANY($1::uuid[])
-				   )
-			`
-		statements.delete = `
-			DELETE FROM run_fork_selected_contract_executions r
-			WHERE r.fork_run_id = ANY($1::uuid[])
-			   OR r.source_run_id = ANY($1::uuid[])
-			   OR EXISTS (
-					SELECT 1
-					FROM events e
-					WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
-					  AND e.run_id = ANY($1::uuid[])
-			   )
-		`
+		predicate = "target.fork_run_id IN %[1]s OR target.source_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id IN (target.source_event_id, target.fork_event_id) AND e.run_id IN %[1]s)"
 	case "run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries", "run_fork_selected_contract_bindings":
-		statements.count = fmt.Sprintf(`
-				SELECT COUNT(*)
-				FROM %s r
-				WHERE r.fork_run_id = ANY($1::uuid[])
-				   OR r.source_run_id = ANY($1::uuid[])
-				   OR EXISTS (
-						SELECT 1
-						FROM events e
-						WHERE e.event_id = r.fork_event_id
-						  AND e.run_id = ANY($1::uuid[])
-				   )
-			`, quoteIdent(table))
-		statements.delete = fmt.Sprintf(`
-			DELETE FROM %s r
-			WHERE r.fork_run_id = ANY($1::uuid[])
-			   OR r.source_run_id = ANY($1::uuid[])
-			   OR EXISTS (
-					SELECT 1
-					FROM events e
-					WHERE e.event_id = r.fork_event_id
-					  AND e.run_id = ANY($1::uuid[])
-			   )
-		`, quoteIdent(table))
+		predicate = "target.fork_run_id IN %[1]s OR target.source_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.fork_event_id AND e.run_id IN %[1]s)"
 	case "timers":
-		statements.count = `SELECT COUNT(*) FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`
-		statements.delete = `DELETE FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`
+		predicate = "target.run_id IN %[1]s OR target.forked_from_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.forked_from_event_id AND e.run_id IN %[1]s)"
 	default:
 		return destructiveResetCleanupStatements{}, fmt.Errorf("destructive reset cleanup table %s is not implemented", table)
 	}
-	return statements, nil
+	from := quoteIdent(table) + " AS target WHERE " + fmt.Sprintf(predicate, runSet)
+	out := destructiveResetCleanupStatements{count: "SELECT COUNT(*) FROM " + from, args: []any{runArg}}
+	if table != "agent_directive_operations" {
+		out.delete = "DELETE FROM " + from
+	}
+	return out, nil
+}
+
+// Only run-set binding differs. The closed cleanup catalog and predicates above
+// are shared; backend syntax cannot choose a different destructive scope.
+func destructiveResetRunSet(runIDs []string, sqlite bool) (string, any) {
+	if sqlite {
+		raw, _ := json.Marshal(runIDs)
+		return "(SELECT value FROM json_each($1))", string(raw)
+	}
+	return "(SELECT unnest($1::uuid[]))", pq.Array(runIDs)
 }
 
 func destructiveResetCleanupPreservesTable(table string, includeSourceArtifacts bool) bool {

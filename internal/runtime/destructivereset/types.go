@@ -187,6 +187,7 @@ type TableRef struct {
 }
 
 type ContainerRef struct {
+	RuntimeID        string                        `json:"runtime_id"`
 	Owner            string                        `json:"owner"`
 	Name             string                        `json:"name"`
 	Kind             string                        `json:"kind"`

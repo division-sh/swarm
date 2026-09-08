@@ -162,9 +162,7 @@ func TestResetQuiescenceReceiptCommitsWithRunCancellationBothStores(t *testing.T
 			if len(result.Runs) != 1 || result.Runs[0].PreviousStatus != "running" || result.Runs[0].Status != "cancelled" {
 				t.Fatalf("exact cancellation = %+v", result)
 			}
-			if backend == "postgres" {
-				proveResetCleanupCommitAndReplay(t, ctx, cap, db, committed)
-			}
+			proveResetCleanupCommitAndReplay(t, ctx, cap, db, backend, committed)
 		})
 	}
 }
@@ -189,10 +187,10 @@ func installResetReceiptFault(t *testing.T, db *sql.DB, backend, phase string) f
 	}
 }
 
-func proveResetCleanupCommitAndReplay(t *testing.T, ctx context.Context, cap startupownership.ProcessCapability, db *sql.DB, op destructivereset.Operation) {
+func proveResetCleanupCommitAndReplay(t *testing.T, ctx context.Context, cap startupownership.ProcessCapability, db *sql.DB, backend string, op destructivereset.Operation) {
 	t.Helper()
 	req := destructivereset.CleanupRequest{OperationID: op.Request.OperationID, ActorTokenID: op.Request.ActorTokenID, RequestedAt: op.Request.RequestedAt, Result: *op.Plan, Quiescence: *op.Quiescence}
-	drop := installResetReceiptFault(t, db, "postgres", "cleanup_committed")
+	drop := installResetReceiptFault(t, db, backend, "cleanup_committed")
 	if _, err := cap.ApplyDestructiveResetCleanup(ctx, req, nil); err == nil {
 		t.Fatal("cleanup receipt fault did not roll back deletion")
 	}
@@ -210,7 +208,12 @@ func proveResetCleanupCommitAndReplay(t *testing.T, ctx context.Context, cap sta
 		t.Fatalf("cleanup receipt = %+v, %v", committed, err)
 	}
 	laterRun := uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{RunID: laterRun, Origin: runlifecyclefixture.ScenarioSetupOrigin()})
+	fixture := runlifecyclefixture.Fixture{RunID: laterRun, Origin: runlifecyclefixture.ScenarioSetupOrigin()}
+	if backend == "sqlite" {
+		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
+	} else {
+		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
+	}
 	replay, err := cap.ApplyDestructiveResetCleanup(ctx, req, nil)
 	if err != nil || !reflect.DeepEqual(replay, result) {
 		t.Fatalf("cleanup replay = %+v, %v", replay, err)

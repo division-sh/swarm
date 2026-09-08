@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 )
 
@@ -102,7 +103,7 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 	if !req.DryRun {
 		next := operation
 		next.Phase, next.Revision, next.Plan = PhasePlanned, operation.Revision+1, &result
-		if err := c.Operations.AdvanceResetOperation(ctx, operation, next); err != nil {
+		if err := c.advanceOperation(ctx, operation, next); err != nil {
 			return ExecutionResult{}, err
 		}
 		operation = next
@@ -113,18 +114,14 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		ActorTokenID: req.ActorTokenID,
 		RequestedAt:  req.RequestedAt,
 	})
-	if err != nil {
-		if runtimeReset != nil {
-			err = errors.Join(err, runtimeReset.Complete(context.WithoutCancel(ctx), true))
-		}
-		return ExecutionResult{}, err
-	}
 	if !req.DryRun {
-		operation, err = c.readEffectReceipt(ctx, req.OperationID, PhaseQuiesced)
+		operation, err = c.readEffectReceipt(ctx, operation, PhaseQuiesced, err)
 		if err != nil {
 			return ExecutionResult{}, err
 		}
 		quiescence = *operation.Quiescence
+	} else if err != nil {
+		return ExecutionResult{}, err
 	}
 	cleanup, err := c.Cleaner.Apply(ctx, CleanupRequest{
 		OperationID:  req.OperationID,
@@ -133,15 +130,14 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		ActorTokenID: req.ActorTokenID,
 		RequestedAt:  req.RequestedAt,
 	})
-	if err != nil {
-		return ExecutionResult{}, err
-	}
 	if !req.DryRun {
-		operation, err = c.readEffectReceipt(ctx, req.OperationID, PhaseCleanupCommitted)
+		operation, err = c.readEffectReceipt(ctx, operation, PhaseCleanupCommitted, err)
 		if err != nil {
 			return ExecutionResult{}, err
 		}
 		cleanup = *operation.Cleanup
+	} else if err != nil {
+		return ExecutionResult{}, err
 	}
 	containers, err := c.Containers.Apply(ctx, ContainerResetRequest{
 		Result:       result,
@@ -157,14 +153,14 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		next := operation
 		next.Revision++
 		next.Response = &out
-		if err := c.Operations.AdvanceResetOperation(ctx, operation, next); err != nil {
+		if err := c.advanceOperation(ctx, operation, next); err != nil {
 			return ExecutionResult{}, err
 		}
 	}
 	if runtimeReset != nil && len(containers.Failed) == 0 {
 		next := operation
 		next.Phase, next.Revision, next.Containers = PhaseContainersSettled, operation.Revision+1, &containers
-		if err := c.Operations.AdvanceResetOperation(ctx, operation, next); err != nil {
+		if err := c.advanceOperation(ctx, operation, next); err != nil {
 			return ExecutionResult{}, err
 		}
 		operation = next
@@ -174,25 +170,44 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		next = operation
 		next.Phase, next.Revision = PhaseCompleted, operation.Revision+1
 		next.Response = &out
-		if err := c.Operations.AdvanceResetOperation(ctx, operation, next); err != nil {
+		if err := c.advanceOperation(ctx, operation, next); err != nil {
 			return ExecutionResult{}, err
 		}
 	}
 	return out, nil
 }
 
-func (c *Coordinator) readEffectReceipt(ctx context.Context, id string, phase OperationPhase) (Operation, error) {
-	op, err := c.Operations.ReadResetOperation(ctx, id)
+// A returned commit error is not a rollback witness. Only the exact committed
+// receipt permits progress; missing or unreadable evidence leaves execution fenced.
+func (c *Coordinator) readEffectReceipt(ctx context.Context, before Operation, phase OperationPhase, applyErr error) (Operation, error) {
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	op, err := c.Operations.ReadResetOperation(readCtx, before.Request.OperationID)
 	if err != nil {
-		return Operation{}, err
+		return Operation{}, errors.Join(applyErr, err)
 	}
-	if err := op.Validate(); err != nil {
-		return Operation{}, err
+	if err := ValidateOperationTransition(before, op); err != nil {
+		return Operation{}, errors.Join(applyErr, fmt.Errorf("reset %s has no exact atomic %s receipt: %w", before.Request.OperationID, phase, err))
 	}
-	if op.Phase != phase || op.Request.OperationID != id {
-		return Operation{}, fmt.Errorf("reset %s has no atomic %s receipt", id, phase)
+	if op.Phase != phase {
+		return Operation{}, errors.Join(applyErr, fmt.Errorf("reset %s has no atomic %s receipt", before.Request.OperationID, phase))
 	}
 	return op, nil
+}
+
+func (c *Coordinator) advanceOperation(ctx context.Context, before, after Operation) error {
+	if err := ValidateOperationTransition(before, after); err != nil {
+		return err
+	}
+	if err := c.Operations.AdvanceResetOperation(ctx, before, after); err != nil {
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		current, readErr := c.Operations.ReadResetOperation(readCtx, before.Request.OperationID)
+		if readErr != nil || !reflect.DeepEqual(current, after) {
+			return errors.Join(err, readErr)
+		}
+	}
+	return nil
 }
 
 func (c *Coordinator) now() time.Time {

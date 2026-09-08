@@ -1342,21 +1342,21 @@ func (m *DockerManager) StopManagedContainer(ctx context.Context, target runtime
 	if expected.BundleHash == "" {
 		return fmt.Errorf("reset container %s has no admitted source projection", target.Name)
 	}
-	inspection, err := m.InspectManagedContainer(ctx, expected.ContainerName)
+	if strings.TrimSpace(target.RuntimeID) == "" {
+		return fmt.Errorf("reset container %s has no planned immutable Docker ID", expected.ContainerName)
+	}
+	inspection, err := m.InspectManagedContainer(ctx, target.RuntimeID)
 	if err != nil {
 		return err
 	}
 	if !inspection.Exists {
 		return nil
 	}
-	if !inspection.HasIdentity || !inspection.Identity.Equal(expected) {
+	if inspection.RuntimeID != target.RuntimeID || !inspection.HasIdentity || !inspection.Identity.Equal(expected) {
 		return fmt.Errorf("reset container %s ownership changed", expected.ContainerName)
 	}
 	if !inspection.Running {
 		return nil
-	}
-	if inspection.RuntimeID == "" {
-		return fmt.Errorf("reset container %s has no immutable Docker ID", expected.ContainerName)
 	}
 	// Names can be reused between inspect and stop. Dispatch only to the exact
 	// inspected object, and reconcile a lost acknowledgment against that object.
@@ -1364,7 +1364,7 @@ func (m *DockerManager) StopManagedContainer(ctx context.Context, target runtime
 		readbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		settled, readErr := m.InspectManagedContainer(readbackCtx, inspection.RuntimeID)
-		if readErr == nil && (!settled.Exists || (settled.HasIdentity && settled.Identity.Equal(expected) && !settled.Running)) {
+		if readErr == nil && (!settled.Exists || (settled.RuntimeID == target.RuntimeID && settled.HasIdentity && settled.Identity.Equal(expected) && !settled.Running)) {
 			return nil
 		}
 		return errors.Join(err, readErr)
@@ -1399,7 +1399,10 @@ func (m *DockerManager) ManagedResetContainerInventory(ctx context.Context) ([]r
 		if strings.TrimSpace(identity.ContainerName) != name {
 			continue
 		}
-		refs = append(refs, runtimedestructivereset.ContainerRefFromIdentity(identity, runtimedestructivereset.ContainerActionStop))
+		if strings.TrimSpace(inspection.RuntimeID) == "" {
+			return nil, fmt.Errorf("managed reset container %s has no immutable Docker ID", name)
+		}
+		refs = append(refs, runtimedestructivereset.ContainerRefFromIdentity(identity, inspection.RuntimeID, runtimedestructivereset.ContainerActionStop))
 	}
 	sort.Slice(refs, func(i, j int) bool {
 		if refs[i].Kind != refs[j].Kind {

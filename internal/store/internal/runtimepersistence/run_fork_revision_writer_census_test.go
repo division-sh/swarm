@@ -229,7 +229,7 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 			ProofTokens: []string{"run_stop", "stopDecisionCardRun", "assertTerminalDecisionCardStateChangeOnly"},
 		},
 		{
-			Path: "internal/store/internal/backend/runlifecycle/active_run_quiescence.go", Writer: "ApplyActiveRunQuiescence",
+			Path: "internal/store/internal/backend/runlifecycle/active_run_quiescence.go", Writer: "applyActiveRunQuiescence",
 			WriterTokens: []string{"effects := runforkrevision.NewEffects()", "TerminalizeRunDeliveriesTx", "TerminalizeRunTx", "FinalizePostgres"},
 			ProofPath:    "internal/store/internal/runtimepersistence/active_run_quiescence_delivery_readback_test.go", Proof: "TestActiveRunDeliveryQuiescenceReadbackParity",
 			ProofTokens: []string{"ApplyActiveRunQuiescence", "requireCompleteRunForkRevision"},
@@ -349,6 +349,41 @@ func scanRunForkRevisionPhysicalWriters(t *testing.T, root string) map[string]st
 			if !ok || fn.Body == nil {
 				continue
 			}
+			if rel == "internal/store/internal/adminpersistence/destructive_reset_cleanup.go" && fn.Name.Name == "destructiveResetCleanupStatementsForTable" {
+				// This closed builder shares a predicate between count and delete.
+				// Census its actual table cases instead of losing dynamic targets
+				// from a scanner that only recognizes literal DELETE FROM names.
+				body, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				function := productionFunctionBody(t, string(body), fn.Name.Name)
+				for _, required := range []string{`from := quoteIdent(table) + " AS target WHERE " + fmt.Sprintf(predicate, runSet)`, `count: "SELECT COUNT(*) FROM " + from`, `out.delete = "DELETE FROM " + from`} {
+					if !strings.Contains(function, required) {
+						t.Fatalf("reset cleanup builder changed its scope construction: missing %s", required)
+					}
+				}
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					clause, ok := node.(*ast.CaseClause)
+					if !ok {
+						return true
+					}
+					for _, expression := range clause.List {
+						literal, ok := expression.(*ast.BasicLit)
+						if !ok || literal.Kind != token.STRING {
+							t.Fatal("reset cleanup table cases must remain explicit")
+						}
+						table, err := strconv.Unquote(literal.Value)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, governed := physical[table]; governed {
+							got[rel+"|"+fn.Name.Name+"|"+table] = struct{}{}
+						}
+					}
+					return true
+				})
+			}
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				literal, ok := node.(*ast.BasicLit)
 				if !ok || literal.Kind != token.STRING {
@@ -397,7 +432,7 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 	}
 	return []runForkRevisionWriterCensusRow{
 		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupSeverPreservedReferences"}, []string{"agent_sessions", "entity_mutations", "timers"}, "parent-owned cleanup references", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan run IDs", "parent deletion cascades complete revision ledger", "TestDestructiveResetCleanup"),
-		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupStatementsForTable"}, []string{"committed_replay_scopes", "dead_letters", "event_deliveries", "event_receipts", "timers"}, "parent-owned cleanup rows", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan run IDs", "parent deletion cascades complete revision ledger", "TestDestructiveResetCleanup"),
+		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupStatementsForTable"}, []string{"events", "entity_mutations", "entity_state", "event_deliveries", "event_delivery_attempts", "event_delivery_outcomes", "committed_replay_scopes", "event_receipts", "dead_letters", "timers", "agent_sessions", "agent_turns", "agent_conversation_audits", "reply_contexts", "fan_out_intents", "fan_out_obligation_barriers", "fan_out_outcomes"}, "parent-owned cleanup rows", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan run IDs", "parent deletion cascades complete revision ledger", "TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores; TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPreservesBoundaries"),
 
 		row("internal/store/internal/backend/agentpersistence/lifecycle.go", []string{"applyPostgresLifecycleSessionMutation", "applySQLiteLifecycleSubordinate"}, []string{"agent_sessions"}, "agent_sessions", "CommitAgentLifecycleTransitionTx", "projected lifecycle transition", "transition result session run IDs", "lifecycle owner FinalizePostgres/FinalizeSQLite", "TestPostgresLifecycleSessionMutationPublishesRunForkRevision"),
 		row("internal/store/internal/backend/decisionpersistence/decision_cards.go", []string{"supersedeRunGateActivations"}, []string{"entity_state"}, "entity_metadata excluded-column no-change", "decision-card named mutation", "accumulator-only update", "validated card run ID", "outer mutation compares declared entity mutation effects; metadata projection is unchanged", matrixProof),

@@ -49,6 +49,11 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 	if s.Runtime == nil {
 		return ContainerResetResult{}, fmt.Errorf("destructive reset managed container runtime is not configured")
 	}
+	for _, planned := range req.Result.Plan.ManagedContainers {
+		if strings.TrimSpace(planned.Name) == "" || strings.TrimSpace(planned.RuntimeID) == "" {
+			return ContainerResetResult{}, fmt.Errorf("%w: destructive reset container name and immutable runtime ID are required", ErrInvalidRequest)
+		}
+	}
 
 	result := ContainerResetResult{
 		OperationName: req.Result.OperationName,
@@ -56,10 +61,7 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 		AppliedAt:     req.RequestedAt,
 	}
 	for _, planned := range req.Result.Plan.ManagedContainers {
-		if strings.TrimSpace(planned.Name) == "" {
-			return ContainerResetResult{}, fmt.Errorf("%w: destructive reset container name is required", ErrInvalidRequest)
-		}
-		inspection, err := s.Runtime.InspectManagedContainer(ctx, planned.Name)
+		inspection, err := s.Runtime.InspectManagedContainer(ctx, planned.RuntimeID)
 		if err != nil {
 			result.Failed = append(result.Failed, ContainerStopFailure{
 				Container: withContainerAction(planned, ContainerActionFailed),
@@ -71,11 +73,15 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 			result.Missing = append(result.Missing, withContainerAction(planned, ContainerActionMissing))
 			continue
 		}
+		if inspection.RuntimeID != planned.RuntimeID {
+			result.Failed = append(result.Failed, ContainerStopFailure{Container: withContainerAction(planned, ContainerActionFailed), Error: "container inspection differs from planned immutable runtime ID"})
+			continue
+		}
 		if !inspection.HasIdentity || inspection.Identity.BundleHash == "" || inspection.Identity.Validate() != nil || !inspection.Identity.ResetEligibleManaged() || !inspection.Identity.Equal(planned.Identity()) {
 			result.Preserved = append(result.Preserved, preservedContainerRef(planned, inspection.Identity))
 			continue
 		}
-		ref := ContainerRefFromIdentity(inspection.Identity, ContainerActionStop)
+		ref := ContainerRefFromIdentity(inspection.Identity, planned.RuntimeID, ContainerActionStop)
 		if !inspection.Running {
 			result.AlreadyStopped = append(result.AlreadyStopped, withContainerAction(ref, ContainerActionAlreadyStopped))
 			continue
@@ -103,9 +109,10 @@ func (s ManagedContainerStopper) now() time.Time {
 	return time.Now().UTC()
 }
 
-func ContainerRefFromIdentity(identity containeridentity.Identity, action string) ContainerRef {
+func ContainerRefFromIdentity(identity containeridentity.Identity, runtimeID, action string) ContainerRef {
 	identity = identity.Normalized()
 	return ContainerRef{
+		RuntimeID:        strings.TrimSpace(runtimeID),
 		Owner:            identity.Owner,
 		Name:             strings.TrimSpace(identity.ContainerName),
 		Kind:             strings.TrimSpace(identity.Kind),
@@ -126,11 +133,11 @@ func preservedContainerRef(planned ContainerRef, identity containeridentity.Iden
 	if strings.TrimSpace(identity.ContainerName) == "" {
 		return withContainerAction(planned, ContainerActionUnowned)
 	}
-	return ContainerRefFromIdentity(identity, ContainerActionUnowned)
+	return ContainerRefFromIdentity(identity, planned.RuntimeID, ContainerActionUnowned)
 }
 
 func withContainerAction(ref ContainerRef, action string) ContainerRef {
-	return ContainerRefFromIdentity(ref.Identity(), action)
+	return ContainerRefFromIdentity(ref.Identity(), ref.RuntimeID, action)
 }
 
 func copyContainerResetResult(result ContainerResetResult) ContainerResetResult {

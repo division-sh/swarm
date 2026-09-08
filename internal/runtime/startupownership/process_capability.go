@@ -265,6 +265,12 @@ func (p *processCapability) ApplyDestructiveResetCleanup(ctx context.Context, re
 		return runtimedestructivereset.CleanupResult{}, errors.New("process startup/topology capability is missing")
 	}
 	if topology != nil {
+		if req.Result.DryRun || !req.Result.IncludeSourceArtifacts || topology.OperationID != req.OperationID ||
+			len(topology.Plan.Sources) != 0 || len(topology.Plan.Agents) != 0 {
+			return runtimedestructivereset.CleanupResult{}, fmt.Errorf("%w: reset topology must clear sources for the exact apply operation", runtimedestructivereset.ErrInvalidRequest)
+		}
+		copy := *topology
+		topology = &copy
 		topology.Operation = runtimeagenttopology.OperationApplyDestructiveResetTopology
 		if err := topology.Validate(); err != nil {
 			return runtimedestructivereset.CleanupResult{}, err
