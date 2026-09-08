@@ -84,6 +84,9 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	if err != nil || derived != identity {
 		return Snapshot{}, fmt.Errorf("%w: historical delivery route identity mismatch", ErrConflict)
 	}
+	if err := validateDeliveryRouteOwningRun(fact.RunID, route); err != nil {
+		return Snapshot{}, fmt.Errorf("%w: historical delivery ownership: %v", ErrConflict, err)
+	}
 	snapshot := Snapshot{
 		DeliveryID: fact.DeliveryID, EventID: fact.EventID, RunID: fact.RunID,
 		RouteIdentity: identity, Route: route, SubscriberClass: class, SubscriberID: route.Recipient.ID(),

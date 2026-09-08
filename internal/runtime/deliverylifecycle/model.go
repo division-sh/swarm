@@ -305,11 +305,11 @@ func NewObligation(eventID, runID string, route events.DeliveryRoute, authority 
 		return Obligation{}, fmt.Errorf("selected delivery authority fork run does not match obligation run")
 	}
 	route = route.Normalized()
+	if err := validateDeliveryRouteOwningRun(runID, route); err != nil {
+		return Obligation{}, err
+	}
 	class := SubscriberNode
 	if route.Recipient.IsAgent() {
-		if route.AgentIdentity.RunID != runID {
-			return Obligation{}, fmt.Errorf("delivery route agent run does not match obligation run")
-		}
 		class = SubscriberAgent
 	} else if !route.Recipient.IsNode() {
 		return Obligation{}, fmt.Errorf("delivery obligation subscriber class is invalid")

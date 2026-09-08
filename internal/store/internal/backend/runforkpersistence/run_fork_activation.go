@@ -574,19 +574,11 @@ func lockRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, lineage 
 	if lineage == nil {
 		return fmt.Errorf("fork activation requires lineage")
 	}
-	if err := tx.QueryRowContext(ctx, `
-		SELECT MIN(revision)
-		FROM run_fork_fact_revisions
-		WHERE run_id = $1::uuid
-		  AND family = 'events'
-		  AND fact_key = $2
-		  AND present
-	`, lineage.SourceRunID, lineage.ForkEventID).Scan(&lineage.ForkEventRevision); err != nil {
+	point, err := resolveRunForkRevisionPoint(ctx, tx, lineage.SourceRunID, lineage.ForkEventID)
+	if err != nil {
 		return fmt.Errorf("resolve fork activation event revision: %w", err)
 	}
-	if lineage.ForkEventRevision <= 0 {
-		return fmt.Errorf("fork activation source event is not revisioned; recreate the store and retry")
-	}
+	lineage.ForkEventRevision = point.Revision
 	var currentRevision int64
 	if err := tx.QueryRowContext(ctx, `
 		SELECT last_revision
@@ -609,16 +601,11 @@ func lockSQLiteRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, li
 	if lineage == nil {
 		return fmt.Errorf("fork activation requires lineage")
 	}
-	if err := tx.QueryRowContext(ctx, `
-		SELECT MIN(revision)
-		FROM run_fork_fact_revisions
-		WHERE run_id = $1 AND family = 'events' AND fact_key = $2 AND present
-	`, lineage.SourceRunID, lineage.ForkEventID).Scan(&lineage.ForkEventRevision); err != nil {
+	point, err := resolveRunForkRevisionPoint(ctx, tx, lineage.SourceRunID, lineage.ForkEventID)
+	if err != nil {
 		return fmt.Errorf("resolve sqlite fork activation event revision: %w", err)
 	}
-	if lineage.ForkEventRevision <= 0 {
-		return fmt.Errorf("fork activation source event is not revisioned; recreate the store and retry")
-	}
+	lineage.ForkEventRevision = point.Revision
 	var currentRevision int64
 	if err := tx.QueryRowContext(ctx, `
 		SELECT last_revision FROM run_fork_revision_heads WHERE run_id = $1

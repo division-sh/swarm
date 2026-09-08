@@ -95,10 +95,6 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 	return out, nil
 }
 
-func LoadRunForkPendingWorkFromRevision(snapshot *RunForkRevisionSnapshot) ([]runfork.RunForkPendingWork, error) {
-	return loadRunForkPendingWorkFromRevision(snapshot)
-}
-
 func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.Snapshot, deadLetter bool) string {
 	if deadLetter || snapshot.Status == runtimedelivery.StatusDeadLetter {
 		return runfork.RunForkPendingClassificationDeadLetter
@@ -202,10 +198,6 @@ func loadRunForkSourceFactsFromRevision(snapshot *runForkRevisionSnapshot, entit
 		FlowInstances: stringSetValues(flowSet),
 		SourceFlows:   stringSetValues(sourceFlowSet),
 	}
-}
-
-func LoadRunForkSourceFactsFromRevision(snapshot *RunForkRevisionSnapshot, entities []runfork.RunForkEntityState) RunForkSourceFacts {
-	return loadRunForkSourceFactsFromRevision(snapshot, entities)
 }
 
 func runForkRevisionSubscriberKey(eventID, subscriberType, subscriberID string) string {
