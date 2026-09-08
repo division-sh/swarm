@@ -15,8 +15,10 @@ identifier references are renamed to avoid collisions. Function bodies, literal
 values, assertions and original helper behavior are otherwise retained. It does
 NOT invoke the changed effect-only journey or the extracted delivery helper.
 
-Original source snapshot SHA256:
+Original source snapshot SHA256 before EOF whitespace normalization:
 `7b44e7c90a992d4856b9cb0a1eb5c390cfeed873f50c638b337e1af82179b51f`.
+Committed snapshot SHA256 (only the extra trailing blank line removed):
+`ce1f31892de9c30f4082936141e88b2b0ea77920525769ed4d9e0c2b9424a21b`.
 Self-contained clone SHA256:
 `f7fe3f71c28d6cf760275808fefc3fb5f85730c902021c5fabc12021a1e69ced`.
 
