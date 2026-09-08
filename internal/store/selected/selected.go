@@ -342,6 +342,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 		products: productPorts{
 			conversationFork: ConversationFork{reader: selected, lifecycle: selected}, conversationAvailable: true,
 			runFork: runFork, runForkAvailable: true,
+			startupRecovery: StartupRecovery{availability: selected}, startupRecoveryAvailable: true,
 		},
 	}, nil
 }

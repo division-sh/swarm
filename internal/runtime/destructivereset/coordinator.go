@@ -12,7 +12,7 @@ type Coordinator struct {
 	Quiescer        QuiescenceApplier
 	Cleaner         CleanupApplier
 	Containers      ContainerStopper
-	RuntimeContexts RuntimeContextQuiescer
+	RuntimeContexts RuntimeContextLifecycle
 	Now             func() time.Time
 }
 
@@ -55,8 +55,24 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		retErr = errors.Join(retErr, lease.Release(context.WithoutCancel(ctx)))
 	}()
 
+	var runtimeReset RuntimeReset
+	if !req.DryRun && c.RuntimeContexts != nil {
+		runtimeReset, err = c.RuntimeContexts.BeginDestructiveReset(ctx)
+		if err != nil {
+			return ExecutionResult{}, err
+		}
+		if runtimeReset == nil {
+			return ExecutionResult{}, errors.New("reset lifecycle returned no operation")
+		}
+		defer runtimeReset.Release()
+	}
+	// Inventory must include persistence and container creation performed by
+	// already-admitted work while the predecessor set is draining.
 	plan, err := c.Planner.BuildPlan(ctx, req)
 	if err != nil {
+		if runtimeReset != nil {
+			err = errors.Join(err, runtimeReset.Complete(context.WithoutCancel(ctx), true))
+		}
 		return ExecutionResult{}, err
 	}
 	result := Result{
@@ -66,17 +82,15 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		PlannedAt:              req.RequestedAt,
 		Plan:                   plan,
 	}
-	if !req.DryRun && c.RuntimeContexts != nil {
-		if err := c.RuntimeContexts.QuiesceAllRuntimeContexts(ctx); err != nil {
-			return ExecutionResult{}, err
-		}
-	}
 	quiescence, err := c.Quiescer.Apply(ctx, QuiescenceRequest{
 		Result:       result,
 		ActorTokenID: req.ActorTokenID,
 		RequestedAt:  req.RequestedAt,
 	})
 	if err != nil {
+		if runtimeReset != nil {
+			err = errors.Join(err, runtimeReset.Complete(context.WithoutCancel(ctx), true))
+		}
 		return ExecutionResult{}, err
 	}
 	cleanup, err := c.Cleaner.Apply(ctx, CleanupRequest{
@@ -97,6 +111,11 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 	})
 	if err != nil {
 		return ExecutionResult{}, err
+	}
+	if runtimeReset != nil && len(containers.Failed) == 0 {
+		if err := runtimeReset.Complete(ctx, !req.IncludeSourceArtifacts); err != nil {
+			return ExecutionResult{}, err
+		}
 	}
 	return ExecutionResult{
 		Plan:       result,

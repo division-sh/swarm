@@ -159,13 +159,11 @@ func TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce(t *testing.T) 
 	if _, available := owner.RunFork(); !available {
 		t.Fatal("SQLite run fork must be available")
 	}
-	for name, available := range map[string]bool{
-		"destructive reset": func() bool { _, ok := owner.DestructiveReset(); return ok }(),
-		"startup recovery":  func() bool { _, ok := owner.StartupRecovery(); return ok }(),
-	} {
-		if available {
-			t.Fatalf("SQLite %s unexpectedly available", name)
-		}
+	if _, available := owner.DestructiveReset(); available {
+		t.Fatal("SQLite destructive reset unexpectedly available")
+	}
+	if recovery, available := owner.StartupRecovery(); !available || recovery.Availability() == nil {
+		t.Fatal("SQLite startup artifact integrity must be available")
 	}
 }
 

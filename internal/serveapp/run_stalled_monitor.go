@@ -21,10 +21,10 @@ type serveRunStalledReader struct {
 	store runstalled.ProjectionReader
 }
 
-func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, projection runstalled.ProjectionReader, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus, posture executionposture.Posture) error {
+func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, projection runstalled.ProjectionReader, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus, posture executionposture.Posture) (func(), error) {
 	reader, ok := newServeRunStalledReader(projection)
 	if !ok || eventBus == nil {
-		return nil
+		return func() {}, nil
 	}
 	monitor := &runstalled.Monitor{
 		Reader:           reader,
@@ -36,17 +36,21 @@ func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Pro
 		},
 	}
 	if owner == nil {
-		return fmt.Errorf("run stalled monitor requires a process work owner")
+		return nil, fmt.Errorf("run stalled monitor requires a process work owner")
 	}
+	ctx, cancel := context.WithCancel(ctx)
 	lease, err := owner.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("admit run stalled monitor: %w", err)
+		cancel()
+		return nil, fmt.Errorf("admit run stalled monitor: %w", err)
 	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer func() { _ = lease.Done() }()
 		monitor.Run(lease.Context())
 	}()
-	return nil
+	return func() { cancel(); <-done }, nil
 }
 
 func newServeRunStalledReader(projection runstalled.ProjectionReader) (*serveRunStalledReader, bool) {

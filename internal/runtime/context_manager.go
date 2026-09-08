@@ -577,14 +577,17 @@ func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklife
 	}
 	for _, raw := range targets {
 		target := raw.normalized()
+		if !m.standingServiceSuppressedLocked(target.ServiceID) && target.Generation <= 0 {
+			return nil, fmt.Errorf("standing service %s has invalid durable generation %d", target.ServiceID, target.Generation)
+		}
+	}
+	for _, raw := range targets {
+		target := raw.normalized()
 		if m.standingServiceSuppressedLocked(target.ServiceID) {
 			continue
 		}
 		if _, exists := out[target.ServiceID]; exists {
 			continue
-		}
-		if target.Generation <= 0 {
-			return nil, fmt.Errorf("standing service %s has invalid durable generation %d", target.ServiceID, target.Generation)
 		}
 		occurrence, err := workOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
 			ServiceID: target.ServiceID, RunID: target.RunID, Generation: uint64(target.Generation),

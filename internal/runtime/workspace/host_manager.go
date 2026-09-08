@@ -180,17 +180,18 @@ func (m *HostManager) ReleaseSourceProjection(context.Context) error {
 	m.projectionMu.Unlock()
 	m.projectionOps.Wait()
 	m.projectionMu.Lock()
-	projection := m.ownedProjection
+	defer m.projectionMu.Unlock()
+	if m.ownedProjection != nil {
+		if err := m.ownedProjection.Release(); err != nil {
+			return err
+		}
+	}
 	m.ownedProjection = nil
 	m.cfg.SourceProjection = nil
 	m.cfg.BundleHash = ""
 	m.cfg.BundleScope = ""
 	m.cfg.SourceProjectionID = ""
-	m.projectionMu.Unlock()
-	if projection == nil {
-		return nil
-	}
-	return projection.Release()
+	return nil
 }
 
 func (m *HostManager) ValidateSource(_ context.Context, source semanticview.Source) error {

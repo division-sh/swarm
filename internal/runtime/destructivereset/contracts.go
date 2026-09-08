@@ -26,7 +26,7 @@ func DefaultDownstreamContracts() []DownstreamContract {
 			ID:          ContractManagedContainers,
 			Status:      "implemented_internal_owner",
 			Owner:       "internal/runtime/containeridentity, internal/runtime/workspace managed identity stamping, and internal/runtime/destructivereset ManagedContainerStopper",
-			Description: "Select and stop only label-proven reset-eligible managed runtime containers while preserving system/operator/unowned containers.",
+			Description: "Stop exact reset-eligible managed containers; projection release separately removes owned projection containers while preserving durable workspace backings and operator/unowned containers.",
 		},
 		{
 			ID:          ContractPublicAPIWrapper,
@@ -75,10 +75,10 @@ func DefaultResetSeams() []ResetSeam {
 
 func DefaultPreservedResources() PreservedResources {
 	return PreservedResources{
-		SystemContainers:        []string{"swarm-scaffold", "swarm-system"},
-		OperatorManagedBoundary: "operator-managed containers are outside Swarm ownership and are not enumerable by this planner",
-		SchemaMigrations:        true,
-		AuthTokens:              true,
-		SourceArtifacts:         true,
+		DurableWorkspaceBackings: true,
+		OperatorManagedBoundary:  "operator-managed containers are outside Swarm ownership and are not enumerable by this planner",
+		SchemaMigrations:         true,
+		AuthTokens:               true,
+		SourceArtifacts:          true,
 	}
 }

@@ -430,38 +430,6 @@ func TestPlatformSpecWorkspaceDataProjectionAuthorityPromoted(t *testing.T) {
 	}
 }
 
-func TestCloseServeRuntimeReleasesProjectionAfterShutdown(t *testing.T) {
-	shutdownErr := fmt.Errorf("shutdown timed out")
-	var order []string
-	supervisor := &processLifecycleSupervisor{
-		currentRT: &runtimepkg.Runtime{},
-	}
-	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
-		order = append(order, "shutdown")
-		return shutdownErr
-	}
-	workspaces := serveRuntimeWorkspaceStub{
-		release: func(context.Context) error {
-			order = append(order, "release_projection")
-			return nil
-		},
-	}
-
-	err := closeServeRuntime(context.Background(), supervisor, cliapp.ServeOptions{
-		Dev:           true,
-		ShutdownGrace: runtimepkg.DefaultShutdownGrace,
-	}, workspaces)
-	if err == nil || !strings.Contains(err.Error(), shutdownErr.Error()) {
-		t.Fatalf("closeServeRuntime err = %v, want shutdown error", err)
-	}
-	if got := strings.Join(order, ","); got != "shutdown,release_projection" {
-		t.Fatalf("order = %s, want shutdown,release_projection", got)
-	}
-	if got := supervisor.CurrentRuntime(); got != nil {
-		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
-	}
-}
-
 func TestServeRuntimeContextStandingTargetsPreservesNonExecutableDeclarations(t *testing.T) {
 	active := runtimepkg.StandingTarget{ServiceID: "active-service", RunID: "active-run", Provider: "telegram"}
 	stopped := runtimepkg.StandingTarget{ServiceID: "stopped-service", RunID: "stopped-run", Provider: "telegram"}
@@ -1126,18 +1094,88 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 
 func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
 	proof := startServedSessionCleanupProof(t)
+	use, lookup, err := proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
+	if err != nil || use == nil || !lookup.Loaded() {
+		t.Fatalf("acquire predecessor: %v %+v", err, lookup)
+	}
+	predecessor := use.Runtime()
+	predecessorGrant, err := predecessor.CurrentStartupGrantEvidence()
+	if err != nil {
+		_ = use.Done()
+		t.Fatal(err)
+	}
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	var artifactBefore string
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT row_to_json(source_artifacts)::text FROM source_artifacts WHERE bundle_hash = $1`, proof.BundleHash).Scan(&artifactBefore); err != nil {
+		t.Fatal(err)
+	}
+	// Reconstruction must consume admitted bytes, not the original directory.
+	if err := os.RemoveAll(proof.SourceRoot); err != nil {
+		t.Fatal(err)
+	}
 	var result struct {
 		OK                     bool   `json:"ok"`
 		Status                 string `json:"status"`
 		IncludeSourceArtifacts bool   `json:"include_source_artifacts"`
 	}
-	runServedSessionCleanupMutation(t, proof, "runtime.nuke", map[string]any{
-		"include_source_artifacts": false, "idempotency_key": "issue-1927-runtime-nuke-" + uuid.NewString(),
-	}, &result)
+	params := map[string]any{"include_source_artifacts": false, "idempotency_key": "issue-2388-retained-reset-" + uuid.NewString()}
+	runServedSessionCleanupMutation(t, proof, "runtime.nuke", params, &result)
 	if !result.OK || result.Status != "completed" || result.IncludeSourceArtifacts {
 		t.Fatalf("served runtime.nuke result = %#v", result)
 	}
 	assertServedSessionCleanupQuiesced(t, proof)
+	use, lookup, err = proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
+	if err != nil || use == nil || !lookup.Loaded() {
+		t.Fatalf("acquire reconstructed context: %v %+v", err, lookup)
+	}
+	successor := use.Runtime()
+	successorGrant, err := successor.CurrentStartupGrantEvidence()
+	if err != nil {
+		_ = use.Done()
+		t.Fatal(err)
+	}
+	if successor == predecessor || successor.WorkOccurrence() == predecessor.WorkOccurrence() || successorGrant.GrantID == predecessorGrant.GrantID || successorGrant.RuntimeGeneration <= predecessorGrant.RuntimeGeneration {
+		_ = use.Done()
+		t.Fatal("reset reused predecessor execution or authority")
+	}
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	var artifactAfter string
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT row_to_json(source_artifacts)::text FROM source_artifacts WHERE bundle_hash = $1`, proof.BundleHash).Scan(&artifactAfter); err != nil {
+		t.Fatal(err)
+	}
+	if artifactAfter != artifactBefore {
+		t.Fatal("retained reset mutated the admitted source artifact")
+	}
+	postReset := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
+		"event_name": "item.received", "bundle_hash": proof.BundleHash,
+		"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
+	})
+	if postReset.RunID == "" || postReset.RunID == proof.RunID {
+		t.Fatalf("post-reset admission did not create fresh work: %+v", postReset)
+	}
+	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, "postgres", postReset.RunID, postReset.EventID, proof.Probe)
+	if replay := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); replay.Error != nil {
+		t.Fatalf("completed reset replay failed: %+v", replay.Error)
+	}
+	var laterWorkExists bool
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, postReset.RunID).Scan(&laterWorkExists); err != nil {
+		t.Fatal(err)
+	}
+	if !laterWorkExists {
+		t.Fatal("completed reset replay destroyed later work")
+	}
+	use, _, err = proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
+	if err != nil || use == nil {
+		t.Fatalf("post-replay context unavailable: %v", err)
+	}
+	defer use.Done()
+	if use.Runtime() != successor {
+		t.Fatal("completed reset replay reconstructed execution again")
+	}
 }
 
 func TestRunServeRuntimeNukeWithSourceArtifactsClearsProcessTopologyBeforeCleanupPostgres(t *testing.T) {
@@ -1147,9 +1185,8 @@ func TestRunServeRuntimeNukeWithSourceArtifactsClearsProcessTopologyBeforeCleanu
 		Status                 string `json:"status"`
 		IncludeSourceArtifacts bool   `json:"include_source_artifacts"`
 	}
-	runServedSessionCleanupMutation(t, proof, "runtime.nuke", map[string]any{
-		"include_source_artifacts": true, "idempotency_key": "issue-2125-runtime-nuke-bundles-" + uuid.NewString(),
-	}, &result)
+	params := map[string]any{"include_source_artifacts": true, "idempotency_key": "issue-2388-deleted-reset-" + uuid.NewString()}
+	runServedSessionCleanupMutation(t, proof, "runtime.nuke", params, &result)
 	if !result.OK || result.Status != "completed" || !result.IncludeSourceArtifacts {
 		t.Fatalf("served runtime.nuke include_source_artifacts result = %#v", result)
 	}
@@ -1176,6 +1213,20 @@ func TestRunServeRuntimeNukeWithSourceArtifactsClearsProcessTopologyBeforeCleanu
 	if len(plan.Sources) != 0 || len(plan.Agents) != 0 {
 		t.Fatalf("process topology after runtime.nuke = %#v, want empty complete source set", plan)
 	}
+	if replay := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); replay.Error != nil {
+		t.Fatalf("unloaded process refused control API replay: %+v", replay.Error)
+	}
+	if lookup := proof.Contexts.LookupBundleHashStatus(proof.BundleHash); lookup.Loaded() {
+		t.Fatal("deleted-source reset replay restored executable context")
+	}
+	if next := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", map[string]any{
+		"include_source_artifacts": false, "idempotency_key": "issue-2388-retain-empty-" + uuid.NewString(),
+	}); next.Error != nil {
+		t.Fatalf("reset of an already empty source set attempted reconstruction: %+v", next.Error)
+	}
+	if lookup := proof.Contexts.LookupBundleHashStatus(proof.BundleHash); lookup.Loaded() {
+		t.Fatal("retained-source reset resurrected a previously deleted source")
+	}
 }
 
 type servedSessionCleanupProof struct {
@@ -1186,6 +1237,8 @@ type servedSessionCleanupProof struct {
 	SessionID  string
 	Contexts   *runtimepkg.RuntimeContextManager
 	Release    func()
+	SourceRoot string
+	Probe      *lifecycletest.Probe
 }
 
 func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
@@ -1250,7 +1303,7 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	}
 	return servedSessionCleanupProof{
 		Endpoint: endpoint, DB: db, BundleHash: bundleHash, RunID: initial.RunID,
-		SessionID: sessionID, Contexts: contexts, Release: releaseWriter,
+		SessionID: sessionID, Contexts: contexts, Release: releaseWriter, SourceRoot: sourceRoot, Probe: probe,
 	}
 }
 
@@ -7581,7 +7634,7 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	})
 	toolGateway := runtimemcp.NewGateway(nil, "", runtimemcp.GatewayHooks{})
 	apiHandlerMux := newAPIServer(&ready, apiHandler, inboundHandler).Handler
-	mcpHandlerMux := newMCPServer(toolGateway).Handler
+	mcpHandlerMux := toolGateway.Handler()
 
 	rec := httptest.NewRecorder()
 	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))

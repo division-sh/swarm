@@ -71,12 +71,12 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 	}
 	if family, available := owner.DestructiveReset(); available {
 		planner := runtimedestructivereset.InventoryPlanner{Reader: runtimedestructivereset.CompositeInventoryReader{
-			Reader: family.Inventory(), Containers: req.Workspaces,
+			Reader: family.Inventory(), Containers: req.RuntimeSupervisor,
 		}}
 		caps.ResetCoordinator = &runtimedestructivereset.Coordinator{
 			Planner: planner, Locks: family.Locks(), Quiescer: runtimedestructivereset.Quiescer{Store: family.Quiescence()},
 			Cleaner:    runtimedestructivereset.Cleaner{Store: processOwnedDestructiveResetStore{capability: req.ProcessCapability}},
-			Containers: runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces}, RuntimeContexts: req.RuntimeContextManager,
+			Containers: runtimedestructivereset.ManagedContainerStopper{Runtime: req.RuntimeSupervisor}, RuntimeContexts: req.RuntimeSupervisor,
 		}
 	}
 	if family, available := owner.RunFork(); available {

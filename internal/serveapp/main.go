@@ -38,7 +38,6 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
@@ -910,7 +909,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	source := loadedBundle.source
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
 	presenter.boot(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
-	primaryWorkspaceBackend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+	_, err = cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
 	if err != nil {
 		presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
 			cliapp.WriteWorkspaceBackendDecisionFailure(out, "serve", err)
@@ -1008,6 +1007,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	}
 	closeUnactivatedStore = false
 	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
+	runtimeRequests := make([]serveRuntimeBundleContextRequest, 0, len(loadedBundles))
 	var runtimeContextManager *runtime.RuntimeContextManager
 	var supervisor *processLifecycleSupervisor
 	var workspaces cliapp.ServeWorkspaceLifecycle
@@ -1030,18 +1030,23 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "api", apiServer))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
-		if len(runtimeContexts) > 1 {
-			shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
-		}
 		if supervisor != nil {
-			shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces, deadline))
-		} else if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
-			shutdownErr = errors.Join(shutdownErr, runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
-			if workspaces != nil {
-				shutdownErr = errors.Join(shutdownErr, workspaces.ReleaseSourceProjection(context.Background()))
+			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
+		} else {
+			if len(runtimeContexts) > 1 {
+				shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
+			}
+			if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
+				joinErr := runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)})
+				shutdownErr = errors.Join(shutdownErr, joinErr)
+				if joinErr == nil && runtimeContexts[0].workspaces != nil {
+					shutdownErr = errors.Join(shutdownErr, runtimeContexts[0].workspaces.ReleaseSourceProjection(context.Background()))
+				}
+			}
+			if shutdownErr == nil {
+				shutdownErr = cleanupLoadedSourceArtifacts()
 			}
 		}
-		shutdownErr = errors.Join(shutdownErr, cleanupLoadedSourceArtifacts())
 		bundleSourcesCleaned = true
 		cancelOwnershipWatch()
 		presenter.shutdown(selectedLifecycle.Finalize(shutdownCtx, shutdownErr))
@@ -1066,7 +1071,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			bootProgress = presenter.runtimeSink()
 		}
 		packLoad := bundlePackLoads[i]
-		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
+		request := serveRuntimeBundleContextRequest{
 			Ctx:                    ctx,
 			Stores:                 runtimePersistence,
 			Config:                 cfg,
@@ -1089,7 +1094,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			RuntimeInstanceID:      runtimeInstanceID,
 			ProcessWorkOwner:       processWorkOwner,
 			NoticePresentation:     noticePresentation,
-		})
+		}
+		contextDef, err := buildServeRuntimeBundleContext(request)
 		if err != nil {
 			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
 				return cliapp.WriteWorkspacePrerequisiteFailure(out, "serve", err)
@@ -1097,6 +1103,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			return 1
 		}
 		runtimeContexts = append(runtimeContexts, contextDef)
+		runtimeRequests = append(runtimeRequests, request)
 	}
 	primaryContext := runtimeContexts[0]
 	processSourceSet, err := compileServeSourceSetPlan(runtimeContexts)
@@ -1148,9 +1155,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}
 	source = primaryContext.loaded.source
-	bootBundleIdentity := primaryContext.bootIdentity
 	workspaces = primaryContext.workspaces
-	primaryWorkspaceBackend = primaryContext.workspaceBackend
 	rt := primaryContext.runtime
 	channelInterfaces, err := serveOperatorChannelInterfaces(runtimeContexts)
 	if err != nil {
@@ -1195,7 +1200,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
 	if recovery, available := stores.StartupRecovery(); available {
-		if exitCode := runServeSourceArtifactStartupRecovery(ctx, recovery, presenter); exitCode != 0 {
+		if exitCode := runServeSourceArtifactStartupRecovery(ctx, recovery, stores.SourceArtifactStore(), presenter); exitCode != 0 {
 			return exitCode
 		}
 	}
@@ -1223,18 +1228,15 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 
-	forkChatLLM, err := buildForkChatSandboxLLMRuntimes(cfg, workspaces, toolGatewayBinding, providerCredentialStore, stores.Effects(), stores.Completion(), stores.CompletionHeartbeat(), rt.Budget)
-	if err != nil {
-		presenter.fail(5, "forkchat_sandbox", err)
-		return 1
-	}
-
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
 	supervisor = newProcessLifecycleSupervisor(ready, rt)
 	supervisor.SetProcessCapability(processCapability)
 	supervisor.shutdownOptions = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.sourceArtifactFact)
-	apiStoreCaps, err := buildSelectedAPICapabilities(stores, selectedAPICapabilityRequest{
+	supervisor.resetRequests = runtimeRequests
+	supervisor.resetContexts = runtimeContexts
+	supervisor.resetGeneration = 1
+	apiCapabilityRequest := selectedAPICapabilityRequest{
 		RepoRoot:                repo,
 		PlatformSpecPath:        resolvedPlatformSpecPath,
 		RunningPlatformSpecPath: strings.TrimSpace(loadedBundle.runningSpecPath),
@@ -1251,7 +1253,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		RuntimeContextManager:   runtimeContextManager,
 		RuntimeSupervisor:       supervisor,
 		NoticePresentation:      noticePresentation,
-	})
+	}
+	apiStoreCaps, err := buildSelectedAPICapabilities(stores, apiCapabilityRequest)
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
@@ -1259,12 +1262,14 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	storeDeps := stores.RuntimeDeps()
 	idempotency := stores.Idempotency()
 	readyFn := func() bool { return ready.Load() }
-	publication := apiv1.EventPublicationOptions{
-		ExecutionPosture: rt.ExecutionPosture,
-		Idempotency:      idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
-		Runs: apiStoreCaps.Runs, Entities: apiStoreCaps.Entities, Observability: apiStoreCaps.Observability,
-		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
-		Source: source, Bundle: bootBundleIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
+	buildExecution := func(primary serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error) {
+		return buildServeRuntimeExecution(stores, apiCapabilityRequest, primary, toolGatewayBinding)
+	}
+	supervisor.resetBuildExecution = buildExecution
+	supervisor.execution, err = buildExecution(primaryContext)
+	if err != nil {
+		presenter.fail(5, "runtime_execution", err)
+		return 1
 	}
 	runtimeIdentity := apiv1.RuntimeIdentityResult{
 		RuntimeInstanceID:   runtimeInstanceID,
@@ -1332,18 +1337,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycle(), Usage: stores.AgentUsage()}),
 		apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: apiStoreCaps.Data}),
-		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Effective: rt.Manager}),
-		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: idempotency, ExecutionPosture: rt.ExecutionPosture}),
 		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPI()}),
-		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, SourceArtifact: rt.Bus, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
-		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
-		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: idempotency, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, SourceArtifact: rt.Bus, Source: source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles()}),
-		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		supervisor.executionDispatch(),
 		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager}, Idempotency: idempotency}),
-		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: idempotency}),
 		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Confirmation: channelOnboarding, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency, Now: opts.TestChannelOnboardingNow}),
@@ -1369,8 +1365,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	if rt.InboundGateway != nil {
 		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
-	apiServer = newAPIServer(ready, apiV1Handler, inboundHandler, ctx)
-	mcpServer = newMCPServer(rt.ToolGateway)
+	apiServer = newAPIServer(serveSupervisorReadiness{serveReadiness: ready, supervisor: supervisor}, apiV1Handler, inboundHandler, ctx)
+	mcpServer = &http.Server{Handler: http.HandlerFunc(supervisor.serveMCP), ReadHeaderTimeout: 5 * time.Second}
 	apiServer.Handler = processOwnedHTTPHandler(processWorkOwner, apiServer.Handler)
 	mcpServer.Handler = processOwnedHTTPHandler(processWorkOwner, mcpServer.Handler)
 	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
@@ -1461,6 +1457,18 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}
 	presenter.recordBootWarnings(bootReport)
+	supervisor.resetRefresh = func(refreshCtx context.Context) error {
+		if err := channelActivationRefresher.RefreshChannelActivations(refreshCtx); err != nil {
+			return err
+		}
+		current := supervisor.CurrentRuntime()
+		stop, err := startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), supervisor.resetContexts, current.Bus, current.ExecutionPosture)
+		if err != nil {
+			return err
+		}
+		supervisor.stopRunStalled = stop
+		return nil
+	}
 	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
 		apiServerLease, err := processWorkOwner.Begin(ctx)
 		if err != nil {
@@ -1482,6 +1490,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
 			return err
 		}
+		supervisor.resetContextsManaged = true
 		return reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive)
 	}, channelOnboarding); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
@@ -1541,7 +1550,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	if opts.TestRuntimeContextsReadyHook != nil {
 		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
-	if err := startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), runtimeContexts, rt.Bus, rt.ExecutionPosture); err != nil {
+	supervisor.stopRunStalled, err = startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), runtimeContexts, rt.Bus, rt.ExecutionPosture)
+	if err != nil {
 		presenter.fail(22, "ready", err)
 		return 1
 	}
@@ -1604,7 +1614,12 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		Standing:                   standing,
 		Packs:                      serveLifecyclePackFacts(runtimeContexts),
 		UnreadInformationalNotices: unreadInformationalNotices,
-	}, func() { ready.Store(true) }) {
+	}, func() {
+		supervisor.mu.Lock()
+		supervisor.apiReady = true
+		ready.Store(true)
+		supervisor.mu.Unlock()
+	}) {
 		return 1
 	}
 	if feedEnabled {
@@ -2213,29 +2228,15 @@ func serveLifecycleWorkspaceLabels(bundles []serveRuntimeBundle) []string {
 	return labels
 }
 
-func closeServeRuntime(ctx context.Context, supervisor *processLifecycleSupervisor, opts cliapp.ServeOptions, workspaces cliapp.ServeWorkspaceLifecycle, deadlines ...time.Time) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	var shutdownErr error
-	if supervisor != nil {
-		shutdownOpts := runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}
-		shutdownErr = supervisor.ShutdownProcessWithOptions(ctx, shutdownOpts)
-	}
-	var projectionErr error
-	if workspaces != nil {
-		projectionErr = workspaces.ReleaseSourceProjection(ctx)
-	}
-	return errors.Join(shutdownErr, projectionErr)
-}
-
 func runServeSourceArtifactStartupRecovery(
 	ctx context.Context,
 	recoveryStore storeselected.StartupRecovery,
+	artifacts runtimestartuprecovery.ArtifactReader,
 	presenter *serveLifecyclePresenter,
 ) int {
 	_, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
 		AvailabilityReader: recoveryStore.Availability(),
+		ArtifactReader:     artifacts,
 	})
 	if err != nil {
 		presenter.fail(5, "startup_recovery", err)
@@ -2248,6 +2249,19 @@ func runServeSourceArtifactStartupRecovery(
 }
 
 func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
+	return startServeRuntimeContextSet(ctx, contexts, manager, false)
+}
+
+// Reset uses the same startup interpreter, but publishes no individual source.
+// The supervisor must stage every fresh context and rebind consumers first.
+func startResetServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
+	if manager == nil {
+		return errors.New("reset startup requires runtime context manager")
+	}
+	return startServeRuntimeContextSet(ctx, contexts, manager, true)
+}
+
+func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, reset bool) error {
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
@@ -2282,6 +2296,12 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 		runtime *runtime.Runtime
 	}, 0, len(contexts))
 	rollback := func() {
+		if reset {
+			// Staging installed the entire candidate set. Withdraw and join it
+			// as a set, including candidates whose Start has not completed.
+			manager.DeactivateAll(runtime.RuntimeContextCauseUnavailable)
+			return
+		}
 		closedByManager := make(map[*runtime.Runtime]struct{}, len(registered))
 		for i := len(registered) - 1; i >= 0; i-- {
 			entry := registered[i]
@@ -2299,6 +2319,7 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 			}
 		}
 	}
+	resetContexts := make([]runtime.BundleContext, 0, len(contexts))
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
@@ -2339,7 +2360,7 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 					return err
 				}
 			}
-			if err := manager.Register(runtime.BundleContext{
+			definition := runtime.BundleContext{
 				SourceArtifactFact:         contextDef.sourceArtifactFact,
 				BundleIdentity:             contextDef.bootIdentity,
 				Source:                     contextDef.loaded.source,
@@ -2352,7 +2373,12 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				PackInventoryDigest:        contextDef.packInventoryDigest,
 				ChannelPlans:               contextDef.runtime.Options.ChannelPlans,
 				DeclaredChannelPublication: contextDef.runtime.Options.DeclaredChannelPublication,
-			}); err != nil {
+			}
+			if reset {
+				resetContexts = append(resetContexts, definition)
+				continue
+			}
+			if err := manager.Register(definition); err != nil {
 				rollback()
 				return err
 			}
@@ -2366,6 +2392,12 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 		} else if len(targets) > 0 {
 			rollback()
 			return errors.New("standing targets require runtime context manager")
+		}
+	}
+	if reset {
+		if err := manager.PublishResetRuntimeContexts(resetContexts...); err != nil {
+			rollback()
+			return err
 		}
 	}
 	return nil
@@ -2441,7 +2473,7 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 		} else if err := contextDef.runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
 		}
-		if contextDef.workspaces != nil {
+		if shutdownErr == nil && contextDef.workspaces != nil {
 			shutdownErr = errors.Join(shutdownErr, contextDef.workspaces.ReleaseSourceProjection(ctx))
 		}
 	}
@@ -2689,9 +2721,15 @@ func systemWorkspaceContainers(lifecycle workspace.Lifecycle) []string {
 
 func newAPIServer(ready serveReadiness, apiV1Handler http.Handler, inboundHandler http.Handler, baseContexts ...context.Context) *http.Server {
 	mux := http.NewServeMux()
-	gateReady := func(next http.Handler) http.Handler {
+	gateReady := func(next http.Handler, control bool) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ready != nil && !runtimeAdmissionReady(ready) {
+			available := ready == nil || runtimeAdmissionReady(ready)
+			if control {
+				if controlReady, ok := ready.(interface{ ControlReady() bool }); ok {
+					available = controlReady.ControlReady()
+				}
+			}
+			if !available {
 				http.Error(w, "booting", http.StatusServiceUnavailable)
 				return
 			}
@@ -2711,11 +2749,11 @@ func newAPIServer(ready serveReadiness, apiV1Handler http.Handler, inboundHandle
 		_, _ = w.Write([]byte("ready\n"))
 	})
 	if apiV1Handler != nil {
-		mux.Handle("/v1/rpc", gateReady(apiV1Handler))
-		mux.Handle("/v1/ws", gateReady(apiV1Handler))
+		mux.Handle("/v1/rpc", gateReady(apiV1Handler, true))
+		mux.Handle("/v1/ws", gateReady(apiV1Handler, true))
 	}
 	if inboundHandler != nil {
-		mux.Handle("/webhooks/", gateReady(inboundHandler))
+		mux.Handle("/webhooks/", gateReady(inboundHandler, false))
 	}
 	server := &http.Server{
 		Handler:           mux,
@@ -2733,19 +2771,6 @@ func runtimeAdmissionReady(ready serveReadiness) bool {
 		return runtimeReady.RuntimeLoad()
 	}
 	return ready.Load()
-}
-
-func newMCPServer(toolGateway *runtimemcp.Gateway) *http.Server {
-	mux := http.NewServeMux()
-	if toolGateway != nil {
-		gatewayHandler := toolGateway.Handler()
-		mux.Handle("/mcp", gatewayHandler)
-		mux.Handle("/tools/", gatewayHandler)
-	}
-	return &http.Server{
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
 }
 
 func validateServeAPIAuthBinding(apiListenAddr string, auth apiv1.AuthTokenResolution) error {
