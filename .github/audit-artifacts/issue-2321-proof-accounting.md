@@ -75,7 +75,7 @@ must be rebound to the final integrated head before the final audit is posted.
 | M19 | `TestCompiledProcessFullLifecycleJourneysSQLitePostgres` H J1-J5, golden H smoke/restart/burst, separate compiled L possession/invocation proof. Provisioned live turns, signed ingress and retained restart not yet credited. |
 | M20 | Private callback checks authenticated `health.check` ready/mock_only before execution and rejects predecessor tokens; golden exact health posture checks and controlled live adapter observation. Bind notices/subscriptions/root modes to final T/L/H result set. |
 | M21 | `TestStructuralValidationNeverObservesDeployment`, `TestStructuralCheckPurposeCensus`, `TestStructuralValidationRejectsUnknownPurpose`, structural CLI output tests. |
-| M22 | Split / tracked separately: F-owned `#2319`, open at latest check. Combined dormant-to-activated webhook acceptance remains blocked, not waived. |
+| M22 | Split / tracked separately: F-owned `#2319` retains credential-absent webhook startup, subsequent activation and Telegram example collapse. These are not passed or credited to provisioned L/internal H proof. Under the user-approved split, they do not block #2321 review/merge/closure; the broader onboarding claim remains unproven. |
 | M23 | Split / tracked separately: `#1801`; existing non-posture config-layer precedence stays authoritative. |
 | M24 | Split / tracked separately: `#2284`; genuine native/Claude/Docker prerequisites preserved. |
 | M25 | `TestGenericScheduleExecutionModeSurvivesReplayAndStoreReconstructionOnBothStores`, `TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores`, standing census, pipeline preflight/claim negatives, external-effect recovery and directive/conversation-fork exact-mode matrices. Replay/resume/decision consumer map and focused execution results below. |
@@ -190,8 +190,17 @@ absorbed into command selection or repaired by weakening failure handling.
 Remaining independent work includes the next integrated result and final-head
 verification. External acceptance
 still requires completing the planned L serve/restart journey, its provisioned
-environment, and #2319 proof. Docker is present; the supported workspace build is
-in progress, with no image validation or authenticated live turn yet credited.
+environment. #2319 is now a nonblocking follow-up, not an acceptance prerequisite,
+under https://github.com/division-sh/swarm/issues/2321#issuecomment-5590488648
+and watchlist a5ed497. Its deferred rows are not passed. #2432's blocking gate is
+unchanged. The default-network workspace build failed on container DNS. A
+build-time host-network retry of the unchanged repository Dockerfile succeeded;
+the supported public workspace build then passed its runnable-CLI validation
+using cached layers. Image swarm-workspace:agent-g-2321 contains executable
+Claude Code 2.1.87. This proves image provisioning only, not provider authentication,
+runtime network readiness, a live turn or retained restart. The expected OAuth
+credential is absent from this process environment; no credential values were read
+or logged and no authenticated live-provider proof is credited.
 The existing paid Claude test does not cover the entire planned L matrix.
 After #2432 integration the full-profile rerun uses an explicit 30-minute package
 timeout without relaxing scenario deadlines. No final audit or

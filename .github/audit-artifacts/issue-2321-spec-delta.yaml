@@ -170,12 +170,14 @@ changes:
       - No-external-executable claim belongs to mock test/harness only, never live Claude serve.
       - Preserve exact workload, profile discovery, identity and public readback assertions; no new fixture-only semantic owner.
 dependencies:
-  acceptance_blocker: {issue: 2319, owner: agent-f, proof: credential_absence_activation_and_combined_webhook_acceptance}
+  acceptance_blocker: {issue: 2432, owner: agent-g, proof: independently_gated_lifecycle_diagnostic_repair}
+  nonblocking_follow_up: {issue: 2319, owner: agent-f, proof: credential_absence_activation_and_telegram_example_collapse, credit: split_tracked_not_passed}
   closed_consumed: [2295, 2391, 2172, 2214]
   separate_open: [1801, 2284]
-  sequencing: Independent composition implementation may start after this gate; combined acceptance waits for F's proof.
+  sequencing: Independent review/merge/closure of 2321 does not wait for 2319; genuine provisioned live/restart proof, 2432 repair, integrated full suite and review remain required. Credential-absent onboarding remains unproven until F's separate proof.
 gate_request:
   outcome_requested: approved_as_broad_refactor
-  current_recorded_outcome: insufficient_escalate_broad_refactor
-  implementation: frozen
+  current_recorded_outcome: approved_cycle_2
+  implementation: approved_with_separate_2432_gate_unchanged
+  acceptance_split_ruling: https://github.com/division-sh/swarm/issues/2321#issuecomment-5590488648
   no_new_issue: true

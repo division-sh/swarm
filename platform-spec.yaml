@@ -20287,8 +20287,11 @@ test_specification:
       surface_credit: >-
         T runs fresh public authored/derived tests without ingress. H owns J1-J5 retained mock lifecycle and signed ingress.
         L separately exercises actual public live serve/dev, real provider prerequisites and graceful/crash restart on both
-        supported stores. Preserve the exact workload and assertions across this separation. Combined webhook acceptance
-        remains dependent on #2319's dormant-to-activated proof. No hidden mock serve flag or second semantic owner exists.
+        supported stores. Preserve the exact workload and assertions across this separation. Credential-absent ingress
+        startup, subsequent activation and Telegram example collapse are split to #2319, not proven by provisioned L or H
+        execution and not prerequisites to #2321 review/merge/closure. The broader credential-absent onboarding claim
+        remains open; existing fail-closed credential checks remain valid until that separate work ships.
+        No hidden mock serve flag or second semantic owner exists.
       journeys:
         J1_sqlite_graceful: Internal retained mock child with omitted recovery gracefully restarts one SQLite store and retains the exact standing service, run, generation, standing ingress entity, bundle, and downstream route before one fresh same-conversation ingress converges.
         J2_postgres_graceful: J1 against an isolated host-PostgreSQL database.

@@ -115,8 +115,9 @@ gaps are recorded in issue-2321-proof-accounting.md; it is not a final proof aud
    stores with provisioned prerequisites. This host lacks Claude and the workspace
    image. An environment/configuration location has been requested; no credentials
    were logged and no paid live turn has been attempted.
-4. Consume F's #2319 activation proof before combined absent-credential webhook
-   acceptance. Its open status does not block independent implementation.
+4. Keep credential-absent webhook startup/activation and Telegram example collapse
+   explicitly split/tracked with F in #2319, not passed. The approved split permits
+   independent #2321 review/merge/closure; the broader onboarding claim stays open.
 5. Record the final-head exhaustive proof audit, then open the single normal PR
    only when review-ready. No final proof audit, PR or failure-class closure exists
    at this checkpoint.
@@ -203,3 +204,32 @@ completed at this checkpoint, so no provisioned image or authenticated provider
 turn is credited. The command log is /tmp/agent-g-2321-workspace-build.log.
 The requested supported credential configuration location remains outstanding.
 F's #2319 remains open with no reply to the existing coordination request.
+
+## Approved Independent Acceptance
+
+The user-approved split supersedes earlier F-dependency wording:
+https://github.com/division-sh/swarm/issues/2321#issuecomment-5590488648.
+Watchlist a5ed497 is consumed. #2321 can be reviewed, merged and closed without
+waiting for #2319 once #2432 repair, genuine provisioned L live/restart proof,
+all in-class checks, the integrated full suite and independent review pass.
+Credential-absent ingress startup/activation and Telegram example collapse remain
+F-owned and explicitly split/tracked, never passed or credited to H. Existing
+fail-closed ingress credential checks remain valid; no mock fallback is authorized.
+#2432's fork-provenance re-gate remains pending; no diagnostic implementation starts.
+
+Provisioning follow-through: the default-network workspace build failed because
+the build container could not resolve deb.debian.org. Host and host-network
+container DNS resolve it. Retrying the unchanged Dockerfile.workspace through
+Docker with build-time --network host succeeded; no runtime networking or credential
+policy change. The supported public workspace build then passed against cached
+layers, including its runnable-Claude validation. Image
+swarm-workspace:agent-g-2321 is available; direct `claude --version` returned
+2.1.87. Logs: /tmp/agent-g-2321-workspace-host-build.log and
+/tmp/agent-g-2321-workspace-build.log. No authenticated provider turn, runtime
+network readiness or retained restart is credited. The expected OAuth credential
+is absent from this process environment; the supported configuration location
+request remains outstanding. The exact L harness still needs implementation.
+
+Administrative split verification: API-spec package passed (4.773s), both YAML
+documents parsed, and git diff --check passed. No production runtime code changed;
+the full suite is deferred to the integrated diagnostic repair, not claimed green.
