@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -42,7 +43,8 @@ func admittedPrivateTestRequest(t *testing.T) cliapp.TestSessionRequest {
 }
 
 func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
-	for _, outcome := range []string{"success", "callback_failure", "cancelled"} {
+	var previousToken string
+	for _, outcome := range []string{"success", "callback_failure", "cancelled", "deadline"} {
 		t.Run(outcome, func(t *testing.T) {
 			req := admittedPrivateTestRequest(t)
 			original := buildStoresForServe
@@ -67,7 +69,10 @@ func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
 			client := &http.Client{Timeout: 2 * time.Second}
 			err := RunTestSession(ctx, req, func(ctx context.Context, ready cliapp.TestSessionEndpoint) error {
 				endpoint = ready
-				for _, token := range []string{"", ready.Token} {
+				if ready.Token == previousToken {
+					t.Fatal("private session reused predecessor authentication")
+				}
+				for _, token := range []string{"", previousToken, ready.Token} {
 					request, err := http.NewRequestWithContext(ctx, http.MethodPost, ready.APIServer+"/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"runtime.identity","params":{}}`))
 					if err != nil {
 						return err
@@ -85,12 +90,34 @@ func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
 					if readErr != nil {
 						return readErr
 					}
-					if token == "" && response.StatusCode != http.StatusUnauthorized {
+					if token != ready.Token && response.StatusCode != http.StatusUnauthorized {
 						t.Fatalf("unauthenticated private API status=%d body=%s", response.StatusCode, body)
 					}
-					if token != "" && (response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"source_artifacts"`))) {
+					if token == ready.Token && (response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"source_artifacts"`))) {
 						t.Fatalf("authenticated private API status=%d body=%s", response.StatusCode, body)
 					}
+				}
+				previousToken = ready.Token
+				request, err := http.NewRequestWithContext(ctx, http.MethodPost, ready.APIServer+"/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"health.check","params":{}}`))
+				if err != nil {
+					return err
+				}
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("Authorization", "Bearer "+ready.Token)
+				healthResponse, err := client.Do(request)
+				if err != nil {
+					return err
+				}
+				var health struct {
+					Result struct {
+						Ready            bool   `json:"ready"`
+						ExecutionPosture string `json:"execution_posture"`
+					} `json:"result"`
+				}
+				err = json.NewDecoder(healthResponse.Body).Decode(&health)
+				healthResponse.Body.Close()
+				if err != nil || !health.Result.Ready || health.Result.ExecutionPosture != "mock_only" {
+					t.Fatalf("private callback preceded mock readiness: health=%#v error=%v", health, err)
 				}
 				response, err := client.Get(ready.APIServer + "/webhooks/private/telegram")
 				if err != nil {
@@ -106,6 +133,11 @@ func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
 				case "cancelled":
 					cancel()
 					return ctx.Err()
+				case "deadline":
+					scenarioCtx, stop := context.WithTimeout(ctx, time.Nanosecond)
+					defer stop()
+					<-scenarioCtx.Done()
+					return scenarioCtx.Err()
 				default:
 					return nil
 				}
@@ -121,6 +153,10 @@ func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
 				}
 			case "cancelled":
 				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("error = %v", err)
+				}
+			case "deadline":
+				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("error = %v", err)
 				}
 			}
