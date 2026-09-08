@@ -222,10 +222,16 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
-	serveappUnit, ok := policy.Units["serveapp-full"]
-	if !ok || !slices.Equal(serveappUnit.Packages, []string{serveappPackage}) || serveappUnit.Run != "" || serveappUnit.CountMode != "count-1" || serveappUnit.BudgetClass != "full" {
-		t.Fatalf("serveapp-full unit = %#v, want one complete uncached serveapp proof", serveappUnit)
+	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces"}
+	var serveappPatterns []*regexp.Regexp
+	for _, id := range serveappUnits {
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{serveappPackage}) || unit.Run == "" || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
+			t.Fatalf("%s unit = %#v, want complete uncached serveapp partition with unchanged budget", id, unit)
+		}
+		serveappPatterns = append(serveappPatterns, regexp.MustCompile(unit.Run))
 	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "serveapp"), serveappPatterns)
 	storeUnit, ok := policy.Units["store-full"]
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
@@ -246,7 +252,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		foundRuntime := false
-		foundServeapp := false
+		foundServeapp := map[string]bool{}
 		foundStore := false
 		foundTestPostgres := false
 		foundStoreRuntime := map[string]bool{}
@@ -254,8 +260,8 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 			if unit == "runtime-full" {
 				foundRuntime = true
 			}
-			if unit == "serveapp-full" {
-				foundServeapp = true
+			if slices.Contains(serveappUnits, unit) {
+				foundServeapp[unit] = true
 			}
 			if unit == "store-full" {
 				foundStore = true
@@ -272,8 +278,10 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		if !foundRuntime {
 			t.Errorf("profile %s does not include runtime-full", profileName)
 		}
-		if !foundServeapp {
-			t.Errorf("profile %s does not include serveapp-full", profileName)
+		for _, id := range serveappUnits {
+			if !foundServeapp[id] {
+				t.Errorf("profile %s does not include %s", profileName, id)
+			}
 		}
 		if !foundStore {
 			t.Errorf("profile %s does not include store-full", profileName)
