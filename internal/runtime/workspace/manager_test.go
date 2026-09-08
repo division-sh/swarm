@@ -939,7 +939,7 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 		case joined == "container ls --all --filter label=dev.swarm.owner=runtime --filter label=dev.swarm.reset.eligible=true --format {{.Names}}":
 			return "swarm-agent-agent-a\nswarm-system\nswarm-malformed\nswarm-stale-name\n", nil
 		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-agent-agent-a":
-			return managedContainerInspectJSON(map[string]string{
+			return managedContainerInspectJSON("fixture-container-id", map[string]string{
 				"dev.swarm.owner":                    "runtime",
 				"dev.swarm.container.kind":           "agent",
 				"dev.swarm.reset.eligible":           "true",
@@ -959,7 +959,7 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 				"dev.swarm.agent_flow_instance_path": "flow/a",
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-system":
-			return managedContainerInspectJSON(map[string]string{
+			return managedContainerInspectJSON("fixture-container-id", map[string]string{
 				"dev.swarm.owner":           "runtime",
 				"dev.swarm.container.kind":  "system",
 				"dev.swarm.reset.eligible":  "false",
@@ -968,14 +968,14 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 				"dev.swarm.workspace.scope": "system",
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-malformed":
-			return managedContainerInspectJSON(map[string]string{
+			return managedContainerInspectJSON("fixture-container-id", map[string]string{
 				"dev.swarm.owner":          "runtime",
 				"dev.swarm.container.kind": "agent",
 				"dev.swarm.reset.eligible": "true",
 				"dev.swarm.container.name": "different-container-name",
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[len(args)-1] == "swarm-stale-name":
-			return managedContainerInspectJSON(map[string]string{
+			return managedContainerInspectJSON("fixture-container-id", map[string]string{
 				"dev.swarm.owner":                    "runtime",
 				"dev.swarm.container.kind":           "agent",
 				"dev.swarm.reset.eligible":           "true",
@@ -1004,7 +1004,7 @@ func TestManagedResetContainerInventoryConsumesTypedLabels(t *testing.T) {
 		t.Fatalf("refs = %#v, want one reset-eligible managed container", refs)
 	}
 	ref := refs[0]
-	if ref.Name != "swarm-agent-agent-a" || ref.Kind != "agent" || !ref.ResetEligible || ref.AgentIdentity.AgentID() != "agent-a" || ref.RunID == "" {
+	if ref.RuntimeID != "fixture-container-id" || ref.Name != "swarm-agent-agent-a" || ref.Kind != "agent" || !ref.ResetEligible || ref.AgentIdentity.AgentID() != "agent-a" || ref.RunID == "" {
 		t.Fatalf("ref = %#v, want agent identity with run lineage", ref)
 	}
 	inspection, err := manager.InspectManagedContainer(context.Background(), ref.Name)
@@ -1031,12 +1031,16 @@ func TestStopManagedContainerUsesExactDockerObjectAndReconcilesAcknowledgment(t 
 				SourceProjection: "runtime-projection-v1:" + strings.Repeat("a", 32),
 				AgentIdentity:    runtimeagentidentitytest.RootDeclared(t, "worker", "test/agents.yaml"),
 			}
-			var stops, readbacks int
+			var stops, readbacks, inspections int
 			manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 				switch args[0] {
 				case "inspect":
 					identity, running, id := expected, true, "immutable-predecessor-id"
-					if args[len(args)-1] == id {
+					if args[len(args)-1] != id {
+						t.Fatalf("inspection selected mutable name: %v", args)
+					}
+					inspections++
+					if inspections > 1 {
 						readbacks++
 						if mode == "lost_ack_missing" {
 							return "", errors.New("No such object")
@@ -1051,7 +1055,7 @@ func TestStopManagedContainerUsesExactDockerObjectAndReconcilesAcknowledgment(t 
 					if mode == "missing_id" {
 						id = ""
 					}
-					return strings.Replace(managedContainerInspectJSON(identity.Labels(), running), "{", fmt.Sprintf(`{"Id":%q,`, id), 1), nil
+					return managedContainerInspectJSON(id, identity.Labels(), running), nil
 				case "stop":
 					stops++
 					if len(args) != 2 || args[1] != "immutable-predecessor-id" {
@@ -1066,7 +1070,7 @@ func TestStopManagedContainerUsesExactDockerObjectAndReconcilesAcknowledgment(t 
 					return "", nil
 				}
 			})
-			err := manager.StopManagedContainer(context.Background(), destructivereset.ContainerRefFromIdentity(expected, destructivereset.ContainerActionStop))
+			err := manager.StopManagedContainer(context.Background(), destructivereset.ContainerRefFromIdentity(expected, "immutable-predecessor-id", destructivereset.ContainerActionStop))
 			wantErr := mode == "successor" || mode == "missing_id" || mode == "lost_ack_running" || mode == "lost_ack_foreign"
 			if (err != nil) != wantErr {
 				t.Fatalf("error=%v wantError=%v", err, wantErr)
@@ -1093,10 +1097,10 @@ func flattenDockerCalls(calls [][]string) string {
 	return strings.Join(lines, "\n")
 }
 
-func managedContainerInspectJSON(labels map[string]string, running bool) string {
+func managedContainerInspectJSON(id string, labels map[string]string, running bool) string {
 	labelParts := make([]string, 0, len(labels))
 	for key, value := range labels {
 		labelParts = append(labelParts, fmt.Sprintf("%q:%q", key, value))
 	}
-	return fmt.Sprintf(`{"State":{"Running":%t},"Config":{"Labels":{%s}}}`, running, strings.Join(labelParts, ","))
+	return fmt.Sprintf(`{"Id":%q,"State":{"Running":%t},"Config":{"Labels":{%s}}}`, id, running, strings.Join(labelParts, ","))
 }

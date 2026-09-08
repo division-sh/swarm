@@ -51,7 +51,7 @@ func TestManagedContainerStopperDryRunSelectsOnlyResetEligibleLabeledContainers(
 		inspections: map[string]ManagedContainerInspection{
 			"swarm-agent-agent-a": managedInspection("swarm-agent-agent-a", "agent", true, true),
 			"swarm-system":        managedInspection("swarm-system", "system", false, true),
-			"swarm-unlabeled":     {Exists: true, Running: true},
+			"swarm-unlabeled":     {RuntimeID: "swarm-unlabeled", Exists: true, Running: true},
 			"swarm-missing":       {Exists: false},
 		},
 	}
@@ -65,10 +65,10 @@ func TestManagedContainerStopperDryRunSelectsOnlyResetEligibleLabeledContainers(
 			DryRun:        true,
 			PlannedAt:     now.Add(-time.Minute),
 			Plan: Plan{ManagedContainers: []ContainerRef{
-				ContainerRefFromIdentity(runtime.inspections["swarm-agent-agent-a"].Identity, ContainerActionStop),
-				{Name: "swarm-system", Action: ContainerActionStop},
-				{Name: "swarm-unlabeled", Action: ContainerActionStop},
-				{Name: "swarm-missing", Action: ContainerActionStop},
+				ContainerRefFromIdentity(runtime.inspections["swarm-agent-agent-a"].Identity, "swarm-agent-agent-a", ContainerActionStop),
+				{Name: "swarm-system", RuntimeID: "swarm-system", Action: ContainerActionStop},
+				{Name: "swarm-unlabeled", RuntimeID: "swarm-unlabeled", Action: ContainerActionStop},
+				{Name: "swarm-missing", RuntimeID: "swarm-missing", Action: ContainerActionStop},
 			}},
 		},
 	})
@@ -110,9 +110,9 @@ func TestManagedContainerStopperApplyReportsStoppedNoopAndPartialFailure(t *test
 			DryRun:        false,
 			PlannedAt:     now.Add(-2 * time.Minute),
 			Plan: Plan{ManagedContainers: []ContainerRef{
-				ContainerRefFromIdentity(runtime.inspections["swarm-agent-agent-a"].Identity, ContainerActionStop),
-				ContainerRefFromIdentity(runtime.inspections["swarm-flow-flow-a"].Identity, ContainerActionStop),
-				ContainerRefFromIdentity(runtime.inspections["swarm-agent-b"].Identity, ContainerActionStop),
+				ContainerRefFromIdentity(runtime.inspections["swarm-agent-agent-a"].Identity, "swarm-agent-agent-a", ContainerActionStop),
+				ContainerRefFromIdentity(runtime.inspections["swarm-flow-flow-a"].Identity, "swarm-flow-flow-a", ContainerActionStop),
+				ContainerRefFromIdentity(runtime.inspections["swarm-agent-b"].Identity, "swarm-agent-b", ContainerActionStop),
 			}},
 		},
 		Cleanup: CleanupResult{
@@ -159,7 +159,7 @@ func TestManagedContainerStopperPreservesSuccessorIdentity(t *testing.T) {
 			predecessor := managedInspection("swarm-agent-agent-a", "agent", true, true)
 			predecessor.Identity.BundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
 			predecessor.Identity.SourceProjection = "runtime-projection-v1:" + strings.Repeat("a", 32)
-			planned := ContainerRefFromIdentity(predecessor.Identity, ContainerActionStop)
+			planned := ContainerRefFromIdentity(predecessor.Identity, predecessor.RuntimeID, ContainerActionStop)
 			successor := predecessor
 			switch field {
 			case "run":
@@ -172,13 +172,13 @@ func TestManagedContainerStopperPreservesSuccessorIdentity(t *testing.T) {
 				successor.Identity.Owner = "foreign"
 			case "retired_entity":
 				successor.Identity.Kind = "entity"
-				planned = ContainerRefFromIdentity(successor.Identity, ContainerActionStop)
+				planned = ContainerRefFromIdentity(successor.Identity, successor.RuntimeID, ContainerActionStop)
 			case "incomplete_plan":
 				planned.SourceProjection = ""
 			case "missing_source":
 				successor.Identity.BundleHash = ""
 				successor.Identity.SourceProjection = ""
-				planned = ContainerRefFromIdentity(successor.Identity, ContainerActionStop)
+				planned = ContainerRefFromIdentity(successor.Identity, successor.RuntimeID, ContainerActionStop)
 			}
 			// Exercise the same serialized identity used by durable plan/outcome storage.
 			encoded, err := json.Marshal(planned)
@@ -212,11 +212,13 @@ func (f managedContainerInventoryFunc) ManagedResetContainerInventory(ctx contex
 
 type recordingManagedContainerRuntime struct {
 	inspections map[string]ManagedContainerInspection
+	inspected   []string
 	stopErrors  map[string]error
 	stops       []string
 }
 
 func (r *recordingManagedContainerRuntime) InspectManagedContainer(_ context.Context, name string) (ManagedContainerInspection, error) {
+	r.inspected = append(r.inspected, name)
 	return r.inspections[strings.TrimSpace(name)], nil
 }
 
@@ -243,6 +245,7 @@ func managedInspection(name, kind string, resetEligible, running bool) ManagedCo
 		identity.AgentIdentity = testManagedAgentIdentity()
 	}
 	return ManagedContainerInspection{
+		RuntimeID:   name,
 		Exists:      true,
 		Running:     running,
 		HasIdentity: true,

@@ -20,7 +20,7 @@ func TestCoordinatorReconstructsOnlyAfterKnownSafeBoundary(t *testing.T) {
 		{name: "deleted", include: true, wantRetain: []bool{false}},
 		{name: "dry run", dry: true},
 		{name: "planning failure compensation", failStage: "plan", wantRetain: []bool{true}, wantError: true},
-		{name: "pre cleanup compensation", failStage: "quiescence", wantRetain: []bool{true}, wantError: true},
+		{name: "uncertain quiescence stays fenced", failStage: "quiescence", wantError: true},
 		{name: "uncertain cleanup stays fenced", failStage: "cleanup", wantError: true},
 		{name: "uncertain container stays fenced", failStage: "containers", wantError: true},
 		{name: "partial container stays fenced", failStage: "partial"},
