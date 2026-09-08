@@ -249,7 +249,7 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 		},
 	}
 
-	if err := applyDataAccumulationToState(base, ExecutionState{FanOut: map[string]any{"count": 3}}, state, spec); err != nil {
+	if err := applyDataAccumulationToState(base, ExecutionState{FanOut: map[string]any{"count": 3}}, state, spec, workflowexpr.ValueExpressionOptions{}); err != nil {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
@@ -327,7 +327,7 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 		},
 	}
 
-	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec, workflowexpr.ValueExpressionOptions{}); err != nil {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
@@ -341,6 +341,7 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 }
 
 func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testing.T) {
+	entityType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "revision_count", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}}}}
 	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
 	base := BaseContext{
 		Entity: values.Wrap(map[string]any{
@@ -356,7 +357,7 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 		},
 	}
 
-	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec, workflowexpr.ValueExpressionOptions{EntityType: &entityType}); err != nil {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
@@ -384,7 +385,7 @@ func TestApplyDataAccumulationToState_WritesNestedTargetPath(t *testing.T) {
 		}},
 	}
 
-	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec, workflowexpr.ValueExpressionOptions{}); err != nil {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
@@ -414,7 +415,7 @@ func TestApplyDataAccumulationToState_FailsClosedOnCELRuntimeError(t *testing.T)
 		},
 	}
 
-	err := applyDataAccumulationToState(base, ExecutionState{}, state, spec)
+	err := applyDataAccumulationToState(base, ExecutionState{}, state, spec, workflowexpr.ValueExpressionOptions{})
 	if err == nil {
 		t.Fatal("expected data accumulation CEL runtime error")
 	}

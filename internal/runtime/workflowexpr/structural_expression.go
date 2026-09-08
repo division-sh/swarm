@@ -49,6 +49,7 @@ func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpress
 	}{
 		{name: "payload", type_: opts.PayloadType},
 		{name: "item", type_: opts.ItemType},
+		{name: "entity", type_: opts.EntityType},
 	} {
 		if root.type_ == nil || root.type_.Kind == "" {
 			continue
@@ -64,7 +65,44 @@ func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpress
 		}
 		provider.rootIdentifiers[identifier] = struct{}{}
 	}
+	if opts.AllowJoin {
+		joinType, err := workflowJoinStructuralType(opts)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := provider.register("join", "join", joinType)
+		if err != nil {
+			return nil, err
+		}
+		provider.rootTypes["join"] = resolved
+		provider.rootIdentifiers["join"] = struct{}{}
+	}
 	return provider, nil
+}
+
+func workflowJoinStructuralType(opts ValueExpressionOptions) (runtimecontracts.ResolvedCatalogType, error) {
+	integer := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}
+	fields := []runtimecontracts.ResolvedCatalogField{}
+	if opts.JoinContext == JoinContextFanOutDelivery {
+		dispositions := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject}
+		for _, name := range []string{"succeeded", "dead_lettered", "no_route", "semantic_rejected", "canceled"} {
+			dispositions.Fields = append(dispositions.Fields, runtimecontracts.ResolvedCatalogField{Name: name, Type: integer})
+		}
+		fields = append(fields, runtimecontracts.ResolvedCatalogField{Name: "total", Type: integer}, runtimecontracts.ResolvedCatalogField{Name: "dispositions", Type: dispositions})
+	} else {
+		result, err := opts.JoinResultType.Resolve()
+		if err != nil {
+			return runtimecontracts.ResolvedCatalogType{}, err
+		}
+		fields = append(fields,
+			runtimecontracts.ResolvedCatalogField{Name: "expected", Type: integer},
+			runtimecontracts.ResolvedCatalogField{Name: "completed", Type: integer},
+			runtimecontracts.ResolvedCatalogField{Name: "missing", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}},
+			runtimecontracts.ResolvedCatalogField{Name: "results", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &result}},
+			runtimecontracts.ResolvedCatalogField{Name: "timed_out", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeBoolean}},
+		)
+	}
+	return runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: fields}, nil
 }
 
 func (p *workflowStructuralTypeProvider) register(root, path string, resolved runtimecontracts.ResolvedCatalogType) (*cel.Type, error) {
@@ -122,6 +160,14 @@ func (p *workflowStructuralTypeProvider) register(root, path string, resolved ru
 			fieldType, err := p.register(root, path+"_"+field.Name, field.Type)
 			if err != nil {
 				return nil, fmt.Errorf("field %s: %w", field.Name, err)
+			}
+			// Top-level entity null comparisons are an existing contract (not T?).
+			// Keep scalar types exact while allowing comparisons with materialized null.
+			if root == "entity" && path == "entity" {
+				switch field.Type.Kind {
+				case runtimecontracts.CatalogTypeText, runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeNumber, runtimecontracts.CatalogTypeBoolean:
+					fieldType = cel.NullableType(fieldType)
+				}
 			}
 			node.fields[field.Name] = workflowStructuralField{
 				name: field.Name, typeValue: field.Type.Clone(), celType: fieldType, isOptional: field.IsOptional,
@@ -257,7 +303,7 @@ func workflowStructuralMapField(target any, field string) (any, bool) {
 type workflowPresenceFacts map[string]struct{}
 
 func validateWorkflowOptionalReads(compiled *cel.Ast, provider *workflowStructuralTypeProvider) error {
-	if compiled == nil || compiled.NativeRep() == nil || provider == nil || len(provider.nodes) == 0 {
+	if compiled == nil || compiled.NativeRep() == nil || provider == nil || len(provider.rootTypes) == 0 {
 		return nil
 	}
 	analyzer := workflowOptionalReadAnalyzer{ast: compiled.NativeRep(), provider: provider}
@@ -285,13 +331,16 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 	}
 	if expr.Kind() == celast.SelectKind {
 		selection := expr.AsSelect()
+		if a.untypedStructuralOperand(selection.Operand(), bindings) {
+			return fmt.Errorf("field selection requires an exact structural type; declare a closed record or typed collection")
+		}
 		if err := a.validate(selection.Operand(), facts, bindings); err != nil {
 			return err
 		}
 		if selection.IsTestOnly() {
 			return nil
 		}
-		field, path, optional := a.selectedField(selection.Operand(), selection.FieldName())
+		field, path, optional := a.selectedField(selection.Operand(), selection.FieldName(), bindings)
 		if optional {
 			if _, proven := facts[path]; !proven {
 				return undecidedOptionalReadError(path, field)
@@ -334,6 +383,9 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 			// Stock optional selection owns the absence decision. Its operand may
 			// still contain an independently undecided parent read.
 			if len(args) > 0 {
+				if a.untypedStructuralOperand(args[0], bindings) {
+					return fmt.Errorf("optional selection requires an exact structural type; declare a closed record or typed collection")
+				}
 				return a.validate(args[0], facts, bindings)
 			}
 		}
@@ -359,6 +411,10 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 			return err
 		}
 		bodyBindings := cloneWorkflowStructuralBindings(bindings)
+		bodyFacts := withoutWorkflowShadowedFacts(facts, value.IterVar(), value.IterVar2(), value.AccuVar())
+		delete(bodyBindings, value.IterVar())
+		delete(bodyBindings, value.IterVar2())
+		delete(bodyBindings, value.AccuVar())
 		if a.structuralExpression(value.IterRange(), bindings) {
 			bodyBindings[value.IterVar()] = struct{}{}
 			if value.HasIterVar2() {
@@ -368,11 +424,17 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 		if a.structuralExpression(value.AccuInit(), bindings) {
 			bodyBindings[value.AccuVar()] = struct{}{}
 		}
-		for _, child := range []celast.Expr{value.LoopCondition(), value.LoopStep(), value.Result()} {
-			if err := a.validate(child, facts, bodyBindings); err != nil {
+		for _, child := range []celast.Expr{value.LoopCondition(), value.LoopStep()} {
+			if err := a.validate(child, bodyFacts, bodyBindings); err != nil {
 				return err
 			}
 		}
+		resultBindings := cloneWorkflowStructuralBindings(bindings)
+		delete(resultBindings, value.AccuVar())
+		if a.structuralExpression(value.AccuInit(), bindings) {
+			resultBindings[value.AccuVar()] = struct{}{}
+		}
+		return a.validate(value.Result(), withoutWorkflowShadowedFacts(facts, value.AccuVar()), resultBindings)
 	case celast.ListKind:
 		for _, element := range expr.AsList().Elements() {
 			if err := a.validate(element, facts, bindings); err != nil {
@@ -397,6 +459,14 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 		}
 	}
 	return nil
+}
+
+func (a workflowOptionalReadAnalyzer) untypedStructuralOperand(expr celast.Expr, bindings workflowStructuralBindings) bool {
+	if !a.structuralExpression(expr, bindings) {
+		return false
+	}
+	_, exact := a.provider.resolvedType(a.ast.GetType(expr.ID()))
+	return !exact
 }
 
 func (a workflowOptionalReadAnalyzer) structuralExpression(expr celast.Expr, bindings workflowStructuralBindings) bool {
@@ -443,9 +513,8 @@ func validateWorkflowResultType(output *cel.Type, provider *workflowStructuralTy
 	if opts.ResultType == nil {
 		return nil
 	}
-	// Entity and other separately governed roots remain dynamic in this slice;
-	// their existing structural validators own sink compatibility. Exact
-	// payload/item roots never compile to dyn.
+	// Separately governed untyped roots (for example computed values) retain
+	// their existing sink validation. Declared record roots are structural.
 	if actual == cel.DynType {
 		return nil
 	}
@@ -462,10 +531,17 @@ func validateWorkflowResultType(output *cel.Type, provider *workflowStructuralTy
 	return nil
 }
 
-func (a workflowOptionalReadAnalyzer) selectedField(operand celast.Expr, fieldName string) (workflowStructuralField, string, bool) {
+func (a workflowOptionalReadAnalyzer) selectedField(operand celast.Expr, fieldName string, bindings workflowStructuralBindings) (workflowStructuralField, string, bool) {
 	typeValue := a.ast.GetType(operand.ID())
 	if typeValue == nil {
 		return workflowStructuralField{}, "", false
+	}
+	if typeValue.TypeName() == "map" && len(typeValue.Parameters()) == 2 && a.structuralExpression(operand, bindings) {
+		path, ok := workflowSelectionPath(operand)
+		if !ok {
+			path = typeValue.TypeName()
+		}
+		return workflowStructuralField{name: fieldName, celType: typeValue.Parameters()[1], isOptional: true}, path + "." + fieldName, true
 	}
 	node, ok := a.provider.nodes[typeValue.TypeName()]
 	if !ok {
@@ -505,12 +581,25 @@ func (a workflowOptionalReadAnalyzer) factsWhen(expr celast.Expr, truth bool) wo
 			return a.factsWhen(args[0], !truth)
 		}
 	case "_&&_":
-		if len(args) == 2 && truth {
-			return mergeWorkflowPresenceFacts(a.factsWhen(args[0], true), a.factsWhen(args[1], true))
+		if len(args) == 2 {
+			if truth {
+				return mergeWorkflowPresenceFacts(a.factsWhen(args[0], true), a.factsWhen(args[1], true))
+			}
+			return intersectWorkflowPresenceFacts(a.factsWhen(args[0], false), mergeWorkflowPresenceFacts(a.factsWhen(args[0], true), a.factsWhen(args[1], false)))
 		}
 	case "_||_":
-		if len(args) == 2 && !truth {
-			return mergeWorkflowPresenceFacts(a.factsWhen(args[0], false), a.factsWhen(args[1], false))
+		if len(args) == 2 {
+			if !truth {
+				return mergeWorkflowPresenceFacts(a.factsWhen(args[0], false), a.factsWhen(args[1], false))
+			}
+			return intersectWorkflowPresenceFacts(a.factsWhen(args[0], true), mergeWorkflowPresenceFacts(a.factsWhen(args[0], false), a.factsWhen(args[1], true)))
+		}
+	case "_?_:_":
+		if len(args) == 3 {
+			return intersectWorkflowPresenceFacts(
+				mergeWorkflowPresenceFacts(a.factsWhen(args[0], true), a.factsWhen(args[1], truth)),
+				mergeWorkflowPresenceFacts(a.factsWhen(args[0], false), a.factsWhen(args[2], truth)),
+			)
 		}
 	}
 	return nil
@@ -529,6 +618,17 @@ func workflowSelectionPath(expr celast.Expr) (string, bool) {
 			return "", false
 		}
 		return parent + "." + expr.AsSelect().FieldName(), true
+	case celast.CallKind:
+		call := expr.AsCall()
+		args := call.Args()
+		if call.FunctionName() == "_?._" && len(args) == 2 && args[1].Kind() == celast.LiteralKind {
+			parent, ok := workflowSelectionPath(args[0])
+			field, fieldOK := args[1].AsLiteral().Value().(string)
+			if ok && fieldOK {
+				return parent + "." + field, true
+			}
+		}
+		return "", false
 	default:
 		return "", false
 	}
@@ -538,6 +638,31 @@ func mergeWorkflowPresenceFacts(values ...workflowPresenceFacts) workflowPresenc
 	out := workflowPresenceFacts{}
 	for _, value := range values {
 		for path := range value {
+			out[path] = struct{}{}
+		}
+	}
+	return out
+}
+
+func intersectWorkflowPresenceFacts(left, right workflowPresenceFacts) workflowPresenceFacts {
+	out := workflowPresenceFacts{}
+	for path := range left {
+		if _, ok := right[path]; ok {
+			out[path] = struct{}{}
+		}
+	}
+	return out
+}
+
+func withoutWorkflowShadowedFacts(facts workflowPresenceFacts, names ...string) workflowPresenceFacts {
+	out := workflowPresenceFacts{}
+	for path := range facts {
+		root, _, _ := strings.Cut(path, ".")
+		shadowed := false
+		for _, name := range names {
+			shadowed = shadowed || root == name
+		}
+		if !shadowed {
 			out[path] = struct{}{}
 		}
 	}

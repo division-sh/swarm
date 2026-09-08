@@ -479,6 +479,21 @@ func (b *WorkflowContractBundle) FlowPrimaryEntityContract(flowID string) (strin
 	return resolved.EntityType, cloneEntityContract(resolved.Contract), true
 }
 
+// StructuralType preserves nested record edges while top-level entity fields
+// retain their existing default-present contract until the entity-presence work.
+func (p PrimaryEntityContract) StructuralType() (ResolvedCatalogType, error) {
+	fields := make([]ResolvedCatalogField, 0, len(p.Contract.Fields))
+	for _, name := range sortedEntityFieldKeys(p.Contract.Fields) {
+		decl := p.Contract.Fields[name]
+		resolved, err := (CatalogTypeReference{Type: decl.Type, Catalog: p.Types}).Resolve()
+		if err != nil {
+			return ResolvedCatalogType{}, fmt.Errorf("entity %s field %s: %w", p.EntityType, name, err)
+		}
+		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved})
+	}
+	return ResolvedCatalogType{Kind: CatalogTypeObject, Name: p.FlowID + "." + p.EntityType, Fields: fields}, nil
+}
+
 func (b *WorkflowContractBundle) RootPrimaryEntityContract() (string, EntityContract, bool) {
 	resolved, err := b.ResolveRootPrimaryEntity()
 	if err != nil {

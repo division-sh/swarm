@@ -8,9 +8,10 @@ import (
 )
 
 func TestEvalValueExpression_AllowsNullPresenceCheckOnMissingField(t *testing.T) {
-	value, err := EvalValueExpression(`entity.kill_reason == null`, ValueContext{
+	entityType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "kill_reason", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}}}
+	value, err := EvalValueExpressionWithOptions(`entity.kill_reason == null`, ValueContext{
 		Entity: map[string]any{},
-	})
+	}, ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalValueExpression error = %v", err)
 	}
@@ -131,16 +132,16 @@ func TestJoinExpressionTypeCheckingPreservesCatalogTypes(t *testing.T) {
 		expression string
 		wantErr    bool
 	}{
-		{name: "named object field", resultType: "JoinResult", expression: `join.results[0].value == "ok"`},
-		{name: "named object operator", resultType: "JoinResult", expression: `join.results[0] > 1`, wantErr: true},
-		{name: "named object unknown field", resultType: "JoinResult", expression: `join.results[0].missing == "x"`, wantErr: true},
-		{name: "nested scalar alias field", resultType: "JoinResult", expression: `join.results[0].score > 1`},
-		{name: "enum equality", resultType: "Decision", expression: `join.results[0] == "accept"`},
-		{name: "enum numeric operator", resultType: "Decision", expression: `join.results[0] > 1`, wantErr: true},
-		{name: "scalar alias", resultType: "Score", expression: `join.results[0] > 1`},
-		{name: "scalar alias mismatch", resultType: "Score", expression: `join.results[0].startsWith("1")`, wantErr: true},
-		{name: "list", resultType: "list<Score>", expression: `join.results[0][0] > 1`},
-		{name: "map", resultType: "map[text]Score", expression: `join.results[0]["a"] > 1`},
+		{name: "named object field", resultType: "JoinResult", expression: `join.results.exists(r, r.value == "ok")`},
+		{name: "named object operator", resultType: "JoinResult", expression: `join.results.exists(r, r > 1)`, wantErr: true},
+		{name: "named object unknown field", resultType: "JoinResult", expression: `join.results.exists(r, r.missing == "x")`, wantErr: true},
+		{name: "nested scalar alias field", resultType: "JoinResult", expression: `join.results.exists(r, r.score > 1)`},
+		{name: "enum equality", resultType: "Decision", expression: `join.results.exists(r, r == "accept")`},
+		{name: "enum numeric operator", resultType: "Decision", expression: `join.results.exists(r, r > 1)`, wantErr: true},
+		{name: "scalar alias", resultType: "Score", expression: `join.results.exists(r, r > 1)`},
+		{name: "scalar alias mismatch", resultType: "Score", expression: `join.results.exists(r, r.startsWith("1"))`, wantErr: true},
+		{name: "list", resultType: "list<Score>", expression: `join.results.exists(r, r.exists(v, v > 1))`},
+		{name: "map", resultType: "map[text]Score", expression: `join.results.exists(r, r[?"a"].orValue(0) > 1)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateValueExpressionWithOptions(tc.expression, ValueExpressionOptions{

@@ -141,10 +141,14 @@ type recordingPipelineBus struct {
 	deliveryContinuations *pipelineTestContinuationOwner
 }
 
-func handlerEngineProjectNodeModule() *previewWorkflowModule {
+func handlerEngineProjectNodeModule(fields ...map[string]runtimecontracts.EntityFieldDecl) *previewWorkflowModule {
+	entities := testEntityContractsForType("test_entity")
+	if len(fields) > 0 {
+		entities["test_entity"] = runtimecontracts.EntityContract{Fields: fields[0]}
+	}
 	return handlerTestWorkflowModuleWithBundle(&runtimecontracts.WorkflowContractBundle{
 		Semantics:    runtimecontracts.WorkflowSemanticView{Name: "handler-engine-test"},
-		RootEntities: testEntityContractsForType("test_entity"),
+		RootEntities: entities,
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ExecutionType: "system_node"},
 		},
@@ -857,7 +861,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
-			RootEntities: testEntityContractsForType("test_entity"),
+			RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{"revision_count": {Type: "integer"}}}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"node-a": {ExecutionType: "system_node"},
 			},
@@ -1007,7 +1011,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
-			RootEntities: testEntityContractsForType("test_entity"),
+			RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{"kill_reason": {Type: "text"}, "kill_reason_missing": {Type: "boolean"}}}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"node-a": {ExecutionType: "system_node"},
 			},
@@ -1066,8 +1070,8 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	if !ok {
 		t.Fatal("workflow instance missing after declarative write")
 	}
-	if got := instance.Fields["kill_reason_missing"]; got != true {
-		t.Fatalf("kill_reason_missing = %#v, want true", got)
+	if got := instance.Fields["kill_reason_missing"]; got != false {
+		t.Fatalf("kill_reason_missing = %#v, want false for materialized text default", got)
 	}
 }
 
@@ -2116,13 +2120,13 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 	}
 }
 
-func TestExecuteNodeContractHandlerAppliesEmitFieldsSparseFieldPresenceCheck(t *testing.T) {
+func TestExecuteNodeContractHandlerAppliesEmitFieldsMaterializedFieldPresenceCheck(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
-		module:         handlerEngineProjectNodeModule(),
+		module:         handlerEngineProjectNodeModule(map[string]runtimecontracts.EntityFieldDecl{"kill_reason": {Type: "text"}}),
 	}
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
@@ -2158,8 +2162,8 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsSparseFieldPresenceCheck(t *
 	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := payload["kill_reason_missing"]; got != true {
-		t.Fatalf("payload.kill_reason_missing = %#v, want true", got)
+	if got := payload["kill_reason_missing"]; got != false {
+		t.Fatalf("payload.kill_reason_missing = %#v, want false for materialized text default", got)
 	}
 }
 

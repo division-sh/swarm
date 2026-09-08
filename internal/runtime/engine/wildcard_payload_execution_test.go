@@ -20,9 +20,9 @@ import (
 
 type schemaBoundWildcardEvaluator struct{ NoopEvaluator }
 
-func (schemaBoundWildcardEvaluator) EvalBool(expression string, base BaseContext, payloadType *runtimecontracts.ResolvedCatalogType) (bool, error) {
+func (schemaBoundWildcardEvaluator) EvalBool(expression string, base BaseContext, options workflowexpr.ValueExpressionOptions) (bool, error) {
 	result, err := workflowexpr.EvalValueExpressionWithOptions(expression,
-		workflowexpr.ValueContext{Payload: base.Payload.Raw()}, workflowexpr.ValueExpressionOptions{PayloadType: payloadType})
+		workflowexpr.ValueContext{Payload: base.Payload.Raw(), Entity: base.Entity.Raw(), Join: base.Join.Raw()}, options)
 	if err != nil {
 		return false, err
 	}

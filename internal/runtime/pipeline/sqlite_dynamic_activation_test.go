@@ -537,6 +537,7 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{"Component": {Fields: map[string]runtimecontracts.TypeFieldSpec{"component_id": {Type: "text"}}}}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"fanout-node":        {ExecutionType: "system_node"},
 			"spawn-node":         {ExecutionType: "system_node"},
@@ -550,7 +551,7 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 				Events: map[string]runtimecontracts.EventCatalogEntry{
 					"component_scaffold.batch_requested": {
 						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-							"components": {Type: "[json]"},
+							"components": {Type: "[Component]"},
 						}, Required: []string{"components"}},
 					},
 					"component_scaffold.spawn_requested": {

@@ -32,7 +32,7 @@ type pipelineEngineEvaluator struct {
 	coordinator *PipelineCoordinator
 }
 
-func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext, payloadType *runtimecontracts.ResolvedCatalogType) (bool, error) {
+func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext, options workflowexpr.ValueExpressionOptions) (bool, error) {
 	if e.evaluator == nil {
 		return false, runtimeengine.ErrNotImplemented
 	}
@@ -52,12 +52,11 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
 	}
-	options := workflowexpr.ValueExpressionOptions{AllowAccumulated: true}
+	options.AllowAccumulated = true
 	if workflowexpr.ExpressionReferencesRoot(expression, "payload") {
-		if payloadType == nil {
+		if options.PayloadType == nil {
 			return false, fmt.Errorf("workflow payload expression has no exact structural schema")
 		}
-		options.PayloadType = payloadType
 	}
 	return e.evaluator.EvalBoolWithOptions(expression, queryCtx, options)
 }

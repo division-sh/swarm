@@ -845,16 +845,10 @@ func (b *WorkflowContractBundle) resolveQueryEntityTable(node runtimeidentity.Ex
 	if entities != primary.EntityType {
 		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q does not match flow %s primary entity %q", entities, defaultPrimaryEntityFlowLabel(node.FlowPath()), primary.EntityType)
 	}
-	fields := make([]ResolvedCatalogField, 0, len(primary.Contract.Fields))
-	for _, name := range sortedEntityFieldKeys(primary.Contract.Fields) {
-		decl := primary.Contract.Fields[name]
-		resolved, resolveErr := (CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(primary.Types)}).Resolve()
-		if resolveErr != nil {
-			return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q field %s: %w", entities, name, resolveErr)
-		}
-		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved})
+	item, err := primary.StructuralType()
+	if err != nil {
+		return WorkflowCollectionItemResolution{}, fmt.Errorf("query entities %q: %w", entities, err)
 	}
-	item := ResolvedCatalogType{Kind: CatalogTypeObject, Name: primary.EntityType, Fields: fields}
 	return WorkflowCollectionItemResolution{
 		Kind: WorkflowCollectionSourceEntityTable, Source: entities, FlowID: node.FlowPath(), EntityType: primary.EntityType,
 		Origin: "entities." + primary.EntityType, ItemType: item,

@@ -77,7 +77,7 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			event := bundle.Events["item.completed"]
 			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "JoinResult"}
 			bundle.Events["item.completed"] = event
-			h.Join.CompleteWhen = `join.results[0].value == "ok"`
+			h.Join.CompleteWhen = `join.results.exists(r, r.value == "ok")`
 			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
 		}},
 		{name: "custom completion rejects named result as scalar", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {

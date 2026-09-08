@@ -109,6 +109,7 @@ type executionFrame struct {
 	result                    ExecutionResult
 	rule                      *runtimecontracts.HandlerRuleEntry
 	payloadType               *runtimecontracts.ResolvedCatalogType
+	entityType                *runtimecontracts.ResolvedCatalogType
 	ruleSource                handlerRuleSource
 	ruleIndex                 int
 	payload                   map[string]any
@@ -651,6 +652,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
 	payloadType := e.executionPayloadType(req)
+	entityType, _ := semanticview.ResolveEntityStructuralType(e.deps.Source, req.Node.FlowPath())
 	collectionPlan, err := e.resolveHandlerCollectionPlan(req)
 	if err != nil {
 		return executionFrame{}, err
@@ -661,6 +663,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 		base:                     base,
 		payload:                  payload,
 		payloadType:              payloadType,
+		entityType:               entityType,
 		collectionPlan:           collectionPlan,
 		topLevelDataAccumulation: req.Handler.DataAccumulation,
 		state: ExecutionState{
@@ -2108,11 +2111,19 @@ func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOp
 }
 
 func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {
-	if frame == nil || frame.payloadType == nil {
+	if frame == nil {
 		return workflowexpr.ValueExpressionOptions{}
 	}
-	value := frame.payloadType.Clone()
-	return workflowexpr.ValueExpressionOptions{PayloadType: &value}
+	options := workflowexpr.ValueExpressionOptions{}
+	if frame.payloadType != nil {
+		value := frame.payloadType.Clone()
+		options.PayloadType = &value
+	}
+	if frame.entityType != nil {
+		value := frame.entityType.Clone()
+		options.EntityType = &value
+	}
+	return options
 }
 
 func (e *Executor) queryCollectionPlan(frame *executionFrame) (runtimecontracts.WorkflowQueryCollectionPlan, error) {
@@ -3085,6 +3096,7 @@ func (e *Executor) executionContext(frame *executionFrame, step Step) ExecutionC
 		Request:     req,
 		Base:        e.currentContext(frame),
 		PayloadType: payloadType,
+		EntityType:  frameExpressionOptions(frame).EntityType,
 		Step:        step,
 		Completed:   append([]Step(nil), frame.result.ExecutedSteps...),
 	}
@@ -3113,7 +3125,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 	id = strings.TrimSpace(id)
 	check = strings.TrimSpace(check)
 	if check != "" {
-		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame), frame.payloadType)
+		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame), joinExpressionOptions(frame))
 		if err == nil {
 			evaluated := []string{check}
 			if id != "" {
@@ -3137,7 +3149,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 		return false, []string{id}, fmt.Errorf("guard %q is not executable", id)
 	}
 	if strings.TrimSpace(entry.Check) != "" {
-		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame), frame.payloadType)
+		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame), joinExpressionOptions(frame))
 		if err == nil {
 			return passed, []string{id}, nil
 		}
@@ -3169,7 +3181,7 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 		if condition == "" || strings.EqualFold(condition, "else") {
 			return rule, idx, nil
 		}
-		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame), frame.payloadType)
+		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame), joinExpressionOptions(frame))
 		if err != nil {
 			context, contextErr := handlerSelectionContext(source)
 			if contextErr != nil {

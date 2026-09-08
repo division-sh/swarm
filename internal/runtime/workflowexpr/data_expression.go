@@ -17,14 +17,7 @@ import (
 )
 
 var (
-	workflowExpressionEntityReferencePattern         = regexp.MustCompile(`(^|[^a-zA-Z0-9_])entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 	workflowExpressionPlatformEntityReferencePattern = regexp.MustCompile(`(^|[^a-zA-Z0-9_])_entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityPresencePattern          = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
-	workflowExpressionEntityHasPattern               = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)`)
-	workflowExpressionEntityHasTernaryTruePattern    = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityHasTernaryFalsePattern   = regexp.MustCompile(`!\s*has\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*[^:]+:\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityNullCompareLeftPattern   = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*null\b`)
-	workflowExpressionEntityNullCompareRightPattern  = regexp.MustCompile(`\bnull\s*(==|!=)\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
 	workflowExpressionEntityNullNotEqualPattern      = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*!=\s*null\b`)
 	workflowExpressionEntityNullEqualPattern         = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*==\s*null\b`)
 	workflowExpressionNullEntityNotEqualPattern      = regexp.MustCompile(`\bnull\s*!=\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
@@ -52,6 +45,7 @@ type ValueExpressionOptions struct {
 	RequireBool      bool
 	JoinResultType   runtimecontracts.CatalogTypeReference
 	JoinContext      JoinContext
+	EntityType       *runtimecontracts.ResolvedCatalogType
 	PayloadType      *runtimecontracts.ResolvedCatalogType
 	ItemType         *runtimecontracts.ResolvedCatalogType
 	ResultType       *runtimecontracts.ResolvedCatalogType
@@ -116,21 +110,20 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 }
 
 func compileValueExpression(env *cel.Env, expression string, opts ValueExpressionOptions) (*cel.Ast, error) {
-	compiled, issues := env.Compile(expression)
+	parsed, issues := env.Parse(expression)
+	if issues != nil && issues.Err() != nil {
+		return nil, issues.Err()
+	}
+	if opts.AllowJoin {
+		if err := validateJoinAccesses(parsed, opts.JoinContext); err != nil {
+			return nil, err
+		}
+	}
+	compiled, issues := env.Check(parsed)
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
 	}
 	typeChecked := compiled
-	if opts.AllowJoin {
-		if err := validateJoinAccesses(compiled, opts.JoinContext); err != nil {
-			return nil, err
-		}
-		var err error
-		typeChecked, err = typeCheckJoinExpression(env, compiled, opts)
-		if err != nil {
-			return nil, err
-		}
-	}
 	// Payload reads are structurally typed before this point. Other roots keep
 	// their separately owned runtime value contracts until those grammars gain
 	// exact types, so a dynamic result still receives the existing bool check at
@@ -216,175 +209,6 @@ func validateJoinAccesses(compiled *cel.Ast, context JoinContext) error {
 		return nil
 	}
 	return visit(root)
-}
-
-type joinFieldTypeOptimizer struct{}
-
-func (joinFieldTypeOptimizer) Optimize(ctx *cel.OptimizerContext, expression *celast.AST) *celast.AST {
-	matches := celast.MatchDescendants(celast.NavigateAST(expression), func(expr celast.NavigableExpr) bool {
-		if expr.Kind() != celast.SelectKind {
-			return false
-		}
-		operand := expr.AsSelect().Operand()
-		return operand.Kind() == celast.IdentKind && operand.AsIdent() == "join"
-	})
-	for _, match := range matches {
-		ctx.UpdateExpr(match, ctx.NewIdent(joinTypedVariable(match.AsSelect().FieldName())))
-	}
-	return ctx.NewAST(expression.Expr())
-}
-
-func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, opts ValueExpressionOptions) (*cel.Ast, error) {
-	var typedEnv *cel.Env
-	var err error
-	if opts.JoinContext == JoinContextFanOutDelivery {
-		typedEnv, err = env.Extend(
-			cel.Variable(joinTypedVariable("total"), cel.IntType),
-			cel.Variable(joinTypedVariable("dispositions"), cel.MapType(cel.StringType, cel.IntType)),
-		)
-	} else {
-		provider := newJoinCatalogTypeProvider(env.CELTypeProvider(), opts.JoinResultType)
-		resultCELType, resolveErr := provider.resolve(opts.JoinResultType.Type)
-		if resolveErr != nil {
-			return nil, resolveErr
-		}
-		typedEnv, err = env.Extend(
-			cel.CustomTypeProvider(provider),
-			cel.Variable(joinTypedVariable("expected"), cel.IntType),
-			cel.Variable(joinTypedVariable("completed"), cel.IntType),
-			cel.Variable(joinTypedVariable("missing"), cel.ListType(cel.StringType)),
-			cel.Variable(joinTypedVariable("results"), cel.ListType(resultCELType)),
-			cel.Variable(joinTypedVariable("timed_out"), cel.BoolType),
-		)
-	}
-	if err != nil {
-		return nil, err
-	}
-	optimizer, err := cel.NewStaticOptimizer(joinFieldTypeOptimizer{})
-	if err != nil {
-		return nil, err
-	}
-	typed, issues := optimizer.Optimize(typedEnv, compiled)
-	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
-	}
-	return typed, nil
-}
-
-func joinTypedVariable(field string) string {
-	return "__swarm_join_" + strings.TrimSpace(field)
-}
-
-const joinCatalogTypePrefix = "swarm.workflow.join."
-
-type joinCatalogTypeProvider struct {
-	celtypes.Provider
-	result runtimecontracts.CatalogTypeReference
-}
-
-func newJoinCatalogTypeProvider(base celtypes.Provider, result runtimecontracts.CatalogTypeReference) *joinCatalogTypeProvider {
-	return &joinCatalogTypeProvider{Provider: base, result: result}
-}
-
-func (p *joinCatalogTypeProvider) resolve(typeRef string) (*cel.Type, error) {
-	resolved, err := p.result.ResolveReference(typeRef)
-	if err != nil {
-		return nil, err
-	}
-	return p.resolveResolved(resolved)
-}
-
-func (p *joinCatalogTypeProvider) resolveResolved(resolved runtimecontracts.ResolvedCatalogType) (*cel.Type, error) {
-	switch resolved.Kind {
-	case runtimecontracts.CatalogTypeDynamic:
-		return cel.DynType, nil
-	case runtimecontracts.CatalogTypeText:
-		return cel.StringType, nil
-	case runtimecontracts.CatalogTypeInteger:
-		return cel.IntType, nil
-	case runtimecontracts.CatalogTypeNumber:
-		return cel.DoubleType, nil
-	case runtimecontracts.CatalogTypeBoolean:
-		return cel.BoolType, nil
-	case runtimecontracts.CatalogTypeObject:
-		return cel.ObjectType(joinCatalogTypePrefix + resolved.Name), nil
-	case runtimecontracts.CatalogTypeList:
-		if resolved.Element == nil {
-			return nil, fmt.Errorf("catalog list type has no element type")
-		}
-		element, err := p.resolveResolved(*resolved.Element)
-		if err != nil {
-			return nil, err
-		}
-		return cel.ListType(element), nil
-	case runtimecontracts.CatalogTypeMap:
-		if resolved.Key == nil || resolved.Value == nil {
-			return nil, fmt.Errorf("catalog map type is incomplete")
-		}
-		key, err := p.resolveResolved(*resolved.Key)
-		if err != nil {
-			return nil, err
-		}
-		value, err := p.resolveResolved(*resolved.Value)
-		if err != nil {
-			return nil, err
-		}
-		return cel.MapType(key, value), nil
-	default:
-		return nil, fmt.Errorf("unsupported catalog type kind %q", resolved.Kind)
-	}
-}
-
-func (p *joinCatalogTypeProvider) FindStructType(typeName string) (*celtypes.Type, bool) {
-	if name, ok := joinCatalogTypeName(typeName); ok {
-		resolved, err := p.result.ResolveReference(name)
-		if err == nil && resolved.Kind == runtimecontracts.CatalogTypeObject {
-			return celtypes.NewTypeTypeWithParam(celtypes.NewObjectType(typeName)), true
-		}
-	}
-	return p.Provider.FindStructType(typeName)
-}
-
-func (p *joinCatalogTypeProvider) FindStructFieldNames(typeName string) ([]string, bool) {
-	if name, ok := joinCatalogTypeName(typeName); ok {
-		resolved, err := p.result.ResolveReference(name)
-		if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
-			return nil, false
-		}
-		names := make([]string, 0, len(resolved.Fields))
-		for _, field := range resolved.Fields {
-			names = append(names, field.Name)
-		}
-		return names, true
-	}
-	return p.Provider.FindStructFieldNames(typeName)
-}
-
-func (p *joinCatalogTypeProvider) FindStructFieldType(typeName, fieldName string) (*celtypes.FieldType, bool) {
-	if name, ok := joinCatalogTypeName(typeName); ok {
-		resolved, err := p.result.ResolveReference(name)
-		if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
-			return nil, false
-		}
-		field, found := resolved.Field(fieldName)
-		if !found {
-			return nil, false
-		}
-		fieldType, err := p.resolveResolved(field.Type)
-		if err != nil {
-			return nil, false
-		}
-		return &celtypes.FieldType{Type: fieldType}, true
-	}
-	return p.Provider.FindStructFieldType(typeName, fieldName)
-}
-
-func joinCatalogTypeName(typeName string) (string, bool) {
-	if !strings.HasPrefix(typeName, joinCatalogTypePrefix) {
-		return "", false
-	}
-	name := strings.TrimPrefix(typeName, joinCatalogTypePrefix)
-	return name, name != ""
 }
 
 func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
@@ -720,31 +544,6 @@ func isRootReferenceStart(expression string, start int) bool {
 	return true
 }
 
-func EntityReferences(expression string) []string {
-	expression = strings.TrimSpace(StripStringLiterals(expression))
-	if expression == "" {
-		return nil
-	}
-	matches := workflowExpressionEntityReferencePattern.FindAllStringSubmatch(expression, -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]struct{}{}
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
-		ref := strings.TrimSpace(match[2])
-		if ref == "" {
-			continue
-		}
-		if _, ok := seen[ref]; ok {
-			continue
-		}
-		seen[ref] = struct{}{}
-		out = append(out, ref)
-	}
-	return out
-}
-
 func PlatformEntityReferences(expression string) []string {
 	expression = strings.TrimSpace(StripStringLiterals(expression))
 	if expression == "" {
@@ -968,81 +767,6 @@ func EntityReferenceField(ref string) string {
 	return strings.TrimSpace(ref)
 }
 
-func PresenceGuardedEntityFields(expression string) map[string]struct{} {
-	expression = strings.TrimSpace(StripStringLiterals(expression))
-	if expression == "" {
-		return nil
-	}
-	out := map[string]struct{}{}
-	addField := func(field string) {
-		field = EntityReferenceField(field)
-		if field != "" {
-			out[field] = struct{}{}
-		}
-	}
-	for _, match := range workflowExpressionEntityPresencePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasTernaryTruePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 && EntityReferenceField(match[1]) == EntityReferenceField(match[2]) {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasTernaryFalsePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 && EntityReferenceField(match[1]) == EntityReferenceField(match[2]) {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityNullCompareLeftPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityNullCompareRightPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 {
-			addField(match[2])
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func MissingEntityReferences(expression string, entity map[string]any) []string {
-	refs := EntityReferences(expression)
-	if len(refs) == 0 {
-		return nil
-	}
-	guarded := PresenceGuardedEntityFields(expression)
-	out := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		field := EntityReferenceField(ref)
-		if field == "" {
-			continue
-		}
-		if _, ok := guarded[field]; ok {
-			continue
-		}
-		if _, ok := lookupPath(entity, ref); ok {
-			continue
-		}
-		out = append(out, "entity."+ref)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	sort.Strings(out)
-	return out
-}
-
 func NormalizeCELValue(value any) any {
 	switch typed := value.(type) {
 	case nil:
@@ -1101,6 +825,9 @@ func dataExpressionEnvForContext(opts ValueExpressionOptions) (*cel.Env, error) 
 }
 
 func requireStructuralExpressionRoots(expression string, opts ValueExpressionOptions) error {
+	if len(entityExpressionAccesses(expression)) > 0 && (opts.EntityType == nil || opts.EntityType.Kind == runtimecontracts.CatalogTypeDynamic) {
+		return fmt.Errorf("workflow expression reads entity without an exact structural schema")
+	}
 	if ExpressionReferencesRoot(expression, "payload") {
 		if opts.PayloadType == nil || opts.PayloadType.Kind == runtimecontracts.CatalogTypeDynamic {
 			return fmt.Errorf("workflow expression %q reads payload without an exact structural schema", expression)
@@ -1111,13 +838,11 @@ func requireStructuralExpressionRoots(expression string, opts ValueExpressionOpt
 
 func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpressionOptions) (*cel.Env, error) {
 	variables := []cel.EnvOption{
-		cel.Variable("entity", cel.DynType),
 		cel.Variable("_entity", cel.DynType),
 		cel.Variable("event", cel.DynType),
 		cel.Variable("policy", cel.DynType),
 		cel.Variable("computed", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
-		cel.Variable("join", cel.DynType),
 		cel.Variable("_loop", cel.DynType),
 		cel.Function("count_ge",
 			cel.Overload(
@@ -1138,6 +863,16 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 	provider, err := newWorkflowStructuralTypeProvider(base.CELTypeProvider(), opts)
 	if err != nil {
 		return nil, err
+	}
+	for _, root := range []string{"entity", "join"} {
+		rootType, ok := provider.rootType(root)
+		if !ok {
+			rootType = cel.DynType
+		}
+		base, err = base.Extend(cel.CustomTypeProvider(provider), cel.Variable(root, rootType))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if payloadType, ok := provider.rootType("payload"); ok {
 		base, err = base.Extend(cel.CustomTypeProvider(provider), cel.Variable("payload", payloadType))

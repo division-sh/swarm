@@ -294,6 +294,7 @@ type ExecutionContext struct {
 	Request     ExecutionRequest
 	Base        BaseContext
 	PayloadType *runtimecontracts.ResolvedCatalogType
+	EntityType  *runtimecontracts.ResolvedCatalogType
 	Step        Step
 	Completed   []Step
 }
