@@ -395,7 +395,7 @@ func historicalConnectClaim(t testing.TB, recipient events.DeliveryRecipient, ed
 
 func historicalAgentIdentity(t testing.TB, name agentidentity.Name, route agentidentity.Route) agentidentity.Identity {
 	t.Helper()
-	value, err := agentidentity.New(name, route)
+	value, err := agentidentity.New("d34a7a1b-f738-42b2-8758-9e4ad5417ad0", name, route)
 	if err != nil {
 		t.Fatal(err)
 	}

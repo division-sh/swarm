@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -51,15 +52,17 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 		t.Fatal(err)
 	}
 	var nodeRoute, agentRoute events.DeliveryRoute
+	var agentPlan agentidentity.Plan
 	for _, subscriber := range table.Resolve("sink/work.completed") {
-		route := events.DeliveryRoute{Recipient: subscriber.Recipient, AgentIdentity: subscriber.AgentIdentity}
+		route := events.DeliveryRoute{Recipient: subscriber.Recipient}
 		if route.Recipient.IsNode() {
 			nodeRoute = route
 		} else if route.Recipient.IsAgent() {
 			agentRoute = route
+			agentPlan = subscriber.AgentPlan
 		}
 	}
-	if nodeRoute.Recipient.Empty() || agentRoute.Recipient.Empty() || agentRoute.AgentIdentity.IsZero() {
+	if nodeRoute.Recipient.Empty() || agentRoute.Recipient.Empty() || agentPlan.IsZero() {
 		t.Fatal("mixed receiver fixture must derive both exact node and agent recipients")
 	}
 	for _, backend := range eventRecordContractBackends() {
@@ -85,6 +88,12 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
 					target := events.RouteIdentity{FlowID: "sink", FlowInstance: "sink", EntityID: uuid.NewString()}
 					route := cell.route
+					if route.Recipient.IsAgent() {
+						route.AgentIdentity, err = agentPlan.Live(runID)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
 					switch cell.ownership {
 					case "existing":
 						route.Target = events.MustExistingEntityTarget(target)
@@ -101,8 +110,11 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					}
 					if cell.connected {
 						blueprint := runtimepinrouting.ConnectDeliveryRoute{
-							Recipient: route.Recipient, AgentIdentity: route.AgentIdentity, Target: target,
+							Recipient: route.Recipient, Target: target,
 							Context: route.Context, PayloadProjection: route.PayloadProjection,
+						}
+						if route.Recipient.IsAgent() {
+							blueprint.AgentPlan = agentPlan
 						}
 						if route.Recipient.IsNode() {
 							blueprint.Handler = runtimepinrouting.MustConnectReceiverHandler(mustPersistenceNode("sink", "collector"))
@@ -309,7 +321,15 @@ func assertRouteEvidenceStampedConsumers(t testing.TB, source semanticview.Sourc
 			}
 		}
 	}
-	if len(recipients) != 1 || recipients[0].Recipient != route.Recipient || recipients[0].AgentIdentity != route.AgentIdentity || recipients[0].Path != route.Target.Route().FlowInstance || recipients[0].RouteSourceCode() != "stamped_connect_claim" {
+	var expectedPlan agentidentity.Plan
+	if route.Recipient.IsAgent() {
+		var err error
+		expectedPlan, err = route.AgentIdentity.Plan()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(recipients) != 1 || recipients[0].Recipient != route.Recipient || recipients[0].AgentPlan != expectedPlan || recipients[0].Path != route.Target.Route().FlowInstance || recipients[0].RouteSourceCode() != "stamped_connect_claim" {
 		t.Fatalf("completed=%v consumer lost exact stamped recipient: %#v, route=%#v", completed, recipients, route)
 	}
 }
