@@ -212,11 +212,11 @@ func (r ContainerRef) Identity() containeridentity.Identity {
 }
 
 type PreservedResources struct {
-	SystemContainers        []string `json:"system_containers"`
-	OperatorManagedBoundary string   `json:"operator_managed_boundary"`
-	SchemaMigrations        bool     `json:"schema_migrations"`
-	AuthTokens              bool     `json:"auth_tokens"`
-	SourceArtifacts         bool     `json:"source_artifacts"`
+	DurableWorkspaceBackings bool   `json:"durable_workspace_backings"`
+	OperatorManagedBoundary  string `json:"operator_managed_boundary"`
+	SchemaMigrations         bool   `json:"schema_migrations"`
+	AuthTokens               bool   `json:"auth_tokens"`
+	SourceArtifacts          bool   `json:"source_artifacts"`
 }
 
 type DownstreamContract struct {
@@ -274,8 +274,15 @@ type ContainerStopper interface {
 	Apply(context.Context, ContainerResetRequest) (ContainerResetResult, error)
 }
 
-type RuntimeContextQuiescer interface {
-	QuiesceAllRuntimeContexts(context.Context) error
+type RuntimeContextLifecycle interface {
+	BeginDestructiveReset(context.Context) (RuntimeReset, error)
+}
+
+// RuntimeReset owns only process-local reconstruction. Durable reset phases and
+// outcome replay belong to the reset coordinator and selected-store operation.
+type RuntimeReset interface {
+	Complete(context.Context, bool) error
+	Release()
 }
 
 type ExecutionResult struct {

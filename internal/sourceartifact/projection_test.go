@@ -8,6 +8,40 @@ import (
 	"testing"
 )
 
+func TestRuntimeProjectionReleaseRetriesFailedDeletionWithoutReopening(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires filesystem permission enforcement")
+	}
+	parent := t.TempDir()
+	root := filepath.Join(parent, "projection")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := &RuntimeProjection{state: &runtimeProjectionState{root: root, refs: 1}}
+	defer func() { _ = os.Chmod(parent, 0o700) }()
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Release(); err == nil {
+		t.Fatal("release concealed failed filesystem deletion")
+	}
+	if p.PrivateRoot() != "" {
+		t.Fatal("failed release reopened the projection")
+	}
+	if _, err := p.Retain(); err == nil {
+		t.Fatal("failed release permitted a new handle")
+	}
+	if err := os.Chmod(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("retry forgot the undeleted projection: %v", err)
+	}
+}
+
 func TestRuntimeProjectionHandleReadsAndReleaseAreSynchronized(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: admitted\n"), 0o600); err != nil {

@@ -190,7 +190,7 @@ type DockerManager struct {
 	data                 runtimedataaccess.Provider
 	projectionMu         sync.Mutex
 	projectionOps        sync.WaitGroup
-	projectionContainers map[string]struct{}
+	projectionContainers map[string]runtimecontaineridentity.Identity
 	projectionReleased   bool
 	ownedProjection      *sourceartifact.RuntimeProjection
 	RunDockerFn          func(ctx context.Context, args ...string) (string, error) // test seam
@@ -239,7 +239,7 @@ func NewDockerManager() *DockerManager {
 	return &DockerManager{
 		cfg:                  cfg,
 		baseCfg:              cfg,
-		projectionContainers: map[string]struct{}{},
+		projectionContainers: map[string]runtimecontaineridentity.Identity{},
 	}
 }
 
@@ -478,19 +478,18 @@ func (m *DockerManager) ReleaseSourceProjection(ctx context.Context) error {
 	m.projectionOps.Wait()
 	m.projectionMu.Lock()
 	names := make([]string, 0, len(m.projectionContainers))
-	for name := range m.projectionContainers {
+	identities := make(map[string]runtimecontaineridentity.Identity, len(m.projectionContainers))
+	for name, identity := range m.projectionContainers {
 		names = append(names, name)
+		identities[name] = identity
 	}
 	m.projectionMu.Unlock()
 	sort.Strings(names)
 	var releaseErr error
 	for _, name := range names {
-		if _, err := m.RunDocker(ctx, "rm", "--force", name); err != nil && !dockerContainerAbsent(err) {
-			exists, _, inspectErr := m.InspectContainer(ctx, name)
-			if inspectErr != nil || exists {
-				releaseErr = errors.Join(releaseErr, fmt.Errorf("release source projection container %s: %w", name, errors.Join(err, inspectErr)))
-				continue
-			}
+		if err := m.removeProjectionContainer(ctx, identities[name]); err != nil {
+			releaseErr = errors.Join(releaseErr, fmt.Errorf("release source projection container %s: %w", name, err))
+			continue
 		}
 		m.projectionMu.Lock()
 		delete(m.projectionContainers, name)
@@ -498,14 +497,40 @@ func (m *DockerManager) ReleaseSourceProjection(ctx context.Context) error {
 	}
 	if releaseErr == nil {
 		m.projectionMu.Lock()
-		ownedProjection := m.ownedProjection
-		m.ownedProjection = nil
-		m.projectionMu.Unlock()
-		if ownedProjection != nil {
-			releaseErr = ownedProjection.Release()
+		if m.ownedProjection != nil {
+			releaseErr = m.ownedProjection.Release()
+			if releaseErr == nil {
+				m.ownedProjection = nil
+			}
 		}
+		m.projectionMu.Unlock()
 	}
 	return releaseErr
+}
+
+func (m *DockerManager) removeProjectionContainer(ctx context.Context, expected runtimecontaineridentity.Identity) error {
+	inspection, err := m.InspectManagedContainer(ctx, expected.ContainerName)
+	if err != nil || !inspection.Exists {
+		return err
+	}
+	if !inspection.HasIdentity || !inspection.Identity.Equal(expected) {
+		return fmt.Errorf("container ownership no longer matches the admitted projection")
+	}
+	if inspection.RuntimeID == "" {
+		return fmt.Errorf("container has no immutable Docker ID")
+	}
+	// A name may be reassigned after inspection. Only the inspected object can
+	// be removed; an ambiguous acknowledgment requires readback of that ID.
+	if _, err := m.RunDocker(ctx, "rm", "--force", inspection.RuntimeID); err != nil {
+		readbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		settled, readErr := m.InspectManagedContainer(readbackCtx, inspection.RuntimeID)
+		if readErr == nil && !settled.Exists {
+			return nil
+		}
+		return errors.Join(err, readErr)
+	}
+	return nil
 }
 
 func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.Source) error {
@@ -1243,13 +1268,9 @@ func (m *DockerManager) recordProjectionContainer(name string, identity runtimec
 		return
 	}
 	m.projectionMu.Lock()
-	m.projectionContainers[strings.TrimSpace(name)] = struct{}{}
+	identity.ContainerName = strings.TrimSpace(name)
+	m.projectionContainers[identity.ContainerName] = identity.Normalized()
 	m.projectionMu.Unlock()
-}
-
-func dockerContainerAbsent(err error) bool {
-	message := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(message, "no such container") || strings.Contains(message, "not found")
 }
 
 func (m *DockerManager) inspectRuntimeContainerIdentity(ctx context.Context, name string) (runtimecontaineridentity.Identity, bool, error) {

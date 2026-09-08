@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type AvailabilityReader interface {
@@ -15,6 +16,11 @@ type AvailabilityReader interface {
 
 type Request struct {
 	AvailabilityReader AvailabilityReader
+	ArtifactReader     ArtifactReader
+}
+
+type ArtifactReader interface {
+	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
 }
 
 type Result struct {
@@ -46,14 +52,32 @@ func Recover(ctx context.Context, req Request) (Result, error) {
 	if req.AvailabilityReader == nil {
 		return Result{}, fmt.Errorf("startup recovery availability reader is required")
 	}
+	if req.ArtifactReader == nil {
+		return Result{}, fmt.Errorf("startup recovery source artifact reader is required")
+	}
 	availabilities, err := req.AvailabilityReader.ActiveNonStandingRunBundleAvailabilities(ctx)
 	if err != nil {
 		return Result{}, err
 	}
 	result := Result{CheckedAvailabilities: append([]runbundle.Availability(nil), availabilities...)}
+	verified := make(map[string]bool)
 	for _, availability := range availabilities {
 		switch {
 		case availability.Available():
+			if verified[availability.BundleHash] {
+				continue
+			}
+			artifact, err := req.ArtifactReader.GetSourceArtifact(ctx, availability.BundleHash)
+			if err != nil {
+				return result, fmt.Errorf("startup recovery run %s source artifact %s: %w", availability.RunID, availability.BundleHash, err)
+			}
+			if artifact.BundleHash != availability.BundleHash {
+				return result, fmt.Errorf("startup recovery run %s requested source artifact %s, reader returned %s", availability.RunID, availability.BundleHash, artifact.BundleHash)
+			}
+			if err := artifact.Validate(); err != nil {
+				return result, fmt.Errorf("startup recovery run %s source artifact %s: %w", availability.RunID, availability.BundleHash, err)
+			}
+			verified[availability.BundleHash] = true
 			continue
 		case availability.DataIntegrityError():
 			result.DataIntegrityErrors = append(result.DataIntegrityErrors, availability)

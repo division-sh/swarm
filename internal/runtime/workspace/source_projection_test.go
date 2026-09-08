@@ -24,6 +24,51 @@ type projectionDockerCall struct {
 	args    []string
 }
 
+func TestWorkspaceReleaseRetainsFailedProjectionDeletion(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires filesystem permission enforcement")
+	}
+	for _, backend := range []string{"host", "docker"} {
+		t.Run(backend, func(t *testing.T) {
+			parent := t.TempDir()
+			t.Setenv("TMPDIR", parent)
+			projection, root := testRuntimeSourceProjection(t)
+			var manager Lifecycle = NewHostManager()
+			if backend == "docker" {
+				manager = NewDockerManager()
+			}
+			if err := manager.BindSourceProjection(projection); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				_ = os.Chmod(parent, 0o700)
+				_ = manager.ReleaseSourceProjection(context.Background())
+			}()
+			if err := projection.Release(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(parent, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.ReleaseSourceProjection(context.Background()); err == nil {
+				t.Fatal("workspace concealed failed filesystem deletion")
+			}
+			if err := manager.BindSourceProjection(projection); err == nil {
+				t.Fatal("workspace lifecycle reopened after release")
+			}
+			if err := os.Chmod(parent, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.ReleaseSourceProjection(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(root); !os.IsNotExist(err) {
+				t.Fatalf("workspace retry forgot undeleted projection: %v", err)
+			}
+		})
+	}
+}
+
 func testRuntimeSourceProjection(t *testing.T) (*sourceartifact.RuntimeProjection, string) {
 	return testRuntimeSourceProjectionNamed(t, "workspace-test")
 }
@@ -84,16 +129,15 @@ func TestBundleScopedSystemWorkspacesDoNotReusePriorSourceMount(t *testing.T) {
 
 	created := map[string]string{}
 	var removed []string
-	runDocker := func(_ context.Context, args ...string) (string, error) {
+	fixture := &projectionDockerFixture{}
+	runDocker := func(ctx context.Context, args ...string) (string, error) {
 		switch args[0] {
-		case "inspect":
-			return "", fmt.Errorf("no such object")
 		case "create":
 			created[args[2]] = strings.Join(args, " ")
 		case "rm":
 			removed = append(removed, args[len(args)-1])
 		}
-		return "", nil
+		return fixture.run(ctx, args...)
 	}
 	start := func(projection *sourceartifact.RuntimeProjection) *DockerManager {
 		manager := NewDockerManager()
@@ -430,15 +474,13 @@ func TestReleaseSourceProjectionRemovesOwnedContainersAfterPartialLaunch(t *test
 		t.Fatal(err)
 	}
 	var calls []string
-	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+	fixture := &projectionDockerFixture{}
+	manager.SetRunDockerFnForTest(func(ctx context.Context, args ...string) (string, error) {
 		calls = append(calls, strings.Join(args, " "))
-		if args[0] == "inspect" {
-			return "", fmt.Errorf("no such object")
-		}
 		if args[0] == "start" {
 			return "", fmt.Errorf("start failed")
 		}
-		return "", nil
+		return fixture.run(ctx, args...)
 	})
 	if err := manager.EnsureSystemWorkspaces(context.Background()); err == nil || !strings.Contains(err.Error(), "start failed") {
 		t.Fatalf("EnsureSystemWorkspaces error = %v, want partial-launch failure", err)
@@ -447,7 +489,7 @@ func TestReleaseSourceProjectionRemovesOwnedContainersAfterPartialLaunch(t *test
 		t.Fatal(err)
 	}
 	joined := strings.Join(calls, "\n")
-	if !strings.Contains(joined, "rm --force "+manager.cfg.ScaffoldContainer) {
+	if !strings.Contains(joined, "rm --force docker-object-1") {
 		t.Fatalf("partial launch container was not removed before source release:\n%s", joined)
 	}
 	if err := manager.EnsureSystemWorkspaces(context.Background()); err == nil || !strings.Contains(err.Error(), "is released") {
@@ -468,17 +510,16 @@ func TestReleaseSourceProjectionWaitsForAdmittedContainerLaunchBeforeTeardown(t 
 	createStarted := make(chan struct{})
 	allowCreate := make(chan struct{})
 	var removed []string
-	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+	fixture := &projectionDockerFixture{}
+	manager.SetRunDockerFnForTest(func(ctx context.Context, args ...string) (string, error) {
 		switch args[0] {
-		case "inspect":
-			return "", fmt.Errorf("no such object")
 		case "create":
 			close(createStarted)
 			<-allowCreate
 		case "rm":
 			removed = append(removed, args[len(args)-1])
 		}
-		return "", nil
+		return fixture.run(ctx, args...)
 	})
 	ensureDone := make(chan error, 1)
 	go func() { ensureDone <- manager.EnsureSystemWorkspaces(context.Background()) }()
@@ -511,7 +552,7 @@ func TestReleaseSourceProjectionWaitsForAdmittedContainerLaunchBeforeTeardown(t 
 	if err := <-releaseDone; err != nil {
 		t.Fatalf("ReleaseSourceProjection: %v", err)
 	}
-	if len(removed) != 1 || removed[0] != manager.cfg.ScaffoldContainer {
+	if len(removed) != 1 || removed[0] != "docker-object-1" {
 		t.Fatalf("removed containers = %#v, want the admitted partial launch", removed)
 	}
 	if err := manager.EnsureSystemWorkspaces(context.Background()); err == nil || !strings.Contains(err.Error(), "is released") {
@@ -531,10 +572,13 @@ func TestReleaseSourceProjectionReconcilesCreateAndRemoveAcknowledgmentLoss(t *t
 	}
 	createAttempted := false
 	removeAttempted := false
-	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+	fixture := &projectionDockerFixture{}
+	manager.SetRunDockerFnForTest(func(ctx context.Context, args ...string) (string, error) {
+		out, err := fixture.run(ctx, args...)
+		if err != nil {
+			return out, err
+		}
 		switch args[0] {
-		case "inspect":
-			return "", fmt.Errorf("no such object")
 		case "create":
 			createAttempted = true
 			return "", fmt.Errorf("create acknowledgment lost")
@@ -542,7 +586,7 @@ func TestReleaseSourceProjectionReconcilesCreateAndRemoveAcknowledgmentLoss(t *t
 			removeAttempted = true
 			return "", fmt.Errorf("remove acknowledgment lost")
 		}
-		return "", nil
+		return out, nil
 	})
 	if err := manager.EnsureSystemWorkspaces(context.Background()); err == nil || !strings.Contains(err.Error(), "acknowledgment lost") {
 		t.Fatalf("EnsureSystemWorkspaces error = %v, want create acknowledgment loss", err)
@@ -568,20 +612,12 @@ func TestReleaseSourceProjectionRetainsFilesystemWhileContainerRemovalIsUncertai
 	if err := manager.BindSourceProjection(projection); err != nil {
 		t.Fatal(err)
 	}
-	containers := map[string]bool{}
-	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
-		switch args[0] {
-		case "inspect":
-			if containers[args[len(args)-1]] {
-				return "true", nil
-			}
-			return "", fmt.Errorf("no such object")
-		case "create":
-			containers[args[2]] = true
-		case "rm":
+	fixture := &projectionDockerFixture{}
+	manager.SetRunDockerFnForTest(func(ctx context.Context, args ...string) (string, error) {
+		if args[0] == "rm" {
 			return "", fmt.Errorf("remove state uncertain")
 		}
-		return "", nil
+		return fixture.run(ctx, args...)
 	})
 	if err := manager.EnsureSystemWorkspaces(context.Background()); err != nil {
 		t.Fatal(err)
@@ -595,12 +631,7 @@ func TestReleaseSourceProjectionRetainsFilesystemWhileContainerRemovalIsUncertai
 	if _, err := os.Stat(projectionRoot); err != nil {
 		t.Fatalf("uncertain container lost its retained source projection: %v", err)
 	}
-	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
-		if args[0] == "rm" {
-			delete(containers, args[len(args)-1])
-		}
-		return "", nil
-	})
+	manager.SetRunDockerFnForTest(fixture.run)
 	if err := manager.ReleaseSourceProjection(context.Background()); err != nil {
 		t.Fatal(err)
 	}

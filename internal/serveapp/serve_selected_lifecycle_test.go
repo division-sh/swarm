@@ -105,7 +105,7 @@ func TestServeActivatesSelectedStoreBeforeProcessOwnedConstruction(t *testing.T)
 		t.Fatal("serve selected-store activation owner is missing")
 	}
 	for _, marker := range []string{
-		"buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{",
+		"buildServeRuntimeBundleContext(request)",
 		"startServeOwnershipWatch(ownershipWatchCtx",
 		"installServeSourceSet(ctx, processCapability",
 		"processCapability.IssueGenerationGrant(ctx",

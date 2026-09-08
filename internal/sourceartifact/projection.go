@@ -129,21 +129,22 @@ func (p *RuntimeProjection) Release() error {
 		return nil
 	}
 	p.state.mu.Lock()
-	if p.released {
-		p.state.mu.Unlock()
+	defer p.state.mu.Unlock()
+	if !p.released {
+		p.released = true
+		p.state.refs--
+	}
+	if p.state.refs > 0 || p.state.removed {
 		return nil
 	}
-	p.released = true
-	p.state.refs--
-	if p.state.refs > 0 {
-		p.state.mu.Unlock()
-		return nil
+	// Release permanently fences the handle, but failed deletion must remain
+	// retryable by that owner without decrementing its reference a second time.
+	if err := removeProjectionTree(p.state.root); err != nil {
+		return err
 	}
-	root := p.state.root
 	p.state.removed = true
 	p.state.root = ""
-	p.state.mu.Unlock()
-	return removeProjectionTree(root)
+	return nil
 }
 
 func sealProjectionTree(root string) error {
