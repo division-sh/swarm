@@ -199,6 +199,11 @@ store_parity:
     - {id: observability-sqlite, kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, profile: pr-common, backends: [default_sqlite], capabilities: [{claim_id: observability, risk_dimensions: [read_snapshot, writer_ownership]}]}
     - {id: observability-postgres, kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: observability, risk_dimensions: [read_snapshot, writer_ownership]}]}
     - {id: destructive-reset-postgres, kind: go_test, name: TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
+    - id: destructive-reset-parity-2388
+      kind: tracker
+      issue: 2388
+      watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+      capabilities: [{claim_id: destructive_reset}]
     - {id: websocket-different-concept, kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes, path: internal/apiv1/openrpc_ws_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: non_store_transport, risk_dimensions: [structural_census, proof_schedule]}]}
     - id: golden-forced-restart
       kind: go_test
@@ -477,7 +482,9 @@ store_parity:
     - id: destructive_reset
       semantic_owners: [internal/store/selected destructive reset and startup recovery]
       selected_purposes: [runtime]
-      backend_dispositions: {default_sqlite: unsupported_with_exact_spec_and_teaching_proof, explicit_postgres: supported_with_dual_backend_proof}
+      backend_dispositions: {default_sqlite: split_with_active_issue_and_fail_closed_proof, explicit_postgres: supported_with_dual_backend_proof}
+      split_issue: 2388
+      split_proof_id: destructive-reset-parity-2388
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke]
       risk_dimensions: [fail_closed, writer_ownership]
       evidence:
@@ -495,6 +502,9 @@ store_parity:
         - {role: different_concept, backends: [default_sqlite, explicit_postgres], risk_dimensions: [structural_census, proof_schedule], proof_ids: [websocket-different-concept]}
       public_methods: [agent.frame, event.subscribe, health.ping, health.subscribe, mailbox.subscribe, rpc.unsubscribe, run.subscribe_trace, runtime.identity, runtime.subscribe_logs]
 active_trackers:
+  - kind: github_issue
+    issue: 2388
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: github_issue
     issue: 2274
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
@@ -724,13 +734,15 @@ mutating_api_parity_ledger:
       Shared served harness proves real /v1/rpc generation replacement, prior
       run quiescence, fresh publication, and idempotent replay.
   - method: runtime.nuke
-    classification: postgres_only_with_spec_ref
+    classification: split_with_issue_ref
     backends: [postgres_only]
+    split_issue: 2388
     spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke
     proof_refs:
       - {kind: artifact, path: platform-spec.yaml}
       - {kind: go_test, name: TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners}
       - {kind: go_test, name: TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce}
+      - {kind: tracker, issue: 2388, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
   - method: conversation.fork
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
