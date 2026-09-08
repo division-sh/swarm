@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"testing"
 	"time"
 
@@ -17,6 +18,67 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			for _, status := range []string{ActivityAttemptStatusSucceeded, ActivityAttemptStatusFailed, ActivityAttemptStatusUncertain} {
+				t.Run(status, func(t *testing.T) {
+					intent := testNonIdempotentActivityIntent(runtimecorrelation.RunIDFromContext(ctx), uuid.NewString(), uuid.NewString())
+					record := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
+					started, inserted, err := store.StartActivityAttempt(ctx, record)
+					if err != nil || !inserted {
+						t.Fatalf("start: %v inserted=%v", err, inserted)
+					}
+					terminal := started.withTerminal(status, uuid.NewString(), intent.SuccessEvent, map[string]any{"ok": true}, nil)
+					failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "fixture_story_test", "activity-runtime", "execute", nil))
+					if !ok {
+						t.Fatal("missing failure")
+					}
+					if status != ActivityAttemptStatusSucceeded {
+						terminal.Failure, terminal.ResultEventType = &failure, intent.FailureEvent
+					}
+					terminal, err = store.CompleteActivityAttempt(ctx, terminal)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var beforeCount, beforeHead int64
+					if err := store.testDB().QueryRow(`SELECT COUNT(*) FROM author_activity_occurrences`).Scan(&beforeCount); err != nil {
+						t.Fatal(err)
+					}
+					if err := store.testDB().QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&beforeHead); err != nil {
+						t.Fatal(err)
+					}
+					again, inserted, err := store.StartActivityAttempt(ctx, terminal)
+					if err != nil || inserted || !reflect.DeepEqual(again, terminal) {
+						t.Fatalf("duplicate start: %v inserted=%v", err, inserted)
+					}
+					again, err = store.CompleteActivityAttempt(ctx, terminal)
+					if err != nil || !reflect.DeepEqual(again, terminal) {
+						t.Fatalf("duplicate completion: %v", err)
+					}
+					uncertain := terminal
+					uncertain.Failure, uncertain.ResultEventType = &failure, intent.FailureEvent
+					again, err = store.MarkActivityAttemptUncertain(ctx, uncertain)
+					if err != nil || !reflect.DeepEqual(again, terminal) {
+						t.Fatalf("terminal uncertainty: %v", err)
+					}
+					var afterCount, afterHead int64
+					if err := store.testDB().QueryRow(`SELECT COUNT(*) FROM author_activity_occurrences`).Scan(&afterCount); err != nil {
+						t.Fatal(err)
+					}
+					if err := store.testDB().QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&afterHead); err != nil {
+						t.Fatal(err)
+					}
+					if beforeCount != afterCount || beforeHead != afterHead {
+						t.Fatal("fixture invented a no-op story")
+					}
+				})
+			}
+		})
+	}
+}
 
 func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 	ctx := testAuthorActivityContext(t, context.Background())

@@ -104,8 +104,10 @@ func (j pipelineTestActivityJournal) startTx(ctx context.Context, tx *sql.Tx, re
 	if err := ValidateActivityAttemptClaimIdentity(actual, record); err != nil {
 		return ActivityAttemptRecord{}, false, err
 	}
-	if err := authoractivityfixture.Record(ctx, ActivityAttemptStoryDraft(actual, ActivityAttemptStatusStarted)); err != nil {
-		return ActivityAttemptRecord{}, false, err
+	if rows > 0 {
+		if err := authoractivityfixture.Record(ctx, ActivityAttemptStoryDraft(actual, ActivityAttemptStatusStarted)); err != nil {
+			return ActivityAttemptRecord{}, false, err
+		}
 	}
 	return actual, rows > 0, nil
 }
@@ -156,7 +158,10 @@ func (j pipelineTestActivityJournal) CompleteActivityAttempt(ctx context.Context
 		if rows == 0 && out.Status == ActivityAttemptStatusStarted {
 			return fmt.Errorf("activity attempt %s remained started after terminal update", record.RequestEventID)
 		}
-		return authoractivityfixture.Record(txctx, ActivityAttemptStoryDraft(out, out.Status))
+		if rows > 0 {
+			return authoractivityfixture.Record(txctx, ActivityAttemptStoryDraft(out, out.Status))
+		}
+		return nil
 	})
 	return
 }
@@ -183,7 +188,12 @@ func (j pipelineTestActivityJournal) MarkActivityAttemptUncertain(ctx context.Co
 		if !j.store.isSQLite() {
 			query = `UPDATE activity_attempts SET status = 'uncertain', result_event_id = $1::uuid, result_event_type = $2, result_payload = $3::jsonb, failure = $4::jsonb, completed_at = NOW(), updated_at = NOW() WHERE request_event_id = $5::uuid AND execution_mode = $6 AND status = 'started'`
 		}
-		if _, err := tx.ExecContext(txctx, query, record.ResultEventID, record.ResultEventType, string(payload), failure, record.RequestEventID, record.ExecutionMode); err != nil {
+		result, err := tx.ExecContext(txctx, query, record.ResultEventID, record.ResultEventType, string(payload), failure, record.RequestEventID, record.ExecutionMode)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
 			return err
 		}
 		var found bool
@@ -197,7 +207,10 @@ func (j pipelineTestActivityJournal) MarkActivityAttemptUncertain(ctx context.Co
 		if err := ValidateActivityAttemptTerminalMode(out, record); err != nil {
 			return err
 		}
-		return authoractivityfixture.Record(txctx, ActivityAttemptStoryDraft(out, ActivityAttemptStatusUncertain))
+		if rows > 0 {
+			return authoractivityfixture.Record(txctx, ActivityAttemptStoryDraft(out, ActivityAttemptStatusUncertain))
+		}
+		return nil
 	})
 	return
 }
