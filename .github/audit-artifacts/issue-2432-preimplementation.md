@@ -1,6 +1,10 @@
 # Pre-Implementation Coverage Audit
 
 Issue: #2432. Agent: agent-g. Phase: pre-audit only; independent approval pending.
+Cycle-1 outcome is **insufficient; widen class**. The additive
+`issue-2432-fork-provenance-amendment.md` supersedes the selected-fork exclusions,
+universally unparented provenance proposal, F6/F7 and related stop condition below.
+Read both artifacts together; neither authorizes production implementation.
 Audited fresh `origin/master` at `496498457` on 2026-09-08. #2321 remains at
 `631af39ca` in its separate worktree; no runtime repair is included here.
 
