@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +23,7 @@ type commandLivePrerequisites struct {
 	chatID      int
 	image       string
 	network     string
+	mcpHost     string
 	dsn         string
 }
 
@@ -33,6 +36,7 @@ func readCommandLivePrerequisites(getenv func(string) string) (commandLivePrereq
 		{"CLAUDE_CODE_OAUTH_TOKEN", &result.claudeToken},
 		{"TELEGRAM_BOT_TOKEN", &result.botToken},
 		{"SWARM_COMMAND_LIVE_WORKSPACE_IMAGE", &result.image},
+		{"SWARM_COMMAND_LIVE_MCP_HOST", &result.mcpHost},
 		{goldenPostgresEnv, &result.dsn},
 	} {
 		value := strings.TrimSpace(getenv(item.key))
@@ -46,6 +50,9 @@ func readCommandLivePrerequisites(getenv func(string) string) (commandLivePrereq
 		return result, fmt.Errorf("SWARM_COMMAND_LIVE_TELEGRAM_CHAT_ID must name an authorized private test chat (positive integer)")
 	}
 	result.chatID = chatID
+	if ip := net.ParseIP(result.mcpHost); ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
+		return result, fmt.Errorf("SWARM_COMMAND_LIVE_MCP_HOST must be an explicit container-reachable host interface IP, not loopback or a wildcard")
+	}
 	result.network = strings.TrimSpace(getenv("SWARM_COMMAND_LIVE_WORKSPACE_NETWORK"))
 	return result, nil
 }
@@ -136,7 +143,8 @@ func prepareCommandLiveProject(t *testing.T, binary, project string, store golde
 	return releaseProcessSpec{
 		BinaryPath: binary, WorkingDir: project, Source: "contracts", ConfigPath: "live.yaml",
 		Store: store.name, APIPort: freeReleaseTCPPort(t), MCPPort: freeReleaseTCPPort(t),
-		TokenFile: "api-token", Token: apiToken, Env: env, WorkspaceBackend: "docker",
+		MCPListenHost: prerequisites.mcpHost,
+		TokenFile:     "api-token", Token: apiToken, Env: env, WorkspaceBackend: "docker",
 		RedactValues: []string{prerequisites.claudeToken, prerequisites.botToken, signingSecret, apiToken},
 	}, signingSecret
 }
@@ -154,6 +162,11 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 			t.Fatal("L proof must execute the public binary")
 		}
 		process := startReleaseServe(t, options)
+		t.Cleanup(func() {
+			if t.Failed() {
+				t.Logf("sanitized public serve output:\n%s", process.output.String())
+			}
+		})
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		if err := process.waitReady(ctx); err != nil {
@@ -182,19 +195,42 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 		waitForFullLifecycleRunStatus(t, process.rpc, run.RunID, "running")
 		return bundle, run
 	}
-	nextID := int(time.Now().UnixMilli())
+	// Each journey owns fresh stores; retain one schema-valid counter across restarts.
+	nextID := 1000
 	send := func(process *releaseServeProcess) (int, fullLifecycleIngressReceipt) {
 		nextID++
 		return nextID, sendLifecycleTelegramUpdateWithSecret(t, process, nextID, prerequisites.chatID, signingSecret)
 	}
 	converge := func(process *releaseServeProcess, run fullLifecycleRun, count, id int, receipt fullLifecycleIngressReceipt) fullLifecycleEvent {
+		t.Logf("L ingress %d accepted; awaiting reply approval", id)
 		approveFullLifecycleEffect(t, process.rpc, run.RunID, fmt.Sprintf("live-send-%d", id))
 		waitForLifecycleConvergenceMode(t, process, run.RunID, count, "live")
+		t.Logf("L ingress %d converged through live agent and Telegram connector", id)
 		return requireFullLifecycleReceiptEvents(t, process.rpc, run.RunID, id, receipt)
 	}
 
 	process := start(spec)
 	bundle, standing := openStanding(process, nil)
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		var diagnosis map[string]any
+		if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": standing.RunID}, &diagnosis); err != nil {
+			t.Logf("failure diagnosis unavailable: %v", err)
+			return
+		}
+		raw, err := json.Marshal(diagnosis)
+		if err != nil {
+			t.Logf("encode failure diagnosis: %v", err)
+			return
+		}
+		output := &releaseProcessOutput{secrets: spec.RedactValues}
+		_, _ = output.Write(raw)
+		t.Logf("sanitized public run diagnosis: %s", output.String())
+	})
 	id, firstReceipt := send(process)
 	first := converge(process, standing, 1, id, firstReceipt)
 	stop(process)
@@ -281,6 +317,7 @@ func TestCommandLivePrerequisiteAdmission(t *testing.T) {
 		"CLAUDE_CODE_OAUTH_TOKEN":             "unit-test-only-not-used-for-execution",
 		"TELEGRAM_BOT_TOKEN":                  "unit-test-only-not-used-for-execution",
 		"SWARM_COMMAND_LIVE_WORKSPACE_IMAGE":  "dedicated-image",
+		"SWARM_COMMAND_LIVE_MCP_HOST":         "172.17.0.1",
 		"SWARM_COMMAND_LIVE_TELEGRAM_CHAT_ID": "42",
 		goldenPostgresEnv:                     "postgres://configured-test-store",
 	}
@@ -309,6 +346,17 @@ func TestCommandLivePrerequisiteAdmission(t *testing.T) {
 		})
 		if err == nil {
 			t.Fatalf("invalid private chat %q accepted", chat)
+		}
+	}
+	for _, host := range []string{"localhost", "127.0.0.1", "0.0.0.0", "::", "::1"} {
+		_, err := readCommandLivePrerequisites(func(key string) string {
+			if key == "SWARM_COMMAND_LIVE_MCP_HOST" {
+				return host
+			}
+			return valid[key]
+		})
+		if err == nil {
+			t.Fatalf("unreachable or wildcard MCP host %q accepted", host)
 		}
 	}
 }

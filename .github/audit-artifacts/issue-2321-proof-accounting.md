@@ -209,3 +209,12 @@ its authenticated L rows remain unproven, as do the separate live archetype rows
 After #2432 integration the full-profile rerun uses an explicit 30-minute package
 timeout without relaxing scenario deadlines. No final audit or
 review-ready PR exists. This checklist must not be submitted as proof of closure.
+
+Latest provisioned checkpoint: protected credentials and the dedicated private
+Telegram destination are now supplied. Standalone authenticated Claude succeeds;
+the retained H dual-store J1-J5 matrix passes (50.505s). The first L run exposed an
+invalid test message ID; the second stalled before reply approval. A paired socket
+probe found the harness MCP listener unreachable from Docker at the advertised host
+address. The bounded test/deployment correction uses a schema-valid counter and an
+explicit reachable MCP listener IP; the actual corrected L rerun is queued, not
+passed. These findings do not authorize a diagnostic/runtime scope expansion.

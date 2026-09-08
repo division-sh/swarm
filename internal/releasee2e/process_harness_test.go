@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -84,6 +85,7 @@ type releaseProcessSpec struct {
 	Dev                         bool
 	APIPort                     int
 	MCPPort                     int
+	MCPListenHost               string
 	PublicWebhookBaseURL        string
 	PublicWebhookListen         string
 	TokenFile                   string
@@ -111,12 +113,16 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	if workspaceBackend == "" {
 		workspaceBackend = "host"
 	}
+	mcpHost := options.MCPListenHost
+	if mcpHost == "" {
+		mcpHost = "127.0.0.1"
+	}
 	args := []string{
 		"serve",
 		"--backend", "claude_cli",
 		"--workspace-backend", workspaceBackend,
 		"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.APIPort),
-		"--mcp-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.MCPPort),
+		"--mcp-listen-addr", net.JoinHostPort(mcpHost, fmt.Sprint(options.MCPPort)),
 		"--shutdown-grace", "2s",
 		"--no-color",
 	}

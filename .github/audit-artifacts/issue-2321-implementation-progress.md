@@ -269,3 +269,37 @@ The retained H dual-store J1-J5 matrix is submitted through swarm-test and curre
 queued behind other work; no matrix result is claimed yet. No final full-suite run
 or provisioned L pass is claimed. Bare live archetype proof is still separate work,
 not automatically credited by this fixture or the installed workspace image.
+
+## Provisioned Live Attempt Follow-Through
+
+The user supplied protected local credential files and authorized a dedicated
+private Telegram destination. Bot getMe and the exact private smoke marker were
+verified without printing credentials or changing an existing webhook. A real
+tools-disabled Claude prompt in the workspace succeeded in 2.612s, with one turn
+and reported cost USD 0.0221115. This proves authenticated provider access, not
+Swarm lifecycle or tool-gateway convergence.
+
+The previously queued retained H J1-J5 SQLite/PostgreSQL regression passed in
+50.505s through swarm-test. That remains H credit, not L.
+
+The first actual L SQLite attempt reached readiness but the harness's millisecond
+message ID exceeded the provider-pack integer schema and was correctly refused.
+Replaced it with a deterministic, schema-valid per-journey counter spanning restarts.
+The next attempt admitted ingress and created the agent but timed out waiting for
+the reply approval; no successful Telegram delivery is claimed.
+
+An independent Docker connection probe found the harness's loopback MCP listener
+unreachable through the container host address, while the host bridge interface
+was reachable. The L harness now requires SWARM_COMMAND_LIVE_MCP_HOST, an explicit
+container-reachable host interface IP, and passes it to the existing public MCP
+listener flag. It rejects loopback/wildcard inputs. H keeps its original loopback
+default. No runtime gateway owner, credential rule, retired environment side
+channel, source file or production semantic changed. Added sanitized process/run
+diagnosis on failure and per-ingress progress for the next actual attempt.
+
+The queued diagnostic-only rerun was canceled before acquiring a slot after the
+network mismatch was identified. The corrected L SQLite rerun is queued through
+swarm-test; /tmp/agent-g-2321-live-sqlite-4.log owns its pending result. No passing L
+turn, connector success, restart or full-suite result is claimed. #2432 remains
+separately gated and frozen. No new production defect has been established by
+these harness/deployment findings.
