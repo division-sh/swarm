@@ -1,0 +1,181 @@
+issue: 2321
+agent: agent-g
+status: proposed_for_independent_gate_not_authoritative
+baseline: 09eaf68345cfc24770ce3b5109efd0d49cd15196
+binding_ruling: https://github.com/division-sh/swarm/issues/2321#issuecomment-5578274480
+coverage_audit: issue-2321-preimplementation.md
+promotion_rule: >-
+  This is the proposed authoritative delta, not a merge artifact or permission to implement.
+  After independent approval, promote these rules into platform-spec.yaml in the same PR
+  as the matching implementation and remove contradictory clauses. No runtime implementation
+  is included in this audit branch.
+failure_class: command_owned_execution_and_zero_project_edit_startup
+intended_closure: failure_class_eliminated
+changes:
+  - target: engine.process_execution_posture
+    operation: replace_configuration_authority_preserve_causal_fences
+    rules:
+      - Serve and serve --dev select live execution; test selects mock execution at command composition.
+      - No public configuration, environment, backend or persisted descriptor may select command execution purpose.
+      - Retire runtime.execution_posture in every config layer; reject it with exact originating file/key even when masked by a later layer.
+      - Keep internal typed posture, immutable execution_mode and existing root/child/durable-work/external-effect fences.
+      - Historical causal mode cannot be rewritten on restart, recovery, replay or fork.
+  - target: engine.agent_session_management.llm_provider_selection_config_authority.mock_agent_runtime
+    operation: replace_selection_and_fully_mocked_waivers
+    rules:
+      - Authored doubles remain source data in both commands and never select or waive live execution.
+      - Canonical selection produces the executable actor descriptor once before persistence.
+      - Live descriptor contains selected live backend/model and no executable mock artifact; source retains the double.
+      - Test descriptor contains exact admitted performance bytes/digest and mock mode, retaining the live model metadata.
+      - Test admission enumerates every effective agent declaration including templates/imports/scoped duplicate names and refuses any missing double before acquisition.
+      - A legitimate live backend pin plus a double is valid source under both commands.
+      - Retire public llm.backend mock, --backend mock and authored llm_backend mock as alternative selectors.
+      - Preserve strict stored descriptor validation; no read-time selection, conversion or old-store support.
+    selection_matrix:
+      - {command: serve, live_pin: valid_or_default, double: present, execution: live}
+      - {command: serve, live_pin: valid_or_default, double: absent, execution: live}
+      - {command: test, live_pin: valid_or_default, double: present, execution: exact_double}
+      - {command: test, live_pin: valid_or_default, double: absent, execution: refuse_before_acquisition}
+      - {command: any, live_pin: retired_mock_selector, double: any, execution: teaching_refusal}
+      - {command: structural_reader, live_pin: syntactically_invalid, double: any, execution: structural_refusal}
+  - target: test_specification.deterministic_scenario_runner
+    operation: replace_external_server_ownership
+    rules:
+      - Public test owns one fresh isolated session per invocation, not an external server or retained test daemon.
+      - Keep existing scenario grammar/compiler/profile/API/quiescence owners; do not add restart commands to scenario syntax.
+      - Compile/admit source, scenarios, all doubles and required exact connector responses before acquiring runtime resources.
+      - Explicit API-server/context/target-token options refuse before connection lookup, requests or resource acquisition.
+      - Ambient target settings cannot choose or mutate a live server.
+      - Parse and validate all config layers including invalid/retired keys; valid deployment store/listener/auth/workspace/activation settings do not enter the private session request.
+      - Session owns fresh temp SQLite state, isolated workspace backings, ephemeral loopback API/gateway listeners and generated in-memory transport auth.
+      - Do not claim project retained/dev stores, publish a persistent project context or rewrite the current context.
+      - Public test disables provider ingress, channel registration and external exposure; existing mock-effect fences forbid live effects.
+      - On all cooperative exits withdraw admission, cancel/drain/join owned work, shut down listeners, close contexts/workspaces/store, then release temporary resources.
+      - Forced death may leave inaccessible private temp artifacts; a later invocation never reuses them and no new scavenger/recovery machinery is added.
+    composition:
+      command_owner: cmd/swarm/main.go
+      cli_port: proposed TestSessionRunner injected into cliapp.Execute alongside ServeRunner
+      implementation: proposed serveapp.RunTestSession using shared construction below serveapp.Run
+      constructor: >-
+        Extract buildRuntimeComposition around existing buildStores, schema/source admission,
+        buildServeRuntimeBundleContext/NewRuntime, source-set and API construction.
+        One implementation serves both command compositions, no cliapp-to-serveapp import.
+      start: Existing process lifecycle supervisor and startServeRuntimeContexts own ordering and producer release.
+      ready: Existing committed readiness and exact runtime.identity/source matching precede scenario callback.
+      execute: Existing CLI scenarioRunner over the private real API; callback receives no store access.
+      close: Existing supervisor/context/workspace/store shutdown with reverse acquisition unwind and surfaced errors.
+  - target: cli_specification.command_catalog.test
+    operation: align_owned_session_and_target_refusal
+    rules:
+      - Bare swarm test executes authored or derived scenarios without running/selecting a server first.
+      - No public test posture, retained-store, ingress, daemon or restart selector.
+      - Missing double or required exact connector response teaches source remediation, not live credential setup.
+      - Structural validity is necessary but not sufficient for mock test completeness.
+  - target: engine.boot_verification
+    operation: separate_existing_structural_and_execution_checks
+    rules:
+      - Structural readers use one admitted effective source including provider/channel declarations; no raw-bundle describe validation.
+      - Structural validation acquires no credentials, probes no Claude/Docker/MCP, claims no store and constructs no actor.
+      - Preserve supplied mock artifact/schema/reference/scope/model grammar and all source-level permission/native/tool/workspace declarations.
+      - Keep all registry/supplemental/post-boot structural checks and severity; classify every entry, not a list of errors to suppress.
+      - Split mixed check internals in their existing owner; CLI readers do not reinterpret findings.
+      - Test adds exact performance/response completeness; missing artifacts are not bare structural invalidity.
+      - Serve and doctor retain concrete live model/backend/credential/MCP/native/workspace readiness.
+    runtime_only_observations:
+      - credential_key_exists
+      - managed_credential_state
+      - mcp_server_reachable
+      - provider credential and activation readiness snapshots
+    mixed_existing_checks:
+      - tool_resolution
+      - required_mcp_tool_availability
+      - platform_tool_usage_hints
+      - invalid_field_detection model selection portion
+    mixed_rule: >-
+      Declared candidates/references/permission/schema/model grammar remain structural;
+      actual discovery/fulfillability and selected live provider/model resolution are live readiness.
+      No missing probe is represented as success. Exact per-owner classification is in Amendment 2.
+  - target: cli_specification.command_catalog.verify
+    operation: specify_structural_result
+    rules:
+      - Verify and describe/describe routes share effective-source admission and the existing structural validation report.
+      - JSON and human output separate source validity from deployment readiness.
+      - Keep production_valid as absence of validation-only harness dependence, not machine readiness.
+    output_delta:
+      add: {validation_scope: structural, live_readiness: not_evaluated}
+      remove: [workspace_backend, capability_subjects]
+      preserve:
+        - ok and structural findings with exact severity/location/remediation/evidence
+        - production_valid and harness counts/provenance
+        - source_root and pack_inventory
+      rationale: >-
+        Workspace selection and operational packs.Subject status require an execution/readiness
+        purpose. Bare readers do not fabricate one. Keep declared capability validation and
+        inventory; existing doctor/serve operational projections are unchanged. No compatibility aliases.
+  - target: cli_specification.foundations.output_contract.command_support.output_conformance_registry.rows.describe
+    operation: specify_admitted_structural_view
+    rules:
+      - View is rendered from the same admitted effective source/report as verify, including graph and diagnostics.
+      - Remove mock-sensitive workspace_backend output; add validation_scope structural and live_readiness not_evaluated.
+      - Preserve source_hash/source_authority, root/flows, approvals, graph, routing topology, diagnostics and equivalence meaning.
+      - Keep declared ingress and capability metadata; do not assert credential or deployment readiness.
+  - target: cli_specification.foundations.output_contract.command_support.output_conformance_registry.rows.describe_routes
+    operation: align_source_admission
+    rules:
+      - Preserve routing-topology/v1 and stable quiet edge/issue IDs.
+      - Consume the same admitted effective source/report as verify and describe, not the raw source wrapper.
+  - target: workspace_model.workspace_backend_selection
+    operation: remove_mock_presence_inference
+    rules:
+      - Concrete selection consumes the command-selected execution descriptor and typed effect reachability.
+      - Live doubles do not waive Claude/native/exec/managed-workspace prerequisites.
+      - Structural readers report no concrete workspace decision or machine-readiness claim.
+      - Test uses isolated workspace backings and existing mock-effect boundary, not project workspace data.
+  - target: configuration_source_authority.unified_swarm_config
+    operation: retire_posture_and_shipped_deployment_config
+    rules:
+      - Remove posture key/schema/examples/teaching from all configuration layers, rejecting old usage with provenance.
+      - Examples/archetypes ship no deployment config or precreated .swarm tree; no swarm.live.yaml graduation path.
+      - Retained recovery_on_startup defaults true, explicit false survives presence-aware merge, dev remains fresh.
+      - Keep unrelated configuration precedence under issue 1801 and existing Claude default/prerequisites.
+  - target: cli_specification.foundations.local_runtime_state_authority
+    operation: preserve_live_coordinates_add_test_isolation
+    rules:
+      - Preserve .swarm/stores/dev.db, dev-scratch.db, workspace root and all possession/epoch refusals.
+      - Public test temporary state cannot borrow or replace project live/dev state or context.
+      - No migration/export/purge/compatibility machinery; old selected stores remain unsupported.
+  - target: test_specification.internal_catalog_conformance.compiled_process_full_lifecycle_profile
+    operation: replace_contradictory_mock_serve_invocation_claim
+    rules:
+      - Label retained mock J1-J5 as compiled internal lifecycle harness, not public swarm serve/test.
+      - Parent harness owns store/workspace lifetime across child processes; each child uses the shared runtime construction and real selected-store/API owners.
+      - J1-J4 reopen identical isolated SQLite/PostgreSQL state after graceful stop or SIGKILL; J5 uses existing fresh scratch epoch owner.
+      - Signed ingress uses a local fixture credential/listener through real authentication/receipt/normalization/settlement/delivery owners, never normalized-only injection.
+      - Public test remains fresh and ingress-disabled; no hidden public serve mock path.
+      - Keep exact ordered receipt, entity distinctions, old snapshots, route, card/timer/connector and cardinality assertions.
+      - Lifecycle M3 missing exact mock response fails test admission, not bare structural verify; malformed supplied response still fails structural verification.
+      - Retain separate real live serve/dev command, credential, signed ingress and graceful/crash restart proof on both stores with genuine prerequisites.
+      - Full M1-M24 and J1-J5 invocation/state-owner mapping is mandatory as specified in audit Amendment 2.
+      - Unfiltered CI records actual L/T/H surface; a skipped live prerequisite is not successful closure evidence.
+    internal_entry: >-
+      Proposed TestOwnedMockLifecycleProcessEntry in a go test -c composition-package binary.
+      Harness-only fixture input cannot be parsed by the production binary. Parent starts/joins
+      each child and only cleans roots/database after all children stop. No general service framework.
+  - target: test_specification.internal_catalog_conformance.compiled_process_golden_profile
+    operation: split_public_command_from_internal_mock_lifecycle_credit
+    rules:
+      - Retained mock smoke/restart/kill/burst assertions use internal compiled lifecycle harness.
+      - Authored/derived scenario and concurrent-live noninterference use actual public test command.
+      - Possession refusal, invocation-root, live turn/readiness and dev/retained restart use actual live serve commands separately.
+      - No-external-executable claim belongs to mock test/harness only, never live Claude serve.
+      - Preserve exact workload, profile discovery, identity and public readback assertions; no new fixture-only semantic owner.
+dependencies:
+  acceptance_blocker: {issue: 2319, owner: agent-f, proof: credential_absence_activation_and_combined_webhook_acceptance}
+  closed_consumed: [2295, 2391, 2172, 2214]
+  separate_open: [1801, 2284]
+  sequencing: Independent composition implementation may start after this gate; combined acceptance waits for F's proof.
+gate_request:
+  outcome_requested: approved_as_broad_refactor
+  current_recorded_outcome: insufficient_escalate_broad_refactor
+  implementation: frozen
+  no_new_issue: true
