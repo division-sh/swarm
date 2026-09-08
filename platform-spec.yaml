@@ -564,6 +564,14 @@ contract_formats:
         attempt; started, uncertain, missing, or otherwise non-terminal dispatch evidence
         fails the fork closed. Source-run approval never authorizes a fork-local provider
         call. Policy-inconsistent evidence also fails the fork closed.
+        Repeated recorded-result materialization confirms the complete child
+        attempt against the projected source evidence: exact owner and request
+        coordinates, generation, status and execution mode, result identity and
+        payload, failure, input hash, detached reply authority and copied times.
+        Matching request/result IDs alone do not establish agreement. Conflicting
+        evidence fails without overwriting the row or appending a lifecycle story;
+        an unchanged repeat is a no-op. JSON evidence uses the canonical semantic
+        value comparison, not byte order or a second numeric interpretation.
       fork_generation_correspondence: >
         One transient correspondence owns source-to-child generation projection.
         Its source is the exact admitted run/entity snapshot at the fixed fork
