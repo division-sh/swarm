@@ -91,8 +91,12 @@ These are development results, not a final integrated-head closure matrix.
   Agent-free fixture: this does not claim live-provider turns or agent restarts.
 
 Large/whole suites use go run ./cmd/swarm-test; targeted tests use ordinary go test.
-The unfiltered whole suite acquired its slot after 13m28s. Its result is
-pending; no whole-suite success is claimed.
+The first unfiltered whole suite failed in nine packages. In-scope fixture/guard
+repairs are committed in 009e18c34 and pass targeted checks, including Claude
+retry/restart, directive acknowledgment/rollback, private-runtime isolation and
+exact descriptor consumption. A second unfiltered run is queued. No whole-suite
+success is claimed. The complete 29-row development checklist and explicit proof
+gaps are recorded in issue-2321-proof-accounting.md; it is not a final proof audit.
 
 ## Remaining Work And Acceptance
 

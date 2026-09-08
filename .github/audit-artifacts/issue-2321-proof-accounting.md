@@ -82,11 +82,11 @@ must be rebound to the final integrated head before the final audit is posted.
 | M26 | `TestStructuralReadersShareAdmittedSource`, `TestStructuralReadersRetainPostBootInvalidity`, `TestStructuralReadersDoNotConstructChannelActivation`; compiled reader proof on untouched source. |
 | M27 | Structural check census and no-deployment-observation tests; output explicitly says structural/not_evaluated, preserves production_valid harness meaning, removes operational capability fields. |
 | M28 | `TestCommandOwnedSelectionRefusesMissingPurposeAndRetiredSelectors`, provider/pin/model table, descriptor corruption tests, masked-config rejection. |
-| M29 | Concurrent-live noninterference and pre-acquisition explicit-target refusal are present. Exhaustive poison deployment/config/credential/resource input proof still required. |
+| M29 | `TestPrivateTestIgnoresDeploymentResources` passes with both ambient store backends, an unreadable credential/token/password document, occupied API/MCP ports, a counted ambient API trap, unavailable Docker and retained-store/workspace sentinels. `TestPrivateTestRejectsEachExplicitDeploymentTargetBeforeAcquisition` covers all three target flags. Concurrent-live noninterference remains separate. |
 
 ## Honest Completion Boundary
 
-The first unfiltered swarm-test run failed in ten packages. No runtime blocker was
+The first unfiltered swarm-test run failed in nine packages. No runtime blocker was
 established by those failures: they included old descriptor fixtures, retired
 selector assertions, structural-reader/import guards, an unused import, a removed
 empty fixture directory, an invalid model alias and a nil-vs-empty persisted
@@ -94,6 +94,6 @@ configuration revision. Bounded fixes have targeted passing proofs. The second
 unfiltered run is queued/running; no integrated pass is claimed yet.
 
 Remaining independent work includes the second-suite result, the explicit M14/M15/
-M25/M29 accounting/proof gaps above and final-head verification. External acceptance
+M25 accounting/proof gaps above and final-head verification. External acceptance
 still requires the provisioned L environment and #2319 proof. No final audit or
 review-ready PR exists. This checklist must not be submitted as proof of closure.
