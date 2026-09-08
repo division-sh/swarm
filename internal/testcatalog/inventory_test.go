@@ -291,7 +291,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
-	catalogUnits := []string{"catalog-replay", "catalog-runtime"}
+	catalogUnits := []string{"catalog-replay-1", "catalog-replay-2", "catalog-replay-3", "catalog-runtime", "catalog-runtime-staged"}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
 		var selectors []string
 		for _, id := range ids {

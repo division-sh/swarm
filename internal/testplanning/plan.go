@@ -263,7 +263,16 @@ func MatrixJSON(plan RunPlan) ([]byte, error) {
 	matrix := struct {
 		Include []entry `json:"include"`
 	}{Include: make([]entry, 0, len(plan.Units))}
-	for _, unit := range plan.Units {
+	// Offer expensive units first without changing the digest-bound plan. Actions
+	// controls admission; this ordering does not promise a runner start order.
+	ordered := append([]ProofUnit(nil), plan.Units...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].WeightSeconds == ordered[j].WeightSeconds {
+			return ordered[i].ID < ordered[j].ID
+		}
+		return ordered[i].WeightSeconds > ordered[j].WeightSeconds
+	})
+	for _, unit := range ordered {
 		matrix.Include = append(matrix.Include, entry{Unit: unit.ID})
 	}
 	return json.Marshal(matrix)

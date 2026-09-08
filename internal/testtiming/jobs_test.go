@@ -38,7 +38,7 @@ func TestWholeJobEvidenceIsExactAndIncludesAllCosts(t *testing.T) {
 	opts := EvaluationOptions{Plan: plan, WorkflowRunID: 1, WorkflowAttempt: 1}
 	result := EvaluateBudget(timingTestPolicy(), opts, commands)
 	AttachJobEvidence(&result, plan, 1, 1, decoded)
-	if result.Status != BudgetPass || result.Jobs.RunnerMinutes != float64(len(jobs)) || result.Jobs.QueueSeconds != float64(5*len(jobs)) || result.Jobs.PeakConcurrency != 2 {
+	if result.Status != BudgetPass || result.Jobs.RunnerMinutes != float64(len(jobs)) || result.Jobs.StartLagSeconds != float64(5*len(jobs)) || result.Jobs.PeakConcurrency != 2 {
 		t.Fatalf("whole-job report: %+v jobs=%+v", result, result.Jobs)
 	}
 	var report bytes.Buffer

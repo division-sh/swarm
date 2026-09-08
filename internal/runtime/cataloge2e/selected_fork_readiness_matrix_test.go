@@ -349,7 +349,19 @@ func (s stopAfterSelectedForkCommit) MaterializeRunForkForSelectedContractExecut
 	return result, errStopAfterSelectedForkCommit
 }
 
-func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
+func TestSelectedForkFlowOwnedReadinessBothStoresInitial(t *testing.T) {
+	runSelectedForkFlowOwnedReadinessBothStores(t, "initial")
+}
+
+func TestSelectedForkFlowOwnedReadinessBothStoresStaged(t *testing.T) {
+	runSelectedForkFlowOwnedReadinessBothStores(t, "staged")
+}
+
+func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage string) {
+	t.Helper()
+	if selectedStage != "initial" && selectedStage != "staged" {
+		t.Fatalf("invalid readiness proof stage %q", selectedStage)
+	}
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, declarations := range []int{0, 1, 2} {
 			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "activity_loop", "activity_loop_rule", "activity_loop_failure", "agent", "mixed", "mixed_progress"} {
@@ -361,6 +373,9 @@ func TestSelectedForkFlowOwnedReadinessBothStores(t *testing.T) {
 					continue
 				}
 				for _, stage := range []string{"initial", "staged"} {
+					if stage != selectedStage {
+						continue
+					}
 					t.Run(fmt.Sprintf("%s/declared_%d/%s/%s", backend, declarations, frontier, stage), func(t *testing.T) {
 						root := selectedForkReadinessCatalogFixture(t, declarations, frontier)
 						var activityCalls atomic.Int32

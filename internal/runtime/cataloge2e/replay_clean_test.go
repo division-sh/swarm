@@ -623,9 +623,40 @@ func canonicalJSONBytes(raw []byte) ([]byte, error) {
 	return replayconformance.CanonicalJSON(raw)
 }
 
-func TestCatalogReplayClean_SelectedStores(t *testing.T) {
+func TestCatalogReplayClean_SelectedStores1(t *testing.T) {
+	runCatalogReplayCleanPartition(t, 1)
+}
+
+func TestCatalogReplayClean_SelectedStores2(t *testing.T) {
+	runCatalogReplayCleanPartition(t, 2)
+}
+
+func TestCatalogReplayClean_SelectedStores3(t *testing.T) {
+	runCatalogReplayCleanPartition(t, 3)
+}
+
+// Cuts measured from full CI 34287939711: 84.28s, 86.48s, 86.48s of
+// fixture execution. Every fixture retains all three runs and comparisons.
+func catalogReplayPartition(name string) int {
+	if name < "test-dual-delivery" {
+		return 1
+	}
+	if name < "test-policy-hard-gate-override" {
+		return 2
+	}
+	return 3
+}
+
+func runCatalogReplayCleanPartition(t *testing.T, partition int) {
+	t.Helper()
+	if partition < 1 || partition > 3 {
+		t.Fatalf("invalid catalog replay partition %d", partition)
+	}
 	for _, fixture := range catalogReplayCleanFixtures(t) {
 		fixture := fixture
+		if catalogReplayPartition(fixture.Name) != partition {
+			continue
+		}
 		t.Run(fixture.Name, func(t *testing.T) {
 			transcript := buildCatalogExecutionTranscript(t, fixture)
 			sourceHarness, source := executeCatalogTranscript(t, fixture, catalogBackendPostgres, transcript)
@@ -645,6 +676,29 @@ func TestCatalogReplayCleanCensus(t *testing.T) {
 	if len(fixtures) != 94 {
 		t.Fatalf("replay-clean fixtures = %d, want 94", len(fixtures))
 	}
+	counts := map[int]int{}
+	seen := map[string]bool{}
+	for _, fixture := range fixtures {
+		if seen[fixture.Name] {
+			t.Fatalf("duplicate executable replay fixture %s", fixture.Name)
+		}
+		seen[fixture.Name] = true
+		counts[catalogReplayPartition(fixture.Name)]++
+	}
+	for partition := 1; partition <= 3; partition++ {
+		if counts[partition] == 0 {
+			t.Fatalf("empty replay partition %d", partition)
+		}
+	}
+	assertCatalogPartitionEntrypoints(t, "replay_clean_test.go", "TestCatalogReplayClean_SelectedStores", "runCatalogReplayCleanPartition", map[string]string{
+		"TestCatalogReplayClean_SelectedStores1": "1",
+		"TestCatalogReplayClean_SelectedStores2": "2",
+		"TestCatalogReplayClean_SelectedStores3": "3",
+	})
+	assertCatalogPartitionEntrypoints(t, "selected_fork_readiness_matrix_test.go", "TestSelectedForkFlowOwnedReadinessBothStores", "runSelectedForkFlowOwnedReadinessBothStores", map[string]string{
+		"TestSelectedForkFlowOwnedReadinessBothStoresInitial": `"initial"`,
+		"TestSelectedForkFlowOwnedReadinessBothStoresStaged":  `"staged"`,
+	})
 
 	repo := repoRootFromCatalogE2E(t)
 	for _, relative := range []string{
@@ -654,6 +708,44 @@ func TestCatalogReplayCleanCensus(t *testing.T) {
 		"internal/runtime/cataloge2e/tier12_runtime_tools_e2e_test.go",
 	} {
 		assertCatalogReplayPrimitivesAbsent(t, filepath.Join(repo, filepath.FromSlash(relative)))
+	}
+}
+
+func assertCatalogPartitionEntrypoints(t *testing.T, filename, prefix, executor string, want map[string]string) {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repoRootFromCatalogE2E(t), "internal/runtime/cataloge2e", filename), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrappers := map[string]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || !strings.HasPrefix(fn.Name.Name, prefix) {
+			continue
+		}
+		if fn.Body == nil || len(fn.Body.List) != 1 {
+			t.Fatalf("%s must call the complete replay proof exactly once", fn.Name.Name)
+		}
+		statement, ok := fn.Body.List[0].(*ast.ExprStmt)
+		if !ok {
+			t.Fatalf("%s has no replay call", fn.Name.Name)
+		}
+		call, ok := statement.X.(*ast.CallExpr)
+		if !ok || len(call.Args) != 2 {
+			t.Fatalf("%s has invalid replay call", fn.Name.Name)
+		}
+		owner, ok := call.Fun.(*ast.Ident)
+		if !ok || owner.Name != executor {
+			t.Fatalf("%s bypasses the full replay proof", fn.Name.Name)
+		}
+		part, ok := call.Args[1].(*ast.BasicLit)
+		if !ok || want[fn.Name.Name] == "" || part.Value != want[fn.Name.Name] || wrappers[fn.Name.Name] {
+			t.Fatalf("duplicate or invalid replay partition %s", fn.Name.Name)
+		}
+		wrappers[fn.Name.Name] = true
+	}
+	if len(wrappers) != len(want) {
+		t.Fatalf("replay wrappers=%v, want every partition", wrappers)
 	}
 }
 
