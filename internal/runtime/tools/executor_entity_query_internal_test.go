@@ -66,6 +66,17 @@ func TestFilterEntityStateRowsCEL_RejectsUndeclaredFieldBeforeEvalOnEmptyRows(t 
 	}
 }
 
+func TestEntityFilterPreservesTopLevelNullComparisons(t *testing.T) {
+	schema := testEntityFilterSchema()
+	rows := []map[string]any{{"fields": map[string]any{"status": nil, "score": nil}}}
+	for _, expression := range []string{`status == null`, `score == null`} {
+		got, err := filterEntityStateRowsCEL(expression, rows, schema)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("%s: rows=%v err=%v", expression, got, err)
+		}
+	}
+}
+
 func testEntityFilterSchema() entityToolSchema {
 	return entityToolSchema{
 		Defined: true,

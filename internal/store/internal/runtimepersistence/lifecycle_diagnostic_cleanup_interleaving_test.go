@@ -133,6 +133,7 @@ func TestLifecycleDiagnosticCleanupTransactionInterleavingsBothStores(t *testing
 					if err := store.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
 						t.Fatal(err)
 					}
+					store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 					return store
 				}
 				firstStore, secondStore := open(firstDB), open(secondDB)

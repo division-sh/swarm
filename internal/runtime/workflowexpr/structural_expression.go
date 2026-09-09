@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/google/cel-go/cel"
@@ -22,17 +21,18 @@ type workflowStructuralField struct {
 }
 
 type workflowStructuralNode struct {
-	name      string
-	typeValue runtimecontracts.ResolvedCatalogType
-	fields    map[string]workflowStructuralField
+	name       string
+	typeValue  runtimecontracts.ResolvedCatalogType
+	fields     map[string]workflowStructuralField
+	entityRoot bool
 }
 
 type workflowStructuralTypeProvider struct {
 	celtypes.Provider
-	nodes           map[string]*workflowStructuralNode
-	rootTypes       map[string]*cel.Type
-	rootIdentifiers map[string]struct{}
-	aliases         map[string]string
+	nodes             map[string]*workflowStructuralNode
+	rootTypes         map[string]*cel.Type
+	rootIdentifiers   map[string]struct{}
+	registrationOrder []*workflowStructuralNode
 }
 
 func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpressionOptions) (*workflowStructuralTypeProvider, error) {
@@ -41,7 +41,6 @@ func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpress
 		nodes:           map[string]*workflowStructuralNode{},
 		rootTypes:       map[string]*cel.Type{},
 		rootIdentifiers: map[string]struct{}{},
-		aliases:         map[string]string{},
 	}
 	for _, root := range []struct {
 		name  string
@@ -140,22 +139,18 @@ func (p *workflowStructuralTypeProvider) register(root, path string, resolved ru
 		}
 		return cel.MapType(key, value), nil
 	case runtimecontracts.CatalogTypeObject:
-		alias := strings.TrimSpace(resolved.Name)
-		if alias != "" {
-			if typeName, ok := p.aliases[alias]; ok {
-				return cel.ObjectType(typeName), nil
+		entityRoot := root == "entity" && path == "entity"
+		// Names and traversal paths are diagnostics, not type identities. Only
+		// exact structural equality permits reuse of a provider-local handle.
+		for _, node := range p.registrationOrder {
+			if node.entityRoot == entityRoot && runtimecontracts.StructuralCatalogTypesEqual(node.typeValue, resolved) {
+				return cel.ObjectType(node.name), nil
 			}
 		}
-		typeIdentity := root + "_" + path
-		if alias != "" {
-			typeIdentity = alias
-		}
-		typeName := workflowStructuralTypePrefix + sanitizeStructuralTypeName(typeIdentity)
-		if alias != "" {
-			p.aliases[alias] = typeName
-		}
-		node := &workflowStructuralNode{name: typeName, typeValue: resolved.Clone(), fields: map[string]workflowStructuralField{}}
+		typeName := fmt.Sprintf("%srecord%d", workflowStructuralTypePrefix, len(p.registrationOrder))
+		node := &workflowStructuralNode{name: typeName, typeValue: resolved.Clone(), fields: map[string]workflowStructuralField{}, entityRoot: entityRoot}
 		p.nodes[typeName] = node
+		p.registrationOrder = append(p.registrationOrder, node)
 		for _, field := range resolved.Fields {
 			fieldType, err := p.register(root, path+"_"+field.Name, field.Type)
 			if err != nil {
@@ -177,18 +172,6 @@ func (p *workflowStructuralTypeProvider) register(root, path string, resolved ru
 	default:
 		return nil, fmt.Errorf("unsupported structural kind %q at %s", resolved.Kind, path)
 	}
-}
-
-func sanitizeStructuralTypeName(value string) string {
-	var out strings.Builder
-	for _, r := range value {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
-			out.WriteRune(r)
-		} else {
-			out.WriteByte('_')
-		}
-	}
-	return out.String()
 }
 
 func (p *workflowStructuralTypeProvider) rootType(name string) (*cel.Type, bool) {
@@ -351,7 +334,7 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 	if expr.Kind() == celast.CallKind {
 		call := expr.AsCall()
 		args := call.Args()
-		if call.FunctionName() == "_[_]" && len(args) == 2 && a.structuralExpression(args[0], bindings) {
+		if call.FunctionName() == "_[_]" && len(args) == 2 && (a.structuralExpression(args[0], bindings) || a.structuralExpression(args[1], bindings)) {
 			return fmt.Errorf("direct map/list lookup is not presence-safe; use the stock optional lookup form <value>[?<key-or-index>] and decide or forward its absence")
 		}
 		switch call.FunctionName() {
@@ -421,7 +404,7 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 				bodyBindings[value.IterVar2()] = struct{}{}
 			}
 		}
-		if a.structuralExpression(value.AccuInit(), bindings) {
+		if a.structuralExpression(value.AccuInit(), bindings) || a.structuralExpression(value.LoopStep(), bodyBindings) {
 			bodyBindings[value.AccuVar()] = struct{}{}
 		}
 		for _, child := range []celast.Expr{value.LoopCondition(), value.LoopStep()} {
@@ -431,7 +414,7 @@ func (a workflowOptionalReadAnalyzer) validate(expr celast.Expr, facts workflowP
 		}
 		resultBindings := cloneWorkflowStructuralBindings(bindings)
 		delete(resultBindings, value.AccuVar())
-		if a.structuralExpression(value.AccuInit(), bindings) {
+		if _, owned := bodyBindings[value.AccuVar()]; owned {
 			resultBindings[value.AccuVar()] = struct{}{}
 		}
 		return a.validate(value.Result(), withoutWorkflowShadowedFacts(facts, value.AccuVar()), resultBindings)
@@ -474,7 +457,7 @@ func (a workflowOptionalReadAnalyzer) structuralExpression(expr celast.Expr, bin
 		return false
 	}
 	if typeValue := a.ast.GetType(expr.ID()); typeValue != nil {
-		if _, owned := a.provider.nodes[typeValue.TypeName()]; owned {
+		if a.ownsType(typeValue) {
 			return true
 		}
 	}
@@ -490,12 +473,62 @@ func (a workflowOptionalReadAnalyzer) structuralExpression(expr celast.Expr, bin
 			return true
 		}
 		args := call.Args()
-		return len(args) > 0 && a.structuralExpression(args[0], bindings)
+		for _, arg := range args {
+			if a.structuralExpression(arg, bindings) {
+				return true
+			}
+		}
+		return false
 	case celast.ComprehensionKind:
-		return a.structuralExpression(expr.AsComprehension().IterRange(), bindings)
+		value := expr.AsComprehension()
+		body := cloneWorkflowStructuralBindings(bindings)
+		delete(body, value.IterVar())
+		delete(body, value.IterVar2())
+		delete(body, value.AccuVar())
+		if a.structuralExpression(value.IterRange(), bindings) {
+			body[value.IterVar()] = struct{}{}
+			if value.HasIterVar2() {
+				body[value.IterVar2()] = struct{}{}
+			}
+		}
+		if a.structuralExpression(value.AccuInit(), bindings) || a.structuralExpression(value.LoopStep(), body) {
+			body[value.AccuVar()] = struct{}{}
+		}
+		delete(body, value.IterVar())
+		delete(body, value.IterVar2())
+		return a.structuralExpression(value.Result(), body)
+	case celast.ListKind:
+		for _, value := range expr.AsList().Elements() {
+			if a.structuralExpression(value, bindings) {
+				return true
+			}
+		}
+	case celast.MapKind:
+		for _, entry := range expr.AsMap().Entries() {
+			value := entry.AsMapEntry()
+			if a.structuralExpression(value.Key(), bindings) || a.structuralExpression(value.Value(), bindings) {
+				return true
+			}
+		}
 	default:
 		return false
 	}
+	return false
+}
+
+func (a workflowOptionalReadAnalyzer) ownsType(value *cel.Type) bool {
+	if value == nil {
+		return false
+	}
+	if _, owned := a.provider.nodes[value.TypeName()]; owned {
+		return true
+	}
+	for _, parameter := range value.Parameters() {
+		if a.ownsType(parameter) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateWorkflowResultType(output *cel.Type, provider *workflowStructuralTypeProvider, opts ValueExpressionOptions) error {
