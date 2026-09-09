@@ -74,6 +74,9 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	for edge, allowance := range inheritedFanOutBoundaryAllowances() {
 		allowed[edge] = allowance
 	}
+	for edge, allowance := range receiverMaterializationBoundaryAllowances() {
+		allowed[edge] = allowance
+	}
 	return allowed
 }
 
@@ -250,7 +253,7 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 					break
 				}
 				callee := historicalBoundaryFunction(fn)
-				if inheritedFanOutBoundaryReference(callee) {
+				if inheritedFanOutBoundaryReference(callee) || receiverMaterializationBoundaryReference(callee) {
 					add(n, "reference:"+callee)
 				}
 				switch callee {
@@ -515,6 +518,11 @@ func (arbitrary *unexpectedReader) mintOrigin() {
 func (arbitrary *unexpectedReader) admitOrigin(other bus.PublicationCommand) error {
     return other.ValidateFanOut()
 }
+func (arbitrary *unexpectedReader) mintReceiverPlan() {
+    mint := events.AdmitReceiverMaterializationPlan
+    alias := mint
+    _ = alias
+}
 func (arbitrary *unexpectedReader) decode(raw []byte) error {
     var fact eventAlias
     unmarshal := codec.Unmarshal
@@ -568,6 +576,7 @@ func ordinaryBusiness(raw []byte) error {
 	findings := historicalBoundaryCollect(pkg, info, fset, file)
 	got := historicalBoundaryProblems(findings, historicalBoundaryAllowances(), false)
 	want := []string{
+		historicalBoundaryOwner + "unexpectedReader.mintReceiverPlan/reference:events::AdmitReceiverMaterializationPlan",
 		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:events::NewInheritedFanOutOrigin",
 		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:runtime/fanoutobligation::PrepareOrdinalEmission",
 		historicalBoundaryOwner + "unexpectedReader.admitOrigin/reference:runtime/bus::PublicationCommand.ValidateFanOut",
