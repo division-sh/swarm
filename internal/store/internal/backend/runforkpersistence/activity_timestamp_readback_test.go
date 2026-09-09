@@ -35,7 +35,14 @@ func activityTimestampDatabase(t *testing.T, backend string) *sql.DB {
 	_, err := db.Exec(fmt.Sprintf(`CREATE TABLE activity_attempts (
 		request_event_id TEXT PRIMARY KEY, status TEXT, execution_mode TEXT,
 		result_event_type TEXT, result_payload TEXT, failure TEXT, input_hash TEXT,
-		started_at %s, completed_at %s, updated_at %s)`, stamp, stamp, stamp))
+		started_at %s, completed_at %s, updated_at %s,
+		run_id TEXT NOT NULL DEFAULT '', source_event_id TEXT, parent_event_id TEXT,
+		entity_id TEXT, flow_instance TEXT, node_id TEXT NOT NULL DEFAULT '',
+		handler_event_key TEXT NOT NULL DEFAULT '', activity_id TEXT NOT NULL DEFAULT '',
+		tool TEXT NOT NULL DEFAULT '', effect_class TEXT NOT NULL DEFAULT '',
+		attempt INTEGER NOT NULL DEFAULT 1, success_event TEXT NOT NULL DEFAULT '',
+		failure_event TEXT NOT NULL DEFAULT '', result_event_id TEXT, loop_generation TEXT,
+		loop_stage TEXT)`, stamp, stamp, stamp))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +87,7 @@ func TestActivityTimestampReaderTerminalPrecisionBothStores(t *testing.T) {
 							}
 							failure = string(raw)
 						}
-						_, err := db.Exec(`INSERT INTO activity_attempts VALUES ($1,$2,$3,$4,$5,$6,'exact-hash',$7,$8,$9)`, id, status, mode, resultType, resultPayload, failure, want[0], want[1], want[2])
+						_, err := db.Exec(`INSERT INTO activity_attempts (request_event_id,status,execution_mode,result_event_type,result_payload,failure,input_hash,started_at,completed_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'exact-hash',$7,$8,$9)`, id, status, mode, resultType, resultPayload, failure, want[0], want[1], want[2])
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -113,7 +120,7 @@ func TestActivityTimestampReaderSQLiteTextAndBytesPrecision(t *testing.T) {
 			if kind == "bytes" {
 				raw = []byte(raw.(string))
 			}
-			if _, err := db.Exec(`INSERT INTO activity_attempts VALUES ($1,'succeeded','live','write.result','{}','null','hash',$2,$3,$4)`, id, raw, raw, raw); err != nil {
+			if _, err := db.Exec(`INSERT INTO activity_attempts (request_event_id,status,execution_mode,result_event_type,result_payload,failure,input_hash,started_at,completed_at,updated_at) VALUES ($1,'succeeded','live','write.result','{}','null','hash',$2,$3,$4)`, id, raw, raw, raw); err != nil {
 				t.Fatal(err)
 			}
 			got, err := readActivityTimestampEvidence(t, db, id)
@@ -142,7 +149,7 @@ func TestActivityTimestampReaderRejectsIncompleteEvidenceBothStores(t *testing.T
 					t.Run(column+"/"+name, func(t *testing.T) {
 						id := uuid.NewString()
 						at := time.Date(2026, 9, 8, 0, 0, 0, 123456000, time.UTC)
-						if _, err := db.Exec(`INSERT INTO activity_attempts VALUES ($1,'succeeded','live','write.result','{}','null','hash',$2,$3,$4)`, id, at, at, at); err != nil {
+						if _, err := db.Exec(`INSERT INTO activity_attempts (request_event_id,status,execution_mode,result_event_type,result_payload,failure,input_hash,started_at,completed_at,updated_at) VALUES ($1,'succeeded','live','write.result','{}','null','hash',$2,$3,$4)`, id, at, at, at); err != nil {
 							t.Fatal(err)
 						}
 						if _, err := db.Exec(`UPDATE activity_attempts SET `+column+`=$1 WHERE request_event_id=$2`, value, id); err != nil {
@@ -161,7 +168,7 @@ func TestActivityTimestampReaderRejectsIncompleteEvidenceBothStores(t *testing.T
 			} {
 				t.Run(cell.name, func(t *testing.T) {
 					id, at := uuid.NewString(), time.Now().UTC()
-					if _, err := db.Exec(`INSERT INTO activity_attempts VALUES ($1,$2,$3,$4,'{}','null','hash',$5,$6,$7)`, id, cell.status, cell.mode, cell.result, at, at, at); err != nil {
+					if _, err := db.Exec(`INSERT INTO activity_attempts (request_event_id,status,execution_mode,result_event_type,result_payload,failure,input_hash,started_at,completed_at,updated_at) VALUES ($1,$2,$3,$4,'{}','null','hash',$5,$6,$7)`, id, cell.status, cell.mode, cell.result, at, at, at); err != nil {
 						t.Fatal(err)
 					}
 					if _, err := readActivityTimestampEvidence(t, db, id); err == nil {

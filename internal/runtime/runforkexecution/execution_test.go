@@ -1278,9 +1278,8 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	laterAt := earlierAt.Add(time.Second)
 	earlierEvent := seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, earlierEventID, "item.received", earlierAt, "test_entity", nil, loaded.SourceArtifactFact)
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
-	laterEvent := eventtest.ChildForProducerWithRoutingSource(
-		laterEventID, events.EventType("item.received"), eventtest.Producer(events.EventProducerNode, "source-node"), "", payload, 0,
-		events.EventLineage{RunID: sourceRunID, ParentEventID: earlierEventID, ExecutionMode: executionmode.Live},
+	laterEvent := eventtest.ExistingRunRootIngressWithRoutingSource(
+		laterEventID, events.EventType("item.received"), "source-runtime", "", payload, 0, sourceRunID,
 		earlierEvent.NormalizedEnvelope(), earlierEvent.RoutingSource(), laterAt,
 	)
 	commitRunForkTestEvent(t, ctx, pg, laterEvent, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("test-node")})

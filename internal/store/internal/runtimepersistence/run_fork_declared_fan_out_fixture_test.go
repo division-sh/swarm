@@ -63,6 +63,7 @@ func seedDeclaredForkFanOutFixture(t *testing.T, backend string, fixture authorA
 	}
 	record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "pending", 1, at)
 	record.CurrentState, record.EntityType, record.Mode = "review", "root", "static"
+	record.EnteredStageAt, record.UpdatedAt = at, at
 	if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
 		State: record, FanOutIntent: &request,
 		DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claim.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},

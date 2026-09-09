@@ -15,6 +15,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
@@ -48,7 +49,7 @@ type persistedEventIdentity = eventrecord.Record
 type runForkActivationLineage = storerunfork.RunForkActivationLineage
 type runForkActivityRequestPayload = storerunfork.RunForkActivityRequestPayload
 type runForkGateActivationBinding = storerunfork.RunForkGateActivationBinding
-type runForkEntityProjection = storerunfork.RunForkEntityProjection
+type runForkEntityProjection = runfork.EntityProjection
 type runCompletionOwnerSummaries = storerunlifecycle.RunCompletionOwnerSummaries
 type terminalRunMutation = storerunlifecycle.TerminalRunMutation
 type standaloneRuntimePlatformRunRecord = storerunlifecycle.StandaloneRuntimePlatformRunRecord

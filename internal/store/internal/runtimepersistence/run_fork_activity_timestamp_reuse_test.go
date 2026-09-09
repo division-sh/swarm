@@ -334,13 +334,8 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := events.NewChildEvent(events.ChildEventInput{
-		Facts:   events.EventFacts{ID: requestID, Type: "platform.activity_requested", Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "workflow"}, Payload: payload, ChainDepth: 1, RoutingSource: source, CreatedAt: at.Add(2 * time.Minute)},
-		Lineage: events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	event := eventtest.ChildForProducerWithRoutingSource(requestID, "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
+		events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live}, events.EventEnvelope{}, source, at.Add(2*time.Minute))
 	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, nil); err != nil {
 		t.Fatal(err)
 	}

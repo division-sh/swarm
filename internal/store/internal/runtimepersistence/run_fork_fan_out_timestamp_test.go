@@ -23,7 +23,7 @@ func TestRunForkFanOutTimestampCurrentReadbackBothStores(t *testing.T) {
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			store := owner.(runForkSelectedLifecycleStore)
 			at := time.Date(2026, 9, 8, 10, 11, 12, 123456000, time.UTC)
-			source := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 2, at)
+			ctx, source := seedDeclaredForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 2, at)
 			captureFanOutBarrierForkRevision(t, ctx, db, source.runID, postgres)
 			outcome := eventtest.ExistingRunRootIngress(uuid.NewString(), "timestamp.fanout_finished", "timestamp-proof", "", []byte(`{}`), 0, source.runID, events.EventEnvelope{}, at.Add(time.Second))
 			if err := commitSemanticPipelineProcessedEventFixture(ctx, owner, outcome); err != nil {
@@ -43,7 +43,7 @@ func TestRunForkFanOutTimestampCurrentReadbackBothStores(t *testing.T) {
 			}
 			captureFanOutBarrierForkRevision(t, ctx, db, source.runID, postgres)
 			point := historicalLineageCheckpoint(t, db, source.runID, postgres, at.Add(2*time.Second))
-			request := runfork.RunForkMaterializeRequest{SourceRunID: source.runID, At: point}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: source.runID, At: point, OriginalLoopCarriage: originalCarriageForRun(t, owner, source.runID)}
 			child, err := store.MaterializeRunFork(ctx, request)
 			if err != nil || child.MaterializedFanOutCount != 1 || child.ForkRunID == source.runID {
 				t.Fatalf("real first materialization: %#v err=%v", child, err)
