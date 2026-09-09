@@ -77,9 +77,17 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 		fixture         string
 		eventName       string
 		seedSourceTimer bool
+		fanOutBarrier   bool
 		wantCode        string
 		wantCapability  string
 	}{
+		{
+			name:           "selected fan-out barrier has no deferred execution owner",
+			fanOutBarrier:  true,
+			eventName:      "items.ready",
+			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
+			wantCapability: selectedContractDeferredWorkFanOutBarrier,
+		},
 		{
 			name:            "revisioned active source timer",
 			fixture:         "tests/tier5-flow-lifecycle/test-timer-fire",
@@ -123,6 +131,9 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			ctx := runForkTestContext(t)
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := filepath.Join(repoRoot, test.fixture)
+			if test.fanOutBarrier {
+				contractsRoot = canonicalrouting.CopyForkFanOutCarrier(t, false, true)
+			}
 			loader := admittedFixtureSelectedContractSourceLoader{
 				RepoRoot:         repoRoot,
 				SourceRoot:       contractsRoot,
@@ -399,8 +410,11 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 		fixture        string
 		eventName      string
 		stateOnly      bool
+		fanOutBarrier  bool
 		wantCapability string
 	}{
+		{name: "delivery replay fan-out barrier", fanOutBarrier: true, eventName: "items.ready", wantCapability: selectedContractDeferredWorkFanOutBarrier},
+		{name: "state only fan-out barrier", fanOutBarrier: true, stateOnly: true, eventName: "items.ready", wantCapability: selectedContractDeferredWorkFanOutBarrier},
 		{
 			name:           "delivery replay workflow timer",
 			fixture:        "tests/tier5-flow-lifecycle/test-timer-fire",
@@ -453,6 +467,9 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			ctx := runForkTestContext(t)
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := filepath.Join(repoRoot, test.fixture)
+			if test.fanOutBarrier {
+				contractsRoot = canonicalrouting.CopyForkFanOutCarrier(t, false, true)
+			}
 			loader := admittedFixtureSelectedContractSourceLoader{
 				RepoRoot:         repoRoot,
 				SourceRoot:       contractsRoot,
@@ -472,6 +489,19 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			at := time.Unix(1700002215, 0).UTC()
 			if test.stateOnly {
 				seedSelectedExecutionStateOnlySourceRun(t, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
+			} else if test.fanOutBarrier {
+				// This declaration's receiver is the run root, not the template
+				// entity used by the older deferred-work fixtures below.
+				entityID = sourceRunID
+				seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
+					t, db, sourceRunID, entityID, sourceEventID, test.eventName, at, "root",
+					selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", ""), nil,
+					eventtest.RootRoutingSource(sourceRunID),
+					events.EnvelopeForEntityID(events.EventEnvelope{}, sourceRunID), loaded.SourceArtifactFact,
+				)
+				if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $1::uuid AND entity_id = $1::uuid`, sourceRunID); err != nil {
+					t.Fatalf("seed declared root receiver metadata: %v", err)
+				}
 			} else {
 				seedSelectedExecutionSourceRunWithPrimaryRoute(
 					t,
