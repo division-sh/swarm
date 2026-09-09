@@ -8,25 +8,54 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
-func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
+func TestDurableDataInvocationInvarianceSQLitePostgresShard1(t *testing.T) {
+	testDurableDataInvocation(t, 0)
+}
+func TestDurableDataInvocationInvarianceSQLitePostgresShard2(t *testing.T) {
+	testDurableDataInvocation(t, 1)
+}
+func TestDurableDataInvocationInvarianceSQLitePostgresShard3(t *testing.T) {
+	testDurableDataInvocation(t, 2)
+}
+func TestDurableDataInvocationInvarianceSQLitePostgresShard4(t *testing.T) {
+	testDurableDataInvocation(t, 3)
+}
+func TestDurableDataInvocationInvarianceSQLitePostgresShard5(t *testing.T) {
+	testDurableDataInvocation(t, 4)
+}
+func TestDurableDataInvocationInvarianceSQLitePostgresShard6(t *testing.T) {
+	testDurableDataInvocation(t, 5)
+}
+
+func testDurableDataInvocation(t *testing.T, shard int) {
+	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
 	if dsn == "" {
 		t.Fatalf("%s is required for the two-store invocation proof", goldenPostgresEnv)
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, releaseRoot)
-	var baseline map[string]map[string]any
-	var baselineHash string
-	var baselineMu sync.Mutex
+	// Every worker compares against the same checked fixture, so splitting the
+	// process does not reset the cross-geometry/cross-backend equality oracle.
+	var expected struct {
+		BundleHash string                    `json:"bundle_hash"`
+		Readback   map[string]map[string]any `json:"readback"`
+	}
+	oracle, err := os.ReadFile(filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/static_data_invocation.expected.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(oracle, &expected); err != nil {
+		t.Fatal(err)
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			// Stores, authored trees and processes are independent. Only the
-			// immutable expected semantic output is shared between backends.
+			// Stores, authored trees and processes are independent; only immutable
+			// expected semantic output is shared between backends and shards.
 			t.Parallel()
 			base := filepath.Join(releaseRoot, backend)
 			root := filepath.Join(base, "bundle")
@@ -50,15 +79,7 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 			writeReleaseFile(t, token, goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, base, store.passwordEnv, 0)
 			assertGoldenProcessHasNoExternalExecutables(t, env)
-			cells := []struct{ name, cwd, operand string }{
-				{"relative-inside", base, "bundle"}, {"absolute-inside", base, root},
-				{"relative-outside", outside, "../bundle"}, {"absolute-outside", outside, root},
-				{"omitted", root, ""}, {"dot", root, "."},
-				{"symlink-cwd", filepath.Join(base, "alias"), "."},
-				{"alias", base, "alias"}, {"chain", base, "chain"}, {"ancestor", base, "ancestor/bundle"},
-				{"relative-alias-parent", base, "outside/link/../bundle"},
-				{"absolute-alias-parent", outside, outside + "/link/../bundle"},
-			}
+			cells := staticDataInvocationCells(shard, base)
 			foreignProven := false
 			for _, cell := range cells {
 				t.Run(cell.name, func(t *testing.T) {
@@ -96,31 +117,21 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 					if len(identity.SourceArtifacts) != 1 || identity.SourceArtifacts[0].BundleHash != hash {
 						t.Fatalf("runtime.identity differs from health: %#v", identity)
 					}
-					baselineMu.Lock()
-					if baselineHash == "" {
-						baselineHash = hash
-					}
-					wantHash := baselineHash
-					baselineMu.Unlock()
+					wantHash := expected.BundleHash
 					if hash != wantHash {
 						t.Fatalf("hash = %s, want %s", hash, wantHash)
 					}
 					readStarted := time.Now()
 					observed := runStaticDataRead(t, process, hash, cell.name, "")
 					t.Logf("invocation admitted static-data read after %s", time.Since(readStarted))
-					baselineMu.Lock()
-					if baseline == nil {
-						baseline = observed
-					}
-					wantReadback := baseline
-					baselineMu.Unlock()
+					wantReadback := expected.Readback
 					if !reflect.DeepEqual(observed, wantReadback) {
 						t.Fatalf("readback differs: %#v; baseline %#v", observed, wantReadback)
 					}
 					// Every geometry proves the same hash, IDs and actual read bytes.
 					// Grant rejection/recovery is independent of the spelling used to
 					// select that identical artifact; prove it once per selected store.
-					if !foreignProven {
+					if shard == 0 && !foreignProven {
 						foreign := observed["registry/child.completed"]["static_id"].(string)
 						runStaticDataRead(t, process, hash, cell.name+"-foreign", foreign)
 						healthy := runStaticDataRead(t, process, hash, cell.name+"-healthy", "")
@@ -153,6 +164,11 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 						}
 					}
 				})
+			}
+			// These geometry-independent negatives still run once per backend,
+			// after real successful admission and the missing-file failure phase.
+			if shard != 5 {
+				return
 			}
 			writeReleaseFile(t, filepath.Join(root, "data/resume.md"), "Root resume: exact admitted bytes.\n")
 			writeReleaseFile(t, filepath.Join(base, "file-root"), "not a directory")
@@ -193,6 +209,23 @@ func TestDurableDataInvocationInvarianceSQLitePostgres(t *testing.T) {
 			}
 		})
 	}
+}
+
+func staticDataInvocationCells(shard int, base string) []struct{ name, cwd, operand string } {
+	if shard < 0 || shard >= 6 {
+		panic("invalid invocation shard")
+	}
+	root, outside := filepath.Join(base, "bundle"), filepath.Join(base, "outside")
+	cells := []struct{ name, cwd, operand string }{
+		{"relative-inside", base, "bundle"}, {"absolute-inside", base, root},
+		{"relative-outside", outside, "../bundle"}, {"absolute-outside", outside, root},
+		{"omitted", root, ""}, {"dot", root, "."},
+		{"symlink-cwd", filepath.Join(base, "alias"), "."},
+		{"alias", base, "alias"}, {"chain", base, "chain"}, {"ancestor", base, "ancestor/bundle"},
+		{"relative-alias-parent", base, "outside/link/../bundle"},
+		{"absolute-alias-parent", outside, outside + "/link/../bundle"},
+	}
+	return cells[shard*2 : (shard+1)*2]
 }
 
 func runStaticDataRead(t *testing.T, process *releaseServeProcess, hash, key, foreign string) map[string]map[string]any {

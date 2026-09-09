@@ -19,7 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-// Companion to releasee2e.TestDurableDataInvocationInvarianceSQLitePostgres:
+// Companion to releasee2e.TestDurableDataInvocationInvarianceSQLitePostgresShard1:
 // public failed-delivery classification alone cannot identify mock schema rejection.
 func TestStaticDataInvocationMockRequestsExactForeignID(t *testing.T) {
 	repo := runtimepipeline.WorkflowRepoRoot()
