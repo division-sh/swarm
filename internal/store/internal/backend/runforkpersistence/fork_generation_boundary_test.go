@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -54,6 +55,11 @@ func TestForkGenerationConsumerBoundary(t *testing.T) {
 		}
 	})
 	t.Run("hostile", func(t *testing.T) { generationBoundaryHostile(t, imports) })
+	for _, pkg := range loaded {
+		if pkg.PkgPath == historicalBoundaryModule+"runtime/loopruntime" {
+			t.Run("captured_owner_extra_coordinate", func(t *testing.T) { generationBoundaryCapturedOwnerHostile(t, pkg, imports) })
+		}
+	}
 }
 
 func generationBoundaryCollect(pkg *types.Package, info *types.Info, fset *token.FileSet, file *ast.File) []historicalBoundaryFinding {
@@ -141,6 +147,7 @@ func generationBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed := map[string]historicalBoundaryAllowance{
 		generationBoundaryLoop + "NewForkCorrespondence/reference:" + generationBoundaryLoop + "Fork":             {1, "canonical relation constructs the sole expected child activation"},
 		generationBoundaryLoop + "ForkCorrespondence.Bind/reference:" + generationBoundaryLoop + "ForkGeneration": {1, "canonical relation translates an admitted source reference"},
+		generationBoundaryLoop + "Activation.CapturedContext/canonical_coordinate":                                {2, "projects only captured attempt/revision after exact historical and current owner validation"},
 		historicalBoundaryOwner + "forkPendingProposedEffect/coordinate:RevisionID":                               {1, "fresh continuation projects the admitted child reference"},
 		historicalBoundaryOwner + "projectForkRevisionPayload/coordinate:RevisionField":                           {2, "bound payload projection checks and replaces only the admitted field"},
 		historicalBoundaryOwner + "projectForkRevisionPayload/coordinate:RevisionID":                              {2, "bound payload projection checks and replaces the exact admitted revision"},
@@ -163,7 +170,7 @@ func generationBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	for function, count := range map[string]int{
 		"forkActivationInventory": 18, "ForkCorrespondence.AdmitSourceKey": 5,
 		"ForkCorrespondence.AdmitSourceRevision": 5, "ForkCorrespondence.AdmitSource": 2,
-		"ForkCorrespondence.ProjectedActivations": 6, "ForkChildReference.Context": 4,
+		"ForkCorrespondence.ProjectedActivations": 6, "ForkChildReference.Context": 2,
 		"ForkCorrespondence.AdmitChild": 7, "ForkCorrespondence.ValidateChild": 8,
 		"ForkCorrespondence.AdmitSourceContext": 1,
 	} {
@@ -173,6 +180,55 @@ func generationBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		allowed[generationBoundaryLoop+function+"/generation_construction"] = historicalBoundaryAllowance{1, "canonical generation construction followed by exact owner validation"}
 	}
 	return allowed
+}
+
+func generationBoundaryCapturedOwnerHostile(t *testing.T, loaded *packages.Package, imports historicalBoundaryImports) {
+	t.Helper()
+	for _, coordinate := range []string{"Attempt", "RevisionID"} {
+		t.Run(coordinate, func(t *testing.T) {
+			fset := token.NewFileSet()
+			var files []*ast.File
+			changed := false
+			for _, path := range loaded.CompiledGoFiles {
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				text := string(body)
+				const signature = "func (a Activation) CapturedContext(g attemptgeneration.Generation) (map[string]any, error) {"
+				if strings.Contains(text, signature) {
+					if changed || strings.Count(text, signature) != 1 {
+						t.Fatal("expected one captured projection owner")
+					}
+					// Same approved method/file, arbitrary local receiver name: an
+					// extra current-owner read must exceed the exact projection budget.
+					text = strings.Replace(text, signature, signature+"\n arbitraryFruit := a; _ = arbitraryFruit."+coordinate, 1)
+					changed = true
+				}
+				file, err := parser.ParseFile(fset, path, text, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				files = append(files, file)
+			}
+			if !changed {
+				t.Fatal("captured owner hostile injection did not land")
+			}
+			info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+			pkg, err := (&types.Config{Importer: imports}).Check(loaded.PkgPath, fset, files, info)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var findings []historicalBoundaryFinding
+			for _, file := range files {
+				findings = append(findings, generationBoundaryCollect(pkg, info, fset, file)...)
+			}
+			problems := historicalBoundaryProblems(findings, generationBoundaryAllowances(), false)
+			if len(problems) != 1 || !strings.Contains(problems[0], "Activation.CapturedContext/canonical_coordinate") {
+				t.Fatalf("approved owner admitted extra current-generation %s read: %v", coordinate, problems)
+			}
+		})
+	}
 }
 
 func generationBoundaryHostile(t *testing.T, imports historicalBoundaryImports) {
