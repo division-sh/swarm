@@ -1,9 +1,12 @@
-# #2439 Implementation Proof Accounting
+# Post-Implementation Proof Audit: #2439
 
 Agent: agent-g. Same combined #2321/#2432 PR, separate SQLite repair commit.
 Gate: https://github.com/division-sh/swarm/issues/2439#issuecomment-5602701049.
 This supplements the reviewer-completed pre-implementation audit on #2439; it
-does not ask for a new gate. Final integrated suite and PR review are pending.
+does not ask for a new gate. Final integrated full-profile swarm-test passed at
+qualifying HEAD 1f5680f25bdb7fc988ac5e74a9c8bb27c1698336, code/test tree
+be9e98fe3fb2504b68dcefa487eaec66a222a519. Subsequent final audit edits are docs only.
+Independent PR/merge review remains required.
 
 Update: the pre-master-integration combined full-profile suite exited 0 at the
 eb4c8c613 code checkpoint. The branch is now rebased onto B's merged #2440 at
@@ -13,8 +16,9 @@ Post-rebase SQLite exit/bootstrap race selections pass (16.971s/13.910s).
 The second integrated swarm-test passed the SQLite/store packages but failed one
 unrelated custom web-search rate-limit timing assertion. Test-only repair
 ae8bbb782 checks admission rather than downstream server-arrival spacing and
-adds a delayed-transport control. A fresh full-profile swarm-test is queued;
-no final PR closure is claimed yet. Full accounting is in the #2321 proof audit.
+adds a delayed-transport control. Historical failures remain failed receipts;
+final qualification after the T7 correction below passed. Full accounting is in
+the #2321 proof audit.
 
 The lead then reproduced a genuine T7 read cancellation defect at 65b09065f:
 automatic rollback before Commit lost context.Canceled/DeadlineExceeded behind
@@ -31,8 +35,8 @@ disposition on every exit. Immediate parent: selected-store connection/resource
 lifetime and transaction-failure preservation. Broader parent #2250 remains open,
 including PostgreSQL-specific raw transaction/session/panic cleanup; no universal
 backend closure is claimed. The original diagnostic failure was an entry point,
-not the boundary. No child tail remains inside this SQLite class if final proof
-passes; the heterogeneous #2250 tail is not credibly countable here.
+not the boundary. No known child tail remains inside this qualified SQLite class;
+the heterogeneous #2250 tail is not credibly countable here.
 
 `sqlite.Backend.runTransactionOnce` owns the pinned `sql.Conn`, `sql.Tx`, callback,
 commit, rollback and final release/disposal. `CloseConnection` is a private backend
@@ -92,7 +96,7 @@ no new blanket allowlist or public raw authority.
 | T11 bootstrap | execution-proven through the same corrected path | TestSQLiteBootstrapOwnsEveryExit count=3 race: fresh/current, inspect error, commit error, rollback error, pre-acquire cancellation, pre-commit cancellation and committed-but-error; exact origin DDL, real DB readback. Full schema plan coverage remains TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables. |
 | T12 pool isolation | execution-proven through the same corrected path | ExitFaultDisposition pools1/3, separate connection readback and a pinned surviving connection; other connection remains usable, exactly one disposed on uncertainty. IndependentHandleAndReopen diagnostic proof supplies retained reopen. |
 | T13 diagnostics | reproduced and fixed | TestLifecycleDiagnosticAtomicProjection before_commit SQLite/PostgreSQL now PASS, plus concurrency/ack/prefix/provenance/reopen matrix. No repeated transition or duplicate log. |
-| T14 combined acceptance | not yet closure-credited | Final full-profile swarm-test queued/running; #2432 and #2321 retain separate proof accounting. |
+| T14 combined acceptance | execution-proven through the same corrected path | Full-profile swarm-test PASS, exit 0 at 1f5680f25; SQLite backend 15.800s, runtimepersistence 552.917s, catalog/fork 503.274s, releasee2e 840.195s and all remaining packages passed. #2432 and #2321 retain separate proof accounting. |
 
 Focused evidence: `/tmp/agent-g-2439-exits-final.log` PASS 2.656s, all new owner
 faults/reviewer probes count=3 race; `/tmp/agent-g-2439-bootstrap-proof.log` PASS
@@ -119,8 +123,13 @@ runner-done were both ready and select could incorrectly report no callback
 entry. Removed that competing receive, preserving the independent barrier and
 all production/cancellation/retirement assertions. This failed run is not hidden
 or counted green. The corrected repeated matrix above is the actual receipt.
-Final unchanged full-profile swarm-test is queued at be9e98fe3; the old stale
-queue request was cancelled before execution, never claimed as qualification.
+Final unchanged executable/test full-profile swarm-test PASS at qualifying HEAD
+1f5680f25 (code be9e98fe3):
+`SWARM_TEST_PROOF_PROFILE=full go run ./cmd/swarm-test -- -count=1 -timeout=30m ./...`.
+Log /tmp/agent-g-final-bounded-repairs-full.log, SHA256
+1e449b463692002e4457cfb68cdee552a3a29edbad738d679fe6ec8234307db0.
+The old stale queue request was cancelled before execution, never claimed as
+qualification. No workload reduction, diagnostic retry or physical-owner bypass.
 
 Unchanged golden burst now passes (`/tmp/agent-g-2439-golden-burst.log`, 246.405s),
 but this is not causal classification of the earlier PostgreSQL timeout. Original
@@ -139,5 +148,6 @@ existing node and #2439 mapping, no new issue or POTENTIAL_ISSUES entry. Archite
 feedback: exact connection lifetime is now explicit in the existing owner; broader
 PostgreSQL cleanup/retained-session audit stays #2250, likely several bounded
 owner-specific passes, high correctness ROI but not estimated as a one-line fix.
-Intended closure is failure class eliminated for #2439 only after final acceptance
-and independent review. Current status: implemented/focused proof, not merge-ready.
+Achieved implementation closure claim: **failure class eliminated** for #2439,
+with all T1-T14 proofs and integrated acceptance passed. Independent merge review
+remains required; this does not close PostgreSQL or the broader #2250 class.

@@ -1,6 +1,6 @@
 # Post-Implementation Proof Audit: #2432
 
-**Integration candidate, not final review proof.** B's PR #2440 merged as
+**Final implementation proof; independent merge review required.** B's PR #2440 merged as
 47c0e70d8ef89a2c99f0be4af632f24692121b83. The serialized integration ruling
 https://github.com/division-sh/swarm/issues/2432#issuecomment-5604559542 supersedes
 the historical reset freeze recorded in issue-2432-reset-integration-escalation.md.
@@ -9,10 +9,12 @@ That failing probe remains historical evidence, not the current runtime contract
 Agent-g; one combined #2321/#2432/#2439 PR, separate repair commits/proof tables.
 The branch was carefully rebased with merge resolutions reapplied; B's single
 eventpersistence settlement owner replaces G's agentpersistence projector. Final
-integrated suite and final head binding remain outstanding. Lead disposition
+full-profile swarm-test passed at qualifying HEAD 1f5680f25bdb7fc988ac5e74a9c8bb27c1698336,
+code/test tree be9e98fe3fb2504b68dcefa487eaec66a222a519; subsequent final audit edits
+are documentation only. Lead disposition
 issuecomment-5607051620 records LSF-028/029 as explicit #2353 residual risks,
 not an indefinite historical-evidence blocker or a claim that they were fixed.
-Current-head live/restart has passed on both stores with distinct failed-attempt
+Live/restart at runtime head 5426deb7b passed on both stores with distinct failed-attempt
 accounting in issue-2321-postimplementation.md; no old delivery was replayed.
 Approved original/amended gate:
 https://github.com/division-sh/swarm/issues/2432#issuecomment-5601046597.
@@ -36,9 +38,10 @@ typed-lineage/platform-event policies and matching runtime.run_fork.selected_con
 policies, including destructive discard. Required new outbox facts have no legacy
 default. Old selected stores are unsupported; no backfill, conversion or migration.
 
-Closure commitment: eliminate this entire diagnostic class. No currently known
-same-class child remains after the named proofs pass. Confidence is conditional on
-final full-suite/review, not proof-by-shared-owner. The #2439 failure was discovered
+Closure commitment and achieved implementation claim: **failure class eliminated**
+for this entire diagnostic class. No currently known same-class child remains;
+the complete named proofs and full suite passed. Independent merge review is
+still required, not replaced by shared ownership. The #2439 failure was discovered
 by F4, explicitly tracked and independently approved, and repaired separately in
 this PR. It was not silently absorbed or disguised as a diagnostic retry.
 
@@ -105,8 +108,8 @@ and 14.816s). Managed diagnostic race count=3 passed (store 656.324s, actual
 catalog/fork 116.361s). The integrated swarm-test at 5426deb7b passed
 runtimepersistence (558.061s), catalog/fork (494.842s) and releasee2e (841.922s),
 but FAILED one unrelated rate-limit timing assertion. ae8bbb782 repairs only that
-test oracle; a fresh full-profile swarm-test is queued. These are not an overall
-green receipt; final combined acceptance remains required before review.
+test oracle. That failed run is not an overall green receipt. The subsequent
+repaired-head full-profile qualification passed, as recorded below.
 SQLite exit/bootstrap race checks pass (16.971s/13.910s). Persistence inventory is
 regenerated with only exact moved/removed findings classified. API spec checks pass.
 
@@ -117,7 +120,16 @@ Executed focused complete diagnostic/read-consumer selection:
 -count=1 -timeout=180s` PASS 26.206s. Separate disjoint-source race count=3 PASS
 21.868s; malformed provenance matrix PASS 2.105s. Prior race concurrency/discard
 count=3 PASS and actual dual-store fork activation PASS are implementation
-checkpoints; final full-suite head binding remains required, not assumed.
+checkpoints, not substitutes for the following full-suite receipt.
+
+Final qualification: `SWARM_TEST_PROOF_PROFILE=full go run ./cmd/swarm-test --
+-count=1 -timeout=30m ./...` **PASS, exit 0** at 1f5680f25. Runtimepersistence
+552.917s, actual catalog/fork 503.274s, releasee2e 840.195s, serveapp 502.424s;
+all remaining packages passed. Log /tmp/agent-g-final-bounded-repairs-full.log,
+SHA256 1e449b463692002e4457cfb68cdee552a3a29edbad738d679fe6ec8234307db0.
+Separate #2439 T7 read cancellation and physical retirement controls pass race
+count=50; separate #2321 failure evidence controls pass race count=3. These are
+the final integrated boundaries, not a claim that earlier failed receipts passed.
 
 Watchlist: existing #2432 nodes/refinements 12e94ca, 7a23362 and 5621eed; #2439
 refinement 823590f. No further node, issue, POTENTIAL_ISSUES entry or architecture
