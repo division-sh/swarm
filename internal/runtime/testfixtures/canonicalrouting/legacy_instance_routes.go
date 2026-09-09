@@ -98,7 +98,7 @@ pins:
       - deploy.done
 `, "deploy.done:\n  key: "+producerField+"\n  "+producerField+": string\n", "", "")
 
-	consumerNodes := "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n" + secondHandler
+	consumerNodes := "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n" + secondHandler
 	consumerAgents := ""
 	if opts.Consumer == TemplateInstanceAgentConsumer || opts.Consumer == TemplateInstanceNodeAndAgentConsumer {
 		subscriptions := "deploy.done"
@@ -158,7 +158,6 @@ deploy.done:
   vertical_id: string
 `)
 	writeClosedVariantFile(t, root, "flows/producer/nodes.yaml", `producer-node:
-  id: producer-node
   execution_type: system_node
   subscribes_to: [deploy.requested]
   produces: [deploy.done]

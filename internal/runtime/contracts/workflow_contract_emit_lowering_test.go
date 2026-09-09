@@ -149,7 +149,31 @@ payload:
 
 func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 	rootSchema := FlowSchemaDocument{}
-	return &WorkflowContractBundle{
+	events := map[string]EventCatalogEntry{
+		"account.scored": {
+			Payload: EventPayloadSpec{
+				Properties: map[string]EventFieldSpec{
+					"account_id":      {Type: "string"},
+					"interest_score":  {Type: "number"},
+					"computed_tier":   {Type: "string"},
+					"unrelated_input": {Type: "string"},
+				},
+				Required: []string{"account_id", "interest_score"},
+			},
+		},
+		"account.bucketed": {
+			Payload: EventPayloadSpec{
+				Properties: map[string]EventFieldSpec{
+					"account_id":     {Type: "string"},
+					"bucket":         {Type: "string"},
+					"interest_score": {Type: "number"},
+					"tier":           {Type: "string"},
+				},
+				Required: []string{"account_id", "bucket", "interest_score"},
+			},
+		},
+	}
+	bundle := &WorkflowContractBundle{
 		RootSchema: &rootSchema,
 		RootEntities: EntityContractsDocument{
 			"account": {
@@ -159,31 +183,11 @@ func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 				},
 			},
 		},
-		Events: map[string]EventCatalogEntry{
-			"account.scored": {
-				Payload: EventPayloadSpec{
-					Properties: map[string]EventFieldSpec{
-						"account_id":      {Type: "string"},
-						"interest_score":  {Type: "number"},
-						"computed_tier":   {Type: "string"},
-						"unrelated_input": {Type: "string"},
-					},
-					Required: []string{"account_id", "interest_score"},
-				},
-			},
-			"account.bucketed": {
-				Payload: EventPayloadSpec{
-					Properties: map[string]EventFieldSpec{
-						"account_id":     {Type: "string"},
-						"bucket":         {Type: "string"},
-						"interest_score": {Type: "number"},
-						"tier":           {Type: "string"},
-					},
-					Required: []string{"account_id", "bucket", "interest_score"},
-				},
-			},
-		},
+		Events: events,
 	}
+	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Path: ".", Schema: rootSchema, Events: events}
+	bundle.FlowTree = FlowTree{Root: root, ByID: map[string]*FlowContractView{".": root}, ByPath: map[string]*FlowContractView{".": root}}
+	return bundle
 }
 
 func assertEmitCEL(t *testing.T, fields map[string]ExpressionValue, field, want string) {

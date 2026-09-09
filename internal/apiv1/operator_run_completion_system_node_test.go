@@ -358,13 +358,12 @@ discovery: {}
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "events.yaml"), `
 flow.started:
   entity_id:
-    type: string
+    type: string?
   topic:
     type: string?
 `)
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "nodes.yaml"), `
 pipeline:
-  id: pipeline
   execution_type: system_node
   subscribes_to:
     - flow.started

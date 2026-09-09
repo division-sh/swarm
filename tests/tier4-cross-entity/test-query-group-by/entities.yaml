@@ -1,1 +1,4 @@
-test_entity: {}
+items:
+  state:
+    type: text
+    _unused_reason: preseeded query grouping proof field

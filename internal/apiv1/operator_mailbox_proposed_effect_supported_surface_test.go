@@ -286,7 +286,6 @@ pins:
   text: text
 `)
 	writeRunCompletionFixtureFile(t, root+"/nodes.yaml", `support-agent:
-  id: support-agent
   execution_type: system_node
   subscribes_to: [thing.created]
   event_handlers:

@@ -2,9 +2,7 @@ package testtiming
 
 import (
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
+
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,12 +15,80 @@ import (
 )
 
 type ciWorkflowStep struct {
-	Name            string         `yaml:"name"`
-	If              string         `yaml:"if"`
-	ContinueOnError bool           `yaml:"continue-on-error"`
-	Run             string         `yaml:"run"`
-	Uses            string         `yaml:"uses"`
-	With            map[string]any `yaml:"with"`
+	ID              string            `yaml:"id"`
+	Name            string            `yaml:"name"`
+	If              string            `yaml:"if"`
+	ContinueOnError bool              `yaml:"continue-on-error"`
+	Run             string            `yaml:"run"`
+	Uses            string            `yaml:"uses"`
+	With            map[string]any    `yaml:"with"`
+	Env             map[string]string `yaml:"env"`
+}
+
+func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(testTimingRepoRoot(t), ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]ciWorkflowJob `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	plan, proof := workflow.Jobs["ci-plan"], workflow.Jobs["proof-unit"]
+	modules := findWorkflowStep(plan.Steps, "Restore shared Go modules")
+	consumer := findWorkflowStep(proof.Steps, "Restore shared Go modules")
+	if modules == nil || consumer == nil || modules.With["path"] != "~/go/pkg/mod" || consumer.With["path"] != modules.With["path"] || consumer.With["key"] != modules.With["key"] {
+		t.Fatal("planner and proofs must share one exact module-only cache")
+	}
+	for _, identity := range []string{"runner.os", "runner.arch", "steps.go.outputs.go-version", "hashFiles('go.sum')"} {
+		if !strings.Contains(modules.With["key"].(string), identity) {
+			t.Fatalf("module cache omits %s", identity)
+		}
+	}
+	populate := findWorkflowStep(plan.Steps, "Populate shared Go modules")
+	saveModules := findWorkflowStep(plan.Steps, "Save shared Go modules")
+	if populate == nil || populate.Run != "go mod download" || saveModules == nil || saveModules.With["path"] != modules.With["path"] || saveModules.With["key"] != "${{ steps.modules.outputs.cache-primary-key }}" {
+		t.Fatal("the planner must populate the complete module graph before saving it")
+	}
+	build := findWorkflowStep(proof.Steps, "Restore measured Go cache")
+	saveBuild := findWorkflowStep(proof.Steps, "Save measured Go cache")
+	if build == nil || saveBuild == nil || build.With["path"] != "~/.cache/go-build" || saveBuild.With["path"] != build.With["path"] || saveBuild.With["key"] != "${{ steps.go-cache-restore.outputs.cache-primary-key }}" {
+		t.Fatal("build cache must not duplicate modules or use a different save identity")
+	}
+	seed := findWorkflowStep(plan.Steps, "Restore exact-head production Go cache")
+	compile := findWorkflowStep(plan.Steps, "Compile production dependencies once")
+	saveSeed := findWorkflowStep(plan.Steps, "Save exact-head production Go cache")
+	if seed == nil || compile == nil || saveSeed == nil || seed.With["path"] != build.With["path"] || seed.With["restore-keys"] != nil || !strings.HasSuffix(seed.With["key"].(string), "-${{ github.sha }}") || saveSeed.With["key"] != "${{ steps.production-cache.outputs.cache-primary-key }}" || saveSeed.With["path"] != seed.With["path"] {
+		t.Fatal("production seed must be an exact-head Go cache, not another proof or stale seed")
+	}
+	for _, command := range []string{`test "$(git rev-parse HEAD)" = "$SOURCE_SHA"`, "go build ./...", `go build -race -o "$RUNNER_TEMP/swarm-ci-race" ./cmd/swarm`} {
+		if !strings.Contains(compile.Run, command) {
+			t.Fatalf("production seed omits exact-head compilation %q", command)
+		}
+	}
+	if strings.Contains(compile.Run, "go test") {
+		t.Fatal("cache preparation must not execute or replace a proof")
+	}
+	seedConsumed := false
+	for _, key := range strings.Split(build.With["key"].(string)+"\n"+build.With["restore-keys"].(string), "\n") {
+		if key == seed.With["key"] {
+			seedConsumed = true
+			continue
+		}
+		if strings.TrimSpace(key) != "" && (!strings.Contains(key, "matrix.unit") || !strings.Contains(key, "steps.go.outputs.go-version")) {
+			t.Fatalf("build fallback can select another proof/toolchain: %s", key)
+		}
+	}
+	if !seedConsumed {
+		t.Fatal("workers do not consume the exact production seed")
+	}
+	for _, step := range proof.Steps {
+		if step.Name == "Save shared Go modules" || (step.Name == "Run exact planned proof unit" && step.If != "") {
+			t.Fatal("proofs must execute on cache hit/miss and not republish module archives")
+		}
+	}
 }
 
 type ciWorkflowJob struct {
@@ -57,16 +123,19 @@ func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 		}
 	}
 	producer := findWorkflowStep(workflow.Jobs["proof-unit"].Steps, "Run exact planned proof unit")
-	for _, want := range []string{"-record-evidence", "-plan \"$plan\"", "-unit \"$UNIT_ID\"", "-check-confirmation"} {
+	for _, want := range []string{"-record-evidence", "-plan \"$plan\"", "-unit \"$UNIT_ID\""} {
 		if producer == nil || !strings.Contains(producer.Run, want) {
 			t.Fatalf("proof producer missing %q", want)
 		}
 	}
 	aggregate := findWorkflowStep(workflow.Jobs["timing-budget"].Steps, "Evaluate complete plan-bound evidence")
-	for _, want := range []string{"-evaluate-budget", "-plan test-results/plan/proof-plan.json", "-evidence-root test-results/evidence"} {
+	for _, want := range []string{"-evaluate-budget", "-plan test-results/plan/proof-plan.json", "-evidence-root test-results/evidence", "-workflow-head-sha \"$WORKFLOW_HEAD_SHA\""} {
 		if aggregate == nil || !strings.Contains(aggregate.Run, want) {
 			t.Fatalf("aggregate missing %q", want)
 		}
+	}
+	if aggregate.Env["WORKFLOW_HEAD_SHA"] != "${{ github.event.pull_request.head.sha || github.sha }}" {
+		t.Fatal("job identity must come from the triggering event, not the merge checkout or jobs evidence")
 	}
 	if !strings.Contains(workflow.Jobs["required-tests"].Name, "Required test summary") || !strings.Contains(workflow.Jobs["sqlite-local-dev"].Name, "SQLite local smoke") {
 		t.Fatal("stable branch-protection check names drifted")
@@ -83,6 +152,9 @@ func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 		t.Fatal("workflow does not bind plan and consumer checkouts to the executed SHA")
 	}
 	for _, forbidden := range []string{
+		"-check-confirmation",
+		"-attempt confirmation",
+		"confirmation_status",
 		"go-test-shards.json",
 		"full-conformance-packages.txt",
 		"full-conformance:",
@@ -224,15 +296,63 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
-	serveappUnit, ok := policy.Units["serveapp-full"]
-	if !ok || !slices.Equal(serveappUnit.Packages, []string{serveappPackage}) || serveappUnit.Run != "" || serveappUnit.CountMode != "count-1" || serveappUnit.BudgetClass != "full" {
-		t.Fatalf("serveapp-full unit = %#v, want one complete uncached serveapp proof", serveappUnit)
+	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
+	var serveappPatterns []*regexp.Regexp
+	for _, id := range serveappUnits {
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{serveappPackage}) || unit.Run == "" || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
+			t.Fatalf("%s unit = %#v, want complete uncached serveapp partition with unchanged budget", id, unit)
+		}
+		serveappPatterns = append(serveappPatterns, regexp.MustCompile(unit.Run))
 	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "serveapp"), serveappPatterns)
+	contractsPatterns := make([]*regexp.Regexp, 0, 2)
+	for _, id := range []string{"contracts-first", "contracts-rest"} {
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/contracts"}) || unit.Run == "" || unit.CountMode != "count-1" {
+			t.Fatalf("%s must retain its complete uncached contracts partition", id)
+		}
+		contractsPatterns = append(contractsPatterns, regexp.MustCompile(unit.Run))
+		for name, profile := range policy.Profiles {
+			if !slices.Contains(profile.Units, id) {
+				t.Fatalf("profile %s omits contracts partition %s", name, id)
+			}
+		}
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "runtime", "contracts"), contractsPatterns)
+	apiPatterns := make([]*regexp.Regexp, 0, 2)
+	for _, id := range []string{"api-operator", "api-rest"} {
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/apiv1"}) || unit.Run == "" || unit.CountMode != "count-1" {
+			t.Fatalf("%s must retain its complete uncached API partition", id)
+		}
+		apiPatterns = append(apiPatterns, regexp.MustCompile(unit.Run))
+		for name, profile := range policy.Profiles {
+			if !slices.Contains(profile.Units, id) {
+				t.Fatalf("profile %s omits API partition %s", name, id)
+			}
+		}
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "apiv1"), apiPatterns)
+	conformancePatterns := make([]*regexp.Regexp, 0, 2)
+	for _, id := range []string{"conformance-1", "conformance-2"} {
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/conformance"}) || unit.Run == "" || unit.CountMode != "count-1" {
+			t.Fatalf("%s must retain its complete uncached conformance partition", id)
+		}
+		conformancePatterns = append(conformancePatterns, regexp.MustCompile(unit.Run))
+		for name, profile := range policy.Profiles {
+			if !slices.Contains(profile.Units, id) {
+				t.Fatalf("profile %s omits conformance partition %s", name, id)
+			}
+		}
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "runtime", "conformance"), conformancePatterns)
 	storeUnit, ok := policy.Units["store-full"]
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
 	}
-	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-full-03", "store-runtime-full-04"}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-full-03", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
 	for _, unitID := range storeRuntimeUnits {
 		unit, exists := policy.Units[unitID]
@@ -248,7 +368,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		foundRuntime := false
-		foundServeapp := false
+		foundServeapp := map[string]bool{}
 		foundStore := false
 		foundTestPostgres := false
 		foundStoreRuntime := map[string]bool{}
@@ -256,8 +376,8 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 			if unit == "runtime-full" {
 				foundRuntime = true
 			}
-			if unit == "serveapp-full" {
-				foundServeapp = true
+			if slices.Contains(serveappUnits, unit) {
+				foundServeapp[unit] = true
 			}
 			if unit == "store-full" {
 				foundStore = true
@@ -274,8 +394,10 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		if !foundRuntime {
 			t.Errorf("profile %s does not include runtime-full", profileName)
 		}
-		if !foundServeapp {
-			t.Errorf("profile %s does not include serveapp-full", profileName)
+		for _, id := range serveappUnits {
+			if !foundServeapp[id] {
+				t.Errorf("profile %s does not include %s", profileName, id)
+			}
 		}
 		if !foundStore {
 			t.Errorf("profile %s does not include store-full", profileName)
@@ -335,49 +457,12 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 
 func assertGoProofPartition(t *testing.T, dir string, patterns []*regexp.Regexp) {
 	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	runs := make([]string, len(patterns))
+	for i, pattern := range patterns {
+		runs[i] = pattern.String()
+	}
+	if err := testplanning.ValidateGoProofPartition(dir, runs); err != nil {
 		t.Fatal(err)
-	}
-	matchedPatterns := make([]bool, len(patterns))
-	proofs := 0
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, entry.Name()), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", entry.Name(), err)
-		}
-		for _, declaration := range file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Recv != nil || function.Name == nil {
-				continue
-			}
-			name := function.Name.Name
-			if name == "TestMain" || (!strings.HasPrefix(name, "Test") && !strings.HasPrefix(name, "Example") && !strings.HasPrefix(name, "Fuzz")) {
-				continue
-			}
-			proofs++
-			matches := 0
-			for index, pattern := range patterns {
-				if pattern.MatchString(name) {
-					matches++
-					matchedPatterns[index] = true
-				}
-			}
-			if matches != 1 {
-				t.Errorf("runtime-persistence proof %s matches %d store partitions, want exactly one", name, matches)
-			}
-		}
-	}
-	if proofs == 0 {
-		t.Fatal("runtime-persistence proof inventory is empty")
-	}
-	for index, matched := range matchedPatterns {
-		if !matched {
-			t.Errorf("store partition %d matches no runtime-persistence proof", index+1)
-		}
 	}
 }
 

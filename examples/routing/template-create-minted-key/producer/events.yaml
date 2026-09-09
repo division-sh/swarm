@@ -1,4 +1,4 @@
 validation.triggered:
-  candidate: text?
+  candidate: text
 validation.requested:
-  candidate: text?
+  candidate: text

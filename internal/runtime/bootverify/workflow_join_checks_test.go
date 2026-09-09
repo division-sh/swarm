@@ -77,7 +77,7 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			event := bundle.Events["item.completed"]
 			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "JoinResult"}
 			bundle.Events["item.completed"] = event
-			h.Join.CompleteWhen = `join.results[0].value == "ok"`
+			h.Join.CompleteWhen = `join.results.exists(r, r.value == "ok")`
 			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
 		}},
 		{name: "custom completion rejects named result as scalar", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
@@ -218,7 +218,6 @@ item.received:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "nodes.yaml"), `
 shared-node:
-  id: shared-node
   execution_type: system_node
   subscribes_to: [item.received]
   event_handlers:
@@ -309,9 +308,9 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		RootSchema:   &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting", Initial: true}, {ID: "ready"}, {ID: "attention", Terminal: true}}}},
 		RootEntities: runtimecontracts.EntityContractsDocument{"Order": {Fields: map[string]runtimecontracts.EntityFieldDecl{"expected": {Type: "[text]", Initial: []any{}}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"item.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "jsonb"}}}},
-			"join.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"results": {Type: "list<jsonb>"}}}},
-			"join.timed_out": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"missing": {Type: "list<text>"}}}},
+			"item.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "jsonb"}}, Required: []string{"member_id", "result"}}},
+			"join.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"results": {Type: "list<jsonb>"}}, Required: []string{"results"}}},
+			"join.timed_out": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"missing": {Type: "list<text>"}}, Required: []string{"missing"}}},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &spec}}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{

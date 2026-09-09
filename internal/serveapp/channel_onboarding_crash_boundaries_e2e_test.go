@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"sync"
 	"testing"
@@ -168,11 +169,28 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 			}
 
 			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
-				if len(after.Operation.CredentialAdmissions) != len(after.Operation.CredentialReservations) || after.Operation.Phase != channelonboarding.PhaseSucceeded {
+				if len(after.Operation.CredentialAdmissions) != len(after.Operation.CredentialReservations) || after.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
 					t.Fatalf("%s E2E-13 rediscovered checkpoint = %#v", backend, after.Operation)
 				}
+				resume := startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint, []string{"channel", "resume", responsibilityID, "--yes"}, "")
+				challenge := waitChannelOnboardingChallenge(t, resume.stdout, resume.stderr, resume.done)
+				callbackURL, signingSecret := waitChannelOnboardingRegistrationForCredential(t, harness.provider, "crash-boundary-token", 2, resume)
+				claim := submitChannelOnboardingClaimAs(t, callbackURL, signingSecret, challenge, 17213, 7000, 7213, "operator_0")
+				requireChannelClaimDisposition(t, string(backend)+" E2E-13 recovered successor claim", claim, "consumed_by_binding")
+				requireChannelOnboardingCommandSuccess(t, resume)
+				after = getChannelOnboardingRPC(t, harness, responsibilityID)
 				afterRow := requireChannelOnboardingOperationRow(t, harness, responsibilityID)
-				assertChannelOnboardingIdentityPreserved(t, string(backend)+" E2E-13 reconnect", predecessor, afterRow)
+				if afterRow.Identity.Interface.Selector != predecessor.Identity.Interface.Selector ||
+					afterRow.Identity.Status != predecessor.Identity.Status ||
+					afterRow.Identity.AccountReference != predecessor.Identity.AccountReference ||
+					afterRow.Identity.ConversationRef != predecessor.Identity.ConversationRef ||
+					afterRow.Identity.ConversationScope != predecessor.Identity.ConversationScope ||
+					afterRow.Identity.ProofID != predecessor.Identity.ProofID ||
+					afterRow.Identity.BindingRevision != predecessor.Identity.BindingRevision+1 ||
+					afterRow.Identity.ProofRevision != predecessor.Identity.ProofRevision+1 ||
+					afterRow.Identity.ProofStatus != "active" {
+					t.Fatalf("%s E2E-13 fresh reconnect identity = predecessor %#v successor %#v", backend, predecessor.Identity, afterRow.Identity)
+				}
 				if afterRow.Activation == nil || predecessor.Activation == nil || afterRow.Activation.Revision <= predecessor.Activation.Revision {
 					t.Fatalf("%s E2E-13 recovered reconnect did not advance activation: predecessor=%#v successor=%#v", backend, predecessor, afterRow)
 				}
@@ -224,13 +242,14 @@ func restartChannelOnboardingAtProcessPublicationBoundary(t *testing.T, backend 
 	publicationBarrier.ContinueAfterRelease()
 	defer publicationBarrier.Release()
 	harness.opts.TestChannelOnboardingBarrier = publicationBarrier.Reach
-	apiListen := reserveChannelOnboardingListenAddress(t)
-	harness.opts.APIListenAddr = apiListen
+	apiBound := make(chan net.Addr, 1)
+	harness.opts.APIListenAddr = "127.0.0.1:0"
+	harness.opts.TestAPIListenerBound = func(address net.Addr) { apiBound <- address }
 	harness.process = startServeRuntimeTestProcess(t, harness.opts)
-	harness.endpoint = "http://" + apiListen
 	if recoveredID := publicationBarrier.Wait(t); recoveredID != operationID {
 		t.Fatalf("%s E2E-14 recovery publication responsibility=%s, want %s", backend, recoveredID, operationID)
 	}
+	harness.endpoint = "http://" + (<-apiBound).String()
 	assertChannelOnboardingServeNotReady(t, harness.endpoint)
 	publication := channelOnboardingPersistedHandoffAtPublication(t, harness, operationID)
 	if committed.Operation == nil || committed.Activation == nil ||
@@ -251,6 +270,7 @@ func restartChannelOnboardingAtProcessPublicationBoundary(t *testing.T, backend 
 	publicationBarrier.Release()
 	harness.process.waitForReadyLine()
 	harness.opts.TestChannelOnboardingBarrier = nil
+	harness.opts.TestAPIListenerBound = nil
 	return publication
 }
 

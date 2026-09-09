@@ -6,5 +6,5 @@ expect:
   events:
     include: [digest.compiled]
   entities:
-    - type: test_entity
+    - type: items
       current_state: compiled

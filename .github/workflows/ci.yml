@@ -36,10 +36,49 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Go
+        id: go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
+
+      - name: Restore shared Go modules
+        id: modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Populate shared Go modules
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: go mod download
+      - name: Save shared Go modules
+        if: github.event_name != 'pull_request' && steps.modules.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ steps.modules.outputs.cache-primary-key }}
+
+      - name: Restore exact-head production Go cache
+        id: production-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+      - name: Compile production dependencies once
+        if: steps.production-cache.outputs.cache-hit != 'true'
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          go build ./...
+          go build -race -o "$RUNNER_TEMP/swarm-ci-race" ./cmd/swarm
+      - name: Save exact-head production Go cache
+        if: steps.production-cache.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.production-cache.outputs.cache-primary-key }}
 
       - name: Plan proof topology
         id: plan
@@ -166,6 +205,8 @@ jobs:
         run: go test ./internal/store/internal/runtimepersistence -run '^TestSQLiteProcessCapability(File|Coordinate)ReplacementTerminalizesIdleOwner$' -count=1
       - name: Prove read-only status remains possession-free
         run: go test ./internal/cliapp -run '^TestStoreStatusReads(CurrentSQLiteStoreWithoutMutationBootstrap|SelectedStoreOwnershipWithoutContextInference)$' -count=1
+      - name: Prove selected-root aliases preserve strict source admission
+        run: go test ./internal/cliapp ./internal/sourceartifact -run '^(TestSourceRootSelectionAliasMatrix|TestStaticDataCatalogInvocationInvariance|TestResolveCLISourcePlatformSpecPaths.*|TestCLIContractPathResolutionIgnoresLegacyContractsDir|TestRunCommandLocalForegroundConsumesServeOwnerAndV1API|TestStartLocalRunServeConsumesPositionalSourceOwner|TestAdmissionLinksDoNotChangeWithSelectedRootSpelling|TestAdmitDirectoryRejectsIncludedSymlinkBeforeClassification|TestExcludedNameIsNeverOpened)$' -count=1
       - name: Prove shipped dev and non-dev SQLite serve
         run: go test ./internal/releasee2e -run '^TestGoldenSQLitePossessionServeJourney$' -count=1 -v
 
@@ -182,6 +223,7 @@ jobs:
         with:
           ref: ${{ needs.ci-plan.outputs.execution_sha }}
       - uses: actions/setup-go@v5
+        id: go
         with:
           go-version-file: go.mod
           cache: false
@@ -190,18 +232,21 @@ jobs:
         with:
           name: ci-plan
           path: test-results/plan
+      - name: Restore shared Go modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
       - name: Restore measured Go cache
         id: go-cache-restore
         uses: actions/cache/restore@v4
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-test-${{ runner.os }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
+          path: ~/.cache/go-build
+          key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            go-test-${{ runner.os }}-${{ matrix.unit }}-master-
-            go-test-${{ runner.os }}-${{ matrix.unit }}-
-            go-test-${{ runner.os }}-
+            go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+            go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-${{ github.ref_name }}-
+            go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-
       - name: Run exact planned proof unit
         shell: bash
         env:
@@ -234,44 +279,20 @@ jobs:
           set -e
           elapsed=$(( $(date +%s) - start ))
           go run ./cmd/swarm-test-timing -record-evidence \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
             -plan "$plan" -unit "$UNIT_ID" -attempt primary \
             -input "$primary_json" -evidence "$primary_evidence" \
             -elapsed-seconds "$elapsed" -exit-code "$status"
 
-          confirmation_status=0
-          if [ "$status" -eq 0 ]; then
-            confirm=$(go run ./cmd/swarm-test-timing -check-confirmation \
-              -plan "$plan" -policy .github/test-timing-budgets.yaml -evidence "$primary_evidence")
-            if [ "$confirm" = "true" ]; then
-              confirmation_json="test-results/evidence/${UNIT_ID}-confirmation.json"
-              confirmation_evidence="test-results/evidence/${UNIT_ID}-confirmation-evidence.json"
-              confirmation_start=$(date +%s)
-              set +e
-              go run ./cmd/swarm-test -- "${packages[@]}" "${run_args[@]}" -count=1 -json | tee "$confirmation_json"
-              confirmation_status=${PIPESTATUS[0]}
-              set -e
-              confirmation_elapsed=$(( $(date +%s) - confirmation_start ))
-              go run ./cmd/swarm-test-timing -record-evidence \
-                -plan "$plan" -unit "$UNIT_ID" -attempt confirmation \
-                -input "$confirmation_json" -evidence "$confirmation_evidence" \
-                -elapsed-seconds "$confirmation_elapsed" -exit-code "$confirmation_status"
-            elif [ "$confirm" != "false" ]; then
-              echo "invalid confirmation decision: $confirm" >&2
-              exit 1
-            fi
-          fi
           go run ./cmd/swarm-test-timing -input "$primary_json" -markdown "test-results/evidence/${UNIT_ID}-timing.md"
           cat "test-results/evidence/${UNIT_ID}-timing.md" >> "$GITHUB_STEP_SUMMARY"
           test "$status" -eq 0
-          test "$confirmation_status" -eq 0
       - name: Save measured Go cache
         if: github.event_name != 'pull_request' && steps.go-cache-restore.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-test-${{ runner.os }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
+          path: ~/.cache/go-build
+          key: ${{ steps.go-cache-restore.outputs.cache-primary-key }}
       - name: Upload proof evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -340,6 +361,9 @@ jobs:
     needs: [ci-plan, proof-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -363,7 +387,11 @@ jobs:
           merge-multiple: true
       - name: Evaluate complete plan-bound evidence
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > test-results/jobs.json
           go run ./cmd/swarm-test-timing -assert-execution-sha \
             -plan test-results/plan/proof-plan.json -execution-sha "$(git rev-parse HEAD)"
           go run ./cmd/swarm-test-timing -evaluate-budget \
@@ -371,6 +399,9 @@ jobs:
             -policy .github/test-timing-budgets.yaml \
             -weight-model .github/test-timing-weights.json \
             -evidence-root test-results/evidence \
+            -jobs test-results/jobs.json \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
+            -workflow-head-sha "$WORKFLOW_HEAD_SHA" \
             -result-json test-results/timing-budget-result.json \
             -markdown test-results/timing-budget-result.md
           cat test-results/timing-budget-result.md >> "$GITHUB_STEP_SUMMARY"
@@ -382,6 +413,7 @@ jobs:
           path: |
             test-results/timing-budget-result.json
             test-results/timing-budget-result.md
+            test-results/jobs.json
           if-no-files-found: warn
 
   required-tests:
@@ -459,6 +491,7 @@ jobs:
           go run ./cmd/swarm-test-timing -assert-execution-sha \
             -plan test-results/plan/proof-plan.json -execution-sha "$(git rev-parse HEAD)"
           result=$(go run ./cmd/swarm-test-timing -update-weight-model \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
             -plan test-results/plan/proof-plan.json \
             -evidence-root test-results/evidence \
             -weight-model .github/test-timing-weights.json \

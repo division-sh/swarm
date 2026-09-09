@@ -1,6 +1,8 @@
 package testplanning
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,12 +11,32 @@ import (
 	"strings"
 )
 
-const WeightModelVersion = 1
+const WeightModelVersion = 2
 
 type WeightModel struct {
-	Version     int                `json:"version"`
-	SourceRunID string             `json:"source_run_id"`
-	Packages    map[string]float64 `json:"packages"`
+	Version     int                              `json:"version"`
+	SourceRunID string                           `json:"source_run_id"`
+	Packages    map[string]float64               `json:"packages"`
+	Units       map[string]map[string]UnitWeight `json:"units"`
+}
+
+// UnitWeight belongs to one exact executable selection in one profile. A changed
+// selector, count policy or execution environment cannot reuse a stale estimate.
+type UnitWeight struct {
+	Selection string  `json:"selection"`
+	Seconds   float64 `json:"seconds"`
+}
+
+func MeasureUnit(unit ProofUnit, seconds float64) UnitWeight {
+	unit.WeightSeconds = 0
+	raw, _ := json.Marshal(unit)
+	sum := sha256.Sum256(raw)
+	return UnitWeight{Selection: hex.EncodeToString(sum[:]), Seconds: seconds}
+}
+
+func (m WeightModel) UnitSeconds(profile string, unit ProofUnit) (float64, bool) {
+	measured, ok := m.Units[profile][unit.ID]
+	return measured.Seconds, ok && measured.Selection == MeasureUnit(unit, 0).Selection
 }
 
 func LoadWeightModel(r io.Reader) (WeightModel, error) {
@@ -53,6 +75,20 @@ func (m WeightModel) Validate() error {
 		}
 		if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 {
 			return fmt.Errorf("weight for %s must be finite and non-negative", pkg)
+		}
+	}
+	for profile, units := range m.Units {
+		switch profile {
+		case ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly:
+		default:
+			return fmt.Errorf("unknown unit weight profile %q", profile)
+		}
+		for id, weight := range units {
+			digest, err := hex.DecodeString(weight.Selection)
+			if strings.TrimSpace(id) == "" || err != nil || len(digest) != sha256.Size ||
+				math.IsNaN(weight.Seconds) || math.IsInf(weight.Seconds, 0) || weight.Seconds < 0 {
+				return fmt.Errorf("invalid exact unit weight %s/%s", profile, id)
+			}
 		}
 	}
 	return nil

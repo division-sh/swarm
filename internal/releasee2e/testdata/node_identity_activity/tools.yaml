@@ -1,0 +1,19 @@
+send:
+  description: admission-only activity identity control
+  handler_type: http
+  effect_class: read_only
+  input_schema:
+    type: object
+    properties:
+      message: {type: string}
+    required: [message]
+  output_schema:
+    type: object
+    properties:
+      delivered: {type: boolean}
+  response_success: {kind: http_status_2xx}
+  http:
+    method: POST
+    url: https://example.invalid/send
+    body:
+      message: "{{input.message}}"

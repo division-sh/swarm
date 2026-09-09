@@ -1,5 +1,4 @@
 child-intake:
-  id: child-intake
   execution_type: system_node
   subscribes_to: [child.start]
   produces: [child.internal]
@@ -10,7 +9,6 @@ child-intake:
       emit: child.internal
 
 child-processor:
-  id: child-processor
   execution_type: system_node
   subscribes_to: [child.internal]
   produces: [child.done]

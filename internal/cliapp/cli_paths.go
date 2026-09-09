@@ -2,6 +2,7 @@ package cliapp
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -59,16 +60,28 @@ func resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath string, opts
 }
 
 func ResolveSourceRoot(invocationRootPath, raw string) (string, error) {
+	invocationRootPath, err := requireInvocationRootPath(invocationRootPath)
+	if err != nil {
+		return "", err
+	}
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		raw = invocationRootPath
 	}
 	if !filepath.IsAbs(raw) {
-		raw = filepath.Join(invocationRootPath, raw)
+		// Resolve symlinks before collapsing parent traversals in the operand.
+		raw = invocationRootPath + string(filepath.Separator) + raw
 	}
-	root, err := filepath.Abs(raw)
+	root, err := filepath.EvalSymlinks(raw)
 	if err != nil {
-		return "", fmt.Errorf("resolve source directory %q: %w", raw, err)
+		return "", &cliAPIValidationError{message: fmt.Sprintf("resolve source directory %q: %v", raw, err)}
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", &cliAPIValidationError{message: fmt.Sprintf("inspect source directory %q: %v", raw, err)}
+	}
+	if !info.IsDir() {
+		return "", &cliAPIValidationError{message: fmt.Sprintf("source root must be a directory: %s", raw)}
 	}
 	return filepath.Clean(root), nil
 }

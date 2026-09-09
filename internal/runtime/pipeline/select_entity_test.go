@@ -522,7 +522,6 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnAmbiguousMatch(t *te
 
 const selectEntityTestNodes = `
 treasury-orchestrator:
-  id: treasury-orchestrator
   execution_type: system_node
   subscribes_to: [opco.spend_recorded]
   event_handlers:

@@ -61,13 +61,13 @@ func projectionResolverBundle() *runtimecontracts.WorkflowContractBundle {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 					"dimension": {Type: "text"},
 					"score":     {Type: "integer"},
-				}},
+				}, Required: []string{"dimension", "score"}},
 			},
 			"score.bad_dimension_complete": {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 					"dimension": {Type: "text"},
 					"score":     {Type: "integer"},
-				}},
+				}, Required: []string{"dimension", "score"}},
 			},
 		},
 	}
@@ -94,6 +94,35 @@ func TestForHandler_FiltersProjectionIssuesToActiveHandler(t *testing.T) {
 	}
 }
 
+func TestValidateProject_PreservesOptionalNamedFieldPresence(t *testing.T) {
+	binding := Binding{
+		SourceItemType: "SourceRecord",
+		SourceType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "note", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
+		}},
+		TargetItemType: "TargetRecord",
+		TargetType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "detail", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, IsOptional: true},
+			{Name: "note", TypeRef: "text", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+		}},
+		Project: map[string]any{"note": "source.note"},
+	}
+	issues := validateProject(nil, materializedFieldTarget{
+		EntityType: "record",
+		FieldName:  "items",
+		TypeCatalog: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"SourceRecord": {Fields: map[string]runtimecontracts.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}},
+			"TargetRecord": {Fields: map[string]runtimecontracts.TypeFieldSpec{"note": {Type: "text"}, "detail": {Type: "text", IsOptional: true}}},
+		}},
+	}, binding)
+	if !issuesContain(issues, "optional source field") {
+		t.Fatalf("issues = %#v, want optional-to-required presence mismatch", issues)
+	}
+	if issuesContain(issues, "missing detail") {
+		t.Fatalf("issues = %#v, optional target field must not require a projection", issues)
+	}
+}
+
 func TestForHandler_ResolvesQualifiedRuntimeEventToLocalProjectionBinding(t *testing.T) {
 	source := semanticview.Wrap(loadProjectionFlowBundle(t))
 
@@ -117,7 +146,7 @@ func TestActiveHandlerResolutionRejectsQualifiedExactRawBundleFallback(t *testin
 	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "tasks"}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": handler}},
+			"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": handler}},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 			"listener": {"child/task.done": handler},
@@ -155,7 +184,9 @@ func TestValidateEventTypedViewDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 		SourceNode:      identitytest.FlowNode(t, "child", "scorer"),
 		SourceEventType: "score.completed",
 		AccumulatorName: "scores",
-		SourceNamedType: runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
+		SourceType: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+			{Name: "score", TypeRef: "integer", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
+		}},
 	}
 
 	issues := validateEventTypedView(semanticview.Wrap(bundle), runtimecontracts.TypeCatalogDocument{}, binding)
@@ -208,7 +239,6 @@ score.dimension_complete:
 `)
 	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  id: scoring-node
   execution_type: system_node
   event_handlers:
     score.dimension_complete:

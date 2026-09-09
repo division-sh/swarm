@@ -586,13 +586,13 @@ func collectEntityToolWritablePaths(contract entityruntime.Contract, path, typeR
 		return
 	}
 	visiting[typeName] = struct{}{}
-	named := contract.Types.Types[typeName]
-	for fieldName, spec := range named.Fields {
-		fieldName = strings.TrimSpace(fieldName)
-		if fieldName == "" {
-			continue
-		}
-		collectEntityToolWritablePaths(contract, path+"."+fieldName, strings.TrimSpace(spec.Type), seen, visiting, out)
+	resolved, err := resolveEntityToolStructuralType(contract, typeRef)
+	if err != nil {
+		delete(visiting, typeName)
+		return
+	}
+	for _, field := range resolved.Fields {
+		collectEntityToolWritablePaths(contract, path+"."+field.Name, field.TypeRef, seen, visiting, out)
 	}
 	delete(visiting, typeName)
 }
@@ -614,15 +614,13 @@ func collectEntityToolLeafSelectors(contract entityruntime.Contract, path, typeR
 			return
 		}
 		visiting[typeName] = struct{}{}
-		named := contract.Types.Types[typeName]
-		names := make([]string, 0, len(named.Fields))
-		for name := range named.Fields {
-			names = append(names, strings.TrimSpace(name))
+		resolved, err := resolveEntityToolStructuralType(contract, typeRef)
+		if err != nil {
+			delete(visiting, typeName)
+			return
 		}
-		sort.Strings(names)
-		for _, name := range names {
-			spec := named.Fields[name]
-			collectEntityToolLeafSelectors(contract, path+"."+name, spec.Type, seen, visiting, out)
+		for _, field := range resolved.Fields {
+			collectEntityToolLeafSelectors(contract, path+"."+field.Name, field.TypeRef, seen, visiting, out)
 		}
 		delete(visiting, typeName)
 	}
@@ -661,18 +659,18 @@ func entityContractJSONSchema(contract entityruntime.Contract, typeRef string, s
 			return ObjectSchema(map[string]any{})
 		}
 		seen[typeName] = struct{}{}
-		named := contract.Types.Types[typeName]
-		props := make(map[string]any, len(named.Fields))
-		required := make([]string, 0, len(named.Fields))
-		names := make([]string, 0, len(named.Fields))
-		for name := range named.Fields {
-			names = append(names, strings.TrimSpace(name))
+		resolved, err := resolveEntityToolStructuralType(contract, typeRef)
+		if err != nil {
+			delete(seen, typeName)
+			return map[string]any{}
 		}
-		sort.Strings(names)
-		for _, name := range names {
-			spec := named.Fields[name]
-			props[name] = entityContractJSONSchemaWithRefinements(contract, spec.Type, spec.Refinements, true, seen)
-			required = append(required, name)
+		props := make(map[string]any, len(resolved.Fields))
+		required := make([]string, 0, len(resolved.Fields))
+		for _, field := range resolved.Fields {
+			props[field.Name] = entityContractJSONSchemaWithRefinements(contract, field.TypeRef, field.Refinements, true, seen)
+			if !field.IsOptional {
+				required = append(required, field.Name)
+			}
 		}
 		delete(seen, typeName)
 		schema := ObjectSchema(props, required...)
@@ -681,6 +679,10 @@ func entityContractJSONSchema(contract entityruntime.Contract, typeRef string, s
 	default:
 		return map[string]any{}
 	}
+}
+
+func resolveEntityToolStructuralType(contract entityruntime.Contract, typeRef string) (runtimecontracts.ResolvedCatalogType, error) {
+	return (runtimecontracts.CatalogTypeReference{Type: strings.TrimSpace(typeRef), Catalog: contract.Types}).Resolve()
 }
 
 func entityContractJSONSchemaWithRefinements(contract entityruntime.Contract, typeRef string, refinements runtimecontracts.SchemaRefinements, includeEquality bool, seen map[string]struct{}) map[string]any {

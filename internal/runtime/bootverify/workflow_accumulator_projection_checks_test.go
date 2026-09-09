@@ -64,14 +64,17 @@ func accumulatorProjectionBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"score.dimension_complete": {
-				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-					"vertical_id": {Type: "uuid"},
-					"dimension":   {Type: "text"},
-					"tier":        {Type: "integer"},
-					"score":       {Type: "integer"},
-					"evidence":    {Type: "text"},
-					"confidence":  {Type: "text"},
-				}},
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"vertical_id": {Type: "uuid"},
+						"dimension":   {Type: "text"},
+						"tier":        {Type: "integer"},
+						"score":       {Type: "integer"},
+						"evidence":    {Type: "text"},
+						"confidence":  {Type: "text"},
+					},
+					Required: []string{"vertical_id", "dimension", "tier", "score", "evidence", "confidence"},
+				},
 			},
 		},
 	}

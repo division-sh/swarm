@@ -1,9 +1,29 @@
 package pipeline
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
+
+func pipelineExpressionObjectType(name string, fields map[string]runtimecontracts.CatalogTypeKind) runtimecontracts.ResolvedCatalogType {
+	names := make([]string, 0, len(fields))
+	for field := range fields {
+		names = append(names, field)
+	}
+	slices.Sort(names)
+	resolved := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: name}
+	for _, field := range names {
+		resolved.Fields = append(resolved.Fields, runtimecontracts.ResolvedCatalogField{
+			Name: field,
+			Type: runtimecontracts.ResolvedCatalogType{Kind: fields[field]},
+		})
+	}
+	return resolved
+}
 
 func TestNormalizeWorkflowExpressionStringLiterals(t *testing.T) {
 	got, _, err := normalizeWorkflowExpression(
@@ -37,7 +57,10 @@ func TestValidateConditionCEL_RejectsAmbientTimeAccess(t *testing.T) {
 			}
 		})
 	}
-	if err := ValidateConditionCEL(`payload.label == "now()"`, WorkflowConditionContextRule); err != nil {
+	payloadType := pipelineExpressionObjectType("test.ambient.payload", map[string]runtimecontracts.CatalogTypeKind{
+		"label": runtimecontracts.CatalogTypeText,
+	})
+	if err := ValidateConditionCELWithOptions(`payload.label == "now()"`, WorkflowConditionContextRule, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType}); err != nil {
 		t.Fatalf("ValidateConditionCEL string literal = %v, want no ambient-time rejection", err)
 	}
 }
@@ -49,13 +72,19 @@ func TestValidateConditionCEL_RejectsFanOutOutsideDataAccumulationExpressions(t 
 }
 
 func TestValidateConditionCEL_AllowsQueryEntitiesPayloadOperandWithoutRuntimeValue(t *testing.T) {
-	if err := ValidateConditionCEL(`query_entities(name == payload.name).count == 0`, WorkflowConditionContextGuard); err != nil {
+	payloadType := pipelineExpressionObjectType("test.query.payload", map[string]runtimecontracts.CatalogTypeKind{
+		"name": runtimecontracts.CatalogTypeText,
+	})
+	if err := ValidateConditionCELWithOptions(`query_entities(name == payload.name).count == 0`, WorkflowConditionContextGuard, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType}); err != nil {
 		t.Fatalf("expected static query_entities payload operand to validate, got %v", err)
 	}
 }
 
 func TestValidateConditionCEL_AllowsItemOnlyInFilterLikeContexts(t *testing.T) {
-	if err := ValidateConditionCEL(`item.score > 50`, WorkflowConditionContextFilter); err != nil {
+	itemType := pipelineExpressionObjectType("test.filter.item", map[string]runtimecontracts.CatalogTypeKind{
+		"score": runtimecontracts.CatalogTypeInteger,
+	})
+	if err := ValidateConditionCELWithOptions(`item.score > 50`, WorkflowConditionContextFilter, workflowexpr.ValueExpressionOptions{ItemType: &itemType}); err != nil {
 		t.Fatalf("expected filter item scope to validate, got %v", err)
 	}
 	if err := ValidateConditionCEL(`item.score > 50`, WorkflowConditionContextRule); err == nil {
@@ -64,6 +93,10 @@ func TestValidateConditionCEL_AllowsItemOnlyInFilterLikeContexts(t *testing.T) {
 }
 
 func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
+	payloadType := pipelineExpressionObjectType("test.rule.payload", map[string]runtimecontracts.CatalogTypeKind{
+		"name":  runtimecontracts.CatalogTypeText,
+		"score": runtimecontracts.CatalogTypeInteger,
+	})
 	tests := []struct {
 		name       string
 		expression string
@@ -100,7 +133,7 @@ func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateConditionCEL(tt.expression, WorkflowConditionContextRule)
+			err := ValidateConditionCELWithOptions(tt.expression, WorkflowConditionContextRule, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType})
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected rule condition %q to fail validation", tt.expression)
@@ -160,13 +193,20 @@ func TestWorkflowExpressionEvaluator_AllowsComputedNamespace(t *testing.T) {
 
 func TestWorkflowExpressionEvaluatorRejectsTypeInvalidJoinExpressionBeforeEval(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	_, err := eval.EvalBool(`join.missing > 1`, workflowExpressionContext{
+	_, err := eval.EvalBoolWithOptions(`join.missing > 1`, workflowExpressionContext{
 		Join: map[string]any{
 			"expected": 2, "completed": 1, "missing": []any{"b"}, "results": []any{"ok"}, "timed_out": false,
 		},
-	})
+	}, workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinResultType: runtimecontracts.CatalogTypeReference{Type: "text"}})
 	if err == nil || !strings.Contains(err.Error(), "no matching overload") {
 		t.Fatalf("EvalBool type-invalid join error = %v, want typed overload rejection before runtime evaluation", err)
+	}
+}
+
+func TestWorkflowExpressionEvaluatorDoesNotGrantJoinScopeFromText(t *testing.T) {
+	_, err := newWorkflowExpressionEvaluator().EvalBool(`join.completed > 0`, workflowExpressionContext{Join: map[string]any{"completed": 1}})
+	if err == nil || !strings.Contains(err.Error(), "only available") {
+		t.Fatalf("out-of-scope join error=%v", err)
 	}
 }
 
@@ -322,7 +362,8 @@ func TestWorkflowExpressionEvaluator_EvalBoolFailsClosedOnMissingEntityField(t *
 
 func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEntity(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	ok, err := eval.EvalBoolWithOptions(
 		`entity.current_state == "business-current-state" && _entity.current_state == "platform-current-state" && _entity.id == "ent-1" && _entity.gates.reviewed`,
 		workflowExpressionContext{
 			Entity: map[string]any{
@@ -337,7 +378,7 @@ func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEnti
 			},
 			Payload: map[string]any{},
 			Policy:  map[string]any{},
-		},
+		}, workflowexpr.ValueExpressionOptions{EntityType: &entityType},
 	)
 	if err != nil {
 		t.Fatalf("EvalBool error = %v", err)
@@ -349,11 +390,12 @@ func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEnti
 
 func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasPresenceCheckOnSparseField(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(`has(entity.kill_reason)`, workflowExpressionContext{
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	ok, err := eval.EvalBoolWithOptions(`has(entity.kill_reason)`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalBool error = %v", err)
 	}
@@ -364,11 +406,12 @@ func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasPresenceCheckOnSparseField
 
 func TestWorkflowExpressionEvaluator_EvalBoolAllowsNullPresenceChecksOnSparseField(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(`entity.kill_reason == null`, workflowExpressionContext{
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	ok, err := eval.EvalBoolWithOptions(`entity.kill_reason == null`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalBool == null error = %v", err)
 	}
@@ -376,11 +419,11 @@ func TestWorkflowExpressionEvaluator_EvalBoolAllowsNullPresenceChecksOnSparseFie
 		t.Fatal("expected sparse field == null to be true")
 	}
 
-	ok, err = eval.EvalBool(`entity.kill_reason != null`, workflowExpressionContext{
+	ok, err = eval.EvalBoolWithOptions(`entity.kill_reason != null`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalBool != null error = %v", err)
 	}
@@ -391,11 +434,12 @@ func TestWorkflowExpressionEvaluator_EvalBoolAllowsNullPresenceChecksOnSparseFie
 
 func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasGuardedTernaryReadOnSparseField(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(`has(entity.kill_reason) ? entity.kill_reason == "manual" : true`, workflowExpressionContext{
+	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
+	ok, err := eval.EvalBoolWithOptions(`has(entity.kill_reason) ? entity.kill_reason == "manual" : true`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
 		t.Fatalf("EvalBool ternary error = %v", err)
 	}
@@ -406,11 +450,14 @@ func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasGuardedTernaryReadOnSparse
 
 func TestWorkflowExpressionEvaluator_EvalBoolIgnoresEntityRefsInsideStringLiterals(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
-	ok, err := eval.EvalBool(`payload.label == "entity.score"`, workflowExpressionContext{
+	payloadType := pipelineExpressionObjectType("test.literal.payload", map[string]runtimecontracts.CatalogTypeKind{
+		"label": runtimecontracts.CatalogTypeText,
+	})
+	ok, err := eval.EvalBoolWithOptions(`payload.label == "entity.score"`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{"label": "entity.score"},
 		Policy:  map[string]any{},
-	})
+	}, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType})
 	if err != nil {
 		t.Fatalf("EvalBool error = %v", err)
 	}
@@ -421,6 +468,9 @@ func TestWorkflowExpressionEvaluator_EvalBoolIgnoresEntityRefsInsideStringLitera
 
 func TestWorkflowExpressionEvaluator_EvalBoolIgnoresNullPresencePatternsInsideStringLiterals(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
+	payloadType := pipelineExpressionObjectType("test.null-literal.payload", map[string]runtimecontracts.CatalogTypeKind{
+		"label": runtimecontracts.CatalogTypeText,
+	})
 	for _, tc := range []struct {
 		expression string
 		label      string
@@ -428,11 +478,11 @@ func TestWorkflowExpressionEvaluator_EvalBoolIgnoresNullPresencePatternsInsideSt
 		{expression: `payload.label == "entity.kill_reason == null"`, label: "entity.kill_reason == null"},
 		{expression: `payload.label == "entity.kill_reason != null"`, label: "entity.kill_reason != null"},
 	} {
-		ok, err := eval.EvalBool(tc.expression, workflowExpressionContext{
+		ok, err := eval.EvalBoolWithOptions(tc.expression, workflowExpressionContext{
 			Entity:  map[string]any{},
 			Payload: map[string]any{"label": tc.label},
 			Policy:  map[string]any{},
-		})
+		}, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType})
 		if err != nil {
 			t.Fatalf("EvalBool(%q) error = %v", tc.expression, err)
 		}

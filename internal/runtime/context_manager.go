@@ -368,6 +368,7 @@ type RuntimeContextManager struct {
 	nextPublicationGeneration  uint64
 	suppressedStandingServices map[string]struct{}
 	pendingSourceSetTransition *runtimeSourceSetTransitionAdmission
+	resetExecutionFenced       bool
 }
 
 // RuntimeContextPublicationSnapshot is the current public identity of the
@@ -540,6 +541,9 @@ func (m *RuntimeContextManager) BeginStandingRunRecovery(
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.resetExecutionFenced {
+		return nil, worklifetime.ErrAdmissionFenced
+	}
 	var selected *worklifetime.StandingOccurrence
 	for _, entry := range m.contexts {
 		if !runtimeContextEntryLoaded(entry) || entry.standing == nil {
@@ -577,14 +581,17 @@ func (m *RuntimeContextManager) newStandingOccurrencesLocked(workOwner *worklife
 	}
 	for _, raw := range targets {
 		target := raw.normalized()
+		if !m.standingServiceSuppressedLocked(target.ServiceID) && target.Generation <= 0 {
+			return nil, fmt.Errorf("standing service %s has invalid durable generation %d", target.ServiceID, target.Generation)
+		}
+	}
+	for _, raw := range targets {
+		target := raw.normalized()
 		if m.standingServiceSuppressedLocked(target.ServiceID) {
 			continue
 		}
 		if _, exists := out[target.ServiceID]; exists {
 			continue
-		}
-		if target.Generation <= 0 {
-			return nil, fmt.Errorf("standing service %s has invalid durable generation %d", target.ServiceID, target.Generation)
 		}
 		occurrence, err := workOwner.NewStanding(context.Background(), worklifetime.StandingIdentity{
 			ServiceID: target.ServiceID, RunID: target.RunID, Generation: uint64(target.Generation),
@@ -1217,6 +1224,9 @@ func (m *RuntimeContextManager) ReplaceChannelActivationsContext(ctx context.Con
 }
 
 func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *runtimeContextEntry) (*RuntimeContextUse, error) {
+	if m.resetExecutionFenced {
+		return nil, worklifetime.ErrAdmissionFenced
+	}
 	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.workOwner == nil {
 		return nil, fmt.Errorf("runtime context is unavailable")
 	}
@@ -2324,20 +2334,17 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 			return result
 		}
 		result.Changed = true
-		if entry.context != nil {
-			runtimeToShutdown = entry.runtime
-			for _, occurrence := range entry.standing {
-				occurrence.Retire()
-				standingToRetire = append(standingToRetire, occurrence)
-			}
-			entry.standing = nil
-			if runtimeToShutdown != nil {
-				runtimeToShutdown.CloseAdmission()
-			}
-		}
 	}
-	if runtimeToShutdown == nil && entry.context != nil {
+	if entry.context != nil {
 		runtimeToShutdown = entry.runtime
+		for _, occurrence := range entry.standing {
+			occurrence.Retire()
+			standingToRetire = append(standingToRetire, occurrence)
+		}
+		entry.standing = nil
+		if runtimeToShutdown != nil {
+			runtimeToShutdown.CloseAdmission()
+		}
 	}
 	m.mu.Unlock()
 	for _, occurrence := range standingToRetire {
@@ -2378,12 +2385,41 @@ func (m *RuntimeContextManager) DeactivateAllWithOptions(cause string, opts Shut
 	if m == nil {
 		return nil
 	}
-	m.mu.RLock()
+	m.mu.Lock()
 	hashes := append([]string(nil), m.order...)
-	m.mu.RUnlock()
+	updates := make([]runtimeContextVisibilityUpdate, 0, len(hashes))
+	changed := make(map[string]bool, len(hashes))
+	for _, hash := range hashes {
+		entry := m.contexts[hash]
+		if runtimeContextEntryLoaded(entry) {
+			updates = append(updates, runtimeContextVisibilityUpdate{entry: entry, state: RuntimeContextStateUnloaded, cause: normalizeRuntimeContextDeactivationCause(cause)})
+			changed[hash] = true
+		}
+	}
+	if err := m.publishRuntimeContextVisibilityLocked(updates...); err != nil {
+		m.mu.Unlock()
+		return []RuntimeContextDeactivationResult{{ShutdownErr: err}}
+	}
+	// Withdraw the whole selectable set and fence every occurrence before the
+	// first join. Draining one context must not leave a sibling admitting work.
+	for _, hash := range hashes {
+		entry := m.contexts[hash]
+		if entry == nil {
+			continue
+		}
+		if entry.runtime != nil {
+			entry.runtime.CloseAdmission()
+		}
+		for _, occurrence := range entry.standing {
+			occurrence.Retire()
+		}
+	}
+	m.mu.Unlock()
 	results := make([]RuntimeContextDeactivationResult, 0, len(hashes))
 	for _, bundleHash := range hashes {
-		results = append(results, m.DeactivateBundleHashWithOptions(bundleHash, cause, opts))
+		result := m.DeactivateBundleHashWithOptions(bundleHash, cause, opts)
+		result.Changed = result.Changed || changed[bundleHash]
+		results = append(results, result)
 	}
 	return results
 }

@@ -23,7 +23,6 @@ connect:
     to: .
 `,
 		"child/nodes.yaml": `child-aggregator:
-  id: child-aggregator
   execution_type: system_node
   subscribes_to: [micro.done]
   event_handlers:

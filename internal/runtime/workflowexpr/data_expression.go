@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -18,21 +17,7 @@ import (
 )
 
 var (
-	dataExpressionEnvOnce             sync.Once
-	dataExpressionEnv                 *cel.Env
-	dataExpressionEnvErr              error
-	dataExpressionWithBareItemEnvOnce sync.Once
-	dataExpressionWithBareItemEnv     *cel.Env
-	dataExpressionWithBareItemEnvErr  error
-
-	workflowExpressionEntityReferencePattern         = regexp.MustCompile(`(^|[^a-zA-Z0-9_])entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 	workflowExpressionPlatformEntityReferencePattern = regexp.MustCompile(`(^|[^a-zA-Z0-9_])_entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityPresencePattern          = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
-	workflowExpressionEntityHasPattern               = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)`)
-	workflowExpressionEntityHasTernaryTruePattern    = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityHasTernaryFalsePattern   = regexp.MustCompile(`!\s*has\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*[^:]+:\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityNullCompareLeftPattern   = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*null\b`)
-	workflowExpressionEntityNullCompareRightPattern  = regexp.MustCompile(`\bnull\s*(==|!=)\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
 	workflowExpressionEntityNullNotEqualPattern      = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*!=\s*null\b`)
 	workflowExpressionEntityNullEqualPattern         = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*==\s*null\b`)
 	workflowExpressionNullEntityNotEqualPattern      = regexp.MustCompile(`\bnull\s*!=\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
@@ -47,19 +32,37 @@ type ValueContext struct {
 	Payload        map[string]any
 	Policy         map[string]any
 	Computed       map[string]any
+	Accumulated    any
 	FanOut         map[string]any
 	Join           map[string]any
 	Loop           map[string]any
 }
 
 type ValueExpressionOptions struct {
-	AllowBareItem  bool
-	ItemAlias      string
-	AllowJoin      bool
-	RequireBool    bool
-	JoinResultType runtimecontracts.CatalogTypeReference
-	JoinContext    JoinContext
+	AllowBareItem    bool
+	ItemAlias        string
+	AllowJoin        bool
+	RequireBool      bool
+	JoinResultType   runtimecontracts.CatalogTypeReference
+	JoinContext      JoinContext
+	EntityType       *runtimecontracts.ResolvedCatalogType
+	PayloadType      *runtimecontracts.ResolvedCatalogType
+	ItemType         *runtimecontracts.ResolvedCatalogType
+	ResultType       *runtimecontracts.ResolvedCatalogType
+	ResultOptional   bool
+	AllowAccumulated bool
 }
+
+// ValueResult preserves CEL optional absence without introducing null into the
+// workflow value model. Omission-aware sinks consume Present; required sinks
+// reject an absent result.
+type ValueResult struct {
+	value   any
+	present bool
+}
+
+func (r ValueResult) Value() any    { return r.value }
+func (r ValueResult) Present() bool { return r.present }
 
 type JoinContext uint8
 
@@ -73,10 +76,6 @@ func ValidateValueExpression(expression string) error {
 }
 
 func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionOptions) error {
-	env, err := dataExpressionEnvForContext(opts)
-	if err != nil {
-		return err
-	}
 	expression = strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
 	if expression == "" {
 		return fmt.Errorf("workflow data expression is empty")
@@ -99,28 +98,48 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	if err := ValidateEventReferences(expression); err != nil {
 		return err
 	}
+	if err := requireStructuralExpressionRoots(expression, opts); err != nil {
+		return err
+	}
+	env, err := dataExpressionEnvForContext(opts)
+	if err != nil {
+		return err
+	}
 	_, err = compileValueExpression(env, RewriteLoopRoot(expression), opts)
 	return err
 }
 
 func compileValueExpression(env *cel.Env, expression string, opts ValueExpressionOptions) (*cel.Ast, error) {
-	compiled, issues := env.Compile(expression)
+	parsed, issues := env.Parse(expression)
+	if issues != nil && issues.Err() != nil {
+		return nil, issues.Err()
+	}
+	if opts.AllowJoin {
+		if err := validateJoinAccesses(parsed, opts.JoinContext); err != nil {
+			return nil, err
+		}
+	}
+	compiled, issues := env.Check(parsed)
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
 	}
 	typeChecked := compiled
-	if opts.AllowJoin {
-		if err := validateJoinAccesses(compiled, opts.JoinContext); err != nil {
-			return nil, err
-		}
-		var err error
-		typeChecked, err = typeCheckJoinExpression(env, compiled, opts)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if opts.RequireBool && typeChecked.OutputType() != cel.BoolType {
+	// Payload reads are structurally typed before this point. Other roots keep
+	// their separately owned runtime value contracts until those grammars gain
+	// exact types, so a dynamic result still receives the existing bool check at
+	// evaluation.
+	if opts.RequireBool && typeChecked.OutputType() != cel.BoolType && typeChecked.OutputType() != cel.DynType {
 		return nil, fmt.Errorf("workflow expression must return bool, got %s", typeChecked.OutputType())
+	}
+	provider, err := newWorkflowStructuralTypeProvider(nil, opts)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateWorkflowOptionalReads(typeChecked, provider); err != nil {
+		return nil, err
+	}
+	if err := validateWorkflowResultType(typeChecked.OutputType(), provider, opts); err != nil {
+		return nil, err
 	}
 	return compiled, nil
 }
@@ -192,175 +211,6 @@ func validateJoinAccesses(compiled *cel.Ast, context JoinContext) error {
 	return visit(root)
 }
 
-type joinFieldTypeOptimizer struct{}
-
-func (joinFieldTypeOptimizer) Optimize(ctx *cel.OptimizerContext, expression *celast.AST) *celast.AST {
-	matches := celast.MatchDescendants(celast.NavigateAST(expression), func(expr celast.NavigableExpr) bool {
-		if expr.Kind() != celast.SelectKind {
-			return false
-		}
-		operand := expr.AsSelect().Operand()
-		return operand.Kind() == celast.IdentKind && operand.AsIdent() == "join"
-	})
-	for _, match := range matches {
-		ctx.UpdateExpr(match, ctx.NewIdent(joinTypedVariable(match.AsSelect().FieldName())))
-	}
-	return ctx.NewAST(expression.Expr())
-}
-
-func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, opts ValueExpressionOptions) (*cel.Ast, error) {
-	var typedEnv *cel.Env
-	var err error
-	if opts.JoinContext == JoinContextFanOutDelivery {
-		typedEnv, err = env.Extend(
-			cel.Variable(joinTypedVariable("total"), cel.IntType),
-			cel.Variable(joinTypedVariable("dispositions"), cel.MapType(cel.StringType, cel.IntType)),
-		)
-	} else {
-		provider := newJoinCatalogTypeProvider(env.CELTypeProvider(), opts.JoinResultType)
-		resultCELType, resolveErr := provider.resolve(opts.JoinResultType.Type)
-		if resolveErr != nil {
-			return nil, resolveErr
-		}
-		typedEnv, err = env.Extend(
-			cel.CustomTypeProvider(provider),
-			cel.Variable(joinTypedVariable("expected"), cel.IntType),
-			cel.Variable(joinTypedVariable("completed"), cel.IntType),
-			cel.Variable(joinTypedVariable("missing"), cel.ListType(cel.StringType)),
-			cel.Variable(joinTypedVariable("results"), cel.ListType(resultCELType)),
-			cel.Variable(joinTypedVariable("timed_out"), cel.BoolType),
-		)
-	}
-	if err != nil {
-		return nil, err
-	}
-	optimizer, err := cel.NewStaticOptimizer(joinFieldTypeOptimizer{})
-	if err != nil {
-		return nil, err
-	}
-	typed, issues := optimizer.Optimize(typedEnv, compiled)
-	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
-	}
-	return typed, nil
-}
-
-func joinTypedVariable(field string) string {
-	return "__swarm_join_" + strings.TrimSpace(field)
-}
-
-const joinCatalogTypePrefix = "swarm.workflow.join."
-
-type joinCatalogTypeProvider struct {
-	celtypes.Provider
-	result runtimecontracts.CatalogTypeReference
-}
-
-func newJoinCatalogTypeProvider(base celtypes.Provider, result runtimecontracts.CatalogTypeReference) *joinCatalogTypeProvider {
-	return &joinCatalogTypeProvider{Provider: base, result: result}
-}
-
-func (p *joinCatalogTypeProvider) resolve(typeRef string) (*cel.Type, error) {
-	resolved, err := p.result.ResolveReference(typeRef)
-	if err != nil {
-		return nil, err
-	}
-	return p.resolveResolved(resolved)
-}
-
-func (p *joinCatalogTypeProvider) resolveResolved(resolved runtimecontracts.ResolvedCatalogType) (*cel.Type, error) {
-	switch resolved.Kind {
-	case runtimecontracts.CatalogTypeDynamic:
-		return cel.DynType, nil
-	case runtimecontracts.CatalogTypeText:
-		return cel.StringType, nil
-	case runtimecontracts.CatalogTypeInteger:
-		return cel.IntType, nil
-	case runtimecontracts.CatalogTypeNumber:
-		return cel.DoubleType, nil
-	case runtimecontracts.CatalogTypeBoolean:
-		return cel.BoolType, nil
-	case runtimecontracts.CatalogTypeObject:
-		return cel.ObjectType(joinCatalogTypePrefix + resolved.Name), nil
-	case runtimecontracts.CatalogTypeList:
-		if resolved.Element == nil {
-			return nil, fmt.Errorf("catalog list type has no element type")
-		}
-		element, err := p.resolveResolved(*resolved.Element)
-		if err != nil {
-			return nil, err
-		}
-		return cel.ListType(element), nil
-	case runtimecontracts.CatalogTypeMap:
-		if resolved.Key == nil || resolved.Value == nil {
-			return nil, fmt.Errorf("catalog map type is incomplete")
-		}
-		key, err := p.resolveResolved(*resolved.Key)
-		if err != nil {
-			return nil, err
-		}
-		value, err := p.resolveResolved(*resolved.Value)
-		if err != nil {
-			return nil, err
-		}
-		return cel.MapType(key, value), nil
-	default:
-		return nil, fmt.Errorf("unsupported catalog type kind %q", resolved.Kind)
-	}
-}
-
-func (p *joinCatalogTypeProvider) FindStructType(typeName string) (*celtypes.Type, bool) {
-	if name, ok := joinCatalogTypeName(typeName); ok {
-		if _, found := p.result.NamedFields(name); found {
-			return celtypes.NewTypeTypeWithParam(celtypes.NewObjectType(typeName)), true
-		}
-	}
-	return p.Provider.FindStructType(typeName)
-}
-
-func (p *joinCatalogTypeProvider) FindStructFieldNames(typeName string) ([]string, bool) {
-	if name, ok := joinCatalogTypeName(typeName); ok {
-		fields, found := p.result.NamedFields(name)
-		if !found {
-			return nil, false
-		}
-		names := make([]string, 0, len(fields))
-		for field := range fields {
-			names = append(names, field)
-		}
-		sort.Strings(names)
-		return names, true
-	}
-	return p.Provider.FindStructFieldNames(typeName)
-}
-
-func (p *joinCatalogTypeProvider) FindStructFieldType(typeName, fieldName string) (*celtypes.FieldType, bool) {
-	if name, ok := joinCatalogTypeName(typeName); ok {
-		fields, found := p.result.NamedFields(name)
-		if !found {
-			return nil, false
-		}
-		field, found := fields[strings.TrimSpace(fieldName)]
-		if !found {
-			return nil, false
-		}
-		fieldType, err := p.resolve(field.Type)
-		if err != nil {
-			return nil, false
-		}
-		return &celtypes.FieldType{Type: fieldType}, true
-	}
-	return p.Provider.FindStructFieldType(typeName, fieldName)
-}
-
-func joinCatalogTypeName(typeName string) (string, bool) {
-	if !strings.HasPrefix(typeName, joinCatalogTypePrefix) {
-		return "", false
-	}
-	name := strings.TrimPrefix(typeName, joinCatalogTypePrefix)
-	return name, name != ""
-}
-
 func EvalValueExpression(expression string, ctx ValueContext) (any, error) {
 	return EvalValueExpressionWithOptions(expression, ctx, ValueExpressionOptions{})
 }
@@ -382,53 +232,68 @@ func EvalJoinBool(expression string, join map[string]any, resultType runtimecont
 }
 
 func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts ValueExpressionOptions) (any, error) {
-	env, err := dataExpressionEnvForContext(opts)
+	result, err := EvalValueResultWithOptions(expression, ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	if !result.Present() {
+		return nil, fmt.Errorf("workflow expression produced absence for a non-omission-aware sink")
+	}
+	return result.Value(), nil
+}
+
+func EvalValueResultWithOptions(expression string, ctx ValueContext, opts ValueExpressionOptions) (ValueResult, error) {
 	normalized := strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
 	if normalized == "" {
-		return nil, fmt.Errorf("workflow data expression is empty")
+		return ValueResult{}, fmt.Errorf("workflow data expression is empty")
 	}
 	if expressionReferencesFanOutField(normalized, "target") {
-		return nil, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
+		return ValueResult{}, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
 	}
 	if expressionReferencesFanOutField(normalized, "identity") {
-		return nil, fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
+		return ValueResult{}, fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
 	}
 	if expressionReferencesFanOutField(normalized, "item") {
-		return nil, fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
+		return ValueResult{}, fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
 	}
 	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(normalized, "index") {
-		return nil, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
+		return ValueResult{}, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
 	}
 	if !opts.AllowJoin && ExpressionReferencesRoot(normalized, "join") {
-		return nil, fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
+		return ValueResult{}, fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
 	}
 	if err := ValidateEventReferences(normalized); err != nil {
-		return nil, err
+		return ValueResult{}, err
+	}
+	if err := requireStructuralExpressionRoots(normalized, opts); err != nil {
+		return ValueResult{}, err
+	}
+	env, err := dataExpressionEnvForContext(opts)
+	if err != nil {
+		return ValueResult{}, err
 	}
 	if missing := MissingEntityReferences(normalized, ctx.Entity); len(missing) > 0 {
-		return nil, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
+		return ValueResult{}, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
 	ast, err := compileValueExpression(env, RewriteLoopRoot(normalized), opts)
 	if err != nil {
-		return nil, err
+		return ValueResult{}, err
 	}
 	program, err := env.Program(ast)
 	if err != nil {
-		return nil, err
+		return ValueResult{}, err
 	}
 	activation := map[string]any{
-		"entity":   NormalizeCELInputMap(ctx.Entity),
-		"_entity":  NormalizeCELInputMap(ctx.PlatformEntity),
-		"event":    NormalizeCELInputMap(ctx.Event),
-		"payload":  NormalizeCELInputMap(ctx.Payload),
-		"policy":   NormalizeCELInputMap(ctx.Policy),
-		"computed": NormalizeCELInputMap(ctx.Computed),
-		"fan_out":  NormalizeCELInputMap(ctx.FanOut),
-		"join":     NormalizeCELInputMap(ctx.Join),
-		"_loop":    NormalizeCELInputMap(ctx.Loop),
+		"entity":      NormalizeCELInputMap(ctx.Entity),
+		"_entity":     NormalizeCELInputMap(ctx.PlatformEntity),
+		"event":       NormalizeCELInputMap(ctx.Event),
+		"payload":     NormalizeCELInputMap(ctx.Payload),
+		"policy":      NormalizeCELInputMap(ctx.Policy),
+		"computed":    NormalizeCELInputMap(ctx.Computed),
+		"accumulated": NormalizeCELValue(ctx.Accumulated),
+		"fan_out":     NormalizeCELInputMap(ctx.FanOut),
+		"join":        NormalizeCELInputMap(ctx.Join),
+		"_loop":       NormalizeCELInputMap(ctx.Loop),
 	}
 	if opts.AllowBareItem {
 		activation["item"] = NormalizeCELValue(ctx.FanOut["item"])
@@ -438,9 +303,19 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	}
 	out, _, err := program.Eval(activation)
 	if err != nil {
-		return nil, err
+		return ValueResult{}, err
 	}
-	return NormalizeCELValue(out), nil
+	return normalizeCELResult(out), nil
+}
+
+func normalizeCELResult(value any) ValueResult {
+	if optional, ok := value.(*celtypes.Optional); ok {
+		if !optional.HasValue() {
+			return ValueResult{}
+		}
+		return ValueResult{value: NormalizeCELValue(optional.GetValue()), present: true}
+	}
+	return ValueResult{value: NormalizeCELValue(value), present: true}
 }
 
 func ExpressionReferencesRoot(expression, root string) bool {
@@ -669,31 +544,6 @@ func isRootReferenceStart(expression string, start int) bool {
 	return true
 }
 
-func EntityReferences(expression string) []string {
-	expression = strings.TrimSpace(StripStringLiterals(expression))
-	if expression == "" {
-		return nil
-	}
-	matches := workflowExpressionEntityReferencePattern.FindAllStringSubmatch(expression, -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]struct{}{}
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
-		ref := strings.TrimSpace(match[2])
-		if ref == "" {
-			continue
-		}
-		if _, ok := seen[ref]; ok {
-			continue
-		}
-		seen[ref] = struct{}{}
-		out = append(out, ref)
-	}
-	return out
-}
-
 func PlatformEntityReferences(expression string) []string {
 	expression = strings.TrimSpace(StripStringLiterals(expression))
 	if expression == "" {
@@ -917,81 +767,6 @@ func EntityReferenceField(ref string) string {
 	return strings.TrimSpace(ref)
 }
 
-func PresenceGuardedEntityFields(expression string) map[string]struct{} {
-	expression = strings.TrimSpace(StripStringLiterals(expression))
-	if expression == "" {
-		return nil
-	}
-	out := map[string]struct{}{}
-	addField := func(field string) {
-		field = EntityReferenceField(field)
-		if field != "" {
-			out[field] = struct{}{}
-		}
-	}
-	for _, match := range workflowExpressionEntityPresencePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasTernaryTruePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 && EntityReferenceField(match[1]) == EntityReferenceField(match[2]) {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityHasTernaryFalsePattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 && EntityReferenceField(match[1]) == EntityReferenceField(match[2]) {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityNullCompareLeftPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 2 {
-			addField(match[1])
-		}
-	}
-	for _, match := range workflowExpressionEntityNullCompareRightPattern.FindAllStringSubmatch(expression, -1) {
-		if len(match) >= 3 {
-			addField(match[2])
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func MissingEntityReferences(expression string, entity map[string]any) []string {
-	refs := EntityReferences(expression)
-	if len(refs) == 0 {
-		return nil
-	}
-	guarded := PresenceGuardedEntityFields(expression)
-	out := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		field := EntityReferenceField(ref)
-		if field == "" {
-			continue
-		}
-		if _, ok := guarded[field]; ok {
-			continue
-		}
-		if _, ok := lookupPath(entity, ref); ok {
-			continue
-		}
-		out = append(out, "entity."+ref)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	sort.Strings(out)
-	return out
-}
-
 func NormalizeCELValue(value any) any {
 	switch typed := value.(type) {
 	case nil:
@@ -1046,40 +821,112 @@ func NormalizeCELInputMap(source map[string]any) map[string]any {
 }
 
 func dataExpressionEnvForContext(opts ValueExpressionOptions) (*cel.Env, error) {
-	if strings.TrimSpace(opts.ItemAlias) != "" {
-		return newDataExpressionEnv(false, strings.TrimSpace(opts.ItemAlias))
-	}
-	if opts.AllowBareItem {
-		dataExpressionWithBareItemEnvOnce.Do(func() {
-			dataExpressionWithBareItemEnv, dataExpressionWithBareItemEnvErr = newDataExpressionEnv(true, "")
-		})
-		return dataExpressionWithBareItemEnv, dataExpressionWithBareItemEnvErr
-	}
-	dataExpressionEnvOnce.Do(func() {
-		dataExpressionEnv, dataExpressionEnvErr = newDataExpressionEnv(false, "")
-	})
-	return dataExpressionEnv, dataExpressionEnvErr
+	return newDataExpressionEnv(opts.AllowBareItem, strings.TrimSpace(opts.ItemAlias), opts)
 }
 
-func newDataExpressionEnv(allowBareItem bool, itemAlias string) (*cel.Env, error) {
+func requireStructuralExpressionRoots(expression string, opts ValueExpressionOptions) error {
+	if len(entityExpressionAccesses(expression)) > 0 && (opts.EntityType == nil || opts.EntityType.Kind == runtimecontracts.CatalogTypeDynamic) {
+		return fmt.Errorf("workflow expression reads entity without an exact structural schema")
+	}
+	if ExpressionReferencesRoot(expression, "payload") {
+		if opts.PayloadType == nil || opts.PayloadType.Kind == runtimecontracts.CatalogTypeDynamic {
+			return fmt.Errorf("workflow expression %q reads payload without an exact structural schema", expression)
+		}
+	}
+	return nil
+}
+
+func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpressionOptions) (*cel.Env, error) {
 	variables := []cel.EnvOption{
-		cel.Variable("entity", cel.DynType),
 		cel.Variable("_entity", cel.DynType),
 		cel.Variable("event", cel.DynType),
-		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
 		cel.Variable("computed", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
-		cel.Variable("join", cel.DynType),
 		cel.Variable("_loop", cel.DynType),
+		cel.Function("count_ge",
+			cel.Overload(
+				"count_ge_dyn_dyn",
+				[]*cel.Type{cel.DynType, cel.DynType},
+				cel.IntType,
+				cel.FunctionBinding(workflowCountGE),
+			),
+		),
 	}
-	if allowBareItem {
-		variables = append(variables, cel.Variable("item", cel.DynType))
+	if opts.AllowAccumulated {
+		variables = append(variables, cel.Variable("accumulated", cel.DynType))
 	}
-	if itemAlias = strings.TrimSpace(itemAlias); itemAlias != "" {
-		variables = append(variables, cel.Variable(itemAlias, cel.DynType))
+	base, err := cel.NewEnv(append(variables, cel.OptionalTypes())...)
+	if err != nil {
+		return nil, err
 	}
-	return cel.NewEnv(variables...)
+	provider, err := newWorkflowStructuralTypeProvider(base.CELTypeProvider(), opts)
+	if err != nil {
+		return nil, err
+	}
+	for _, root := range []string{"entity", "join"} {
+		rootType, ok := provider.rootType(root)
+		if !ok {
+			rootType = cel.DynType
+		}
+		base, err = base.Extend(cel.CustomTypeProvider(provider), cel.Variable(root, rootType))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if payloadType, ok := provider.rootType("payload"); ok {
+		base, err = base.Extend(cel.CustomTypeProvider(provider), cel.Variable("payload", payloadType))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if itemType, ok := provider.rootType("item"); ok {
+		itemName := "item"
+		if itemAlias != "" {
+			itemName = itemAlias
+		}
+		base, err = base.Extend(cel.CustomTypeProvider(provider), cel.Variable(itemName, itemType))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return base, nil
+}
+
+func workflowCountGE(args ...ref.Val) ref.Val {
+	if len(args) != 2 {
+		return celtypes.NewErr("count_ge expects 2 arguments")
+	}
+	threshold, ok := workflowNumericValue(NormalizeCELValue(args[1]))
+	if !ok {
+		return celtypes.NewErr("count_ge threshold must be numeric")
+	}
+	values, ok := NormalizeCELValue(args[0]).([]any)
+	if !ok {
+		return celtypes.NewErr("count_ge values must be a list")
+	}
+	count := int64(0)
+	for _, value := range values {
+		if number, numeric := workflowNumericValue(value); numeric && number >= threshold {
+			count++
+		}
+	}
+	return celtypes.Int(count)
+}
+
+func workflowNumericValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	default:
+		return 0, false
+	}
 }
 
 func rewriteOutsideStringLiterals(expression string, rewrite func(string) string) string {

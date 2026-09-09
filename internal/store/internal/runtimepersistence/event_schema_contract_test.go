@@ -56,6 +56,13 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 		{"global_scope_with_flow", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.flowInstance = "flow-a/1" }},
 		{"noncanonical_flow_whitespace", "check", validUnsafeFlowEventRow, func(row *unsafeEventRow) { row.flowInstance = " flow-a/1 " }},
 		{"missing_payload", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.payload = nil }},
+		{"missing_payload_schema_bundle_hash", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.payloadSchemaBundleHash = nil }},
+		{"invalid_payload_schema_bundle_hash", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.payloadSchemaBundleHash = "bundle-invalid" }},
+		{"noncanonical_payload_schema_flow_id", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.payloadSchemaFlowID = " flow-a " }},
+		{"missing_payload_schema_event_key", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.payloadSchemaEventKey = nil }},
+		{"blank_payload_schema_event_key", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.payloadSchemaEventKey = "" }},
+		{"invalid_payload_schema_digest", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.payloadSchemaDigest = "sha256:invalid" }},
+		{"invalid_payload_schema_class", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.payloadSchemaClass = "ambient" }},
 		{"missing_created_at", "not_null", validUnsafeEventRow, func(row *unsafeEventRow) { row.createdAt = nil }},
 		{"runtime_source_without_route", "check", validUnsafeRuntimeSourceEventRow, func(row *unsafeEventRow) { row.sourceRoute = `{}` }},
 		{"declared_source_without_authority", "check", validUnsafeDeclaredSourceEventRow, func(row *unsafeEventRow) { row.routingSourceAuthority = nil }},
@@ -130,6 +137,11 @@ type unsafeEventRow struct {
 	flowInstance             any
 	scope                    any
 	payload                  any
+	payloadSchemaBundleHash  any
+	payloadSchemaFlowID      any
+	payloadSchemaEventKey    any
+	payloadSchemaDigest      any
+	payloadSchemaClass       any
 	executionMode            any
 	chainDepth               any
 	producedBy               any
@@ -148,7 +160,11 @@ func validUnsafeEventRow() unsafeEventRow {
 	return unsafeEventRow{
 		class: "root_ingress", eventID: uuid.NewString(), runID: uuid.NewString(), eventName: "schema.contract",
 		taskID: "task", scope: string(events.EventScopeGlobal), payload: `{}`, executionMode: "live", chainDepth: 0,
-		producedBy: "schema-proof", producedByType: "external", createdAt: time.Date(2026, 7, 18, 20, 0, 0, 0, time.UTC),
+		payloadSchemaBundleHash: authorActivityTestBundleHash,
+		payloadSchemaFlowID:     "flow-a", payloadSchemaEventKey: "schema.contract",
+		payloadSchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		payloadSchemaClass:  "schema_less",
+		producedBy:          "schema-proof", producedByType: "external", createdAt: time.Date(2026, 7, 18, 20, 0, 0, 0, time.UTC),
 		routingSourceKind: "external_ingress", routingSourceAuthority: "provider_admission_plan",
 		sourceRoute: `{"flow_id":"flow-a","entity_id":"` + uuid.NewString() + `"}`, targetRoute: `{}`, targetSet: `[]`,
 	}
@@ -304,6 +320,8 @@ func unsafeEventInsert(row unsafeEventRow) (string, string, []any) {
 	}
 	args := []any{
 		row.class, row.eventID, row.runID, row.eventName, row.taskID, row.entityID, row.flowInstance, row.scope, row.payload, payloadBytes,
+		row.payloadSchemaBundleHash, row.payloadSchemaFlowID, row.payloadSchemaEventKey,
+		row.payloadSchemaDigest, row.payloadSchemaClass,
 		row.executionMode, row.chainDepth, row.producedBy, row.producedByType, row.sourceEventID, row.createdAt,
 		row.routingSourceKind, row.routingSourceAuthority, row.sourceRoute, row.targetRoute, row.targetSet, row.operatorReferenceEventID,
 		unsafeEventRouteSettlement(row),
@@ -311,19 +329,24 @@ func unsafeEventInsert(row unsafeEventRow) (string, string, []any) {
 	return `
 		INSERT INTO events (
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
+			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
+			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
 				operator_reference_event_id, route_settlement
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, `
 		INSERT INTO events (
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
+			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
+			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
 				operator_reference_event_id, route_settlement
 			) VALUES (
-				$1, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9::jsonb, $10::bytea, $11, $12, $13, $14,
-				$15::uuid, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb, $22::uuid, $23::jsonb
+				$1, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9::jsonb, $10::bytea,
+				$11, $12, $13, $14, $15, $16, $17, $18, $19,
+				$20::uuid, $21, $22, $23, $24::jsonb, $25::jsonb, $26::jsonb, $27::uuid, $28::jsonb
 			)
 		`, args
 }

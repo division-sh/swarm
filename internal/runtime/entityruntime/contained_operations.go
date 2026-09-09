@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
@@ -225,15 +226,15 @@ func resolveTypePath(contract Contract, typeRef string, segments []string) (stri
 		if segment == "" {
 			return "", fmt.Errorf("field is required")
 		}
-		named, ok := contract.Types.Types[typeName(contract, currentType)]
-		if !ok {
+		resolved, err := resolveStructuralType(contract, currentType)
+		if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
 			return "", fmt.Errorf("path does not resolve through a named type")
 		}
-		spec, ok := named.Fields[segment]
+		field, ok := resolved.Field(segment)
 		if !ok {
 			return "", fmt.Errorf("undeclared path segment %s", segment)
 		}
-		currentType = strings.TrimSpace(spec.Type)
+		currentType = strings.TrimSpace(field.TypeRef)
 	}
 	return currentType, nil
 }
@@ -246,8 +247,8 @@ func normalizePartialObjectValue(contract Contract, fieldName, typeRef string, v
 	if isJSONObjectType(contract, typeRef) {
 		return cloneMap(object), nil
 	}
-	named, ok := contract.Types.Types[typeName(contract, typeRef)]
-	if !ok {
+	resolved, err := resolveStructuralType(contract, typeRef)
+	if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
 		return nil, fieldTypeError(fieldName, "must be object")
 	}
 	out := make(map[string]any, len(object))
@@ -256,11 +257,11 @@ func normalizePartialObjectValue(contract Contract, fieldName, typeRef string, v
 		if key == "" {
 			continue
 		}
-		spec, ok := named.Fields[key]
+		field, ok := resolved.Field(key)
 		if !ok {
 			return nil, fieldTypeError(joinFieldName(fieldName, key), "is undeclared")
 		}
-		normalized, err := normalizeValueForType(contract, joinFieldName(fieldName, key), spec.Type, raw)
+		normalized, err := normalizeValueForType(contract, joinFieldName(fieldName, key), field.TypeRef, raw)
 		if err != nil {
 			return nil, err
 		}

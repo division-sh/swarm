@@ -86,8 +86,6 @@ type PostgresStore struct {
 	runLifecycleCandidates *storerunhandoff.CandidateCoordinator
 }
 
-type EventPayloadValidator func(ctx context.Context, eventType string, payload []byte) error
-
 func DSNFromConfig(cfg config.DatabaseConfig, password string) string {
 	host := strings.TrimSpace(cfg.Host)
 	if host == "" {

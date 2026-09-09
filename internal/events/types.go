@@ -1034,6 +1034,7 @@ type Event struct {
 	routingSource   RoutingSource
 	operatorRef     *OperatorReferenceProvenance
 	selectedFork    *SelectedForkLineage
+	payloadSchema   *PayloadSchemaBinding
 }
 
 type deliveryContextKey struct{}
@@ -1602,6 +1603,10 @@ func (e Event) Clone() Event {
 	if e.selectedFork != nil {
 		lineage := *e.selectedFork
 		cloned.selectedFork = &lineage
+	}
+	if e.payloadSchema != nil {
+		binding := *e.payloadSchema
+		cloned.payloadSchema = &binding
 	}
 	return cloned
 }

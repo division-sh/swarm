@@ -31,6 +31,15 @@ func TestPlatformSpecDigestMatchesMaterializedFilename(t *testing.T) {
 	if len(spec) == 0 {
 		t.Fatal("embedded platform spec is empty")
 	}
+	for _, field := range []string{
+		"payload_schema_bundle_hash",
+		"payload_schema_event_key",
+		"payload_schema_digest",
+	} {
+		if !strings.Contains(string(spec), field) {
+			t.Fatalf("embedded platform spec is missing event admission field %s", field)
+		}
+	}
 	digest := sha256.Sum256(spec)
 	want := hex.EncodeToString(digest[:])
 	if got := PlatformSpecDigest(); got != want {

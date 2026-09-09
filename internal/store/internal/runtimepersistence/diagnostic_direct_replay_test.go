@@ -145,7 +145,8 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 func persistSQLiteRuntimeLogForReplayTest(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string) string {
 	t.Helper()
 	payload := json.RawMessage(`{"log_level":"warn","message":"diagnostic replay proof","details":{"component":"diagnostic_replay","action":"proof"}}`)
-	if err := store.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload, ExecutionMode: executionmode.Live}); err != nil {
+	record := runtimeLogPersistenceRecordForReplayTest(t, runID, payload)
+	if err := store.PersistRuntimeLog(ctx, record); err != nil {
 		t.Fatalf("PersistRuntimeLog(sqlite): %v", err)
 	}
 	var eventID string
@@ -165,7 +166,8 @@ func persistSQLiteRuntimeLogForReplayTest(t *testing.T, ctx context.Context, sto
 func persistPostgresRuntimeLogForReplayTest(t *testing.T, ctx context.Context, pg *PostgresStore, runID string) string {
 	t.Helper()
 	payload := json.RawMessage(`{"log_level":"warn","message":"diagnostic replay proof","details":{"component":"diagnostic_replay","action":"proof"}}`)
-	if err := pg.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{RunID: runID, Payload: payload, ExecutionMode: executionmode.Live}); err != nil {
+	record := runtimeLogPersistenceRecordForReplayTest(t, runID, payload)
+	if err := pg.PersistRuntimeLog(ctx, record); err != nil {
 		t.Fatalf("PersistRuntimeLog(postgres): %v", err)
 	}
 	var eventID string
@@ -180,6 +182,21 @@ func persistPostgresRuntimeLogForReplayTest(t *testing.T, ctx context.Context, p
 		t.Fatalf("load postgres runtime log event_id: %v", err)
 	}
 	return eventID
+}
+
+func runtimeLogPersistenceRecordForReplayTest(t *testing.T, runID string, payload json.RawMessage) runtimepkg.RuntimeLogPersistenceRecord {
+	t.Helper()
+	event := eventtest.DiagnosticDirect(
+		uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, "", "", events.EventEnvelope{},
+		time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC),
+	)
+	admission, err := eventtest.PayloadAdmission(event, "", string(events.EventTypePlatformRuntimeLog))
+	if err != nil {
+		t.Fatalf("bind runtime-log admission fixture: %v", err)
+	}
+	return runtimepkg.RuntimeLogPersistenceRecord{
+		RunID: runID, Payload: payload, PayloadAdmission: admission, ExecutionMode: executionmode.Live,
+	}
 }
 
 func appendSQLiteReplayTestEvent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, evt events.Event) {

@@ -244,7 +244,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 		Events: map[string]runtimecontracts.EventCatalogEntry{"timer.cancel": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"controller": {
-				ID: "controller", SubscribesTo: []string{"timer.cancel"},
+				SubscribesTo: []string{"timer.cancel"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"timer.cancel": {AdvancesTo: "done"},
 				},
@@ -721,7 +721,6 @@ item.requested:
   item: string
 `,
 		"review/nodes.yaml": `top-level-reader:
-  id: top-level-reader
   execution_type: system_node
   subscribes_to: [top.ready]
   event_handlers:
@@ -735,7 +734,6 @@ item.requested:
           fields:
             item: row
 nested-reader:
-  id: nested-reader
   execution_type: system_node
   subscribes_to: [nested.ready]
   event_handlers:
@@ -968,7 +966,7 @@ func deliveryTargetOwnershipNode(id string, handler runtimecontracts.SystemNodeE
 
 func deliveryTargetOwnershipEventNode(id, eventType string, handler runtimecontracts.SystemNodeEventHandler) runtimecontracts.SystemNodeContract {
 	return runtimecontracts.SystemNodeContract{
-		ID: id, SubscribesTo: []string{eventType},
+		SubscribesTo:  []string{eventType},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventType: handler},
 	}
 }

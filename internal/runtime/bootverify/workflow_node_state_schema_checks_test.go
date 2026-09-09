@@ -13,7 +13,6 @@ func TestRun_ReportsNodeStateJSONBWithTypedCounterpart(t *testing.T) {
 		t.Run(fieldType, func(t *testing.T) {
 			bundle := nodeStateSchemaTypingBundle()
 			bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
-				ID:         "scoring-node",
 				StateTable: "scoring_state",
 				StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
 					{Name: "dimensions_received", Type: fieldType},
@@ -32,7 +31,6 @@ func TestRun_ReportsNodeStateJSONBWithTypedCounterpart(t *testing.T) {
 func TestRun_ReportsNodeStateJSONBLintEvidenceWithoutCounterpart(t *testing.T) {
 	bundle := nodeStateSchemaTypingBundle()
 	bundle.Nodes["build-node"] = runtimecontracts.SystemNodeContract{
-		ID:         "build-node",
 		StateTable: "build_state",
 		StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
 			{Name: "build_evidence", Type: "jsonb"},
@@ -52,7 +50,6 @@ func TestRun_ReportsNodeStateJSONBLintEvidenceWithoutCounterpart(t *testing.T) {
 func TestRun_ReportsUndeclaredNodeStateNamedType(t *testing.T) {
 	bundle := nodeStateSchemaTypingBundle()
 	bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
-		ID:         "scoring-node",
 		StateTable: "scoring_state",
 		StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
 			{Name: "dimensions_received", Type: "[MissingScore]"},
@@ -69,7 +66,6 @@ func TestRun_ReportsUndeclaredNodeStateNamedType(t *testing.T) {
 func TestRun_AllowsDeclaredNodeStateNamedType(t *testing.T) {
 	bundle := nodeStateSchemaTypingBundle()
 	bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
-		ID:         "scoring-node",
 		StateTable: "scoring_state",
 		StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
 			{Name: "dimensions_received", Type: "[DimensionScore]"},
@@ -91,7 +87,6 @@ func TestRun_AllowsDeclaredNodeStateScalarAndEnumRefs(t *testing.T) {
 	bundle.RootTypes.Scalars["ScoreID"] = runtimecontracts.ScalarTypeDecl{Base: "text"}
 	bundle.RootTypes.Enums["ScoreStatus"] = runtimecontracts.EnumTypeDecl{Values: []string{"ready", "done"}, Default: "ready"}
 	bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
-		ID:         "scoring-node",
 		StateTable: "scoring_state",
 		StateSchema: runtimecontracts.NodeStateSchema{Fields: []runtimecontracts.NodeStateField{
 			{Name: "score_id", Type: "ScoreID"},

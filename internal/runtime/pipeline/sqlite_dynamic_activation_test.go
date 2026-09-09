@@ -537,10 +537,11 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{"Component": {Fields: map[string]runtimecontracts.TypeFieldSpec{"component_id": {Type: "text"}}}}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"fanout-node":        {ID: "fanout-node", ExecutionType: "system_node"},
-			"spawn-node":         {ID: "spawn-node", ExecutionType: "system_node"},
-			"nested-fanout-node": {ID: "nested-fanout-node", ExecutionType: "system_node"},
+			"fanout-node":        {ExecutionType: "system_node"},
+			"spawn-node":         {ExecutionType: "system_node"},
+			"nested-fanout-node": {ExecutionType: "system_node"},
 		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
@@ -550,20 +551,20 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 				Events: map[string]runtimecontracts.EventCatalogEntry{
 					"component_scaffold.batch_requested": {
 						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-							"components": {Type: "[json]"},
-						}},
+							"components": {Type: "[Component]"},
+						}, Required: []string{"components"}},
 					},
 					"component_scaffold.spawn_requested": {
 						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 							"component_id": {Type: "text"},
 							"nested_items": {Type: "[text]"},
-						}},
+						}, Required: []string{"component_id", "nested_items"}},
 					},
 					"component_scaffold.task_requested": {
 						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 							"component_id": {Type: "text"},
 							"task":         {Type: "text"},
-						}},
+						}, Required: []string{"component_id", "task"}},
 					},
 				},
 			},

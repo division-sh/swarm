@@ -53,7 +53,6 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 
 	provider := &releaseTelegramAPIDouble{}
 	apiPort := freeReleaseTCPPort(t)
-	mcpPort := freeReleaseTCPPort(t)
 	publicPort := freeReleaseTCPPort(t)
 	publicListen := fmt.Sprintf("127.0.0.1:%d", publicPort)
 	providerEnv := startReleaseTelegramAPI(t, provider, root, publicListen)
@@ -61,7 +60,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath, WorkingDir: root, ConfigPath: configPath, Source: contracts,
-			Store: "sqlite", APIPort: apiPort, MCPPort: mcpPort,
+			Store: "sqlite", APIPort: apiPort,
 			PublicWebhookBaseURL: "https://" + releaseChannelPublicHost, PublicWebhookListen: publicListen,
 			TokenFile: tokenFile, Token: releaseChannelAPIToken, Env: env,
 		})
@@ -151,11 +150,15 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 		}
 
 		resumeArgs := append(strings.Fields(resumeCommand)[1:], "--yes", "--api-server", process.apiBase, "--api-token-file", tokenFile)
-		resumed := runReleaseChannelCommand(t, binaryPath, root, env, releaseChannelCredential, configPath, resumeArgs...)
-		if resumed.err != nil || !strings.Contains(resumed.output, "READY") {
-			t.Fatalf("release printed resume command failed: %v\n%s", resumed.err, resumed.output)
+		resumed := startReleaseChannelCommand(t, binaryPath, root, env, releaseChannelCredential, configPath, resumeArgs...)
+		challenge := waitReleaseChannelChallenge(t, resumed)
+		callbackURL, signingSecret := waitReleaseChannelRegistrationAfter(t, provider, resumed, beforeRegistrations)
+		publishReleaseTelegramClaim(t, callbackURL, publicListen, signingSecret, challenge)
+		output := waitReleaseChannelCommand(t, resumed)
+		if !strings.Contains(output, "READY") {
+			t.Fatalf("release printed resume command lacks READY:\n%s", output)
 		}
-		assertReleaseChannelOutputSecretSafe(t, resumed.output, releaseChannelCredential)
+		assertReleaseChannelOutputSecretSafe(t, output, releaseChannelCredential, signingSecret)
 		delivery := waitReleaseChannelDelivery(t, provider, beforeDeliveries)
 		if delivery["text"] != "Swarm channel connected." {
 			t.Fatalf("release resumed confirmation = %#v", delivery)
@@ -244,10 +247,14 @@ func waitReleaseChannelChallenge(t *testing.T, command *releaseChannelCommand) s
 }
 
 func waitReleaseChannelRegistration(t *testing.T, provider *releaseTelegramAPIDouble, command *releaseChannelCommand) (string, string) {
+	return waitReleaseChannelRegistrationAfter(t, provider, command, 0)
+}
+
+func waitReleaseChannelRegistrationAfter(t *testing.T, provider *releaseTelegramAPIDouble, command *releaseChannelCommand, predecessorCount int) (string, string) {
 	t.Helper()
 	value := waitReleaseChannelValue(t, command, "registration", func() string {
-		callbackURL, signingSecret, _ := provider.Registration()
-		if callbackURL == "" || signingSecret == "" {
+		callbackURL, signingSecret, count := provider.Registration()
+		if callbackURL == "" || signingSecret == "" || count <= predecessorCount {
 			return ""
 		}
 		return callbackURL + "\n" + signingSecret

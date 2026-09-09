@@ -1,2 +1,2 @@
 check.requested:
-  score: integer?
+  score: integer

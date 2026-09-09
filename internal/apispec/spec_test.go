@@ -18,8 +18,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 73 {
-		t.Fatalf("method count = %d, want 73", report.MethodCount)
+	if report.MethodCount != 70 {
+		t.Fatalf("method count = %d, want 70", report.MethodCount)
 	}
 	if report.SchemaCount != 236 {
 		t.Fatalf("schema count = %d, want 236", report.SchemaCount)
@@ -27,8 +27,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.ErrorCodeCount != 67 {
 		t.Fatalf("error code count = %d, want 67", report.ErrorCodeCount)
 	}
-	if report.MutatingMethodCount != 33 {
-		t.Fatalf("mutating method count = %d, want 33", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 30 {
+		t.Fatalf("mutating method count = %d, want 30", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 5 {
 		t.Fatalf("subscription method count = %d, want 5", report.SubscriptionMethodCnt)
@@ -127,8 +127,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 73 {
-		t.Fatalf("generated OpenRPC methods = %d, want 73", len(doc.Methods))
+	if len(doc.Methods) != 70 {
+		t.Fatalf("generated OpenRPC methods = %d, want 70", len(doc.Methods))
 	}
 	if len(doc.Components.Schemas) != 236 {
 		t.Fatalf("generated OpenRPC schemas = %d, want 236", len(doc.Components.Schemas))
@@ -887,7 +887,9 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 	assertScalarContains(t, mappingValue(mailbox, "schema_authority"), "decision_event_payload_contract")
 	assertScalarValue(t, mappingValue(mailbox, "routing_class"), "event_loop_routable")
 	payload := mustMappingValue(t, mailbox, "payload")
-	required := mustMappingValue(t, mailbox, "required")
+	if mappingValue(mailbox, "required") != nil {
+		t.Fatal("mailbox.card_decided uses retired required list instead of required-by-default field grammar")
+	}
 	for _, field := range []string{
 		"card_id",
 		"anchor_kind",
@@ -902,20 +904,22 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 		if mappingValue(payload, field) == nil {
 			t.Fatalf("mailbox.card_decided payload missing %s", field)
 		}
-		if !sequenceContainsScalar(required, field) {
-			t.Fatalf("mailbox.card_decided required missing %s", field)
+		if strings.HasSuffix(strings.TrimSpace(scalarValue(mappingValue(payload, field))), "?") {
+			t.Fatalf("mailbox.card_decided required field %s is marked optional", field)
 		}
 	}
 	deferred := mustMappingValue(t, catalog, "mailbox.card_deferred")
 	assertScalarContains(t, mappingValue(deferred, "schema_authority"), "decision_event_payload_contract")
 	deferredPayload := mustMappingValue(t, deferred, "payload")
-	deferredRequired := mustMappingValue(t, deferred, "required")
+	if mappingValue(deferred, "required") != nil {
+		t.Fatal("mailbox.card_deferred uses retired required list instead of required-by-default field grammar")
+	}
 	for _, field := range []string{"card_id", "until"} {
 		if mappingValue(deferredPayload, field) == nil {
 			t.Fatalf("mailbox.card_deferred payload missing %s", field)
 		}
-		if !sequenceContainsScalar(deferredRequired, field) {
-			t.Fatalf("mailbox.card_deferred required missing %s", field)
+		if strings.HasSuffix(strings.TrimSpace(scalarValue(mappingValue(deferredPayload, field))), "?") {
+			t.Fatalf("mailbox.card_deferred required field %s is marked optional", field)
 		}
 	}
 }

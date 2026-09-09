@@ -1,4 +1,4 @@
 batch.requested:
-  mode: string?
-  items: array?
+  mode: string
+  items: "[DispatchItem]"
 batch.dispatched: {}

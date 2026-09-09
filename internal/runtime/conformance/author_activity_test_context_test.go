@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -387,6 +389,20 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	}
 	if strings.TrimSpace(opts.SourceArtifactFact.BundleHash()) == "" {
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
+	}
+	if opts.PayloadAdmitter == nil {
+		if opts.ContractBundle != nil {
+			opts.PayloadAdmitter = runtimepkg.NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.SourceArtifactFact)
+		} else {
+			opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+				return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+			}
+		}
+	}
+	if opts.Logger == nil {
+		if logs, ok := eventStore.(runtimepkg.RuntimeLogPersistence); ok {
+			opts.Logger = conformanceRuntimeLoggerHook{logger: runtimepkg.NewRuntimeLogger(logs, opts.ExecutionPosture, opts.PayloadAdmitter)}
+		}
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = conformanceTestRuntimeOccurrence(t, opts.SourceArtifactFact.BundleHash())

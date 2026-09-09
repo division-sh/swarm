@@ -1,4 +1,4 @@
 types:
   FilteredItem:
-    id: text
+    id: text?
     score: integer

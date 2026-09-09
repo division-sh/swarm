@@ -164,7 +164,7 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 			name:     "capability declaration drift",
 			provider: "github",
 			mutate: func(t *testing.T, dir string) {
-				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.github.{event_type}", "inbound.evil")
+				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.github.raw.{event_type}", "inbound.evil")
 			},
 			want: "capabilities do not match",
 		},

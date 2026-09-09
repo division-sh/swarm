@@ -23,6 +23,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 const (
@@ -64,7 +65,8 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if _, err := uuid.Parse(sourceEventID); err != nil {
 		return runtimeengine.ActionExecution{}, fmt.Errorf("artifact_repo_commit requires UUID source event id: %w", err)
 	}
-	repoID, err := requiredArtifactUUID(execCtx.Base, spec.RepoID, "artifact_repo.repo_id")
+	expressionOptions := executionExpressionOptions(execCtx)
+	repoID, err := requiredArtifactUUID(execCtx.Base, spec.RepoID, "artifact_repo.repo_id", expressionOptions)
 	if err != nil {
 		return runtimeengine.ActionExecution{}, err
 	}
@@ -72,7 +74,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err != nil {
 		return runtimeengine.ActionExecution{}, err
 	}
-	requestID, err := requiredArtifactUUID(execCtx.Base, spec.RequestID, "artifact_repo.request_id")
+	requestID, err := requiredArtifactUUID(execCtx.Base, spec.RequestID, "artifact_repo.request_id", expressionOptions)
 	if err != nil {
 		return runtimeengine.ActionExecution{}, err
 	}
@@ -85,22 +87,22 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		}
 		return pc.persistAndPublishArtifactRepoFailure(ctx, execCtx, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, err)
 	}
-	partitionKey, err = optionalArtifactSegment(execCtx.Base, spec.PartitionKey, "artifact_repo.partition_key")
+	partitionKey, err = optionalArtifactSegment(execCtx.Base, spec.PartitionKey, "artifact_repo.partition_key", expressionOptions)
 	if err != nil {
 		return fail(artifactRepoClassify(err, runtimefailures.ClassSchemaInvalid, "artifact_repo_partition_key_invalid", "resolve_input"))
 	}
-	displaySlug, err = optionalArtifactDisplaySlug(execCtx.Base, spec.DisplaySlug)
+	displaySlug, err = optionalArtifactDisplaySlug(execCtx.Base, spec.DisplaySlug, expressionOptions)
 	if err != nil {
 		return fail(artifactRepoClassify(err, runtimefailures.ClassSchemaInvalid, "artifact_repo_display_slug_invalid", "resolve_input"))
 	}
-	provenance, err = artifactRepoProvenance(execCtx.Base, spec)
+	provenance, err = artifactRepoProvenance(execCtx.Base, spec, expressionOptions)
 	if err != nil {
 		return fail(artifactRepoClassify(err, runtimefailures.ClassSchemaInvalid, "artifact_repo_provenance_invalid", "resolve_input"))
 	}
 	if previous := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Fields[spec.Output.LastSourceEventID])); previous == sourceEventID && artifactRepoOutputsComplete(execCtx.Request.State.StateCarrier.Fields, spec) {
 		return runtimeengine.ActionExecution{}, nil
 	}
-	files, treeHash, err := prepareArtifactRepoFiles(execCtx.Base, spec)
+	files, treeHash, err := prepareArtifactRepoFiles(execCtx.Base, spec, expressionOptions)
 	if err != nil {
 		return fail(artifactRepoClassify(err, runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid", "validate_input"))
 	}
@@ -130,7 +132,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		}
 		repoURL := artifactRepoPublicScheme + repoID
 		manifest := artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, previous.Ref, treeHash, files)
-		successPayload, err := artifactRepoSuccessPayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, previous.Ref, manifest)
+		successPayload, err := artifactRepoSuccessPayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, previous.Ref, manifest, expressionOptions)
 		if err != nil {
 			return fail(err)
 		}
@@ -153,13 +155,13 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 			"limit":      maxRepo,
 		}))
 	}
-	ref, err := commitArtifactRepoFiles(ctx, repoPath, files, sourceEventID, requestID, treeHash, optionalArtifactString(execCtx.Base, spec.Author), commitTime(execCtx.Request.Event.CreatedAt()))
+	ref, err := commitArtifactRepoFiles(ctx, repoPath, files, sourceEventID, requestID, treeHash, optionalArtifactString(execCtx.Base, spec.Author, expressionOptions), commitTime(execCtx.Request.Event.CreatedAt()))
 	if err != nil {
 		return fail(artifactRepoClassify(err, runtimefailures.ClassDependencyUnavailable, "artifact_repo_commit_failed", "commit_repository"))
 	}
 	repoURL := artifactRepoPublicScheme + repoID
 	manifest := artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, treeHash, files)
-	successPayload, err := artifactRepoSuccessPayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, manifest)
+	successPayload, err := artifactRepoSuccessPayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, manifest, expressionOptions)
 	if err != nil {
 		return fail(err)
 	}
@@ -197,7 +199,7 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(_ context.Co
 	if failureEvent == "" {
 		return runtimeengine.ActionExecution{State: artifactRepoResultState(execCtx, fields)}, cause
 	}
-	payload, payloadErr := artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, failureValue)
+	payload, payloadErr := artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, failureValue, executionExpressionOptions(execCtx))
 	if payloadErr != nil {
 		return runtimeengine.ActionExecution{}, errors.Join(cause, payloadErr)
 	}
@@ -498,7 +500,7 @@ func artifactRepoOutputsComplete(metadata map[string]any, spec *runtimecontracts
 
 func artifactNamespace(execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec) (string, error) {
 	if spec != nil && !spec.Namespace.IsZero() {
-		return requiredArtifactSegment(execCtx.Base, spec.Namespace, "artifact_repo.namespace")
+		return requiredArtifactSegment(execCtx.Base, spec.Namespace, "artifact_repo.namespace", executionExpressionOptions(execCtx))
 	}
 	namespace := strings.TrimSpace(execCtx.Request.Event.RunID())
 	if namespace == "" {
@@ -515,8 +517,8 @@ func artifactNamespace(execCtx runtimeengine.ExecutionContext, spec *runtimecont
 	return namespace, nil
 }
 
-func requiredArtifactUUID(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string) (string, error) {
-	value, err := requiredArtifactString(base, expr, field)
+func requiredArtifactUUID(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string, opts workflowexpr.ValueExpressionOptions) (string, error) {
+	value, err := requiredArtifactString(base, expr, field, opts)
 	if err != nil {
 		return "", err
 	}
@@ -526,8 +528,8 @@ func requiredArtifactUUID(base runtimeengine.BaseContext, expr runtimecontracts.
 	return value, nil
 }
 
-func requiredArtifactString(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string) (string, error) {
-	value, ok, err := evalMailboxExpressionValue(base, expr)
+func requiredArtifactString(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string, opts workflowexpr.ValueExpressionOptions) (string, error) {
+	value, ok, err := evalMailboxExpressionValue(base, expr, opts)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", field, err)
 	}
@@ -541,8 +543,8 @@ func requiredArtifactString(base runtimeengine.BaseContext, expr runtimecontract
 	return out, nil
 }
 
-func requiredArtifactSegment(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string) (string, error) {
-	value, err := requiredArtifactString(base, expr, field)
+func requiredArtifactSegment(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string, opts workflowexpr.ValueExpressionOptions) (string, error) {
+	value, err := requiredArtifactString(base, expr, field, opts)
 	if err != nil {
 		return "", err
 	}
@@ -552,29 +554,29 @@ func requiredArtifactSegment(base runtimeengine.BaseContext, expr runtimecontrac
 	return value, nil
 }
 
-func optionalArtifactSegment(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string) (string, error) {
+func optionalArtifactSegment(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, field string, opts workflowexpr.ValueExpressionOptions) (string, error) {
 	if expr.IsZero() {
 		return "", nil
 	}
-	return requiredArtifactSegment(base, expr, field)
+	return requiredArtifactSegment(base, expr, field, opts)
 }
 
-func optionalArtifactString(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue) string {
+func optionalArtifactString(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, opts workflowexpr.ValueExpressionOptions) string {
 	if expr.IsZero() {
 		return ""
 	}
-	value, ok, err := evalMailboxExpressionValue(base, expr)
+	value, ok, err := evalMailboxExpressionValue(base, expr, opts)
 	if err != nil || !ok {
 		return ""
 	}
 	return strings.TrimSpace(asString(value))
 }
 
-func optionalArtifactDisplaySlug(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue) (string, error) {
+func optionalArtifactDisplaySlug(base runtimeengine.BaseContext, expr runtimecontracts.ExpressionValue, opts workflowexpr.ValueExpressionOptions) (string, error) {
 	if expr.IsZero() {
 		return "", nil
 	}
-	value, ok, err := evalMailboxExpressionValue(base, expr)
+	value, ok, err := evalMailboxExpressionValue(base, expr, opts)
 	if err != nil {
 		return "", fmt.Errorf("artifact_repo.display_slug: %w", err)
 	}
@@ -588,7 +590,7 @@ func optionalArtifactDisplaySlug(base runtimeengine.BaseContext, expr runtimecon
 	return raw, nil
 }
 
-func artifactRepoProvenance(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec) (map[string]any, error) {
+func artifactRepoProvenance(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
 	out := map[string]any{}
 	if spec == nil {
 		return out, nil
@@ -598,7 +600,7 @@ func artifactRepoProvenance(base runtimeengine.BaseContext, spec *runtimecontrac
 		if err := validateArtifactRepoProvenanceKey(key); err != nil {
 			return nil, fmt.Errorf("artifact_repo.provenance key %q: %w", key, err)
 		}
-		value, ok, err := evalMailboxExpressionValue(base, expr)
+		value, ok, err := evalMailboxExpressionValue(base, expr, opts)
 		if err != nil {
 			return nil, fmt.Errorf("artifact_repo.provenance.%s: %w", key, err)
 		}
@@ -610,7 +612,7 @@ func artifactRepoProvenance(base runtimeengine.BaseContext, spec *runtimecontrac
 	return out, nil
 }
 
-func prepareArtifactRepoFiles(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec) ([]artifactRepoPreparedFile, string, error) {
+func prepareArtifactRepoFiles(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, opts workflowexpr.ValueExpressionOptions) ([]artifactRepoPreparedFile, string, error) {
 	if spec == nil {
 		return nil, "", fmt.Errorf("artifact_repo declaration is required")
 	}
@@ -632,7 +634,7 @@ func prepareArtifactRepoFiles(base runtimeengine.BaseContext, spec *runtimecontr
 	seen := map[string]struct{}{}
 	total := 0
 	for i, file := range spec.Files {
-		rawPath, err := requiredArtifactString(base, file.Path, fmt.Sprintf("artifact_repo.files[%d].path", i))
+		rawPath, err := requiredArtifactString(base, file.Path, fmt.Sprintf("artifact_repo.files[%d].path", i), opts)
 		if err != nil {
 			return nil, "", err
 		}
@@ -647,7 +649,7 @@ func prepareArtifactRepoFiles(base runtimeengine.BaseContext, spec *runtimecontr
 			return nil, "", fmt.Errorf("artifact_repo.files duplicate canonical path %s", cleaned)
 		}
 		seen[cleaned] = struct{}{}
-		rawContent, err := requiredArtifactString(base, file.Content, fmt.Sprintf("artifact_repo.files[%d].content", i))
+		rawContent, err := requiredArtifactString(base, file.Content, fmt.Sprintf("artifact_repo.files[%d].content", i), opts)
 		if err != nil {
 			return nil, "", err
 		}
@@ -1168,8 +1170,8 @@ var artifactRepoResultReservedPayloadFields = map[string]struct{}{
 	"provenance":      {},
 }
 
-func artifactRepoSuccessPayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID, repoURL, currentRef string, manifest map[string]any) (map[string]any, error) {
-	out, err := artifactRepoDeclaredResultPayload(base, "success_payload", specSuccessPayload(spec))
+func artifactRepoSuccessPayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID, repoURL, currentRef string, manifest map[string]any, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
+	out, err := artifactRepoDeclaredResultPayload(base, "success_payload", specSuccessPayload(spec), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1193,8 +1195,8 @@ func artifactRepoSuccessPayload(base runtimeengine.BaseContext, spec *runtimecon
 	return out, nil
 }
 
-func artifactRepoFailurePayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID string, failure map[string]any) (map[string]any, error) {
-	out, err := artifactRepoDeclaredResultPayload(base, "failure_payload", specFailurePayload(spec))
+func artifactRepoFailurePayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID string, failure map[string]any, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
+	out, err := artifactRepoDeclaredResultPayload(base, "failure_payload", specFailurePayload(spec), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1230,7 +1232,7 @@ func specFailurePayload(spec *runtimecontracts.ArtifactRepoSpec) map[string]runt
 	return spec.FailurePayload
 }
 
-func artifactRepoDeclaredResultPayload(base runtimeengine.BaseContext, label string, declared map[string]runtimecontracts.ExpressionValue) (map[string]any, error) {
+func artifactRepoDeclaredResultPayload(base runtimeengine.BaseContext, label string, declared map[string]runtimecontracts.ExpressionValue, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
 	out := map[string]any{}
 	for target, expr := range declared {
 		target = strings.TrimSpace(target)
@@ -1240,7 +1242,7 @@ func artifactRepoDeclaredResultPayload(base runtimeengine.BaseContext, label str
 		if _, reserved := artifactRepoResultReservedPayloadFields[target]; reserved {
 			return nil, fmt.Errorf("artifact_repo_commit %s must not override runtime-owned field %s", label, target)
 		}
-		value, ok, err := evalMailboxExpressionValue(base, expr)
+		value, ok, err := evalMailboxExpressionValue(base, expr, opts)
 		if err != nil {
 			return nil, fmt.Errorf("artifact_repo_commit %s.%s evaluation failed: %w", label, target, err)
 		}

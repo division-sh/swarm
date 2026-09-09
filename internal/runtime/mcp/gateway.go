@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -103,6 +104,33 @@ func (g *Gateway) Handler() http.Handler {
 	mux.HandleFunc("/tools/", g.handleTool)
 	mux.HandleFunc("/mcp", g.handleMCP)
 	return mux
+}
+
+// StartupProbeRequestAuthority classifies a registered, authenticated probe, not
+// a client-supplied method or header claiming to be a probe. The runtime still
+// has to match this authority to its current prepared generation grant.
+func (g *Gateway) StartupProbeRequestAuthority(r *http.Request) (runtimeeffects.Authority, bool) {
+	if g == nil || r == nil || r.Method != http.MethodPost || g.authorize(r) != nil {
+		return runtimeeffects.Authority{}, false
+	}
+	turn, err := g.runtimeTurnContextForRequest(r, "mcp.startup_probe_admission")
+	if err != nil || !turn.HasEffectAuthority || turn.CapabilitySurface == nil {
+		return runtimeeffects.Authority{}, false
+	}
+	authority := turn.EffectAuthority
+	if authority.Kind != runtimeeffects.AuthorityStartupProbe || !authority.Valid() || !authority.LeaseExpiresAt.After(time.Now()) {
+		return runtimeeffects.Authority{}, false
+	}
+	if !runtimeeffects.StartupProbeSurfaceMatchesAuthority(*turn.CapabilitySurface, authority) || authority.StartupProbe.ActorID != turn.Actor.ID {
+		return runtimeeffects.Authority{}, false
+	}
+	surface := turn.CapabilitySurface.Authority
+	if surface.ExecutionKind != managedcapabilities.ExecutionNormalAgent ||
+		surface.ExecutionAuthorityID != authority.StartupProbe.StartupAuthorityID ||
+		surface.StartupOwnerID != authority.ExecutionOwner || surface.StartupGeneration != authority.FenceGeneration {
+		return runtimeeffects.Authority{}, false
+	}
+	return authority, true
 }
 
 func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {

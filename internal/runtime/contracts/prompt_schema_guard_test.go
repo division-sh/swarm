@@ -39,13 +39,13 @@ schema-ref-agent:
   role: schema_ref
   intent: prompts/shared-schema-prompt.md
   emit_events:
-    - schema.prompt.created
+    - schema.prompt_created
 `, "\n"))...)
 	if err := os.WriteFile(agentsPath, agentsRaw, 0o644); err != nil {
 		t.Fatalf("write %s: %v", agentsPath, err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(strings.TrimLeft(`
-schema.prompt.created:
+schema.prompt_created:
   item_id: string
 `, "\n")), 0o644); err != nil {
 		t.Fatalf("write events.yaml: %v", err)
@@ -65,7 +65,7 @@ When you call emit_schema_prompt_created with:
 	cases := DerivePromptSchemaGuards(bundle)
 	found := false
 	for _, tc := range cases {
-		if filepath.Base(tc.IntentSource) == "shared-schema-prompt.md" && tc.EmitTool == "emit_schema_prompt_created" {
+		if filepath.Base(tc.IntentSource) == "shared-schema-prompt.md" && tc.EventType == "schema.prompt_created" && tc.EmitTool == "emit_schema_prompt_created" {
 			found = true
 			break
 		}
@@ -93,7 +93,10 @@ func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testin
 		EmitEvents:     []string{"review.completed"},
 	}
 	events := map[string]EventCatalogEntry{
-		"review.completed": {Payload: EventPayloadSpec{Required: []string{"review_id"}}},
+		"review.completed": {Payload: EventPayloadSpec{
+			Properties: map[string]EventFieldSpec{"review_id": {Type: "uuid"}},
+			Required:   []string{"review_id"},
+		}},
 	}
 	flow := FlowContractView{
 		Paths:  FlowContractPaths{FlowPath: "review"},
@@ -171,7 +174,9 @@ ops-lead:
 	prompt := strings.TrimSpace(`
 You are the Operations Lead for {{team_name}}.
 
-When you call emit_item_created, include item_id.
+When you call emit_item_created with:
+- item_id: the created item id
+- items: the intake items
 `)
 	if err := os.WriteFile(filepath.Join(intentDir, "ops-lead.md"), []byte(prompt+"\n"), 0o644); err != nil {
 		t.Fatalf("write prompt fixture: %v", err)

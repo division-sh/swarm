@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"regexp/syntax"
 	"sort"
 	"strings"
 	"sync"
@@ -215,14 +217,87 @@ func (s *conformanceRepoSnapshot) matchingFiles(pattern string, re *regexp.Regex
 	loaded, _ := s.matches.LoadOrStore(pattern, &conformanceRepoSnapshotMatch{})
 	entry := loaded.(*conformanceRepoSnapshotMatch)
 	entry.once.Do(func() {
+		branches := conformanceSnapshotPatternBranches(re)
+		literals := make([][]byte, len(branches))
+		for i, branch := range branches {
+			literals[i] = conformanceSnapshotRequiredLiteral(branch)
+		}
 		for _, file := range s.files {
-			if re.Match(file.Raw) {
-				entry.matches = append(entry.matches, file.Path)
+			for i, branch := range branches {
+				if bytes.Contains(file.Raw, literals[i]) && branch.Match(file.Raw) {
+					entry.matches = append(entry.matches, file.Path)
+					break
+				}
 			}
 		}
 		sort.Strings(entry.matches)
 	})
 	return append([]string(nil), entry.matches...)
+}
+
+// Top-level alternatives have exactly the same boolean semantics when matched
+// separately, but each literal branch can use regexp's prefix search instead of
+// running the combined automaton over every byte of every nonmatching file.
+func conformanceSnapshotPatternBranches(re *regexp.Regexp) []*regexp.Regexp {
+	tree, err := syntax.Parse(re.String(), syntax.Perl)
+	if err != nil || tree.Op != syntax.OpAlternate {
+		return []*regexp.Regexp{re}
+	}
+	branches := make([]*regexp.Regexp, 0, len(tree.Sub))
+	for _, sub := range tree.Sub {
+		branches = append(branches, regexp.MustCompile(sub.String()))
+	}
+	return branches
+}
+
+// A literal in an unconditional concatenation must occur in every match. An
+// empty result deliberately leaves optional, alternating and folded forms to
+// the regex engine, including Unicode case folding.
+func conformanceSnapshotRequiredLiteral(re *regexp.Regexp) []byte {
+	tree, err := syntax.Parse(re.String(), syntax.Perl)
+	if err != nil {
+		return nil
+	}
+	nodes := []*syntax.Regexp{tree}
+	if tree.Op == syntax.OpConcat {
+		nodes = tree.Sub
+	}
+	var literal []byte
+	for _, node := range nodes {
+		if node.Op == syntax.OpLiteral && node.Flags&syntax.FoldCase == 0 {
+			candidate := []byte(string(node.Rune))
+			// regexp also matches RuneError against invalid UTF-8 input bytes.
+			if strings.ContainsRune(string(candidate), '\uFFFD') {
+				continue
+			}
+			if len(candidate) > len(literal) {
+				literal = candidate
+			}
+		}
+	}
+	return literal
+}
+
+func TestConformanceSnapshotPatternBranchesPreserveRegexSemantics(t *testing.T) {
+	patterns := []string{
+		`needle|other`, `\bneedle\b|other`, `(?i)target|delivery_target_route|target_set`,
+		`(?i:a)|B`, `(?m)^start|end$`, `a(?:b|c)d`, `a|`, `a\|b|c`,
+		`\Qliteral|pipe\E|other`, `\bRouteTable\.Resolve(?:ForRun)?\b|other`,
+		`(?s)begin.*end|(?m)^line$`, `(?i)k|s`, `(?:needle)?other`, `a*b`, `\bneedle\b`, `\x{FFFD}|other`,
+	}
+	inputs := []string{"", "no match", "needle", "needles", "other", "atargetb", "aB", "a|b", "literal|pipe", "RouteTable.ResolveForRun", "start\nline\nend", "begin\nmiddle\nend", "\u212a", "\u017f", "\xff"}
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		for _, input := range inputs {
+			got := false
+			for _, branch := range conformanceSnapshotPatternBranches(re) {
+				got = got || (bytes.Contains([]byte(input), conformanceSnapshotRequiredLiteral(branch)) && branch.MatchString(input))
+			}
+			if got != re.MatchString(input) {
+				t.Errorf("pattern=%q input=%q got=%t", pattern, input, got)
+			}
+		}
+	}
 }
 
 func (s *conformanceRepoSnapshot) pathMatches(path, pattern string, re *regexp.Regexp) (bool, error) {

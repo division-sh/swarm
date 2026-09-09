@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+func (testRuntimeReset) SettleResources(context.Context) error { return nil }
+
+func (runtimeContextQuiescerFunc) ResetSourceProjections(context.Context) ([]SourceProjection, error) {
+	return nil, nil
+}
+
 func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
 	now := time.Date(2026, 8, 9, 19, 0, 0, 0, time.UTC)
 	locks := &recordingLockManager{acquired: true}
@@ -42,11 +48,12 @@ func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
 		Now: func() time.Time { return now },
 	}
 
+	installCoordinatorOperationFixture(t, coord)
 	got, err := coord.Execute(context.Background(), Request{OperationID: destructiveResetOperationID, ActorTokenID: "operator", RequestHash: "hash"})
 	if err != nil {
 		t.Fatalf("Execute error = %v", err)
 	}
-	if !slices.Equal(calls, []string{"plan", "runtime", "quiescence", "cleanup", "containers"}) {
+	if !slices.Equal(calls, []string{"runtime", "plan", "quiescence", "cleanup", "containers"}) {
 		t.Fatalf("calls = %#v", calls)
 	}
 	if got.Plan.OperationName != DefaultOperationName || got.Quiescence.OperationName != DefaultOperationName || got.Cleanup.OperationName != DefaultOperationName || got.Containers.OperationName != DefaultOperationName {
@@ -137,9 +144,17 @@ func (f containerStopperFunc) Apply(ctx context.Context, req ContainerResetReque
 
 type runtimeContextQuiescerFunc func(context.Context) error
 
-func (f runtimeContextQuiescerFunc) QuiesceAllRuntimeContexts(ctx context.Context) error {
-	return f(ctx)
+func (f runtimeContextQuiescerFunc) BeginDestructiveReset(ctx context.Context, _ string) (RuntimeReset, error) {
+	if err := f(ctx); err != nil {
+		return nil, err
+	}
+	return testRuntimeReset{}, nil
 }
+
+type testRuntimeReset struct{}
+
+func (testRuntimeReset) Complete(context.Context, bool) error { return nil }
+func (testRuntimeReset) Release()                             {}
 
 func successfulPlanner() Planner {
 	return plannerFunc(func(context.Context, Request) (Plan, error) { return Plan{CleanupRunSetKnown: true}, nil })

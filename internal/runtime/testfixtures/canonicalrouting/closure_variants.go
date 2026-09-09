@@ -97,7 +97,7 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 		events += "  description: internally produced completion\n"
 	}
 	writeClosedVariantFile(t, root, "events.yaml", events)
-	writeClosedVariantFile(t, root, "nodes.yaml", "worker:\n  id: worker\n  execution_type: system_node\n"+timerBlock+"  event_handlers:\n    task.start:\n      emit:\n        event: task.done\nobserver:\n  id: observer\n  execution_type: system_node\n  event_handlers:\n    task.done: {}\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "worker:\n  execution_type: system_node\n"+timerBlock+"  event_handlers:\n    task.start:\n      emit:\n        event: task.done\nobserver:\n  execution_type: system_node\n  event_handlers:\n    task.done: {}\n")
 	return root
 }
 
@@ -229,7 +229,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	if !settings.omitTimerHandler {
 		timerHandler = "    " + timerHandlerKey + ":\n      advances_to: done\n"
 	}
-	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  id: support-node\n  execution_type: system_node\n  subscribes_to:\n    - ticket.opened\n    - ticket.closed\n    - timer.reminder\n  timers:\n"+timerBlock+"  event_handlers:\n    ticket.opened:\n      create_entity: true\n      advances_to: active\n    ticket.closed:\n      advances_to: done\n"+timerHandler)
+	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  execution_type: system_node\n  subscribes_to:\n    - ticket.opened\n    - ticket.closed\n    - timer.reminder\n  timers:\n"+timerBlock+"  event_handlers:\n    ticket.opened:\n      create_entity: true\n      advances_to: active\n    ticket.closed:\n      advances_to: done\n"+timerHandler)
 	return root
 }
 
@@ -319,7 +319,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	if settings.includeTimerFireHandler {
 		handlers += "    timer.reminder:\n      advances_to: done\n"
 	}
-	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  id: support-node\n  execution_type: system_node\n  subscribes_to:\n    - ticket.opened\n    - ticket.closed\n    - admin.done\n    - admin.review\n    - timer.reminder\n  timers:\n"+timerBlock+"  event_handlers:\n"+handlers)
+	writeClosedVariantFile(t, root, "support/nodes.yaml", "support-node:\n  execution_type: system_node\n  subscribes_to:\n    - ticket.opened\n    - ticket.closed\n    - admin.done\n    - admin.review\n    - timer.reminder\n  timers:\n"+timerBlock+"  event_handlers:\n"+handlers)
 	return root
 }
 
@@ -333,7 +333,7 @@ func CopyVerifyStateSchemaFloat(t testing.TB) string {
 	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\n")
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "task.assigned:\n  swarm:\n    source: external (state schema float verify test)\n")
-	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  id: accumulator\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
+	writeClosedVariantFile(t, root, "child/nodes.yaml", "accumulator:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n  state_schema:\n    fields:\n      composite: float\n")
 	return root
 }
 
@@ -346,7 +346,7 @@ func CopyVerifyAccumulatorEntityProjection(t testing.TB) string {
 	writeClosedVariantFile(t, root, "types.yaml", "types:\n  DimensionScore:\n    dimension: text\n    tier: integer\n    score: integer\n    evidence: text\n    confidence: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: list<DimensionScore>\n    materialize_from: scorer.dimensions_received\n")
 	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  swarm:\n    source: external (verify accumulator projection fixture)\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed: {}\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "scorer:\n  id: scorer\n  execution_type: system_node\n  subscribes_to: [score.dimension_complete]\n  produces: [score.completed]\n  event_handlers:\n    score.dimension_complete:\n      accumulate:\n        into: dimensions_received\n        from: payload\n      emit:\n        event: score.completed\n      advances_to: complete\n  state_schema:\n    fields:\n      dimensions_received: list<DimensionScore>\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "scorer:\n  execution_type: system_node\n  subscribes_to: [score.dimension_complete]\n  produces: [score.completed]\n  event_handlers:\n    score.dimension_complete:\n      accumulate:\n        into: dimensions_received\n        from: payload\n      emit:\n        event: score.completed\n      advances_to: complete\n  state_schema:\n    fields:\n      dimensions_received: list<DimensionScore>\n")
 	return root
 }
 
@@ -377,7 +377,7 @@ func CopyVerifyModelAlias(t testing.TB, variant VerifyModelAliasVariant) string 
 	writeClosedVariantFile(t, root, "child/entities.yaml", "case: {}\n")
 	writeClosedVariantFile(t, root, "child/agents.yaml", fmt.Sprintf("worker:\n  id: worker\n  type: factory\n  role: worker\n  intent: prompts/worker.md\n  model: %s\n  memory: false\n  subscriptions: [task.assigned]\n", model))
 	writeClosedVariantFile(t, root, "child/events.yaml", "task.assigned:\n  swarm:\n    source: external (verify model alias test)\n")
-	writeClosedVariantFile(t, root, "child/nodes.yaml", "closer:\n  id: closer\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "child/nodes.yaml", "closer:\n  execution_type: system_node\n  subscribes_to: [task.assigned]\n  event_handlers:\n    task.assigned:\n      advances_to: done\n")
 	writeClosedVariantFile(t, root, "child/prompts/worker.md", "Handle the task.\n")
 	return root
 }

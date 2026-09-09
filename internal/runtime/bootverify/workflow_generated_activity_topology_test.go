@@ -48,6 +48,10 @@ func TestRunAcceptsNestedFlowGeneratedActivityResultOwnership(t *testing.T) {
 		if !proof.HasSchema {
 			t.Fatalf("nested generated event %s has no engine-owned payload schema: %#v", eventType, proof)
 		}
+		resolution := semanticview.ResolveEventSchema(source, "child", eventType)
+		if !resolution.HasStructural || !resolution.HasClassification || resolution.Classification != runtimecontracts.CompiledEventSchemaGenerated {
+			t.Fatalf("generated event %s structural classification = %#v", eventType, resolution)
+		}
 		routed := false
 		for _, endpoint := range census.MatchingConsumers("child", proof.EventKey()) {
 			if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == "observer-node" && endpoint.HandlerEvent == eventidentity.LeafName(eventType) {

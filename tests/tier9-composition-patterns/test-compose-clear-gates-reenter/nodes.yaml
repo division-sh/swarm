@@ -1,5 +1,4 @@
 reviewer:
-  id: reviewer
   execution_type: system_node
   subscribes_to: [review.done, review.insufficient]
   produces: [review.approved]

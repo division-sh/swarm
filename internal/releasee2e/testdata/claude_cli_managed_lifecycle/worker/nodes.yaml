@@ -1,5 +1,4 @@
 intake:
-  id: intake
   execution_type: system_node
   subscribes_to: [task.assigned]
   produces: [agent.requested]
@@ -15,7 +14,6 @@ intake:
         event: agent.requested
 
 worker-completion:
-  id: worker-completion
   execution_type: system_node
   subscribes_to: [agent.completed]
   event_handlers:

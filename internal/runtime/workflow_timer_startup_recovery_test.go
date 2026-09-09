@@ -38,7 +38,7 @@ import (
 type workflowTimerStartupStore interface {
 	externalRuntimeTestDurableEventStore
 	runtimepipeline.WorkflowPersistenceOwner
-	swarmruntime.EventPayloadValidationBinder
+	swarmruntime.EventPayloadAdmissionBinder
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
 	runtimegenericschedule.Store
@@ -142,18 +142,18 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 					LLM:     config.LLMConfig{Backend: "anthropic"},
 				},
 
-				EventStore:                   selected,
-				EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
-				EventPayloadValidationBinder: selected,
-				AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-				RunLifecycleCandidates:       selected,
-				GenericScheduleStore:         selected,
-				TimerObligationReader:        selected,
-				WorkflowPersistence:          workflowPersistence,
-				ManagerStore:                 selected,
-				ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
-				DeliveryStore:                selected,
-				PipelineObligations:          selected.PipelineObligations(),
+				EventStore:                  selected,
+				EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+				EventPayloadAdmissionBinder: selected,
+				AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+				RunLifecycleCandidates:      selected,
+				GenericScheduleStore:        selected,
+				TimerObligationReader:       selected,
+				WorkflowPersistence:         workflowPersistence,
+				ManagerStore:                selected,
+				ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+				DeliveryStore:               selected,
+				PipelineObligations:         selected.PipelineObligations(),
 
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck:          false,
@@ -345,18 +345,18 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
-					EventStore:                   selected,
-					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
-					EventPayloadValidationBinder: selected,
-					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-					RunLifecycleCandidates:       selected,
-					GenericScheduleStore:         selected,
-					TimerObligationReader:        selected,
-					WorkflowPersistence:          runtimepipeline.NewWorkflowPersistence(owner),
-					ManagerStore:                 selected,
-					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
-					DeliveryStore:                selected,
-					PipelineObligations:          selected.PipelineObligations(),
+					EventStore:                  selected,
+					EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+					EventPayloadAdmissionBinder: selected,
+					AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:      selected,
+					GenericScheduleStore:        selected,
+					TimerObligationReader:       selected,
+					WorkflowPersistence:         runtimepipeline.NewWorkflowPersistence(owner),
+					ManagerStore:                selected,
+					ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+					DeliveryStore:               selected,
+					PipelineObligations:         selected.PipelineObligations(),
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:          false,
 						WorkflowModule:     module,
@@ -471,12 +471,12 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				}
 				if interruption == "publication_abort" {
 					closeRuntime(interruption, interruptedRuntime, interruptedProcess, interruptedCapability)
-					if err := release(nil); err == nil {
+					if err := release.Start(nil); err == nil {
 						t.Fatal("aborted prepared runtime admitted work")
 					}
 				} else {
 					cause := errors.New("injected standing finalization failure")
-					if err := release(func() error { return cause }); !errors.Is(err, cause) {
+					if err := release.Start(func() error { return cause }); !errors.Is(err, cause) {
 						t.Fatalf("finalization error lost: %v", err)
 					}
 					closeRuntime(interruption, interruptedRuntime, interruptedProcess, interruptedCapability)
@@ -510,11 +510,11 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			if err != nil || beforeRelease.CurrentState != "waiting" {
 				t.Fatalf("prepared runtime released an overdue workflow timer: state=%s err=%v", beforeRelease.CurrentState, err)
 			}
-			if err := release(nil); err != nil {
+			if err := release.Start(nil); err != nil {
 				closeRuntime("failed recovery", recoveredRuntime, recoveredProcess, recoveredCapability)
 				t.Fatalf("Start after completed topology: %v", err)
 			}
-			if err := release(nil); err == nil {
+			if err := release.Start(nil); err == nil {
 				t.Fatal("prepared startup was released twice")
 			}
 			defer closeRuntime("recovered", recoveredRuntime, recoveredProcess, recoveredCapability)
@@ -586,17 +586,17 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 
-					EventStore:                   selected,
-					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
-					EventPayloadValidationBinder: selected,
-					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-					RunLifecycleCandidates:       selected,
-					WorkflowPersistence:          workflowPersistence,
-					ManagerStore:                 managerStore,
-					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
-					TimerObligationReader:        selected,
-					DeliveryStore:                selected,
-					PipelineObligations:          selected.PipelineObligations(),
+					EventStore:                  selected,
+					EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+					EventPayloadAdmissionBinder: selected,
+					AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:      selected,
+					WorkflowPersistence:         workflowPersistence,
+					ManagerStore:                managerStore,
+					ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+					TimerObligationReader:       selected,
+					DeliveryStore:               selected,
+					PipelineObligations:         selected.PipelineObligations(),
 
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:          false,
@@ -725,17 +725,17 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 
-					EventStore:                   selected,
-					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
-					EventPayloadValidationBinder: selected,
-					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
-					RunLifecycleCandidates:       selected,
-					WorkflowPersistence:          workflowPersistence,
-					ManagerStore:                 selected,
-					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
-					TimerObligationReader:        selected,
-					DeliveryStore:                selected,
-					PipelineObligations:          selected.PipelineObligations(),
+					EventStore:                  selected,
+					EventBusDurable:             externalRuntimeTestDurableDependencies(selected),
+					EventPayloadAdmissionBinder: selected,
+					AuthorActivityRegistrars:    []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:      selected,
+					WorkflowPersistence:         workflowPersistence,
+					ManagerStore:                selected,
+					ManagerPersistenceRoles:     externalRuntimeTestSelectedManagerRoles(selected),
+					TimerObligationReader:       selected,
+					DeliveryStore:               selected,
+					PipelineObligations:         selected.PipelineObligations(),
 
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:          false,

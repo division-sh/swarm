@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -223,6 +224,10 @@ states: [queued]
 child_entity:
   request_id: text
 `,
+		"child/events.yaml": `
+request.received:
+  request_id: text
+`,
 	})
 	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{
@@ -249,11 +254,15 @@ child_entity:
 	}
 
 	eval := pipelineEngineEvaluator{evaluator: pc.expressionEval, coordinator: pc}
+	resolution := semanticview.ResolveEventSchema(source, "child", "request.received")
+	if !resolution.HasStructural {
+		t.Fatal("query fixture requires an admitted payload type")
+	}
 	ok, err := eval.EvalBool(`query_entities(request_id == payload.request_id).count == 1`, runtimeengine.BaseContext{
 		FlowID:  "child",
-		Event:   values.Wrap(map[string]any{"run_id": testPipelineRunID}),
+		Event:   values.Wrap(map[string]any{"run_id": testPipelineRunID, "trigger_event_type": "request.received"}),
 		Payload: values.Wrap(map[string]any{"request_id": "req-existing"}),
-	})
+	}, workflowexpr.ValueExpressionOptions{PayloadType: &resolution.StructuralType})
 	if err != nil {
 		t.Fatalf("EvalBool query_entities: %v", err)
 	}
@@ -2652,7 +2661,7 @@ func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
 
 		"schema.yaml":   "initial_state: ready\nterminal_states: [ready]\nstates: [ready]\n",
 		"entities.yaml": "test_entity: {}\n",
-		"nodes.yaml":    "artifact-node:\n  id: artifact-node\n  execution_type: system_node\n",
+		"nodes.yaml":    "artifact-node:\n  execution_type: system_node\n",
 		"types.yaml": `types:
   ArtifactProvenance:
     artifact_type: text
@@ -2878,6 +2887,7 @@ func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {
 				"received_count": 3,
 			}),
 		},
+		workflowexpr.ValueExpressionOptions{},
 	)
 	if err != nil {
 		t.Fatalf("EvalBool error = %v", err)
@@ -3368,6 +3378,49 @@ func TestPipelineEmitPayloadProperties_UsesCanonicalFlowEventProofForLocalAndCan
 	}
 	if _, ok := canonical["entity_id"]; ok {
 		t.Fatalf("payload properties must not expose envelope entity_id: %#v", canonical)
+	}
+}
+
+type pipelineTestEntityCollectionPersistenceReader struct {
+	records []WorkflowEntityStatePersistenceRecord
+	calls   int
+}
+
+func (r *pipelineTestEntityCollectionPersistenceReader) QueryWorkflowEntityCollection(_ context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
+	r.calls++
+	return FilterWorkflowEntityCollectionRecords(r.records, owner)
+}
+
+func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *testing.T) {
+	runID := uuid.NewString()
+	source := loadWorkflowTempSource(t, map[string]string{
+		"schema.yaml":   "name: work\ninitial_state: active\nstates: [active]\n",
+		"entities.yaml": "items:\n  id: text\n  status: text\n",
+	})
+	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{
+		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "items", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},
+	}}
+	reader := pipelineEngineEntityCollectionReader{coordinator: &PipelineCoordinator{
+		module:        &pipelineFixtureWorkflowModule{source: source},
+		workflowStore: &workflowInstanceStore{entityCollectionReader: persisted},
+	}}
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	rows, err := reader.QueryEntityCollection(ctx, runID, ".", "items")
+	if err != nil {
+		t.Fatalf("QueryEntityCollection: %v", err)
+	}
+	if persisted.calls != 1 || len(rows) != 1 || rows[0]["id"] != "a" || rows[0]["status"] != "queued" {
+		t.Fatalf("rows = %#v", rows)
+	}
+	if _, err := reader.QueryEntityCollection(ctx, "", ".", "items"); err == nil || persisted.calls != 1 {
+		t.Fatalf("missing explicit run read persistence: error=%v calls=%d", err, persisted.calls)
+	}
+	if _, survives := rows[0]["undeclared"]; survives {
+		t.Fatalf("entity collection leaked undeclared persisted field: %#v", rows[0])
+	}
+	rows[0]["status"] = "mutated"
+	if strings.Contains(string(persisted.records[0].Fields), "mutated") {
+		t.Fatalf("query result aliases persisted fields: %s", persisted.records[0].Fields)
 	}
 }
 

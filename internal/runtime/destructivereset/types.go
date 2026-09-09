@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/containeridentity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/dataaccess"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -38,10 +41,17 @@ type Request struct {
 	OperationID               string
 	ActorTokenID              string
 	RequestHash               string
+	IdempotencyKey            string
 	DryRun                    bool
 	IncludeSourceArtifacts    bool
 	IncludeSourceArtifactsSet bool
 	RequestedAt               time.Time
+	SourceProjections         []SourceProjection
+}
+
+type SourceProjection struct {
+	Cleanup           sourceartifact.RuntimeProjectionCleanup `json:"cleanup"`
+	ManagedContainers bool                                    `json:"managed_containers"`
 }
 
 type Result struct {
@@ -53,6 +63,7 @@ type Result struct {
 }
 
 type QuiescenceRequest struct {
+	OperationID  string
 	Result       Result
 	ActorTokenID string
 	RequestedAt  time.Time
@@ -183,23 +194,39 @@ type TableRef struct {
 }
 
 type ContainerRef struct {
-	Name           string                        `json:"name"`
-	Kind           string                        `json:"kind"`
-	Action         string                        `json:"action"`
-	ResetEligible  bool                          `json:"reset_eligible,omitempty"`
-	CreationSource string                        `json:"creation_source,omitempty"`
-	WorkspaceScope string                        `json:"workspace_scope,omitempty"`
-	RunID          string                        `json:"run_id,omitempty"`
-	AgentIdentity  runtimeagentidentity.Identity `json:"agent_identity,omitempty"`
-	FlowInstance   string                        `json:"flow_instance,omitempty"`
+	RuntimeID        string                        `json:"runtime_id"`
+	Owner            string                        `json:"owner"`
+	Name             string                        `json:"name"`
+	Kind             string                        `json:"kind"`
+	Action           string                        `json:"action"`
+	ResetEligible    bool                          `json:"reset_eligible,omitempty"`
+	CreationSource   string                        `json:"creation_source,omitempty"`
+	WorkspaceScope   string                        `json:"workspace_scope,omitempty"`
+	RunID            string                        `json:"run_id,omitempty"`
+	AgentIdentity    runtimeagentidentity.Identity `json:"agent_identity,omitempty"`
+	FlowInstance     string                        `json:"flow_instance,omitempty"`
+	BundleHash       string                        `json:"bundle_hash,omitempty"`
+	SourceProjection string                        `json:"source_projection,omitempty"`
+	DataProjection   dataaccess.ProjectionID       `json:"data_projection,omitempty"`
+}
+
+func (r ContainerRef) Identity() containeridentity.Identity {
+	return containeridentity.Identity{
+		Owner: r.Owner, Kind: r.Kind, ResetEligible: r.ResetEligible,
+		CreationSource: r.CreationSource, ContainerName: r.Name,
+		WorkspaceScope: r.WorkspaceScope, RunID: r.RunID,
+		AgentIdentity: r.AgentIdentity, FlowInstance: r.FlowInstance,
+		BundleHash: r.BundleHash, SourceProjection: r.SourceProjection,
+		DataProjection: r.DataProjection,
+	}.Normalized()
 }
 
 type PreservedResources struct {
-	SystemContainers        []string `json:"system_containers"`
-	OperatorManagedBoundary string   `json:"operator_managed_boundary"`
-	SchemaMigrations        bool     `json:"schema_migrations"`
-	AuthTokens              bool     `json:"auth_tokens"`
-	SourceArtifacts         bool     `json:"source_artifacts"`
+	DurableWorkspaceBackings bool   `json:"durable_workspace_backings"`
+	OperatorManagedBoundary  string `json:"operator_managed_boundary"`
+	SchemaMigrations         bool   `json:"schema_migrations"`
+	AuthTokens               bool   `json:"auth_tokens"`
+	SourceArtifacts          bool   `json:"source_artifacts"`
 }
 
 type DownstreamContract struct {
@@ -257,8 +284,17 @@ type ContainerStopper interface {
 	Apply(context.Context, ContainerResetRequest) (ContainerResetResult, error)
 }
 
-type RuntimeContextQuiescer interface {
-	QuiesceAllRuntimeContexts(context.Context) error
+type RuntimeContextLifecycle interface {
+	ResetSourceProjections(context.Context) ([]SourceProjection, error)
+	BeginDestructiveReset(context.Context, string) (RuntimeReset, error)
+}
+
+// RuntimeReset owns only process-local reconstruction. Durable reset phases and
+// outcome replay belong to the reset coordinator and selected-store operation.
+type RuntimeReset interface {
+	SettleResources(context.Context) error
+	Complete(context.Context, bool) error
+	Release()
 }
 
 type ExecutionResult struct {
@@ -278,32 +314,22 @@ type CleanupStore interface {
 
 type ManagedContainerRuntime interface {
 	InspectManagedContainer(context.Context, string) (ManagedContainerInspection, error)
-	StopManagedContainer(context.Context, string) error
+	StopManagedContainer(context.Context, ContainerRef) error
 }
 
 type ManagedContainerInspection struct {
+	RuntimeID   string
 	Exists      bool
 	Running     bool
 	HasIdentity bool
-	Identity    ContainerIdentity
-}
-
-type ContainerIdentity struct {
-	Owner          string
-	Kind           string
-	ResetEligible  bool
-	CreationSource string
-	ContainerName  string
-	WorkspaceScope string
-	RunID          string
-	AgentIdentity  runtimeagentidentity.Identity
-	FlowInstance   string
+	Identity    containeridentity.Identity
 }
 
 func (r Request) normalize(now time.Time) (Request, error) {
 	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.ActorTokenID = strings.TrimSpace(r.ActorTokenID)
 	r.RequestHash = strings.TrimSpace(r.RequestHash)
+	r.IdempotencyKey = strings.TrimSpace(r.IdempotencyKey)
 	if !r.IncludeSourceArtifactsSet {
 		r.IncludeSourceArtifacts = true
 		r.IncludeSourceArtifactsSet = true
@@ -318,6 +344,18 @@ func (r Request) normalize(now time.Time) (Request, error) {
 		r.RequestedAt = now
 	}
 	r.RequestedAt = r.RequestedAt.UTC()
+	r.SourceProjections = append([]SourceProjection(nil), r.SourceProjections...)
+	identities, roots := map[string]bool{}, map[string]bool{}
+	for _, source := range r.SourceProjections {
+		projection := source.Cleanup
+		if err := projection.Validate(); err != nil {
+			return Request{}, fmt.Errorf("invalid reset source projection: %w", err)
+		}
+		if identities[projection.Identity] || roots[projection.Root] {
+			return Request{}, errors.New("reset source projections repeat identity or root")
+		}
+		identities[projection.Identity], roots[projection.Root] = true, true
+	}
 	return r, nil
 }
 

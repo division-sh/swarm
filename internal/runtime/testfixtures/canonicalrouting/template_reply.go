@@ -59,8 +59,8 @@ func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 		"provider.replied:\n", "provider.replied:\n  key: provider_request_id\n  provider_request_id: text\n")
 	initiatorEvents := filepath.Join(root, "initiator", "events.yaml")
 	applyClosedReplacement(t, initiatorEvents,
-		"request.submitted:\n  account_id: text?\n",
-		"request.submitted:\n  account_id: text?\n  provider_request_id: text\n")
+		"request.submitted:\n  account_id: text\n",
+		"request.submitted:\n  account_id: text\n  provider_request_id: text\n")
 	applyClosedReplacement(t, initiatorEvents,
 		"requester.requested:\n  account_id: text\n",
 		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
@@ -89,7 +89,6 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
   outputs:
 `)
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
-  id: provider-node
   execution_type: system_node
   subscribes_to: [provider.requested, human_task.deferred, human_task.approved]
   produces: [provider.replied]

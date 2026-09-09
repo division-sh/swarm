@@ -136,13 +136,6 @@ func cloneBoolMap(in map[string]bool) map[string]bool {
 	return out
 }
 
-func EffectiveSystemNodeID(nodeKey string, node SystemNodeContract) string {
-	if nodeKey := strings.TrimSpace(nodeKey); nodeKey != "" {
-		return nodeKey
-	}
-	return strings.TrimSpace(node.ID)
-}
-
 func RequiredAgentsDeclared(schema FlowSchemaDocument) bool {
 	return schema.RequiredAgentsDeclared || len(schema.RequiredAgents) > 0
 }
@@ -228,24 +221,6 @@ func inferredRequiredAgentFacts(agents map[string]AgentRegistryEntry, sourceFile
 		})
 	}
 	return out
-}
-
-func SystemNodeIDMatchesKey(nodeKey, authoredID string) bool {
-	nodeKey = strings.TrimSpace(nodeKey)
-	authoredID = strings.TrimSpace(authoredID)
-	if authoredID == "" || authoredID == nodeKey {
-		return true
-	}
-	return systemNodeRenderedIDTemplateMatchesKey(nodeKey, authoredID)
-}
-
-func systemNodeRenderedIDTemplateMatchesKey(nodeKey, authoredID string) bool {
-	if nodeKey == "" || !strings.Contains(authoredID, "{") || !strings.Contains(authoredID, "}") {
-		return false
-	}
-	prefix, _, _ := strings.Cut(authoredID, "{")
-	prefix = strings.TrimSuffix(strings.TrimSpace(prefix), "-")
-	return prefix == nodeKey
 }
 
 func EffectiveSystemNodeExecutionType(node SystemNodeContract) string {

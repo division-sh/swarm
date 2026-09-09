@@ -518,7 +518,6 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 		},
 	}
 	node := runtimecontracts.SystemNodeContract{
-		ID:            "scanner",
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		SubscribesTo:  []string{"source.requested"},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -539,12 +538,16 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 			"scanner": node,
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"source.requested": {},
+			"source.requested": {Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"url": {Type: "text"}},
+				Required:   []string{"url"},
+			}},
 		},
 		Path: "research",
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	base := &runtimecontracts.WorkflowContractBundle{
+		Events: flow.Events,
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:         "activity-boring-proof",
 			Version:      "v-test",

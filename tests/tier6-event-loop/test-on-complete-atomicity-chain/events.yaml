@@ -1,5 +1,5 @@
 task.started:
-  ready: boolean?
-  batch_id: string?
+  ready: boolean
+  batch_id: string
 phase.advanced: {}
 task.done: {}

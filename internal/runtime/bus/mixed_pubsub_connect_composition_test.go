@@ -169,7 +169,7 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 			outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"producer-local": {
-					ID: "producer-local", SubscribesTo: []string{eventName},
+					SubscribesTo:  []string{eventName},
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: existingOwnerHandlerFixture()},
 				},
 			},
@@ -182,7 +182,6 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.accepted"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
-					ID:            "consumer-node",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.accepted": existingOwnerHandlerFixture()},
 				},
 			},
@@ -278,14 +277,14 @@ func mixedFanoutToFanoutSource(reverse bool) semanticview.Source {
 	localNode := func(id, event string) map[string]runtimecontracts.SystemNodeContract {
 		return map[string]runtimecontracts.SystemNodeContract{
 			id: {
-				ID: id, SubscribesTo: []string{event},
+				SubscribesTo:  []string{event},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: existingOwnerHandlerFixture()},
 			},
 		}
 	}
 	receiver := func(id, event string) map[string]runtimecontracts.SystemNodeContract {
 		return map[string]runtimecontracts.SystemNodeContract{
-			id: {ID: id, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: existingOwnerHandlerFixture()}},
+			id: {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: existingOwnerHandlerFixture()}},
 		}
 	}
 	flows := []connectRoutePlanTestFlow{

@@ -67,7 +67,7 @@ func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContra
 	}
 	nodes := make(map[string]runtimecontracts.SystemNodeContract, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
-		node := runtimecontracts.SystemNodeContract{ID: nodeID}
+		node := runtimecontracts.SystemNodeContract{}
 		if bundle != nil {
 			if authored, ok := bundle.Nodes[nodeID]; ok {
 				node = authored
@@ -141,12 +141,16 @@ type recordingPipelineBus struct {
 	deliveryContinuations *pipelineTestContinuationOwner
 }
 
-func handlerEngineProjectNodeModule() *previewWorkflowModule {
+func handlerEngineProjectNodeModule(fields ...map[string]runtimecontracts.EntityFieldDecl) *previewWorkflowModule {
+	entities := testEntityContractsForType("test_entity")
+	if len(fields) > 0 {
+		entities["test_entity"] = runtimecontracts.EntityContract{Fields: fields[0]}
+	}
 	return handlerTestWorkflowModuleWithBundle(&runtimecontracts.WorkflowContractBundle{
 		Semantics:    runtimecontracts.WorkflowSemanticView{Name: "handler-engine-test"},
-		RootEntities: testEntityContractsForType("test_entity"),
+		RootEntities: entities,
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 	}, "handler-engine-test", "node-a").(*previewWorkflowModule)
 }
@@ -513,7 +517,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 		Schema: runtimecontracts.FlowSchemaDocument{Name: "render", Mode: runtimecontracts.FlowModeStatic},
 		Path:   ".",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a"},
+			"node-a": {},
 		},
 		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
 			"structured_renderer": module,
@@ -669,7 +673,6 @@ subject:
 `,
 		"scoring/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -858,9 +861,9 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
-			RootEntities: testEntityContractsForType("test_entity"),
+			RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{"revision_count": {Type: "integer"}}}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
-				"node-a": {ID: "node-a", ExecutionType: "system_node"},
+				"node-a": {ExecutionType: "system_node"},
 			},
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -938,7 +941,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
 			RootEntities: testEntityContractsForType("test_entity"),
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
-				"node-a": {ID: "node-a", ExecutionType: "system_node"},
+				"node-a": {ExecutionType: "system_node"},
 			},
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -1008,9 +1011,9 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
-			RootEntities: testEntityContractsForType("test_entity"),
+			RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{"kill_reason": {Type: "text"}, "kill_reason_missing": {Type: "boolean"}}}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
-				"node-a": {ID: "node-a", ExecutionType: "system_node"},
+				"node-a": {ExecutionType: "system_node"},
 			},
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -1067,8 +1070,8 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	if !ok {
 		t.Fatal("workflow instance missing after declarative write")
 	}
-	if got := instance.Fields["kill_reason_missing"]; got != true {
-		t.Fatalf("kill_reason_missing = %#v, want true", got)
+	if got := instance.Fields["kill_reason_missing"]; got != false {
+		t.Fatalf("kill_reason_missing = %#v, want false for materialized text default", got)
 	}
 }
 
@@ -1127,7 +1130,7 @@ func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recor
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: testEntityContractsForType("test_entity"),
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "validation",
@@ -1499,7 +1502,6 @@ validation_entity:
 `,
 		"validation/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -1619,9 +1621,14 @@ states: [queued]
 validation_request:
   request_id: text
 `,
+		"validation/events.yaml": `
+request.received:
+  request_id: text
+request.accepted:
+  request_id: text
+`,
 		"validation/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -1734,7 +1741,6 @@ review_entity:
 `,
 		"review/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -1853,7 +1859,6 @@ validation_entity:
 `,
 		"validation/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -1965,7 +1970,6 @@ entity.created: {}
 `,
 		"validation/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
   event_handlers:
     candidate.discovered:
@@ -2116,13 +2120,13 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 	}
 }
 
-func TestExecuteNodeContractHandlerAppliesEmitFieldsSparseFieldPresenceCheck(t *testing.T) {
+func TestExecuteNodeContractHandlerAppliesEmitFieldsMaterializedFieldPresenceCheck(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
-		module:         handlerEngineProjectNodeModule(),
+		module:         handlerEngineProjectNodeModule(map[string]runtimecontracts.EntityFieldDecl{"kill_reason": {Type: "text"}}),
 	}
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
@@ -2158,8 +2162,8 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsSparseFieldPresenceCheck(t *
 	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := payload["kill_reason_missing"]; got != true {
-		t.Fatalf("payload.kill_reason_missing = %#v, want true", got)
+	if got := payload["kill_reason_missing"]; got != false {
+		t.Fatalf("payload.kill_reason_missing = %#v, want false for materialized text default", got)
 	}
 }
 
@@ -2184,9 +2188,14 @@ states: [queued]
 subject:
   kill_reason: text
 `,
+					"scoring/events.yaml": `
+custom.trigger:
+  reason: text
+custom.emitted:
+  label: text
+`,
 					"scoring/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 				})
@@ -2519,14 +2528,14 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{
 				ID:        "high",
-				Condition: "payload.score >= 80",
+				Condition: "payload.score >= 80.0",
 				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"high"`),
 				}},
 			},
 			{
 				ID:        "medium",
-				Condition: "payload.score >= 40",
+				Condition: "payload.score >= 40.0",
 				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"medium"`),
 				}},
@@ -2602,7 +2611,7 @@ func declarativeEmitContractTestBundle(eventType string) *runtimecontracts.Workf
 func additiveOnSuccessContractBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test",
@@ -2618,7 +2627,7 @@ func additiveOnSuccessContractBundle() *runtimecontracts.WorkflowContractBundle 
 func rulesEmitTemplateContractBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test",
@@ -2650,17 +2659,27 @@ func rulesEmitTemplateContractBundle() *runtimecontracts.WorkflowContractBundle 
 
 func declarativeEmitContractTestBundleWithEntry(eventType string, entry runtimecontracts.EventCatalogEntry) *runtimecontracts.WorkflowContractBundle {
 	eventType = strings.TrimSpace(eventType)
+	eventsByType := map[string]runtimecontracts.EventCatalogEntry{
+		eventType: entry,
+		"custom.trigger": {
+			Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{
+					"reason": {Type: "string"},
+					"score":  {Type: "number"},
+				},
+				Required: []string{"reason", "score"},
+			},
+		},
+	}
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test",
 			Version: "v-test",
 		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventType: entry,
-		},
+		Events: eventsByType,
 	}
 }
 
@@ -2748,7 +2767,7 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check:  "payload.score >= 70",
+			Check:  "payload.score >= 70.0",
 			OnFail: "escalate:guard.failed",
 		},
 	}, workflowTriggerContext{
@@ -2813,7 +2832,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check: "payload.score >= 70",
+			Check: "payload.score >= 70.0",
 			OnFailSpec: runtimecontracts.GuardFailureSpec{
 				Action: runtimecontracts.GuardFailureActionEscalate,
 				Escalation: runtimecontracts.EmitSpec{

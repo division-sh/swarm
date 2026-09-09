@@ -128,6 +128,9 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	if owner, ok := any(runner).(WorkflowEntityStatePersistenceReader); ok {
 		store.entityStateReader = owner
 	}
+	if owner, ok := any(runner).(WorkflowEntityCollectionPersistenceReader); ok {
+		store.entityCollectionReader = owner
+	}
 	if owner, ok := any(runner).(WorkflowTargetPersistenceReader); ok {
 		store.targetReader = owner
 	}
@@ -548,6 +551,7 @@ func admitSyntheticEntityContractsForTest(
 	admitted.Agents = base.Agents
 	admitted.Tools = base.Tools
 	admitted.Policy = base.Policy
+	admitted.RootTypes = base.RootTypes
 	admitted.Platform = base.Platform
 	if base.RootSchema != nil {
 		admitted.RootSchema = base.RootSchema

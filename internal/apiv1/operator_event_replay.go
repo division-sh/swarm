@@ -524,12 +524,16 @@ func eventReplayRoutes(deliveries []eventReplayDelivery) ([]events.DeliveryRoute
 }
 
 func replayEventFromOriginal(original operatorread.OperatorEventFull, replayEventID string, now time.Time) (events.Event, error) {
+	var noEvent events.Event
 	snapshot, err := original.EventSnapshot()
 	if err != nil {
-		var event events.Event
-		return event, err
+		return noEvent, err
 	}
-	return events.NewReplayEvent(events.ReplayEventInput{
+	sourceAdmission, ok := snapshot.PayloadAdmission()
+	if !ok {
+		return noEvent, fmt.Errorf("replay source event %s has no payload admission evidence", snapshot.ID())
+	}
+	replay, err := events.NewReplayEvent(events.ReplayEventInput{
 		Facts: events.EventFacts{
 			ID: replayEventID, Type: snapshot.Type(),
 			Producer: events.ProducerClaim{Type: snapshot.ProducerType(), ID: snapshot.SourceAgent()},
@@ -539,6 +543,10 @@ func replayEventFromOriginal(original operatorread.OperatorEventFull, replayEven
 		},
 		Lineage: events.EventLineage{RunID: snapshot.RunID(), ParentEventID: snapshot.ID(), TaskID: snapshot.TaskID(), ExecutionMode: snapshot.ExecutionMode()},
 	})
+	if err != nil {
+		return noEvent, err
+	}
+	return events.ApplyPayloadAdmission(replay, sourceAdmission)
 }
 
 func eventReplayAuditPayload(

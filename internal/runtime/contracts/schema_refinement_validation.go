@@ -87,17 +87,17 @@ func validateSchemaRefinementsInTypeCatalog(context string, types TypeCatalogDoc
 	}
 	sort.Strings(typeNames)
 	for _, typeName := range typeNames {
-		named := types.Types[typeName]
-		fields := make(map[string]schemaRefinementField, len(named.Fields))
-		for fieldName, spec := range named.Fields {
-			fieldName = strings.TrimSpace(fieldName)
-			if fieldName == "" {
-				continue
-			}
-			fields[fieldName] = schemaRefinementField{
-				Name:        fieldName,
-				TypeRef:     spec.Type,
-				Refinements: spec.Refinements,
+		resolved, err := (CatalogTypeReference{Type: typeName, Catalog: types}).Resolve()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s.%s: %w", context, typeName, err))
+			continue
+		}
+		fields := make(map[string]schemaRefinementField, len(resolved.Fields))
+		for _, field := range resolved.Fields {
+			fields[field.Name] = schemaRefinementField{
+				Name:        field.Name,
+				TypeRef:     field.TypeRef,
+				Refinements: field.Refinements,
 			}
 		}
 		errs = append(errs, validateSchemaRefinementFields(context+"."+typeName, types, fields)...)

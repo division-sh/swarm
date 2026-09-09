@@ -30,6 +30,7 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                   1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                         1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:                                     1,
+	{Path: "internal/runtime/diagnostics.go", Scope: "logRuntimeEventSpec", Constructor: "NewStandaloneDiagnosticDirectEvent"}:                                         1,
 	{Path: "internal/runtime/event_construction.go", Scope: "newStandaloneRuntimePlatformDiagnosticEvent", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:         1,
 	{Path: "internal/runtime/genericschedule/owner.go", Scope: "occurrenceEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                      1,
 	{Path: "internal/runtime/genericschedule/owner.go", Scope: "occurrenceEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                                     1,
@@ -55,6 +56,10 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewCausalDiagnosticDirectEvent"}:     1,
 	{Path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:  1,
 	{Path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewStandaloneDiagnosticDirectEvent"}: 1,
+	// Exact outbox settlement chooses live-run versus retained history inside its transaction.
+	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewRunScopedDiagnosticDirectEvent"}:  1,
+	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewStandaloneDiagnosticDirectEvent"}: 1,
+	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewCausalDiagnosticDirectEvent"}:     1,
 }
 
 var productionRootConstructorAllowlist = map[runtimeConstructorCallsite]int{
@@ -241,7 +246,8 @@ func checkProductionEventConstructionFile(t *testing.T, repoRoot, path string, p
 		t.Fatalf("parse %s: %v", path, err)
 	}
 	relativePath := slashPath(repoRoot, path)
-	if importsPath(file, "github.com/division-sh/swarm/internal/events/eventtest") {
+	if importsPath(file, "github.com/division-sh/swarm/internal/events/eventtest") &&
+		!strings.HasPrefix(relativePath, "internal/store/storetest/") {
 		t.Fatalf("%s imports internal/events/eventtest from production code; test fixture builders are test-only", relativePath)
 	}
 	eventAliases, dotImported := eventImportAliases(file)

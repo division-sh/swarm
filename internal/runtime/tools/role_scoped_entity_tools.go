@@ -265,15 +265,14 @@ func roleScopedTopLevelSubpaths(contract entityruntime.Contract, field string) [
 	if err != nil || !deliveryNamedType(contract, decl.Type) {
 		return nil
 	}
-	named := contract.Types.Types[deliveryTypeName(contract, decl.Type)]
-	out := make([]string, 0, len(named.Fields))
-	for name := range named.Fields {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			out = append(out, name)
-		}
+	resolved, err := resolveEntityToolStructuralType(contract, decl.Type)
+	if err != nil {
+		return nil
 	}
-	sort.Strings(out)
+	out := make([]string, 0, len(resolved.Fields))
+	for _, field := range resolved.Fields {
+		out = append(out, field.Name)
+	}
 	return out
 }
 
@@ -282,12 +281,15 @@ func roleScopedEntitySubpathTypeRef(contract entityruntime.Contract, field, subp
 	if err != nil || !deliveryNamedType(contract, decl.Type) {
 		return "", false
 	}
-	named := contract.Types.Types[deliveryTypeName(contract, decl.Type)]
-	subDecl, ok := named.Fields[strings.TrimSpace(subpath)]
+	resolved, err := resolveEntityToolStructuralType(contract, decl.Type)
+	if err != nil {
+		return "", false
+	}
+	subDecl, ok := resolved.Field(subpath)
 	if !ok {
 		return "", false
 	}
-	return subDecl.Type, true
+	return subDecl.TypeRef, true
 }
 
 func roleScopedToolNamePart(raw string) string {

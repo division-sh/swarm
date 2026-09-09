@@ -43,7 +43,8 @@ func (c *checkerContext) validateFanOutPlan(plan runtimecontracts.FanOutCompiled
 			Location: nodeID,
 		})
 	}
-	if err := workflowexpr.ValidateValueExpressionWithOptions(plan.Identity, workflowexpr.ValueExpressionOptions{ItemAlias: plan.ItemAlias}); err != nil {
+	itemType := plan.ItemType.Clone()
+	if err := workflowexpr.ValidateValueExpressionWithOptions(plan.Identity, workflowexpr.ValueExpressionOptions{ItemAlias: plan.ItemAlias, ItemType: &itemType}); err != nil {
 		add(fmt.Sprintf("fan_out.identity %q is invalid: %v", plan.Identity, err))
 	}
 	if workflowexpr.ExpressionReferencesFanOutFieldForValidation(plan.Identity, "index") {

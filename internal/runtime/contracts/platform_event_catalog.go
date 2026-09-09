@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -68,13 +69,11 @@ func platformEventEntryFromYAMLNode(node yaml.Node) EventCatalogEntry {
 	if handling := platformEventScalarValue(node, "runtime_handling"); handling != "" {
 		entry.RuntimeHandling = handling
 	}
-	if payload := platformEventMappingValue(node, "payload"); payload != nil {
-		entry.Payload.Properties = platformEventPayloadProperties(*payload)
+	if platformEventMappingValue(node, "required") != nil {
+		panic("platform event required lists are retired; fields are required by default and optional fields use one trailing ? on their type")
 	}
-	if required := platformEventStringList(node, "required"); len(required) > 0 {
-		entry.Payload.Required = required
-	} else {
-		entry.Payload.Required = requiredPlatformEventFieldNames(entry.Payload.Properties)
+	if payload := platformEventMappingValue(node, "payload"); payload != nil {
+		entry.Payload.Properties, entry.Payload.Required = platformEventPayloadSchema(*payload, "platform event payload")
 	}
 	if consumer := platformEventStringList(node, "consumer"); len(consumer) > 0 {
 		entry.Consumer = consumer
@@ -85,42 +84,98 @@ func platformEventEntryFromYAMLNode(node yaml.Node) EventCatalogEntry {
 	return entry
 }
 
-func platformEventPayloadProperties(payload yaml.Node) map[string]EventFieldSpec {
+func platformEventPayloadSchema(payload yaml.Node, context string) (map[string]EventFieldSpec, []string) {
 	out := map[string]EventFieldSpec{}
 	if payload.Kind != yaml.MappingNode {
-		return out
+		return out, nil
 	}
+	if platformEventMappingValue(payload, "required") != nil {
+		panic(fmt.Sprintf("%s required lists are retired; fields are required by default and optional fields use one trailing ? on their type", context))
+	}
+	required := make([]string, 0, len(payload.Content)/2)
 	content := payload.Content
 	for i := 0; i+1 < len(content); i += 2 {
 		name := strings.TrimSpace(content[i].Value)
 		if name == "" || name == "required" || name == "properties" {
 			continue
 		}
-		field := platformEventFieldSpec(*content[i+1])
+		field, optional, err := platformEventFieldSpec(*content[i+1], context+" field "+name)
+		if err != nil {
+			panic(err)
+		}
 		if strings.TrimSpace(field.Type) == "" {
 			field.Type = "object"
 		}
 		out[name] = field
+		if !optional {
+			required = append(required, name)
+		}
 	}
 	if props := platformEventMappingValue(payload, "properties"); props != nil {
-		for name, field := range platformEventPayloadProperties(*props) {
+		properties, propertyRequired := platformEventPayloadSchema(*props, context+" properties")
+		for name, field := range properties {
 			out[name] = field
 		}
+		required = append(required, propertyRequired...)
 	}
-	return out
+	sort.Strings(required)
+	return out, required
 }
 
-func platformEventFieldSpec(node yaml.Node) EventFieldSpec {
+func platformEventFieldSpec(node yaml.Node, context string) (EventFieldSpec, bool, error) {
 	switch node.Kind {
 	case yaml.ScalarNode:
-		return EventFieldSpec{Type: normalizePlatformEventFieldType(node.Value)}
-	case yaml.MappingNode:
-		return EventFieldSpec{
-			Type:        normalizePlatformEventFieldType(platformEventScalarValue(node, "type")),
-			Description: platformEventScalarValue(node, "description"),
+		typeName, optional, err := admitEventFieldTypeMarker(strings.TrimSpace(node.Value), context)
+		if err != nil {
+			return EventFieldSpec{}, false, err
 		}
+		return EventFieldSpec{Type: normalizePlatformEventFieldType(typeName)}, optional, nil
+	case yaml.MappingNode:
+		if platformEventMappingValue(node, "type") == nil {
+			properties, required := platformEventPayloadSchema(node, context)
+			rawProperties := make(map[string]any, len(properties))
+			for name, field := range properties {
+				rawProperties[name] = platformEventFieldJSONSchema(field)
+			}
+			raw := map[string]any{
+				"type":                 "object",
+				"properties":           rawProperties,
+				"required":             required,
+				"additionalProperties": false,
+			}
+			exact, err := AdmitToolInputSchemaMap(raw)
+			if err != nil {
+				return EventFieldSpec{}, false, fmt.Errorf("admit nested platform event schema: %w", err)
+			}
+			return EventFieldSpec{Type: "object", ExactSchema: &exact}, false, nil
+		}
+		typeName, optional, err := admitEventFieldTypeMarker(platformEventScalarValue(node, "type"), context)
+		if err != nil {
+			return EventFieldSpec{}, false, err
+		}
+		return EventFieldSpec{
+			Type:        normalizePlatformEventFieldType(typeName),
+			Description: platformEventScalarValue(node, "description"),
+		}, optional, nil
 	default:
-		return EventFieldSpec{Type: "object"}
+		return EventFieldSpec{}, false, fmt.Errorf("%s must be a scalar or mapping", context)
+	}
+}
+
+func platformEventFieldJSONSchema(field EventFieldSpec) map[string]any {
+	if field.ExactSchema != nil {
+		return field.ExactSchema.Projection()
+	}
+	typeRef := strings.TrimSpace(field.Type)
+	schema, _ := eventSchemaForTypeRef(typeRef, TypeCatalogDocument{}, map[string]struct{}{})
+	typeName, _ := schema["type"].(string)
+	switch strings.TrimSpace(typeName) {
+	case "", "string", "integer", "number", "boolean", "object", "array":
+		return schema
+	default:
+		// Opaque platform-owned snapshot types remain dynamic leaves; their
+		// containing field presence is still structurally authoritative.
+		return map[string]any{}
 	}
 }
 
@@ -202,23 +257,4 @@ func sortedEventFieldNames(fields map[string]EventFieldSpec) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func requiredPlatformEventFieldNames(fields map[string]EventFieldSpec) []string {
-	names := make([]string, 0, len(fields))
-	for name, field := range fields {
-		name = strings.TrimSpace(name)
-		if name == "" || platformEventFieldAllowsOmission(field) {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func platformEventFieldAllowsOmission(field EventFieldSpec) bool {
-	lower := strings.ToLower(strings.TrimSpace(field.Type + " " + field.Description))
-	return strings.Contains(lower, "nullable") || strings.Contains(lower, "null until") ||
-		strings.Contains(lower, "(optional") || strings.HasPrefix(lower, "optional")
 }

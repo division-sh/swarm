@@ -40,7 +40,7 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 
 		for triggerEventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			triggerEventType = strings.TrimSpace(triggerEventType)
-			triggerProof := semanticview.ResolveFlowEventProof(c.source, flowID, triggerEventType)
+			triggerResolution := semanticview.ResolveEventSchema(c.source, flowID, triggerEventType)
 			for _, emitSite := range payloadCompletenessEmitSites(c.source, node, triggerEventType, handler) {
 				if emitSite.Err != nil {
 					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
@@ -69,10 +69,11 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 						Location: nodeID,
 					})
 				}
-				if !emittedProof.HasSchema {
+				emittedResolution := semanticview.ResolveEventSchema(c.source, flowID, emitted)
+				if !emittedResolution.HasStructural {
 					continue
 				}
-				declared := payloadCompletenessDeclaredFields(emittedProof.Entry)
+				declared := payloadCompletenessDeclaredFields(emittedResolution)
 				for _, field := range payloadCompletenessUndeclaredFields(emitSite.Fields, declared) {
 					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
 						CheckID:  "semantic_drift_payload_completeness",
@@ -81,7 +82,7 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 						Location: nodeID,
 					})
 				}
-				required := payloadCompletenessRequiredFields(emittedProof.Entry)
+				required := payloadCompletenessRequiredFields(emittedResolution)
 				if len(required) == 0 {
 					continue
 				}
@@ -101,8 +102,7 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 							field,
 							emitSite.Label,
 							emitSite.Fields,
-							triggerProof.Entry,
-							triggerProof.HasSchema,
+							triggerResolution,
 							entityFields,
 						),
 						Location: nodeID,
@@ -128,9 +128,8 @@ type payloadCompletenessEmitSite struct {
 	Err       error
 }
 
-func payloadCompletenessRequiredFields(entry runtimecontracts.EventCatalogEntry) []string {
-	required := append([]string{}, entry.Payload.Required...)
-	return uniquePayloadCompletenessStrings(required...)
+func payloadCompletenessRequiredFields(resolution semanticview.EventSchemaResolution) []string {
+	return uniquePayloadCompletenessStrings(resolution.RequiredFieldNames()...)
 }
 
 func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidentity.ExecutableNode, triggerEventType string, handler runtimecontracts.SystemNodeEventHandler) []payloadCompletenessEmitSite {
@@ -141,6 +140,7 @@ func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidenti
 				Node:             node,
 				TriggerEventType: triggerEventType,
 				Site:             label,
+				SchemaProvider:   source,
 			}, spec)
 			if err != nil {
 				out = append(out, payloadCompletenessEmitSite{
@@ -182,15 +182,9 @@ func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidenti
 	return out
 }
 
-func payloadCompletenessDeclaredFields(entry runtimecontracts.EventCatalogEntry) map[string]struct{} {
+func payloadCompletenessDeclaredFields(resolution semanticview.EventSchemaResolution) map[string]struct{} {
 	out := map[string]struct{}{}
-	for field := range entry.Payload.Properties {
-		field = strings.TrimSpace(field)
-		if field != "" {
-			out[field] = struct{}{}
-		}
-	}
-	for _, field := range entry.Payload.Required {
+	for _, field := range resolution.FieldNames() {
 		field = strings.TrimSpace(field)
 		if field != "" {
 			out[field] = struct{}{}
@@ -242,25 +236,19 @@ func isRuntimeOwnedCanonicalContextField(field string) bool {
 	}
 }
 
-func payloadCompletenessTriggerSchemaState(entry runtimecontracts.EventCatalogEntry, hasSchema bool, field string) string {
-	if !hasSchema {
+func payloadCompletenessTriggerSchemaState(resolution semanticview.EventSchemaResolution, field string) string {
+	if !resolution.HasStructural {
 		return "no schema"
 	}
 	field = strings.TrimSpace(field)
 	if field == "" {
 		return "no"
 	}
-	required := map[string]struct{}{}
-	for _, item := range entry.Payload.Required {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			required[item] = struct{}{}
-		}
-	}
-	if _, ok := required[field]; ok {
+	declared, ok := resolution.Field(field)
+	if ok && !declared.IsOptional {
 		return "yes (required)"
 	}
-	if _, ok := entry.Payload.Properties[field]; ok {
+	if ok {
 		return "yes (optional)"
 	}
 	return "no"
@@ -311,7 +299,7 @@ func payloadCompletenessRuleLabel(scope string, index int, id, suffix string) st
 	return fmt.Sprintf("%s[%d].%s", scope, index, suffix)
 }
 
-func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, field, emitSiteLabel string, emitFieldTargets map[string]struct{}, triggerEntry runtimecontracts.EventCatalogEntry, hasTriggerSchema bool, entityFields map[string]struct{}) string {
+func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, field, emitSiteLabel string, emitFieldTargets map[string]struct{}, triggerResolution semanticview.EventSchemaResolution, entityFields map[string]struct{}) string {
 	fieldState := "absent"
 	fieldCovered := "N/A (no emit.fields)"
 	emitSiteLabel = strings.TrimSpace(emitSiteLabel)
@@ -335,7 +323,7 @@ func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, fiel
 		fieldState,
 		fieldCovered,
 		strings.TrimSpace(field),
-		payloadCompletenessTriggerSchemaState(triggerEntry, hasTriggerSchema, field),
+		payloadCompletenessTriggerSchemaState(triggerResolution, field),
 		strings.TrimSpace(field),
 		payloadCompletenessEntitySchemaState(entityFields, field),
 	)

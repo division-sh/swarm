@@ -138,7 +138,8 @@ func TestWorkflowSemanticsJoinPlanPreservesDeclaringResultCatalog(t *testing.T) 
 		t.Fatalf("resolved join result = %#v, %v", resolved, err)
 	}
 	delete(bundle.RootTypes.Types, "JoinResult")
-	if _, ok := joins[0].ResultType.NamedFields("JoinResult"); !ok {
+	retained, err := joins[0].ResultType.Resolve()
+	if err != nil || retained.Kind != CatalogTypeObject {
 		t.Fatal("join plan did not retain the declaring type catalog")
 	}
 }

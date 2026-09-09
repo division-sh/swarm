@@ -376,7 +376,7 @@ func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *t
 				"bundle_hash": bundleHash,
 				"event_name":  "inbound.telegram.text_message",
 				"payload": map[string]any{
-					"conversation_reference": "chat-42", "external_account_reference": "account-42",
+					"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42",
 					"provider_message_reference": 1, "text": "rollback proof",
 				},
 				"idempotency_key": idempotencyKey,
@@ -420,7 +420,7 @@ func TestPublicTemplateInputPublicationRollsBackAfterDeliveryAndCompletionAcross
 				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
 				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 					"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
-					"payload":         map[string]any{"conversation_reference": "chat-42", "external_account_reference": "account-42", "provider_message_reference": 1, "text": "late rollback proof"},
+					"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "late rollback proof"},
 					"idempotency_key": idempotencyKey,
 				})
 				if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
@@ -1130,7 +1130,6 @@ func writeGeneratedTelegramScenarioFixture(t *testing.T, providerURL string) str
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-input-observer:
-  id: telegram-input-observer
   execution_type: system_node
   subscribes_to: [inbound.telegram.text_message]
   event_handlers:
@@ -1150,7 +1149,6 @@ func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 	root := canonicalrouting.CopyTelegramChatWithoutIngress(t)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "nodes.yaml"), `
 telegram-responder:
-  id: telegram-responder
   execution_type: system_node
   subscribes_to: [telegram.reply_requested]
   event_handlers:
@@ -1163,7 +1161,6 @@ telegram-responder:
           chat_id: {cel: payload.chat_id}
           text: {cel: payload.text}
 telegram-revision:
-  id: telegram-revision
   execution_type: system_node
   subscribes_to: [telegram_send_message.revision_requested]
   event_handlers:

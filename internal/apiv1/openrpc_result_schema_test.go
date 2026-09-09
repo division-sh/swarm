@@ -190,9 +190,6 @@ func approvedResultSchemaRuntimeMethods() []string {
 	out = append(out,
 		"channel.onboarding_start",
 		"channel.onboarding_retry",
-		"channel.connect",
-		"channel.reconnect",
-		"channel.rebind",
 		"channel.confirm",
 		"channel.unbind",
 		"channel.proof_revoke",
@@ -393,7 +390,7 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 	}
 	if methodName == "channel.proof_revoke" {
 		return map[string]any{"proof": map[string]any{
-			"format": "swarm-verified-account-proof-v1", "proof_id": "00000000-0000-0000-0000-000000000802",
+			"format": "swarm-verified-account-proof-v2", "proof_id": "00000000-0000-0000-0000-000000000802",
 			"revision": 2, "status": "revoked", "interface": identity,
 			"external_account_reference": "account", "conversation_reference": "conversation", "conversation_scope": "direct",
 			"method": "connect", "challenge": "SWARM-AAAAAAAAAAAAAAAA",

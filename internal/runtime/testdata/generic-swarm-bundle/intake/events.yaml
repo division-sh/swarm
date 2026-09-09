@@ -1,16 +1,18 @@
 item.created:
   emitter:
     - control-plane
-  item_id: string?
-  items: "[IntakeItem]?"
+  item_id: string
+  items: "[IntakeItem]"
 item.processed:
   emitter:
     - worker-a
     - worker-b
   item_id: string?
+  score: number
 item.review_requested:
   emitter:
     - intake-router
+  score: number
 item.rejected:
   emitter:
     - processing-node

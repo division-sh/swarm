@@ -80,7 +80,6 @@ deploy.done:
   key: vertical_id
   vertical_id: string
 `, "", `producer-node:
-  id: producer-node
   execution_type: system_node
   subscribes_to: [deploy.requested]
   event_handlers:
@@ -107,7 +106,6 @@ pins:
   inputs:
     events:
 `+input, "", entities, `consumer-node:
-  id: consumer-node
   execution_type: system_node
   subscribes_to: [deploy.completed]
   event_handlers:
@@ -171,7 +169,6 @@ connect:
 
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-node:
-  id: root-node
   execution_type: system_node
   subscribes_to: [work.ready]
   event_handlers:
@@ -187,7 +184,6 @@ connect:
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.requested:\n  work_id: text?\nwork.ready:\n  key: work_id\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\nmode: static\npins:\n  outputs:\n    events:\n      - work.ready\n")
 	writeLegacyInstanceFlow(t, root, "consumer", "name: consumer\nmode: static\npins:\n  inputs:\n    events:\n      - consumer.work.ready\n", "", "", `consumer-node:
-  id: consumer-node
   execution_type: system_node
   subscribes_to: [consumer.work.ready]
   event_handlers:
@@ -195,7 +191,6 @@ connect:
 `)
 	if includeDynamic {
 		writeLegacyInstanceFlow(t, root, "dynamic", "name: dynamic\nmode: template\ninstance: work_id\npins:\n  inputs:\n    events:\n      - event: dynamic.work.ready\n        resolution:\n          mode: select\n", "", "dynamic_state:\n  work_id: string\n", `dynamic-node:
-  id: dynamic-node-{instance_id}
   execution_type: system_node
   subscribes_to: [dynamic.work.ready]
   event_handlers:

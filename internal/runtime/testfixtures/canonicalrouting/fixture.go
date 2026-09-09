@@ -363,7 +363,6 @@ pins:
     initial: 0
 `)
 	writeClosedNegativeFile(t, root, "legacy_static/nodes.yaml", `legacy-writer:
-  id: legacy-writer
   execution_type: system_node
   subscribes_to: [legacy.seen]
   event_handlers:
@@ -390,7 +389,6 @@ pins:
       - subject.created
 `)
 	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
-  id: root-node
   execution_type: system_node
   subscribes_to: [subject.created]
   event_handlers:

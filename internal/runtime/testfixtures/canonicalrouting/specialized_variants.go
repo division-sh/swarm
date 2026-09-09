@@ -35,7 +35,6 @@ pins:
     type: integer
     _unused_reason: output-mode child primary entity proof field
 `, `reader:
-  id: reader
   execution_type: system_node
   subscribes_to: [task.assigned]
   event_handlers:
@@ -134,7 +133,6 @@ line_item.requested:
     type: "[text]"
     initial: []
 `, `support-node:
-  id: support-node
   execution_type: system_node
   subscribes_to:
     - ticket.opened
@@ -226,6 +224,7 @@ pins:
   inputs:
     events:
       - {event: inbound.telegram, source: external}
+      - {event: inbound.telegram.text_message, source: external}
       - {event: inbound.intercom, source: external}
       - {event: inbound.acme_public, source: external}
       - {event: inbound.partner_auth, source: external}
@@ -245,15 +244,15 @@ pins:
 func inboundAdmissionEvents() string {
 	var out strings.Builder
 	for _, event := range []string{"inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"} {
-		fmt.Fprintf(&out, "%s:\n  entity_id: text\n  provider: text\n  event_type: text\n  provider_event_type: text\n  provider_event_id: text\n  provider_delivery_id: text\n  headers: json\n  received_at: text\n", event)
+		fmt.Fprintf(&out, "%s:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n", event)
 	}
 	return out.String()
 }
 
 func inboundAdmissionNodes() string {
-	events := []string{"inbound.telegram", "inbound.intercom", "inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"}
+	events := []string{"inbound.telegram", "inbound.telegram.text_message", "inbound.intercom", "inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"}
 	var out strings.Builder
-	out.WriteString("matrix-sink:\n  id: matrix-sink\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(events, ", ") + "]\n  event_handlers:\n")
+	out.WriteString("matrix-sink:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(events, ", ") + "]\n  event_handlers:\n")
 	for _, event := range events {
 		fmt.Fprintf(&out, `    %s:
       data_accumulation:
@@ -292,7 +291,6 @@ widget.started:
   seed: boolean
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `scorer:
-  id: scorer
   execution_type: system_node
   subscribes_to: [widget.scored]
   event_handlers:
@@ -370,7 +368,6 @@ ticket.assigned:
   priority: text
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `classifier:
-  id: classifier
   execution_type: system_node
   subscribes_to: [ticket.classified]
   produces: [ticket.assigned]
@@ -385,7 +382,6 @@ ticket.assigned:
           priority: entity.priority
       advances_to: assigned
 assignee:
-  id: assignee
   execution_type: system_node
   subscribes_to: [ticket.assigned]
   event_handlers:
@@ -428,7 +424,6 @@ func CopyArtifactRepoCommitAdmission(t testing.TB) string {
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "artifact.requested:\n  swarm:\n    source: external\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `artifact-writer:
-  id: artifact-writer
   execution_type: system_node
   subscribes_to: [artifact.requested]
   event_handlers:
@@ -464,7 +459,6 @@ func CopyVerifyMissingPin(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-missing-pin-warning\ninitial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\ntask.completed: {}\nchild/task.assigned: {}\nchild/task.result: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `dispatcher:
-  id: dispatcher
   execution_type: system_node
   subscribes_to: [task.requested, child/task.result]
   produces: [task.completed, child/task.assigned]
@@ -477,7 +471,6 @@ func CopyVerifyMissingPin(t testing.TB) string {
         event: task.completed
 `)
 	writeLegacyInstanceFlow(t, root, "child", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, working, done]\npins:\n  inputs:\n    events: [task.assigned, task.feedback]\n", "task.assigned: {}\ntask.feedback:\n  comment: string\ntask.result: {}\n", "work_item: {}\n", `worker:
-  id: worker
   execution_type: system_node
   subscribes_to: [task.assigned, task.feedback]
   produces: [task.result]
@@ -498,7 +491,7 @@ func CopyRunForkTarget(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "entities.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  id: test-node\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: []\n  event_handlers:\n    task.requested:\n      advances_to: done\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: []\n  event_handlers:\n    task.requested:\n      advances_to: done\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\n")
 	return root
 }

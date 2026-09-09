@@ -1,7 +1,13 @@
 control-plane:
   id: control-plane
   role: control-plane
-  intent: {inline: "Coordinate generic bundle events."}
+  intent:
+    inline: |
+      Coordinate generic bundle events.
+
+      When you call emit_item_created with:
+      - item_id: the created item id
+      - items: the intake items
   manager_fallback: control-plane
   subscriptions:
     - item.review_requested

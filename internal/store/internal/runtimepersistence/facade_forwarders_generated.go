@@ -29,6 +29,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	deliverylifecycle "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	destructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	diaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
 	effects "github.com/division-sh/swarm/internal/runtime/effects"
 	entityquery "github.com/division-sh/swarm/internal/runtime/entityquery"
 	executionmode "github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -116,6 +117,10 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runqui
 
 func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
 	return s.destructiveResetPostgresOwner.ApplyDestructiveResetCleanup(ctx, req)
+}
+
+func (s *PostgresStore) ApplyDestructiveResetQuiescence(ctx context.Context, req destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error) {
+	return s.runLifecyclePostgresOwner.ApplyDestructiveResetQuiescence(ctx, req)
 }
 
 func (s *PostgresStore) ApplyServeAbandonActiveRunQuiescence(ctx context.Context, at time.Time) (runquiescence.Result, error) {
@@ -406,6 +411,10 @@ func (s *PostgresStore) FinalizeDirectiveSuccess(ctx context.Context, operationI
 	return s.agentPostgresOwner.FinalizeDirectiveSuccess(ctx, operationID, now, ttl)
 }
 
+func (s *PostgresStore) FindChannelBindingBeginReplay(ctx context.Context, req operatorchannel.BeginReplayRequest) (operatorchannel.Operation, bool, error) {
+	return s.operatorChannelPostgresOwner.FindChannelBindingBeginReplay(ctx, req)
+}
+
 func (s *PostgresStore) ForkRunSource(ctx context.Context, request runlifecycle.ForkSourceRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
 	return s.runLifecyclePostgresOwner.ForkRunSource(ctx, request)
 }
@@ -602,7 +611,7 @@ func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, ident
 	return s.operatorAgentPostgres.ListPendingAgentDeliveryFacts(ctx, identities, since)
 }
 
-func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]manager.AgentLifecycleDiagnostic, error) {
+func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]diaglog.LifecycleDiagnostic, error) {
 	return s.agentPostgresOwner.ListPendingAgentLifecycleDiagnostics(ctx, limit)
 }
 
@@ -890,6 +899,10 @@ func (s *PostgresStore) PauseRunControl(ctx context.Context, req runcontrol.Tran
 	return s.runLifecyclePostgresOwner.PauseRunControl(ctx, req)
 }
 
+func (s *PostgresStore) PersistLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic, record runtime.RuntimeLogPersistenceRecord) (bool, error) {
+	return s.eventPostgresOwner.PersistLifecycleDiagnostic(ctx, item, record)
+}
+
 func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtime.RuntimeLogPersistenceRecord) error {
 	return s.eventPostgresOwner.PersistRuntimeLog(ctx, record)
 }
@@ -934,6 +947,10 @@ func (s *PostgresStore) QueryEntityStates(ctx context.Context, query tools.Entit
 	return s.entityPostgresOwner.QueryEntityStates(ctx, query)
 }
 
+func (s *PostgresStore) QueryWorkflowEntityCollection(ctx context.Context, owner pipeline.WorkflowEntityCollectionOwner) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return s.pipelinePostgresOwner.QueryWorkflowEntityCollection(ctx, owner)
+}
+
 func (s *PostgresStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority) error {
 	return s.runForkPostgresOwner.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority)
 }
@@ -948,6 +965,10 @@ func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructiverese
 
 func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationPostgresReader.ReadTimerObligations(ctx, scope, observedAt)
+}
+
+func (s *PostgresStore) ReconcileChannelOnboardingBinding(ctx context.Context, req channelonboarding.ReconcileBindingRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.ReconcileChannelOnboardingBinding(ctx, req)
 }
 
 func (s *PostgresStore) ReconcileChannelOnboardingEffectOutcomes(ctx context.Context, onboardingOperationID string, now time.Time) ([]effects.ChannelOnboardingEffectOutcome, error) {
@@ -1090,6 +1111,10 @@ func (s *PostgresStore) ResetAll(metadata sessions.ResetMetadata) (sessions.Rese
 	return s.lLMPostgresOwner.ResetAll(metadata)
 }
 
+func (s *PostgresStore) ResetChannelOnboardingPendingIdentity(ctx context.Context, req channelonboarding.PendingResetRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.ResetChannelOnboardingPendingIdentity(ctx, req)
+}
+
 func (s *PostgresStore) ResetStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
 	return s.pipelinePostgresOwner.ResetStandingService(ctx, operation)
 }
@@ -1170,8 +1195,8 @@ func (s *PostgresStore) SelectActiveWorkflowInstances(ctx context.Context, runID
 	return s.pipelinePostgresOwner.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
-func (s *PostgresStore) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
-	s.eventPostgresOwner.SetEventPayloadValidator(validator)
+func (s *PostgresStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {
+	s.eventPostgresOwner.SetEventPayloadAdmitter(admitter)
 }
 
 func (s *PostgresStore) SetRuntimeIngressTransitionEvent(ctx context.Context, target ingress.Status, eventID string, transitionAt time.Time) (bool, error) {
@@ -1282,6 +1307,10 @@ func (s *SQLiteRuntimeStore) Acquire(ctx context.Context, identity agentmemory.I
 	return s.lLMSQLiteOwner.Acquire(ctx, identity, lockOwner)
 }
 
+func (s *SQLiteRuntimeStore) AcquireDestructiveReset(ctx context.Context) (destructivereset.LockLease, bool, error) {
+	return s.destructiveResetSQLiteOwner.AcquireDestructiveReset(ctx)
+}
+
 func (s *SQLiteRuntimeStore) AcquireLiveSession(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, llm.ConversationRecord, error) {
 	return s.lLMSQLiteOwner.AcquireLiveSession(ctx, identity, lockOwner)
 }
@@ -1332,6 +1361,10 @@ func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts
 
 func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req runquiescence.Request) (runquiescence.Result, error) {
 	return s.runLifecycleSQLiteOwner.ApplyActiveRunQuiescence(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) ApplyDestructiveResetQuiescence(ctx context.Context, req destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error) {
+	return s.runLifecycleSQLiteOwner.ApplyDestructiveResetQuiescence(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ApplyServeAbandonActiveRunQuiescence(ctx context.Context, at time.Time) (runquiescence.Result, error) {
@@ -1626,6 +1659,10 @@ func (s *SQLiteRuntimeStore) FinalizeDirectiveSuccess(ctx context.Context, opera
 	return s.agentSQLiteOwner.FinalizeDirectiveSuccess(ctx, operationID, now, ttl)
 }
 
+func (s *SQLiteRuntimeStore) FindChannelBindingBeginReplay(ctx context.Context, req operatorchannel.BeginReplayRequest) (operatorchannel.Operation, bool, error) {
+	return s.operatorChannelSQLiteOwner.FindChannelBindingBeginReplay(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) ForkRunSource(ctx context.Context, request runlifecycle.ForkSourceRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
 	return s.runLifecycleSQLiteOwner.ForkRunSource(ctx, request)
 }
@@ -1806,7 +1843,7 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts o
 	return s.operatorObservabilitySQLite.ListOperatorRuntimeLogs(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]manager.AgentLifecycleDiagnostic, error) {
+func (s *SQLiteRuntimeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]diaglog.LifecycleDiagnostic, error) {
 	return s.agentSQLiteOwner.ListPendingAgentLifecycleDiagnostics(ctx, limit)
 }
 
@@ -2078,6 +2115,10 @@ func (s *SQLiteRuntimeStore) PauseRunControl(ctx context.Context, req runcontrol
 	return s.runLifecycleSQLiteOwner.PauseRunControl(ctx, req)
 }
 
+func (s *SQLiteRuntimeStore) PersistLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic, record runtime.RuntimeLogPersistenceRecord) (bool, error) {
+	return s.eventSQLiteOwner.PersistLifecycleDiagnostic(ctx, item, record)
+}
+
 func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runtime.RuntimeLogPersistenceRecord) error {
 	return s.eventSQLiteOwner.PersistRuntimeLog(ctx, record)
 }
@@ -2122,6 +2163,10 @@ func (s *SQLiteRuntimeStore) QueryEntityStates(ctx context.Context, query tools.
 	return s.entitySQLiteOwner.QueryEntityStates(ctx, query)
 }
 
+func (s *SQLiteRuntimeStore) QueryWorkflowEntityCollection(ctx context.Context, owner pipeline.WorkflowEntityCollectionOwner) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return s.pipelineSQLiteOwner.QueryWorkflowEntityCollection(ctx, owner)
+}
+
 func (s *SQLiteRuntimeStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority) error {
 	return s.runForkSQLiteOwner.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority)
 }
@@ -2130,8 +2175,16 @@ func (s *SQLiteRuntimeStore) Read(ctx context.Context, scope timerobligation.Sco
 	return s.timerObligationSQLiteReader.Read(ctx, scope, observedAt)
 }
 
+func (s *SQLiteRuntimeStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
+	return s.destructiveResetSQLiteOwner.ReadResetInventory(ctx)
+}
+
 func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationSQLiteReader.ReadTimerObligations(ctx, scope, observedAt)
+}
+
+func (s *SQLiteRuntimeStore) ReconcileChannelOnboardingBinding(ctx context.Context, req channelonboarding.ReconcileBindingRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.ReconcileChannelOnboardingBinding(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileChannelOnboardingEffectOutcomes(ctx context.Context, onboardingOperationID string, now time.Time) ([]effects.ChannelOnboardingEffectOutcome, error) {
@@ -2278,6 +2331,10 @@ func (s *SQLiteRuntimeStore) ResetAll(metadata sessions.ResetMetadata) (sessions
 	return s.lLMSQLiteOwner.ResetAll(metadata)
 }
 
+func (s *SQLiteRuntimeStore) ResetChannelOnboardingPendingIdentity(ctx context.Context, req channelonboarding.PendingResetRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.ResetChannelOnboardingPendingIdentity(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) ResetStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
 	return s.pipelineSQLiteOwner.ResetStandingService(ctx, operation)
 }
@@ -2358,8 +2415,8 @@ func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, e
 	return s.runLifecycleSQLiteOwner.ServeAbandonDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
 }
 
-func (s *SQLiteRuntimeStore) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
-	s.eventSQLiteOwner.SetEventPayloadValidator(validator)
+func (s *SQLiteRuntimeStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {
+	s.eventSQLiteOwner.SetEventPayloadAdmitter(admitter)
 }
 
 func (s *SQLiteRuntimeStore) SetRuntimeIngressTransitionEvent(ctx context.Context, target ingress.Status, eventID string, transitionAt time.Time) (bool, error) {

@@ -1,5 +1,5 @@
 task.assigned:
-  request: "[text]?"
+  request: "[text]"
 agent.completed:
   swarm:
     source: external

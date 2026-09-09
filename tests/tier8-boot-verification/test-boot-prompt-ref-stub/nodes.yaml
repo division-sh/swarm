@@ -1,5 +1,4 @@
 prompt-ref-stub-node:
-  id: prompt-ref-stub-node
   execution_type: system_node
   subscribes_to: [task.requested]
   produces: [task.completed]

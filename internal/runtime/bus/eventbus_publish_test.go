@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1369,16 +1370,16 @@ func TestEventBusPublish_AttachesSourceArtifactFactToRuntimeLogs(t *testing.T) {
 	t.Fatalf("bundle source fact not found in runtime logs: %#v", logger.entries)
 }
 
-func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
+func TestEventBusPublish_UsesPayloadAdmitter(t *testing.T) {
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadValidator: func(_ context.Context, eventType string, payload []byte) error {
-			if strings.TrimSpace(eventType) != "task.completed" {
-				t.Fatalf("unexpected event type %q", eventType)
+		PayloadAdmitter: func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			if strings.TrimSpace(string(event.Type())) != "task.completed" {
+				t.Fatalf("unexpected event type %q", event.Type())
 			}
-			if string(payload) != `{"ok":true}` {
-				t.Fatalf("unexpected payload %s", string(payload))
+			if string(event.Payload()) != `{"ok":true}` {
+				t.Fatalf("unexpected payload %s", string(event.Payload()))
 			}
-			return nil
+			return eventtest.PayloadAdmission(event, flowID, "task.completed")
 		},
 	})
 	if err != nil {
@@ -1389,10 +1390,34 @@ func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
+func TestEventBusPublish_DoesNotReinterpretExistingPayloadAdmission(t *testing.T) {
+	var calls atomic.Int32
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadValidator: func(context.Context, string, []byte) error {
-			return context.DeadlineExceeded
+		PayloadAdmitter: func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+			calls.Add(1)
+			return events.PayloadAdmission{}, errors.New("ambient schema admission must not run")
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	event := eventtest.RunCreatingRootIngress("", "already.admitted", "", "", []byte(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{})
+	event, err = eventtest.AdmitPayload(event, "", string(event.Type()))
+	if err != nil {
+		t.Fatalf("bind fixture payload: %v", err)
+	}
+	if err := eb.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
+		t.Fatalf("publish admitted event: %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("payload admitter calls = %d, want 0", calls.Load())
+	}
+}
+
+func TestEventBusPublish_PayloadAdmitterFailureAbortsPublish(t *testing.T) {
+	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		PayloadAdmitter: func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+			return events.PayloadAdmission{}, context.DeadlineExceeded
 		},
 	})
 	if err != nil {
@@ -1400,7 +1425,7 @@ func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 	}
 	err = eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
-		t.Fatalf("expected payload validator failure, got %v", err)
+		t.Fatalf("expected payload admission failure, got %v", err)
 	}
 }
 
@@ -1419,10 +1444,10 @@ func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedRe
 	}
 }
 
-func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T) {
+func TestEventBusPublishDirect_PayloadAdmitterFailureAbortsPublish(t *testing.T) {
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadValidator: func(context.Context, string, []byte) error {
-			return context.DeadlineExceeded
+		PayloadAdmitter: func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+			return events.PayloadAdmission{}, context.DeadlineExceeded
 		},
 	})
 	if err != nil {
@@ -1430,14 +1455,14 @@ func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T
 	}
 	err = eb.PublishDirect(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}), []string{"agent-a"})
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
-		t.Fatalf("expected payload validator failure, got %v", err)
+		t.Fatalf("expected payload admission failure, got %v", err)
 	}
 }
 
-func TestEventBusCheckDirectRoutes_PayloadValidatorFailureAbortsBeforeRecipientPlanning(t *testing.T) {
+func TestEventBusCheckDirectRoutes_PayloadAdmitterFailureAbortsBeforeRecipientPlanning(t *testing.T) {
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadValidator: func(context.Context, string, []byte) error {
-			return context.DeadlineExceeded
+		PayloadAdmitter: func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+			return events.PayloadAdmission{}, context.DeadlineExceeded
 		},
 	})
 	if err != nil {
@@ -1451,7 +1476,7 @@ func TestEventBusCheckDirectRoutes_PayloadValidatorFailureAbortsBeforeRecipientP
 		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}},
 	)
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
-		t.Fatalf("expected payload validator failure, got %v", err)
+		t.Fatalf("expected payload admission failure, got %v", err)
 	}
 	if len(status.Requested) != 1 || status.Requested[0].AgentIdentity != identity {
 		t.Fatalf("requested routes = %#v, want %s", status.Requested, identity)
@@ -3143,7 +3168,6 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
-				ID:           "scan-orchestrator",
 				SubscribesTo: []string{"scan.requested"},
 			},
 		},
@@ -3572,7 +3596,6 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-intake": {
-				ID:            "child-intake",
 				ExecutionType: "system_node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"route.start": handler,
@@ -3592,7 +3615,6 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"project-observer": {
-				ID:            "project-observer",
 				ExecutionType: "system_node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"route.start": handler,
@@ -4286,7 +4308,6 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		Path: "child/grandchild",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
-				ID:           "worker-{instance_id}",
 				SubscribesTo: []string{"micro.done"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"micro.done": {},

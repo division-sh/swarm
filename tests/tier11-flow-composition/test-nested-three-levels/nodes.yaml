@@ -1,5 +1,4 @@
 root-dispatcher:
-  id: root-dispatcher
   execution_type: system_node
   subscribes_to: [pipeline.start]
   produces: [step.begin]
@@ -11,7 +10,6 @@ root-dispatcher:
       emit: step.begin
 
 root-collector:
-  id: root-collector
   execution_type: system_node
   subscribes_to: [micro.done]
   produces: []

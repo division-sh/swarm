@@ -1,4 +1,4 @@
 check.requested:
-  score: integer?
+  score: integer
 check.passed: {}
 check.escalated: {}

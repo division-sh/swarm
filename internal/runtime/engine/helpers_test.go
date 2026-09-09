@@ -110,6 +110,9 @@ func TestResolveRefRequiresExplicitScope(t *testing.T) {
 }
 
 func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "EmitPayload", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "score", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
+	}}
 	base := BaseContext{
 		PlatformEntity: values.Wrap(map[string]any{"current_state": "researching"}),
 		Payload:        values.Wrap(map[string]any{"score": 9}),
@@ -125,7 +128,7 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 			"explicit.ref":   runtimecontracts.RefExpression("payload.score"),
 			"explicit.value": runtimecontracts.LiteralExpression("ready"),
 		},
-	}, workflowexpr.ValueExpressionOptions{})
+	}, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType}, nil)
 	if err != nil {
 		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
@@ -159,6 +162,9 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 }
 
 func TestEmitFieldsPayload_NormalizesWholeNumberJSONInputs(t *testing.T) {
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "ScorePayload", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "raw_score", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
+	}}
 	base := BaseContext{
 		Payload: values.Wrap(map[string]any{"raw_score": 25.0}),
 	}
@@ -166,7 +172,7 @@ func TestEmitFieldsPayload_NormalizesWholeNumberJSONInputs(t *testing.T) {
 		Fields: map[string]runtimecontracts.ExpressionValue{
 			"score": runtimecontracts.CELExpression("payload.raw_score * 2"),
 		},
-	}, workflowexpr.ValueExpressionOptions{})
+	}, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType}, nil)
 	if err != nil {
 		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
@@ -176,6 +182,11 @@ func TestEmitFieldsPayload_NormalizesWholeNumberJSONInputs(t *testing.T) {
 }
 
 func TestEmitFieldsPayload_EvaluatesYAMLLoadedScalarEmitFieldsAsCEL(t *testing.T) {
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "SignalPayload", Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "mode", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+		{Name: "scan_id", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+		{Name: "geography", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+	}}
 	var spec runtimecontracts.EmitSpec
 	if err := yaml.Unmarshal([]byte(`
 event: signals.category_ready
@@ -196,7 +207,7 @@ fields:
 			"geography": "us",
 		}),
 	}
-	transformed, err := emitFieldsPayload(base, ExecutionState{}, spec, workflowexpr.ValueExpressionOptions{})
+	transformed, err := emitFieldsPayload(base, ExecutionState{}, spec, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType}, nil)
 	if err != nil {
 		t.Fatalf("emitFieldsPayload(...) error = %v", err)
 	}
@@ -238,7 +249,7 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 		},
 	}
 
-	if err := applyDataAccumulationToState(base, ExecutionState{FanOut: map[string]any{"count": 3}}, state, spec); err != nil {
+	if err := applyDataAccumulationToState(base, ExecutionState{FanOut: map[string]any{"count": 3}}, state, spec, workflowexpr.ValueExpressionOptions{}); err != nil {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
@@ -316,7 +327,7 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 		},
 	}
 
-	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec, workflowexpr.ValueExpressionOptions{}); err != nil {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
@@ -330,6 +341,7 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 }
 
 func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testing.T) {
+	entityType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "revision_count", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}}}}
 	state := &StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)}
 	base := BaseContext{
 		Entity: values.Wrap(map[string]any{
@@ -345,7 +357,7 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 		},
 	}
 
-	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec, workflowexpr.ValueExpressionOptions{EntityType: &entityType}); err != nil {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
@@ -373,7 +385,7 @@ func TestApplyDataAccumulationToState_WritesNestedTargetPath(t *testing.T) {
 		}},
 	}
 
-	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec); err != nil {
+	if err := applyDataAccumulationToState(base, ExecutionState{}, state, spec, workflowexpr.ValueExpressionOptions{}); err != nil {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
@@ -403,7 +415,7 @@ func TestApplyDataAccumulationToState_FailsClosedOnCELRuntimeError(t *testing.T)
 		},
 	}
 
-	err := applyDataAccumulationToState(base, ExecutionState{}, state, spec)
+	err := applyDataAccumulationToState(base, ExecutionState{}, state, spec, workflowexpr.ValueExpressionOptions{})
 	if err == nil {
 		t.Fatal("expected data accumulation CEL runtime error")
 	}

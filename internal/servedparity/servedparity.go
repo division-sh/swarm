@@ -38,6 +38,7 @@ const (
 	ScenarioStandingServiceSuspendLifecycle          = "standing_service_suspend_lifecycle"
 	ScenarioStandingServiceResumeLifecycle           = "standing_service_resume_lifecycle"
 	ScenarioStandingServiceResetLifecycle            = "standing_service_reset_lifecycle"
+	ScenarioDestructiveResetLifecycle                = "destructive_reset_lifecycle"
 	ScenarioMailboxNoticeAcknowledgmentLifecycle     = "mailbox_notice_acknowledgment_lifecycle"
 	ScenarioMailboxBeginInputLifecycle               = "mailbox_begin_input_lifecycle"
 	ScenarioMailboxCancelInputLifecycle              = "mailbox_cancel_input_lifecycle"
@@ -50,9 +51,6 @@ const (
 	ScenarioConversationForkLifecycle                = "conversation_fork_lifecycle"
 	ScenarioConversationForkChatLifecycle            = "conversation_fork_chat_lifecycle"
 	ScenarioConversationForkDeleteLifecycle          = "conversation_fork_delete_lifecycle"
-	ScenarioOperatorChannelConnectLifecycle          = "operator_channel_connect_lifecycle"
-	ScenarioOperatorChannelReconnectLifecycle        = "operator_channel_reconnect_lifecycle"
-	ScenarioOperatorChannelRebindLifecycle           = "operator_channel_rebind_lifecycle"
 	ScenarioOperatorChannelConfirmLifecycle          = "operator_channel_confirm_lifecycle"
 	ScenarioOperatorChannelUnbindLifecycle           = "operator_channel_unbind_lifecycle"
 	ScenarioOperatorChannelProofRevokeLifecycle      = "operator_channel_proof_revoke_lifecycle"
@@ -100,6 +98,7 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioStandingServiceSuspendLifecycle, "standing.suspend", "TestServedParityHarnessStandingServiceLifecycle"),
 		servedControlScenario(ScenarioStandingServiceResumeLifecycle, "standing.resume", "TestServedParityHarnessStandingServiceLifecycle"),
 		servedControlScenario(ScenarioStandingServiceResetLifecycle, "standing.reset", "TestServedParityHarnessStandingServiceLifecycle"),
+		servedControlScenario(ScenarioDestructiveResetLifecycle, "runtime.nuke", "TestServedResetRetainClearAndHistoricalReplayBothStores"),
 		servedMailboxDecisionScenario(ScenarioMailboxNoticeAcknowledgmentLifecycle, "mailbox.acknowledge"),
 		servedMailboxDecisionScenario(ScenarioMailboxBeginInputLifecycle, "mailbox.begin_input"),
 		servedMailboxDecisionScenario(ScenarioMailboxCancelInputLifecycle, "mailbox.cancel_input"),
@@ -112,9 +111,6 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioConversationForkLifecycle, "conversation.fork", "TestServedParityHarnessConversationForkLifecycle"),
 		servedControlScenario(ScenarioConversationForkChatLifecycle, "conversation.fork_chat", "TestServedParityHarnessConversationForkLifecycle"),
 		servedControlScenario(ScenarioConversationForkDeleteLifecycle, "conversation.fork_delete", "TestServedParityHarnessConversationForkLifecycle"),
-		servedControlScenario(ScenarioOperatorChannelConnectLifecycle, "channel.connect", "TestServedParityHarnessOperatorChannelLifecycle"),
-		servedControlScenario(ScenarioOperatorChannelReconnectLifecycle, "channel.reconnect", "TestServedParityHarnessOperatorChannelLifecycle"),
-		servedControlScenario(ScenarioOperatorChannelRebindLifecycle, "channel.rebind", "TestServedParityHarnessOperatorChannelLifecycle"),
 		servedControlScenario(ScenarioOperatorChannelConfirmLifecycle, "channel.confirm", "TestServedParityHarnessOperatorChannelLifecycle"),
 		servedControlScenario(ScenarioOperatorChannelUnbindLifecycle, "channel.unbind", "TestServedParityHarnessOperatorChannelLifecycle"),
 		servedControlScenario(ScenarioOperatorChannelProofRevokeLifecycle, "channel.proof_revoke", "TestServedParityHarnessOperatorChannelLifecycle"),

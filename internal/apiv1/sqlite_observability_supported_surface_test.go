@@ -25,6 +25,10 @@ import (
 	"github.com/google/uuid"
 )
 
+func observabilityRuntimeLogPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+}
+
 func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	fixture := newSQLiteObservabilitySurfaceFixture(t, ctx)
@@ -324,7 +328,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 		t.Fatalf("BindAgentSession: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, observabilityRuntimeLogPayloadAdmitter)
 	logCtx := runtimecorrelation.WithRunID(ctx, runID)
 	if err := logger.Log(logCtx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",

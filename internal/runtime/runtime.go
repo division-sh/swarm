@@ -70,8 +70,8 @@ import (
 	"github.com/google/uuid"
 )
 
-type EventPayloadValidationBinder interface {
-	SetEventPayloadValidator(func(context.Context, string, []byte) error)
+type EventPayloadAdmissionBinder interface {
+	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
 }
 
 type AuthorActivityCatalogRegistrar interface {
@@ -110,49 +110,49 @@ type RuntimeOptions struct {
 
 // RuntimeDeps is the canonical dependency graph for NewRuntime boot wiring.
 type RuntimeDeps struct {
-	Config                         *config.Config
-	Options                        RuntimeOptions
-	EventStore                     runtimebus.EventStore
-	EventBusDurable                runtimebus.DurableDependencies
-	EventPayloadValidationBinder   EventPayloadValidationBinder
-	InboundPayloadValidationBinder EventPayloadValidationBinder
-	AuthorActivityRegistrars       []AuthorActivityCatalogRegistrar
-	RunControlStore                runtimeruncontrol.Store
-	RunLifecycleCandidates         runtimerunlifecycle.CandidateOwner
-	RuntimeLogStore                RuntimeLogPersistence
-	WorkflowPersistence            runtimepipeline.WorkflowPersistence
-	RunBundleAvailability          runtimepipeline.RunBundleAvailabilityReader
-	SessionRegistry                sessions.Registry
-	LiveSessionAcquirer            llm.LiveSessionAcquirer
-	SessionResetter                sessions.Resetter
-	ConversationStore              llm.ConversationPersistence
-	ManagerStore                   runtimemanager.ManagerPersistence
-	ManagerLifecycleDiagnostics    runtimemanager.AgentLifecycleDiagnosticPersistence
-	ManagerPersistenceRoles        runtimemanager.PersistenceRoles
-	EffectsStore                   runtimeeffects.Store
-	CompletionStore                runtimeeffects.CompletionStore
-	CompletionHeartbeatStore       runtimeeffects.CompletionHeartbeatStore
-	EffectsRecoveryStore           runtimeeffects.RecoveryStore
-	ManagedCapabilitiesStore       managedcapabilities.Persistence
-	DeliveryStore                  runtimedelivery.Store
-	PipelineObligations            runtimepipelineobligation.Store
-	GenericScheduleStore           runtimegenericschedule.Store
-	TimerObligationReader          runtimetimerobligation.Reader
-	MailboxMaterializer            runtimepipeline.MailboxWriteMaterializationStore
-	DecisionCards                  decisioncard.Store
-	ProposedEffects                decisioncard.ProposedEffectStore
-	DecisionCardHumanTasks         decisioncard.HumanTaskStore
-	DecisionCardDraftExpiry        runtimepipeline.DecisionCardDraftExpiry
-	HumanTaskExpiry                runtimepipeline.HumanTaskExpiry
-	StartupGrant                   runtimestartupownership.GenerationGrant
-	MailboxStore                   runtimetools.MailboxPersistence
-	ToolEntityStore                runtimetools.EntityPersistence
-	DataAccessStore                durabledata.ResourceAccessStore
-	HumanTaskStore                 runtimetools.HumanTaskCardStore
-	BudgetSpendStore               budgetspend.Store
-	InboundStore                   InboundPersistence
-	RuntimeIngressStore            runtimeingress.Store
-	ScenarioExecutionProfiles      runtimepipeline.ScenarioExecutionProfileReader
+	Config                        *config.Config
+	Options                       RuntimeOptions
+	EventStore                    runtimebus.EventStore
+	EventBusDurable               runtimebus.DurableDependencies
+	EventPayloadAdmissionBinder   EventPayloadAdmissionBinder
+	InboundPayloadAdmissionBinder EventPayloadAdmissionBinder
+	AuthorActivityRegistrars      []AuthorActivityCatalogRegistrar
+	RunControlStore               runtimeruncontrol.Store
+	RunLifecycleCandidates        runtimerunlifecycle.CandidateOwner
+	RuntimeLogStore               RuntimeLogPersistence
+	WorkflowPersistence           runtimepipeline.WorkflowPersistence
+	RunBundleAvailability         runtimepipeline.RunBundleAvailabilityReader
+	SessionRegistry               sessions.Registry
+	LiveSessionAcquirer           llm.LiveSessionAcquirer
+	SessionResetter               sessions.Resetter
+	ConversationStore             llm.ConversationPersistence
+	ManagerStore                  runtimemanager.ManagerPersistence
+	ManagerLifecycleDiagnostics   runtimemanager.AgentLifecycleDiagnosticPersistence
+	ManagerPersistenceRoles       runtimemanager.PersistenceRoles
+	EffectsStore                  runtimeeffects.Store
+	CompletionStore               runtimeeffects.CompletionStore
+	CompletionHeartbeatStore      runtimeeffects.CompletionHeartbeatStore
+	EffectsRecoveryStore          runtimeeffects.RecoveryStore
+	ManagedCapabilitiesStore      managedcapabilities.Persistence
+	DeliveryStore                 runtimedelivery.Store
+	PipelineObligations           runtimepipelineobligation.Store
+	GenericScheduleStore          runtimegenericschedule.Store
+	TimerObligationReader         runtimetimerobligation.Reader
+	MailboxMaterializer           runtimepipeline.MailboxWriteMaterializationStore
+	DecisionCards                 decisioncard.Store
+	ProposedEffects               decisioncard.ProposedEffectStore
+	DecisionCardHumanTasks        decisioncard.HumanTaskStore
+	DecisionCardDraftExpiry       runtimepipeline.DecisionCardDraftExpiry
+	HumanTaskExpiry               runtimepipeline.HumanTaskExpiry
+	StartupGrant                  runtimestartupownership.GenerationGrant
+	MailboxStore                  runtimetools.MailboxPersistence
+	ToolEntityStore               runtimetools.EntityPersistence
+	DataAccessStore               durabledata.ResourceAccessStore
+	HumanTaskStore                runtimetools.HumanTaskCardStore
+	BudgetSpendStore              budgetspend.Store
+	InboundStore                  InboundPersistence
+	RuntimeIngressStore           runtimeingress.Store
+	ScenarioExecutionProfiles     runtimepipeline.ScenarioExecutionProfileReader
 }
 
 type validatedRuntimeDeps struct {
@@ -242,13 +242,13 @@ type Runtime struct {
 	deliverySignalRegistration *runtimepipeline.DeliveryContinuationSignalRegistration
 	startupAdmission           managedexecution.Admission
 	shutdownGate               shutdownAdmission
-	payloadValidator           runtimebus.PayloadValidator
+	payloadAdmitter            runtimebus.PayloadAdmitter
 	authorActivityDescriptors  []runtimeauthoractivity.EventDescriptor
 	authorActivityScope        runtimeauthoractivity.Scope
 	authorActivityLeases       []*runtimeauthoractivity.EventCatalogLease
 	authorActivityRegistrars   []AuthorActivityCatalogRegistrar
-	eventPayloadBinder         EventPayloadValidationBinder
-	inboundPayloadBinder       EventPayloadValidationBinder
+	eventPayloadBinder         EventPayloadAdmissionBinder
+	inboundPayloadBinder       EventPayloadAdmissionBinder
 	runLifecycleCandidates     runtimerunlifecycle.CandidateOwner
 	deliveryStore              runtimedelivery.Store
 	timerObligationReader      runtimetimerobligation.Reader
@@ -883,16 +883,16 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	}, nil
 }
 
-func (deps validatedRuntimeDeps) payloadValidator(logger *RuntimeLogger) runtimebus.PayloadValidator {
-	return newRuntimePayloadValidator(logger, deps.EmitRegistry.EventSchemaSnapshot())
+func (deps validatedRuntimeDeps) payloadAdmitter(logger *RuntimeLogger) runtimebus.PayloadAdmitter {
+	return NewRuntimePayloadAdmitter(logger, deps.Source, deps.SourceArtifactFact)
 }
 
-func bindRuntimeStorePayloadValidator(eventBinder, inboundBinder EventPayloadValidationBinder, payloadValidator runtimebus.PayloadValidator) {
+func bindRuntimeStorePayloadAdmitter(eventBinder, inboundBinder EventPayloadAdmissionBinder, payloadAdmitter runtimebus.PayloadAdmitter) {
 	if eventBinder != nil {
-		eventBinder.SetEventPayloadValidator(payloadValidator)
+		eventBinder.SetEventPayloadAdmitter(payloadAdmitter)
 	}
 	if inboundBinder != nil {
-		inboundBinder.SetEventPayloadValidator(payloadValidator)
+		inboundBinder.SetEventPayloadAdmitter(payloadAdmitter)
 	}
 }
 
@@ -1103,8 +1103,8 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		authorActivityDescriptors: descriptors,
 		authorActivityScope:       runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, boot.SourceArtifactFact.BundleHash()),
 		authorActivityRegistrars:  append([]AuthorActivityCatalogRegistrar(nil), runtimeDeps.AuthorActivityRegistrars...),
-		eventPayloadBinder:        runtimeDeps.EventPayloadValidationBinder,
-		inboundPayloadBinder:      runtimeDeps.InboundPayloadValidationBinder,
+		eventPayloadBinder:        runtimeDeps.EventPayloadAdmissionBinder,
+		inboundPayloadBinder:      runtimeDeps.InboundPayloadAdmissionBinder,
 		runLifecycleCandidates:    runtimeDeps.RunLifecycleCandidates,
 		deliveryStore:             runtimeDeps.DeliveryStore,
 		timerObligationReader:     runtimeDeps.TimerObligationReader,
@@ -1116,16 +1116,16 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		workOccurrence:            workOccurrence,
 	}
 	if runtimeDeps.RuntimeLogStore != nil {
-		rt.Logger = NewRuntimeLogger(runtimeDeps.RuntimeLogStore, rt.ExecutionPosture)
+		rt.Logger = NewRuntimeLogger(runtimeDeps.RuntimeLogStore, rt.ExecutionPosture, boot.payloadAdmitter(nil))
 	}
-	payloadValidator := boot.payloadValidator(rt.Logger)
-	rt.payloadValidator = payloadValidator
+	payloadAdmitter := boot.payloadAdmitter(rt.Logger)
+	rt.payloadAdmitter = payloadAdmitter
 	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.ExecutionPosture, boot.SourceArtifactFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadValidator, func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+	}, payloadAdmitter, func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 		if managerRef == nil {
 			return fmt.Errorf("flow instance activator is required")
 		}
@@ -1492,17 +1492,40 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 }
 
 func (rt *Runtime) Start(ctx context.Context) error {
-	release, err := rt.PrepareStart(ctx)
+	prepared, err := rt.PrepareStart(ctx)
 	if err != nil {
 		return err
 	}
-	return release(nil)
+	return prepared.Start(nil)
 }
 
-// PrepareStart performs startup admission and validation without starting manager
-// loops, delivery recovery, or autonomous producers. Serve publishes executable
-// channels between preparation and the returned single-use execution release.
-func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error, prepareErr error) {
+// PreparedStartup owns a single prepared runtime's execution release. Preparation
+// installs subscriptions and validates startup, but does not admit managed
+// execution, recover deliveries, or release autonomous producers.
+type PreparedStartup struct {
+	mu      sync.Mutex
+	runtime *Runtime
+	start   func(func() error) error
+}
+
+func (s *PreparedStartup) Start(completePreparedTopology func() error) error {
+	if s == nil {
+		return errors.New("prepared runtime startup is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.start == nil {
+		return errors.New("prepared runtime startup already consumed")
+	}
+	start := s.start
+	s.start = nil
+	if s.runtime.shutdownAdmissionClosed() {
+		return errors.New("prepared runtime was retired before execution release")
+	}
+	return start(completePreparedTopology)
+}
+
+func (rt *Runtime) PrepareStart(ctx context.Context) (_ *PreparedStartup, prepareErr error) {
 	if rt == nil {
 		return nil, fmt.Errorf("runtime is nil")
 	}
@@ -1576,7 +1599,7 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error
 		}
 		rt.runLifecycleRegistration = registration
 	}
-	bindRuntimeStorePayloadValidator(rt.eventPayloadBinder, rt.inboundPayloadBinder, rt.payloadValidator)
+	bindRuntimeStorePayloadAdmitter(rt.eventPayloadBinder, rt.inboundPayloadBinder, rt.payloadAdmitter)
 	if rt.RuntimeIngress != nil {
 		if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
 			return nil, fmt.Errorf("sync runtime ingress state: %w", err)
@@ -1700,23 +1723,8 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error
 			return nil, fmt.Errorf("canonicalize source-scoped dynamic topology before execution admission: %w", err)
 		}
 	}
-	settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
-	if err != nil {
-		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
-		return nil, fmt.Errorf("settle managed startup preflight: %w", err)
-	}
-
 	prepared = true
-	var releaseMu sync.Mutex
-	released := false
-	return func(completePreparedTopology func() error) (releaseErr error) {
-		releaseMu.Lock()
-		if released {
-			releaseMu.Unlock()
-			return fmt.Errorf("prepared runtime start already released")
-		}
-		released = true
-		releaseMu.Unlock()
+	return &PreparedStartup{runtime: rt, start: func(completePreparedTopology func() error) (releaseErr error) {
 		started := false
 		defer func() {
 			if !started {
@@ -1728,6 +1736,11 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error
 		}
 		if rt.shutdownAdmissionClosed() {
 			return fmt.Errorf("prepared runtime was shut down before release")
+		}
+		settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
+		if err != nil {
+			rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
+			return fmt.Errorf("settle managed startup preflight: %w", err)
 		}
 		if rt.Manager != nil {
 			activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority)
@@ -1826,9 +1839,8 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error
 		}
 		started = true
 		return nil
-	}, nil
+	}}, nil
 }
-
 func (rt *Runtime) releaseAutonomousStartupProducers(ctx, startCtx context.Context, skipPersistentStartupRecovery bool, decision *startupRecoveryDecisionReport) error {
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(11, "schedule_restoration", "skipped", "persistent startup recovery disabled")
@@ -1931,7 +1943,7 @@ func (rt *Runtime) recordStartupManagerRecoveryFailure(ctx context.Context, deci
 		}
 	}
 	payload := mustJSON(map[string]any{
-		"failure": *decision.Failure, "failed_event_id": nil, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"failure": *decision.Failure, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if rt.Bus != nil {
 		recoveryEvent, publishErr := newStandaloneRuntimePlatformDiagnosticEvent(events.EventType("platform.recovery_failed"), payload, events.EventEnvelope{}, time.Now(), rt.ExecutionPosture)
@@ -2193,7 +2205,6 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 		"flow_required_agents_started": sortedNonEmptyStrings(report.FlowRequiredAgentsStarted),
 		"system_containers_started":    sortedNonEmptyStrings(report.SystemContainersStarted),
 		"self_check_required":          report.SelfCheckRequired,
-		"self_check_passed":            nil,
 	})
 	eventID := uuid.NewString()
 	evt, err := events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{

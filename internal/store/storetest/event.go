@@ -44,6 +44,11 @@ func InsertCanonicalEventRecord(
 	if db == nil {
 		t.Fatal("canonical event record fixture requires a database")
 	}
+	var err error
+	event, err = eventfixture.BindPayload(event)
+	if err != nil {
+		t.Fatalf("bind canonical event payload fixture: %v", err)
+	}
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatalf("admit canonical event record fixture: %v", err)
@@ -301,6 +306,11 @@ func commitSemanticEventWithInitialFacts(
 	captureForkFrontier bool,
 ) runtimebus.EventAppendOutcome {
 	t.Helper()
+	var err error
+	event, err = eventfixture.BindPayload(event)
+	if err != nil {
+		t.Fatalf("bind event payload fixture: %v", err)
+	}
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatalf("admit event fixture: %v", err)

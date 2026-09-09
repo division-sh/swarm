@@ -1,5 +1,4 @@
 dispatcher:
-  id: dispatcher
   execution_type: system_node
   subscribes_to: [batch.requested]
   produces: [batch.dispatched]

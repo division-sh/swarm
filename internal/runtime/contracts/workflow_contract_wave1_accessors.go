@@ -189,17 +189,20 @@ func singletonCoordinatorValidateTypeRefSeen(types TypeCatalogDocument, typeRef 
 		return nil
 	}
 	typeName := templateInstanceTypeName(types, typeRef)
-	named, ok := types.Types[typeName]
-	if !ok {
+	if _, ok := types.Types[typeName]; !ok {
 		return fmt.Errorf("unsupported contract type %s", typeRef)
 	}
 	if _, ok := seen[typeName]; ok {
 		return nil
 	}
 	seen[typeName] = struct{}{}
-	for field, spec := range named.Fields {
-		if err := singletonCoordinatorValidateTypeRefSeen(types, spec.Type, seen); err != nil {
-			return fmt.Errorf("field %s: %w", strings.TrimSpace(field), err)
+	resolved, err := (CatalogTypeReference{Type: typeName, Catalog: types}).Resolve()
+	if err != nil {
+		return err
+	}
+	for _, field := range resolved.Fields {
+		if err := singletonCoordinatorValidateTypeRefSeen(types, field.TypeRef, seen); err != nil {
+			return fmt.Errorf("field %s: %w", field.Name, err)
 		}
 	}
 	delete(seen, typeName)
@@ -474,6 +477,21 @@ func (b *WorkflowContractBundle) FlowPrimaryEntityContract(flowID string) (strin
 		return "", EntityContract{}, false
 	}
 	return resolved.EntityType, cloneEntityContract(resolved.Contract), true
+}
+
+// StructuralType preserves nested record edges while top-level entity fields
+// retain their existing default-present contract until the entity-presence work.
+func (p PrimaryEntityContract) StructuralType() (ResolvedCatalogType, error) {
+	fields := make([]ResolvedCatalogField, 0, len(p.Contract.Fields))
+	for _, name := range sortedEntityFieldKeys(p.Contract.Fields) {
+		decl := p.Contract.Fields[name]
+		resolved, err := (CatalogTypeReference{Type: decl.Type, Catalog: p.Types}).Resolve()
+		if err != nil {
+			return ResolvedCatalogType{}, fmt.Errorf("entity %s field %s: %w", p.EntityType, name, err)
+		}
+		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved})
+	}
+	return ResolvedCatalogType{Kind: CatalogTypeObject, Name: p.FlowID + "." + p.EntityType, Fields: fields}, nil
 }
 
 func (b *WorkflowContractBundle) RootPrimaryEntityContract() (string, EntityContract, bool) {

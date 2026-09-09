@@ -1,4 +1,4 @@
 flow.spawn_requested:
-  instance_id: string?
-  worker_id: string?
+  instance_id: string
+  worker_id: string
 flow.spawned: {}

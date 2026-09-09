@@ -2,7 +2,7 @@ id: provider.github
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: trigger
-manifest_hash: sha256:ce858bd39b8344db3dd6085e1375f9e1cb6d4a7141bbecab92be4e05d773a80c
+manifest_hash: sha256:981c92f8513923f4e1924e045c36a543ae2fe051f02f160c4fd227b2e04eb675
 provenance:
     source: platform
 capabilities:
@@ -10,7 +10,9 @@ capabilities:
         receive_https_route: /webhooks/{alias}/github
         verify_secret: webhook_signing.github
         emit_events:
-            - inbound.github.{event_type}
+            - inbound.github.issue_comment_created
+            - inbound.github.issue_opened
+            - inbound.github.raw.{event_type}
         persist_dedupe_markers: true
     cannot:
         - emit_undeclared_events

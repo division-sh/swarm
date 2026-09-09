@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
-	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 // EvaluateFanOutOrdinal rehydrates one deferred ordinal through the same
@@ -93,13 +92,18 @@ func (e *Executor) EvaluateFanOutOrdinal(ctx context.Context, intent fanoutoblig
 			RunID: intent.Request.Key.RunID, ParentEventID: trigger.ID(), TaskID: trigger.TaskID(), ExecutionMode: trigger.ExecutionMode(),
 		},
 	}
+	frame.payloadType = e.executionPayloadType(frame.req)
 	emitSpec := plan.Emit
 	eventType := e.resolveDeclarativeEmitEventType(frame, emitSpec.EventType())
 	if eventType == "" {
 		return EmitIntent{}, fmt.Errorf("fan-out compiled plan has no emitted event")
 	}
 	emitSpec.Event = eventType
-	transformed, err := emitFieldsPayload(base, state, emitSpec, workflowexpr.ValueExpressionOptions{ItemAlias: plan.ItemAlias})
+	options := frameExpressionOptions(frame)
+	itemType := plan.ItemType.Clone()
+	options.ItemAlias = plan.ItemAlias
+	options.ItemType = &itemType
+	transformed, err := e.emitFieldsPayload(frame, emitSpec, eventType, options)
 	if err != nil {
 		return EmitIntent{}, err
 	}

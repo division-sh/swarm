@@ -66,22 +66,23 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return event, err
 	}
-	payload, err := remintRunForkPayload(event.Payload, forkRunID, generations)
-	if err != nil {
-		return event, fmt.Errorf("remint selected-contract source event %s loop generation: %w", event.SourceEventID, err)
-	}
-	event.Payload = payload
 	if strings.TrimSpace(event.EventName) != runForkActivityRequestEvent {
 		return event, nil
 	}
-	payload, err = bindRunForkActivitySourceEvent(payload, forkRunID, event.SourceEventID)
-	if err != nil {
-		return event, fmt.Errorf("bind selected-contract activity request %s to fork-local frontier: %w", event.SourceEventID, err)
-	}
-	event.Payload = payload
 	var request runForkActivityRequestPayload
-	if err := json.Unmarshal(payload, &request); err != nil {
+	if err := json.Unmarshal(event.Payload, &request); err != nil {
 		return event, fmt.Errorf("decode selected-contract activity request %s: %w", event.SourceEventID, err)
+	}
+	request.SourceRunID = strings.TrimSpace(forkRunID)
+	request.SourceEventID = activityidentity.ForkLineageEventID(forkRunID, event.SourceEventID)
+	if parentEventID := strings.TrimSpace(request.ParentEventID); parentEventID != "" {
+		request.ParentEventID = activityidentity.ForkLineageEventID(forkRunID, parentEventID)
+	}
+	for _, generation := range generations {
+		if strings.TrimSpace(generation.LoopID) == strings.TrimSpace(request.Generation.LoopID) {
+			request.Generation = generation.Normalize()
+			break
+		}
 	}
 	policy := runtimecontracts.ActivityForkPolicy(strings.TrimSpace(request.ForkPolicy))
 	proposed, err := loadRunForkProposedEffectAuthority(ctx, tx, event.SourceEventID)
@@ -155,15 +156,6 @@ func loadRunForkProposedEffectAuthority(ctx context.Context, tx *sql.Tx, request
 		return false, fmt.Errorf("approved proposed effect %s is not terminal fork evidence: card=%s verdict=%s continuation=%s", requestEventID, status, verdict, state)
 	}
 	return true, nil
-}
-
-func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceRequestEventID string) (json.RawMessage, error) {
-	payload := map[string]any{}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, err
-	}
-	payload["source_event_id"] = activityidentity.ForkLineageEventID(forkRunID, sourceRequestEventID)
-	return json.Marshal(payload)
 }
 
 func loadRunForkEntityGenerations(ctx context.Context, tx *sql.Tx, forkRunID, entityID string) ([]attemptgeneration.Generation, error) {

@@ -82,6 +82,22 @@ func TestBuildBaseContext_UsesConcreteFlowInstanceForPlatformEntity(t *testing.T
 	}
 }
 
+func TestBuildBaseContext_PrefersExactExecutionFlowOverPersistedWorkflowName(t *testing.T) {
+	base, err := BuildBaseContext(ContextBuilderInput{
+		FlowID: "child",
+		State: StateSnapshot{
+			WorkflowName: "root",
+			StateCarrier: NewStateCarrier(nil, nil, nil),
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildBaseContext: %v", err)
+	}
+	if got := base.FlowID; got != "child" {
+		t.Fatalf("base FlowID = %q, want exact execution flow", got)
+	}
+}
+
 func TestContextOverlayHelpers_DoNotMutateOriginal(t *testing.T) {
 	base := BaseContext{
 		Payload:     values.Wrap(map[string]any{"a": 1}),

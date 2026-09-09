@@ -42,6 +42,8 @@ type entry struct {
 	digest Digest
 	raw    []byte
 	root   yaml.Node
+	nodes  int
+	edges  int
 	err    error
 	ready  chan struct{}
 	lru    *list.Element
@@ -142,6 +144,8 @@ func (s *Store) Load(raw []byte) (Snapshot, error) {
 	pending.root, pending.err = s.parse(owned)
 	if pending.err != nil {
 		pending.err = &ParseError{cause: pending.err}
+	} else {
+		pending.nodes, pending.edges = nodeTreeSize(&pending.root)
 	}
 
 	s.mu.Lock()
@@ -236,7 +240,7 @@ func (s Snapshot) Decode(target any) error {
 	if s.entry == nil {
 		return fmt.Errorf("empty YAML snapshot")
 	}
-	root := cloneNode(&s.entry.root)
+	root := cloneSizedNode(&s.entry.root, s.entry.nodes, s.entry.edges)
 	return root.Decode(target)
 }
 
@@ -251,7 +255,7 @@ func (s Snapshot) NodeCopy() yaml.Node {
 	if s.entry == nil {
 		return yaml.Node{}
 	}
-	return *cloneNode(&s.entry.root)
+	return *cloneSizedNode(&s.entry.root, s.entry.nodes, s.entry.edges)
 }
 
 func cloneNode(source *yaml.Node) *yaml.Node {
@@ -259,6 +263,12 @@ func cloneNode(source *yaml.Node) *yaml.Node {
 		return nil
 	}
 	nodeCount, edgeCount := nodeTreeSize(source)
+	return cloneSizedNode(source, nodeCount, edgeCount)
+}
+
+// Whole snapshots retain these counts at admission; mutable/subtree callers
+// still size their own graph before cloning it.
+func cloneSizedNode(source *yaml.Node, nodeCount, edgeCount int) *yaml.Node {
 	cloner := nodeGraphCloner{
 		nodes: make([]yaml.Node, nodeCount),
 		edges: make([]*yaml.Node, edgeCount),

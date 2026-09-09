@@ -118,7 +118,6 @@ pins:
     events: [job.received]
 `, singletonCoordinatorEntitiesYAML(), "", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -178,7 +177,7 @@ func TestBuildSingletonCoordinatorDemandProjection_CoversScopedReadersAndIntrins
 		wantTarget string
 	}{
 		{
-			name: "group_by key",
+			name: "group_by source",
 			entities: `
 coordinator_state:
   verticals:
@@ -187,17 +186,16 @@ coordinator_state:
 `,
 			nodes: `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
     job.received:
       group_by:
-        items_from: payload.job
-        key: entity.verticals
+        items_from: entity.verticals
+        key: status
         store_as: metadata.grouped
 `,
-			wantKind:   "entity_read.group_by.key",
+			wantKind:   "entity_read.group_by.items_from",
 			wantTarget: "entity.verticals",
 		},
 		{
@@ -210,7 +208,6 @@ coordinator_state:
 `,
 			nodes: `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -228,7 +225,6 @@ coordinator-node:
 			entities: "coordinator_state: {}\n",
 			nodes: `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -297,7 +293,6 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -409,7 +404,6 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -450,7 +444,6 @@ coordinator_state:
     initial: {}
 `, "", `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:
@@ -482,7 +475,6 @@ pins:
 `
 	const nodes = `
 coordinator-node:
-  id: coordinator-node
   execution_type: system_node
   subscribes_to: [job.received]
   event_handlers:

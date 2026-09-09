@@ -3,6 +3,7 @@ package providerconnectors
 import (
 	"io/fs"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -12,26 +13,46 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func testEmbeddedPackInventory(t testing.TB) *packartifact.EffectivePackInventory {
-	t.Helper()
+var embeddedTestInventory = sync.OnceValues(func() (*packartifact.EffectivePackInventory, error) {
 	base, err := packartifact.LoadPlatformPackInventoryFS(platformpacks.FS(), packartifact.InventoryManifestFileName, "0.7.0", packartifact.SelectionEmbedded)
 	if err != nil {
-		t.Fatalf("load embedded platform pack inventory: %v", err)
+		return nil, err
 	}
-	inventory, err := packartifact.NewEffectivePackInventory(base, nil)
+	return packartifact.NewEffectivePackInventory(base, nil)
+})
+
+func testEmbeddedPackInventory(t testing.TB) *packartifact.EffectivePackInventory {
+	t.Helper()
+	inventory, err := embeddedTestInventory()
 	if err != nil {
 		t.Fatalf("build effective embedded pack inventory: %v", err)
 	}
 	return inventory
 }
 
+var embeddedTestRegistry = sync.OnceValues(func() (*PackRegistry, error) {
+	inventory, err := embeddedTestInventory()
+	if err != nil {
+		return nil, err
+	}
+	return NewPackRegistryFromInventory(inventory, "0.7.0")
+})
+
 func testPackRegistry(t testing.TB) *PackRegistry {
 	t.Helper()
-	registry, err := NewPackRegistryFromInventory(testEmbeddedPackInventory(t), "0.7.0")
+	registry, err := embeddedTestRegistry()
 	if err != nil {
 		t.Fatalf("load embedded connector pack registry: %v", err)
 	}
-	return registry
+	// Each fixture owns its mutable projection, not the shared admitted template.
+	out := &PackRegistry{byProvider: make(map[string]map[string]LoadedPack, len(registry.byProvider))}
+	for provider, tools := range registry.byProvider {
+		out.byProvider[provider] = make(map[string]LoadedPack, len(tools))
+		for toolID, pack := range tools {
+			out.byProvider[provider][toolID] = cloneLoadedPack(pack)
+		}
+	}
+	return out
 }
 
 func TestEffectiveConnectorAdmissionValidatesGeneratedIndexEvidence(t *testing.T) {

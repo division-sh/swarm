@@ -75,7 +75,6 @@ func bootverifyValidationFindings(handler runtimecontracts.SystemNodeEventHandle
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"deploy_node": {
-				ID: "deploy_node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"deploy.requested": handler,
 				},

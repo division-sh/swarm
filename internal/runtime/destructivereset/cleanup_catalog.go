@@ -21,6 +21,7 @@ type CleanupPolicy struct {
 
 func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 	return []CleanupCatalogEntry{
+		{Table: "runtime_reset_operations", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "durable destructive reset identity and phase outcomes", PreservationProof: "reset recovery and historical replay must survive cleanup and API cache expiration"},
 		{Table: "fan_out_obligation_barriers", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "fan_out_obligation_barriers.run_id", DeleteOrderGroup: 1},
 		{Table: "fan_out_outcomes", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "fan_out_outcomes.run_id", DeleteOrderGroup: 1},
 		{Table: "fan_out_intents", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "fan_out_intents.run_id", DeleteOrderGroup: 2},

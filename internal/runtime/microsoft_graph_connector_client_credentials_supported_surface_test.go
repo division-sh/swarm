@@ -359,25 +359,24 @@ func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) s
 						},
 					},
 				}),
-				"subject": runtimecontracts.CELExpression("payload.payload.message.text"),
-				"content": runtimecontracts.CELExpression("payload.payload.message.text"),
+				"subject": runtimecontracts.CELExpression("payload.text"),
+				"content": runtimecontracts.CELExpression("payload.text"),
 			},
 		},
 	}
 	const nodeID = "microsoft-graph-responder"
 	node := runtimecontracts.SystemNodeContract{
-		ID:            nodeID,
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.telegram": handler,
+			"inbound.telegram.text_message": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
+	bundle := boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "microsoft_graph", Tool: "microsoft_graph.send_mail"}}},
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram.text_message"}},
 				},
 			},
 		},
@@ -389,22 +388,24 @@ func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) s
 				nodeID: {
 					ID:                   nodeID,
 					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.telegram"},
+					RuntimeSubscriptions: []string{"inbound.telegram.text_message"},
 				},
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				nodeID: {"inbound.telegram": handler},
+				nodeID: {"inbound.telegram.text_message": handler},
 			},
 			EventOwners: map[string][]string{
-				"inbound.telegram": {nodeID},
+				"inbound.telegram.text_message": {nodeID},
 			},
 		},
-	}))
+	})
+	declareTelegramTextMessageProviderImport(t, bundle)
+	base := semanticview.Wrap(bundle)
 	source, err := providerconnectors.SourceWithConnectorPackImports(base, microsoftGraphConnectorPackRegistry(t, baseURL))
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
-	return source
+	return withTelegramTextMessageProviderSchema(t, source)
 }
 
 func microsoftGraphConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {

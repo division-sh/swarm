@@ -4458,7 +4458,7 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 
 func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDeliveryRoutes(t *testing.T) {
 	node := runtimecontracts.SystemNodeContract{
-		ID: "test-node", ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
+		ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.received": {}},
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -5385,6 +5385,23 @@ func TestSelectedContractForkEventPreservesSourceExecutionMode(t *testing.T) {
 	}
 	if evt.ExecutionMode() != runtimeeffects.ExecutionModeMock {
 		t.Fatalf("fork event execution mode = %q, want mock", evt.ExecutionMode())
+	}
+}
+
+func TestSelectedContractForkEventRejectsMissingOrInvalidHistoricalPayload(t *testing.T) {
+	for name, payload := range map[string]json.RawMessage{
+		"missing": nil,
+		"invalid": json.RawMessage(`{"ok":`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := selectedContractForkEvent(uuid.NewString(), uuid.NewString(), uuid.NewString(), runfork.RunForkSelectedContractSourceEvent{
+				SourceEventID: uuid.NewString(), EventName: "task.started",
+				ExecutionMode: runtimeeffects.ExecutionModeMock, Payload: payload,
+			}, "selected-contract")
+			if err == nil {
+				t.Fatalf("selectedContractForkEvent accepted %s historical payload", name)
+			}
+		})
 	}
 }
 

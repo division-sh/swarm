@@ -60,13 +60,11 @@ func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
 		"  - event: account.setup\n    from: producer\n    to: account\n  - event: account.ready\n    from: producer\n    to: account\n",
 		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.create\n  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n")
 	writeClosedVariantFile(t, root, "account/nodes.yaml", `account-setup-node:
-  id: account-setup-node-{instance_id}
   execution_type: system_node
   subscribes_to: [account.create]
   event_handlers:
     account.create: {}
 account-ready-node:
-  id: account-ready-node-{instance_id}
   execution_type: system_node
   subscribes_to: [account.ready]
   event_handlers:
@@ -81,7 +79,6 @@ func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectExisting)
 	writeClosedVariantFile(t, root, "account/nodes.yaml", `account-setup-node:
-  id: account-setup-node-{instance_id}
   execution_type: system_node
   subscribes_to: [account.setup]
   event_handlers:
@@ -101,7 +98,7 @@ func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState s
 	t.Helper()
 	producerEvents := filepath.Join(root, "producer", "events.yaml")
 	for _, event := range []string{"account.requested", "account.ready"} {
-		key, fieldType := "", "text?"
+		key, fieldType := "", "text"
 		if event == "account.ready" {
 			key = "  key: account_id\n"
 			fieldType = "text"
@@ -145,8 +142,6 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	}
 	root := CopyExample(t, TemplateSelectExisting)
 	accountSchema := filepath.Join(root, "account", "schema.yaml")
-	applyClosedReplacement(t, filepath.Join(root, "account", "nodes.yaml"),
-		"  id: account-node\n", "  id: account-node-{instance_id}\n")
 	selectedPin := "      - event: account.ready\n        resolution:\n          mode: " + mode + "\n"
 	applyClosedReplacement(t, accountSchema,
 		"      - event: account.ready\n        resolution:\n          mode: select\n",
@@ -252,7 +247,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	case CreateMintPayload:
 		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: payload.candidate\n")
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
-			"validation.requested:\n  candidate: text?\n",
+			"validation.requested:\n  candidate: text\n",
 			"validation.requested:\n  key: candidate\n  candidate: text\n")
 	default:
 		t.Fatalf("unsupported create mint %d", opts.Mint)
@@ -264,7 +259,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	case CreateResolutionInvalidMint:
 		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: generated.random\n")
 	case CreateResolutionProducerCollision:
-		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  candidate: text?\n", "validation.requested:\n  candidate: text?\n  validation_case_id: uuid\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  candidate: text\n", "validation.requested:\n  candidate: text\n  validation_case_id: uuid\n")
 		applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"), "          candidate: payload.candidate\n", "          candidate: payload.candidate\n          validation_case_id: payload.candidate\n")
 	case CreateResolutionSourceTypeMismatchWithoutCarryType:
 		if opts.Mint == CreateMintPayload {

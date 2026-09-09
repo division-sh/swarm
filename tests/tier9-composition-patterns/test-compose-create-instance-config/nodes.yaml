@@ -1,5 +1,4 @@
 spawner:
-  id: spawner
   execution_type: system_node
   subscribes_to: [spawn.requested]
   produces: [spawn.done]

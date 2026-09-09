@@ -78,7 +78,6 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"support": {
-				ID:            "support",
 				ExecutionType: runtimecontracts.SystemNodeExecutionType,
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"support.reply_drafted": handler},
 			},
@@ -1159,7 +1158,6 @@ observed:
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "nodes.yaml"), `
 indexer:
-  id: indexer
   execution_type: system_node
   subscribes_to: [observed]
   event_handlers:

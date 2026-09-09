@@ -162,6 +162,9 @@ type checkerContext struct {
 	emitFieldExprLoaded   bool
 	emitFieldExprFindings []Finding
 
+	executableReaderExprLoaded   bool
+	executableReaderExprFindings []Finding
+
 	fanOutLoaded   bool
 	fanOutFindings []Finding
 
@@ -226,6 +229,7 @@ var bootCheckRegistry = []Check{
 	{ID: joinValidationCheckID, Severity: SeverityHardInvalidity, Run: checkJoinValidation},
 	{ID: loopValidationCheckID, Severity: SeverityHardInvalidity, Run: checkLoopValidation},
 	{ID: stageGateValidationCheckID, Severity: SeverityHardInvalidity, Run: checkStageGateValidation},
+	{ID: collectionItemSemanticsCheckID, Severity: SeverityHardInvalidity, Run: checkCollectionItemSemantics},
 	{ID: "tool_resolution", Severity: SeverityHardInvalidity, Run: checkToolResolution},
 	{ID: "required_mcp_tool_availability", Severity: SeverityHardInvalidity, Run: checkRequiredMCPToolAvailability},
 	{ID: "platform_tool_usage_hints", Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},
@@ -249,6 +253,7 @@ var bootCheckRegistry = []Check{
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
 	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
 	{ID: "emit_field_expression_validation", Severity: "error", Run: checkEmitFieldExpressionValidation},
+	{ID: "executable_reader_expression_validation", Severity: "error", Run: checkExecutableReaderExpressionValidation},
 	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
 	{ID: "entity_reader_coverage", Severity: SeverityLintEvidence, Run: checkEntityReaderCoverage},
 	{ID: "primary_entity_validation", Severity: "error", Run: checkPrimaryEntityValidation},
@@ -671,17 +676,11 @@ func (c *checkerContext) appendInvalidExecutableNodeFindings(record runtimecontr
 	if nodeID == "" {
 		c.invalidFindings = append(c.invalidFindings, Finding{
 			CheckID: "invalid_field_detection", Severity: "error",
-			Message: fmt.Sprintf("node in scope %s missing required field id", scopeLabel), Location: scopeLabel,
+			Message: fmt.Sprintf("node in scope %s requires a nonempty map key", scopeLabel), Location: scopeLabel,
 		})
 		return
 	}
 	nodeLabel := scopedObjectLabel(scopeLabel, nodeID)
-	if authoredID := strings.TrimSpace(record.Entry.ID); !runtimecontracts.SystemNodeIDMatchesKey(nodeID, authoredID) {
-		c.invalidFindings = append(c.invalidFindings, Finding{
-			CheckID: "invalid_field_detection", Severity: "error",
-			Message: fmt.Sprintf("node %s id %q must match map key", nodeLabel, authoredID), Location: nodeLabel,
-		})
-	}
 	if strings.TrimSpace(record.Entry.ExecutionType) != "" {
 		if err := runtimecontracts.ValidateSystemNodeExecutionType(record.Entry.ExecutionType); err != nil {
 			c.invalidFindings = append(c.invalidFindings, Finding{

@@ -1,6 +1,7 @@
 package eventpersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -92,6 +93,13 @@ func (s *EventSQLiteOwner) admitRuntimeLogRecord(ctx context.Context, record run
 }
 
 func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Event, error) {
+	var event events.Event
+	if !record.PayloadAdmission.Valid() {
+		return event, fmt.Errorf("runtime log payload admission evidence is required")
+	}
+	if !bytes.Equal(record.Payload, record.PayloadAdmission.Payload()) {
+		return event, fmt.Errorf("runtime log payload differs from its admission evidence")
+	}
 	facts := events.EventFacts{
 		ID:       record.EventID,
 		Type:     events.EventType(runtimeLogEventName),
@@ -100,15 +108,20 @@ func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Even
 	}
 	runID := strings.TrimSpace(record.RunID)
 	parentEventID := strings.TrimSpace(record.ParentEventID)
+	var err error
 	if parentEventID != "" {
-		return events.NewCausalDiagnosticDirectEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
+		event, err = events.NewCausalDiagnosticDirectEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
 			RunID: runID, ParentEventID: parentEventID, ExecutionMode: record.ExecutionMode,
 		}})
+	} else if runID != "" {
+		event, err = events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	} else {
+		event, err = events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: facts})
 	}
-	if runID != "" {
-		return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+	if err != nil {
+		return event, err
 	}
-	return events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: facts})
+	return events.ApplyPayloadAdmission(event, record.PayloadAdmission)
 }
 
 func (s *EventPostgresOwner) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {

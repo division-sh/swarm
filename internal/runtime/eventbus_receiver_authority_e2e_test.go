@@ -94,7 +94,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			rt, err := swarmruntime.NewValidationHarnessRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config:     cfg,
 				EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
-				EventPayloadValidationBinder: selected, InboundPayloadValidationBinder: selected,
+				EventPayloadAdmissionBinder: selected, InboundPayloadAdmissionBinder: selected,
 				AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates:   selected, WorkflowPersistence: workflowPersistence,
 				RuntimeLogStore:          selected,
@@ -561,7 +561,6 @@ downstream-agent:
   subscriptions: [task.finalized]
 `,
 		"nodes.yaml": `bridge-node:
-  id: bridge-node
   execution_type: system_node
   subscribes_to: [task.completed]
   produces: [task.finalized]

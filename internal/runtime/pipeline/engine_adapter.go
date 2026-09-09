@@ -24,6 +24,7 @@ import (
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 type pipelineEngineEvaluator struct {
@@ -31,7 +32,7 @@ type pipelineEngineEvaluator struct {
 	coordinator *PipelineCoordinator
 }
 
-func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext) (bool, error) {
+func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext, options workflowexpr.ValueExpressionOptions) (bool, error) {
 	if e.evaluator == nil {
 		return false, runtimeengine.ErrNotImplemented
 	}
@@ -51,7 +52,13 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
 	}
-	return e.evaluator.EvalBool(expression, queryCtx)
+	options.AllowAccumulated = true
+	if workflowexpr.ExpressionReferencesRoot(expression, "payload") {
+		if options.PayloadType == nil {
+			return false, fmt.Errorf("workflow payload expression has no exact structural schema")
+		}
+	}
+	return e.evaluator.EvalBoolWithOptions(expression, queryCtx, options)
 }
 
 func (e pipelineEngineEvaluator) workflowName() string {
@@ -516,6 +523,45 @@ type pipelineEngineStateRepo struct {
 	coordinator *PipelineCoordinator
 }
 
+type pipelineEngineEntityCollectionReader struct {
+	coordinator *PipelineCoordinator
+}
+
+func (r pipelineEngineEntityCollectionReader) QueryEntityCollection(ctx context.Context, runID, flowID, entityType string) ([]map[string]any, error) {
+	flowID = strings.TrimSpace(flowID)
+	entityType = strings.TrimSpace(entityType)
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || r.coordinator.workflowStore.entityCollectionReader == nil {
+		return nil, fmt.Errorf("workflow entity collection reader is required")
+	}
+	owner, err := AdmitWorkflowEntityCollectionOwner(r.coordinator.SemanticSource(), flowID, entityType, runID)
+	if err != nil {
+		return nil, err
+	}
+	records, err := r.coordinator.workflowStore.queryEntityCollection(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	contract, ok := entityruntime.ResolveForFlow(r.coordinator.SemanticSource(), flowID)
+	if !ok {
+		return nil, fmt.Errorf("workflow entity collection flow %s has no exact entity contract", flowID)
+	}
+	rows := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		fields := map[string]any{}
+		if len(record.Fields) > 0 {
+			if err := json.Unmarshal(record.Fields, &fields); err != nil {
+				return nil, fmt.Errorf("decode workflow entity collection row %s: %w", record.EntityID, err)
+			}
+		}
+		materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
+		if err != nil {
+			return nil, fmt.Errorf("materialize workflow entity collection row %s: %w", record.EntityID, err)
+		}
+		rows = append(rows, materialized)
+	}
+	return rows, nil
+}
+
 func cloneWorkflowInstanceForEngineMutation(instance WorkflowInstance) WorkflowInstance {
 	instance.Config = cloneStringAnyMap(instance.Config)
 	instance.Fields = cloneStringAnyMap(instance.Fields)
@@ -950,6 +996,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	return runtimeengine.RuntimeDependencies{
 		Source:              source,
 		StateRepo:           stateRepo,
+		EntityCollections:   pipelineEngineEntityCollectionReader{coordinator: pc},
 		MutationOwner:       pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
 		Locker:              pipelineEngineLocker{coordinator: pc},
 		WorkflowLifecycle:   lifecycleOwner,

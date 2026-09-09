@@ -812,7 +812,6 @@ opco.ceo_ready:
   entity_id: string?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   produces: [opco.ceo_ready]
@@ -828,11 +827,10 @@ func templateInstanceEmpireStyleFixtureFiles() map[string]string {
 		"schema.yaml": "name: test\n",
 		"events.yaml": `opco.spinup_requested:
   entity_id: string?
-  instance_id: string?
-  product_id: string?
+  instance_id: string
+  product_id: string
 `,
 		"nodes.yaml": `portfolio-node:
-  id: portfolio-node
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
   event_handlers:
@@ -854,12 +852,11 @@ auto_emit_on_create:
 `,
 		"operating/entities.yaml": "operating_state: {}\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
-  product_id: string?
+  product_id: string
 component_scaffold.spawn_requested:
-  product_id: string?
+  product_id: string
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   produces: [component_scaffold.spawn_requested]
@@ -879,11 +876,10 @@ func templateInstanceActivationConfigSubscriberFixtureFiles() map[string]string 
 		"schema.yaml": "name: test\n",
 		"events.yaml": `opco.spinup_requested:
   entity_id: string?
-  instance_id: string?
-  product_id: string?
+  instance_id: string
+  product_id: string
 `,
 		"nodes.yaml": `portfolio-node:
-  id: portfolio-node
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
   event_handlers:

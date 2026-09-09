@@ -601,9 +601,9 @@ contract_formats:
       producer-owned payload fields.
       The platform validates emit calls against the declared payload
       contract and populates envelope fields separately.
-      Runtime emit-payload validators MUST validate against the
+      Runtime emit-payload admission MUST consume the
       canonical type-aware event schema lowered through the active
-      Wave 1 type catalog. Runtime validators MUST NOT pass unresolved
+      Wave 1 type catalog. Runtime admission MUST NOT pass unresolved
       contract type names such as named types, scalar aliases, or enums
       to the primitive JSON schema validator as literal schema types.
       Authored `swarm.source`, `swarm.producer`, and `swarm.consumer`
@@ -655,6 +655,30 @@ contract_formats:
             min: 0
             max: 100
           equal_to: sibling_field
+    recursive_field_presence:
+      owner: internal/runtime/contracts.ResolvedCatalogType
+      rule: |
+        Event payload fields and fields declared inside named types share one
+        recursive structural field-edge model. A field is required by default;
+        exactly one trailing `?` on that field's complete authored type marks
+        only that field edge optional. The marker is consumed during YAML
+        admission through the canonical `internal/yamlsource` effective mapping
+        and never survives as part of the scalar, enum, named, list, or map type
+        name. Duplicate keys, aliases, and merge provenance are resolved by that
+        owner before type meaning is assigned. No raw-node or suffix-parser
+        fallback exists.
+      composition: |
+        Named records preserve required/optional edges recursively when nested
+        directly or as list/map values. Optionality belongs to an object field,
+        not to a list element or map key/value position; optional list elements
+        and explicit null list elements are unsupported. Every schema compiler,
+        connect projection, accumulator projection, node-state resolver,
+        fan-out/join item resolver, entity nested normalizer, and generated tool
+        schema consumes this same structural type.
+      omission: |
+        Absence is the sole runtime representation of an optional field that has
+        no value. Empty string, empty list/map, zero, and false are present
+        values. Explicit null is never an internal optional-value representation.
     strict_payload_contract:
       rule: |
         Event payloads are producer-complete only. Every required declared
@@ -854,6 +878,46 @@ contract_formats:
         readers MUST NOT infer or repair it. Historical and operator replay consume
         the canonical decoded event and preserve every fact not explicitly changed
         by their typed replay-lineage rule.
+      payload_admission:
+        owner: internal/events.PayloadAdmission
+        chronology: |
+          Every persistable event payload is admitted against exactly one pinned
+          effective event schema before route planning, instance-key/window/dedup
+          extraction, event identity, delivery planning, or selected-store
+          mutation. Admission returns one immutable value containing the exact
+          normalized payload bytes and schema binding: immutable source-artifact hash, flow
+          identity when applicable, effective event key, schema digest, and
+          source class. Public ingress, normal EventBus publication, direct and
+          recipient-plan preflight, internal/generated/platform publication, and
+          selected-fork publication consume this owner. A schema-less generated or
+          platform event is admissible only when no authored payload reader is
+          reachable.
+          Admission first consumes the compiled input binding for the supplied flow.
+          When pre-route source provenance names a different flow, as with a
+          target-free normalized provider output, admission may resolve across the
+          pinned effective source only when every matching exact-event input binding
+          has the same event identity, source class, and acceptance-schema digest.
+          Missing or disagreeing bindings fail closed; route planning never chooses or
+          rewrites payload schema authority.
+          Source provenance consumes the current source-artifact owner; there is no
+          persisted/ephemeral discriminator or fallback to retired source models.
+        normalization: |
+          Admission recursively lowers external null on an optional field to
+          omission, rejects null on a required field, rejects null list elements,
+          rejects unknown members under a closed schema, preserves all non-null
+          present values, and produces the authoritative bytes once. A later
+          surface may compare or clone those bytes but must not normalize,
+          reserialize, reinterpret, or replace their binding.
+        durable_continuity: |
+          SQLite and PostgreSQL persist the exact admitted bytes and every schema
+          binding coordinate atomically. Hydration restores that evidence through
+          the canonical event decoder. Retry, recovery, ordinary replay, and
+          delivery-event fork replay reuse persisted bytes and binding without an
+          ambient schema lookup. A selected-contract fork validates the exact
+          historical bytes against its pinned target bundle before mutation and
+          persists those bytes unchanged with the target binding. Payload JSONB is
+          query projection only. Byte-distinct payloads or binding-distinct events
+          are identity conflicts even when JSON values are semantically equal.
       invariant_ids:
         runtime.event.producer_origin_valid_at_construction:
           owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
@@ -1419,11 +1483,12 @@ contract_formats:
             sole source-side admission fact: target routes, EventEnvelope fields, FlowInstance/EntityID shape, qualified suffix,
             and leaf equivalence cannot repair absent or contradictory source provenance.
         executable_node_identity: |
-          Every executable workflow-node declaration has one opaque immutable identity consisting of its exact flow_path,
-          owning flow_id, and local node_id. A root declaration carries flow_path "." and an explicitly empty flow_id;
-          that declaration coordinate is distinct from the selected run or execution-flow route. Local node_id, runtime
+          Every executable workflow-node declaration consumes DeclarationIdentity with its exact flow_path, family=node,
+          and semantic_path equal to the node map key. ExecutableNode is its strict {flow_path, node_id} projection;
+          a root declaration carries flow_path ".". There is no additional flow_id coordinate. This declaration
+          coordinate is distinct from the selected run or execution-flow route. A bare local node_id, runtime
           naming, source-event scope, flow-instance text, and descriptor lookup are never executable-node authority. Contract
-          loading mints this identity once, and routing, delivery, handler execution, joins, timers, activities, replay,
+          loading admits this identity, and routing, delivery, handler execution, joins, timers, activities, replay,
           selected-contract fork, recovery, and readback preserve it without reconstruction. Node subscriber_id and other
           durable compact forms are strict canonical codecs of the complete tuple: missing coordinates, alternate spellings,
           unknown fields, malformed keys, or disagreement with the selected declaration fail before mutation. Existing
@@ -2045,7 +2110,7 @@ type_system:
         type. Non-equality predicates, provenance checks, external file
         checks, rule IDs, and failure routing are not schema refinements.
     runtime_consumption: |
-      Event payload validators, entity materialization/write normalization,
+      Event payload admission, entity materialization/write normalization,
       and generated entity/tool schemas that derive from the shared
       type/schema owner MUST consume the same refinement model. A consumer may
       omit a refinement only when it is a different semantic concept or an
@@ -2076,11 +2141,18 @@ type_system:
           allowed_classes: [hard, soft]
         _unused_reason: Reason    # entities only; verify suppression for E1
         _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
+    optional_record_edge: |
+      Event and named-record fields may append exactly one trailing `?` to the
+      complete type in either terse or verbose form, for example `label: text?`
+      or `child: {type: Child?}`. This denotes omission-capable field presence,
+      not `Optional<T>` type syntax and not a nullable value. Top-level entity
+      field presence remains governed by entity_contracts until #2397.
   restrictions:
     retired:
     - jsonb as an author-declared contract type
     - Inline type: object without declared inner shape
     - Optional<T> in Wave 1
+    - Optional list elements or map key/value types
     - inheritance / extends clauses
     - recursive types in Wave 1
     allowed_composition: |
@@ -3753,12 +3825,19 @@ handler_specification:
       type: object or list of objects
       purpose: Cross-entity read and aggregation.
       sub_fields:
+        source: exact payload/entity path, or for post-query operations an exact query/filter collection path produced by an earlier handler phase
         entities: string — entity table name
-        filter: string — optional condition
+        filter: string — optional CEL condition compiled during boot and runtime against the exact query collection item type when it reads `item`
         group_by: string — field to group by
         count: boolean — count per group
         select: list — literal object field names to include; entries are not expressions or lifecycle entity reads
         store_as: string — where to put results (in emit payload)
+      source_rule: Exactly one of source or entities is required. source is always selected when authored and entities is always a table declaration; authoring both is invalid. Runtime data cardinality never changes source identity.
+      selector_rule: group_by is a required top-level scalar item field. select entries are exact top-level object fields; optional selected fields preserve omission. Neither surface is an executable expression.
+      entity_table_runtime: The runtime reads the exact admitted entity type directly from current-run entity_state through the selected workflow persistence owner. The executing event supplies the explicit run identity to the admitted collection owner; ambient context cannot supply or override it. State-only rows and active lifecycle-backed rows are included; wrong-run, wrong-flow, wrong-entity-type, and terminated lifecycle-backed rows are excluded. Each row is normalized to the exact declared entity fields. The workflow-instance lifecycle projection is not an entity-table authority. A missing runtime reader fails closed; entity-table input never falls back to a path or current-entity map.
+      intermediate_outputs: Omitted query.store_as and filter.store_as mean computed.query and computed.filter respectively in both type resolution and runtime storage. No consumer may infer a different default.
+      dataflow_rule: query executes before filter and may read only direct payload/entity input or its declared entities table. filter may additionally read a non-aggregate query collection output. standalone group_by, reduce, and count may read direct input or an earlier query/filter collection output; aggregate outputs are never collection sources. Every explicit-root source must select at least one field below payload or entity.
+      output_ownership_rule: Effective store_as targets for query, filter, standalone group_by, reduce, and count form one exclusive handler-local namespace. Duplicate targets and ancestor/descendant overlaps are invalid regardless of operation phase or result type.
       execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
         or on_complete.
     reduce:
@@ -4114,7 +4193,7 @@ handler_specification:
       example: build_evidence
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
-      rules.condition, data_accumulation.expression, and filter.condition. Each namespace resolves to a specific
+      rules.condition, data_accumulation.expression, query.filter, and filter.condition. Each namespace resolves to a specific
       data source. Declared entity fields are universally readable at a type-valid value; undeclared field references
       are contract errors.'
     namespaces:
@@ -4127,6 +4206,9 @@ handler_specification:
           declared_fields: Every declared entity field is readable with either an explicit initial value or the field's type default.
           undeclared_fields: Referencing an undeclared entity field is a contract error. Legacy platform metadata reads such as entity.current_state, entity.gates, entity.entity_id, entity.flow_instance, entity.revision, entity.created_at, entity.updated_at, entity.entity_type, entity.workflow_name, and entity.workflow_version are invalid unless the field name is declared as business data; use _entity for supported platform metadata.
           presence_checks: has(entity.X) and == null / != null comparisons are valid, but they are not required for declared fields.
+          structural_binding: The declared primary entity contract supplies the same recursive structural type to verification and execution, including guards, rules, executable values, sinks, collections, activity inputs, stage-gate context, and join outcomes. Missing entity type evidence must not grant dynamic field access.
+          nested_records: Top-level fields retain materialized default-present semantics. Inside a named record, optional edges keep their declared presence meaning; direct nested reads require a dominating presence decision just as payload/item and join result reads do. This does not add top-level sparse storage or clear semantics.
+          reference_owner: Field-reference and lifecycle checks consume the stock CEL AST, including optional selectors and lexical macro bindings, after the existing condition-dialect normalization. String/regex extraction must not invent paths or count a shadowed entity identifier as the current entity.
         does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
           collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
           only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.
@@ -4183,6 +4265,24 @@ handler_specification:
       payload:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
+        read_model:
+          schema_owner: The exact effective event-source structural schema is resolved before expression checking; authored, connected, imported, provider, generated, platform, and finite wildcard sources may not fall back to dyn when a payload reader is reachable.
+          execution_binding: Exact receiver handlers consume their handler-local structural schema, including concrete template callbacks. Local wildcard handlers consume the concrete event schema only after the canonical subscription owner confirms that event resolves to the executing handler. The execution frame passes this schema to every expression reader; evaluators do not independently reinterpret sender event names as receiver schemas.
+          required_field: A required field has its declared CEL type and may be read directly.
+          optional_field: '`payload.?field` has stock CEL `optional<T>` type. Direct `payload.field` is valid only where checked-AST control flow proves that exact field path present on every incoming path.'
+          decisions: '`payload.?field.orValue(default)`, `has(payload.field) ? payload.field : default`, and the logically equivalent negated conditional are supported when types agree.'
+          short_circuit: '`has(payload.field) && predicate(payload.field)` and `!has(payload.field) || predicate(payload.field)` prove presence on the evaluated branch. `has(payload.field) || predicate(payload.field)` and `!has(payload.field) && predicate(payload.field)` do not.'
+          nested_records: Optional parent to required child uses `payload.?parent.optMap(p, p.child)`; optional parent to optional child uses `payload.?parent.optFlatMap(p, p.?child)`.
+          lookup: Map/list optional lookup uses stock CEL `m[?key]` and `l[?index]`. Named records use typed dot or optional field selection; bracket lookup on a named record is invalid. This rule follows checked structural type and lexical-scope identity through configured item aliases and comprehension variables; identifier spelling is not authority.
+          facts: Presence facts are exact-path and lexical-scope facts. Nested branches compose, merge retains only facts true on every incoming path, and comprehension facts do not escape their lambda/body.
+          scope_transfer: A comprehension iterator or accumulator shadows outer presence facts for that binding only. Unshadowed outer facts remain available. AND/OR and conditional true/false exits intersect facts across all predecessor paths; a fact on only one predecessor is insufficient.
+          recursive_maps: Schema-valued additionalProperties preserves the recursive map value type through imported/generated schema compilation, including lists and nested dictionaries. Dictionary keys require presence decisions for dot selection as well as optional indexed lookup. Unknown/open values cannot acquire typed member semantics by falling back to dyn.
+          shared_readers: Join arrival results and declared nested entity records use this same structural provider and checked AST. This includes query_entities and query_metrics predicates, both their bare-field aliases and their fields envelope projection. Their existing namespace and selector restrictions remain authoritative, and entity.* is not enabled. Join arrival versus delivery context, allowed fields, membership/cardinality, completion, and timeout lifetime remain owned by the existing join plan and runtime.
+          structural_identity: CEL record identity must be collision-free and independent of diagnostic names or delimiter-joined paths. Reuse requires equality of complete recursive value shape and field-edge presence, including root-specific scalar nullability. Same-named incompatible records cannot share or overwrite a registration.
+          namespace_resolution: Reader selector restrictions consume CEL-checked references after function namespace resolution. A parsed function namespace is not an entity field. Compiler-rejected field references may receive exact-expression diagnostic suggestions, but parsed-name checks cannot independently admit a program or reject a valid stock library namespace. No constructor-name allowlists or aliases are permitted.
+          expression_results: Structural collection provenance survives conditional result branches, concatenation, literal wrappers, optional unwraps and comprehension results. All such derived map/list lookups require the same stock optional lookup decision; target or first-argument spelling alone cannot determine provenance. Lexical iterator and accumulator bindings remain scoped.
+          sinks: Optional-to-optional assignment preserves omission. Optional-to-required assignment requires a decision. An absent optional emit result omits the target field; it never emits null.
+        implementation_constraint: Use stock `cel.OptionalTypes()` plus one checked-AST structural/control-flow analysis. Regex/string scanning, custom optional macros, exact-schema `dyn`, alias-name allowlists, and permissive unresolved-source fallback are prohibited.
       event:
         resolves_to: 'The runtime-owned triggering event envelope/context. event.X reads the supported
           platform-populated event context fields supplied by the runtime.'
@@ -4205,10 +4305,14 @@ handler_specification:
       checks:
         declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
         nested_type_resolution: Nested paths must resolve through named types to a declared field.
+        executable_reader_rule: Every expression-bearing entry in the closed executable-reader census, including action values, activity inputs, select bindings, compute inputs, fan-out expressions, and collection sources, is compiled at boot against the exact structural payload/item owner and exact typed sink when one is declared. Activity input sinks consume the admitted tool input schema, so optional-to-optional forwarding is valid while optional-to-required forwarding and incompatible value types fail before execution. Specialized condition, data-accumulation, and emit checks consume the same compiler and do not exempt other reader phases. An undecided optional read is hard invalidity before execution.
         filter_leaf_rule: query_entities filter paths must resolve to scalar or enum leaves.
         query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, computed, fan_out)
           are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed
           when a supported scoped operand is unavailable in the handler context.
+        executable_collection_rule: Every executable query, filter, standalone group_by, reduce, and count collection source is admitted at boot through one immutable handler collection-dataflow owner, whether or not a condition reads `item`. The owner distinguishes direct payload/entity paths, query entity-table inputs, and explicit or canonical-default query/filter intermediate outputs; preserves exact recursive item type through selection; and rejects root-only, missing, dynamic, cyclic, aggregate, unsupported, or temporally unavailable ancestry. The fixed producer/consumer order is query, filter, standalone group_by, reduce, then count. A consumer may read only direct inputs or a collection output produced by an earlier phase; query therefore cannot read a same-handler filter output. Boot and runtime consume the same plan and runtime must not restore a dyn item fallback.
+        collection_output_ownership_rule: Every effective query, filter, standalone group_by, reduce, and count store_as target has exactly one producer in a handler. Exact duplicate and ancestor/descendant target paths are hard invalidity before any read or write, including collisions between collection and aggregate outputs. Sequential overwrite is not compatibility behavior.
+        collection_selector_rule: query.group_by, query.select, and standalone group_by.key are schema-bound item-field selectors, not executable expressions. Group keys must be required top-level scalar fields. Selection fields must exist; optional selections preserve omission per item, while a missing required selected field fails closed. Unknown, nested, wrong-kind, or undecided optional group keys are hard invalidity.
       rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
         presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
         relevant for business meaning, but not for raw field readability.'
@@ -4221,9 +4325,6 @@ handler_specification:
       required:
         event_handlers: map of event_name → handler declaration
       optional:
-        id: string — migration spelling for the node identifier; if omitted, the YAML map key is the effective node id.
-          If present as a plain value, it must exactly match the YAML map key. Existing rendered runtime-id templates such
-          as node-key-{instance_id} are subscriber naming templates, not a separate semantic node identity owner.
         execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
         subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
           event_handlers keys when omitted. Join timeout delivery is platform-owned and derived from effective join plans.
@@ -4239,8 +4340,10 @@ handler_specification:
           timer authoring for flows using `stages:` is owned by
           `stages.<stage>.timers`, not node-level state timers.
         gate_state: map — gate field definitions for this node (boolean flags on entity)
+      retired:
+        id: 'Any node-level id presence is rejected before value decoding: node.id is retired; the map key is the identity.'
       effective_semantics:
-        id: YAML map key, with same-value explicit id accepted during migration
+        id: YAML map key only, scoped by the existing declaration identity. No authored override or template spelling.
         execution_type: system_node
         runtime_subscriptions: union of explicit subscribes_to entries, event_handlers keys, and intrinsic platform runtime
           events required by declared handler primitives such as platform.join_timeout
@@ -5358,6 +5461,11 @@ engine:
         selected persistence owners. Former schema-dependent or capability-gated entry points and owner-crossing event/fork
         mutation paths reject an unaccepted owner before SQL. Runtime methods otherwise issue fixed current SQL and do not
         inspect or infer schema state.
+      expected_shape_reuse: >
+        The schema owner may retain a bounded pure expected-platform-shape derivation for an identical complete DDL plan
+        and dialect, returning isolated projections to callers. This is not a selected-store compatibility verdict or
+        capability cache: every bootstrap still inspects the actual database and validates generated state plans before
+        marking that concrete store current. Changed or invalid plans cannot inherit an earlier derivation.
     split_boundaries:
     - "Core runtime store method portability is promoted by #1086."
     - "Explicit SQLite local-runtime session locking, event delivery/replay, and trace/read model semantics are promoted under #1087 child closeout."
@@ -5542,10 +5650,9 @@ engine:
             - Dashboard constructors accept typed projections only. Missing owners and read or stream failures are explicit errors; empty-success, fabricated not-found, loose Details reconstruction, and silent SSE continuation are forbidden.
             - The retired internal/digest SQL source and runtime digest persistence contract have no replacement because no supported production consumer exists.
         administrative_operation_contract:
-          bundle_delete_owner: internal/runtime/bundledelete Coordinator with internal/store/internal/adminpersistence.BundleDeletePostgresOwner
-          destructive_reset_owner: internal/runtime/destructivereset Coordinator with internal/store/internal/adminpersistence.DestructiveResetPostgresOwner
+          destructive_reset_owner: internal/runtime/destructivereset Coordinator with private adminpersistence DestructiveResetPostgresOwner and DestructiveResetSQLiteOwner adapters
           rules:
-            - Each operation acquires its operation-specific opaque advisory lease on a dedicated PostgreSQL connection before planning.
+            - Each operation acquires its operation-specific opaque lease before planning. PostgreSQL uses a dedicated advisory-lock connection; SQLite uses the selected owner's nonblocking process-local lease under retained process possession. The SQLite lease is not a transaction held across planning or external work.
             - API idempotency and the administrative lease own independent exact sessions. Construction reserves sufficient connection capacity so layered ownership cannot exhaust a one-connection configured pool.
             - The lease spans planning and external quiescence/container work, but every named persistence mutation owns and settles one short transaction.
             - Context values cannot carry connection, transaction, advisory-lock, lease, or reentrancy authority.
@@ -5876,8 +5983,8 @@ engine:
       runtime_nuke:
         method: runtime.nuke
         selected_capability: apiv1.DestructiveResetCoordinator
-        postgres_support: supported through one Postgres destructive reset coordinator, operation-specific lease, and named short-transaction persistence owners
-        sqlite_support: unsupported; SQLite omits destructive reset cleanup/quiescence capabilities and must fail closed
+        postgres_support: supported through the backend-neutral destructive reset coordinator, operation-specific advisory lease, and named short-transaction persistence owners
+        sqlite_support: supported through the same destructive reset coordinator, cleanup catalog, durable operation contract, and retained process capability; the private SQLite adapter owns a nonblocking operation lease and short atomic cleanup transactions
       conversation_fork:
         method: conversation.fork
         selected_capability: ConversationForkLifecycle
@@ -7381,7 +7488,7 @@ engine:
       \n# Legacy/kernel timer example:\ntimers:\n  - id: daily_report\n    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\
       \n    start_on: boot\n    recurring: true"
   expression_language:
-    description: All guard checks, rule conditions, filter conditions, and on_complete branch conditions are evaluated using
+    description: All guard checks, rule conditions, query/filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.
     specification: https://github.com/google/cel-spec
     go_implementation: https://github.com/google/cel-go
@@ -7390,6 +7497,7 @@ engine:
       payload: Current event payload fields
       event: Current runtime-owned event envelope/context fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
+      item: Exact element value for query.filter, filter.condition, and count.condition. Fan-out expressions use their configured item alias. Item and alias bindings inherit the compiled collection element type and never fall back to dyn.
       fan_out: Available after fan_out step for count metadata (fan_out.count). fan_out.index is available only
         while evaluating fan_out.emit.fields for one item.
       join: Available only while evaluating join complete_when and selected on_complete/timeout outcomes. The typed fields
@@ -7985,7 +8093,7 @@ engine:
       severity: error
       scope: contract
       trigger: A declaration uses an unsupported or malformed field in a fail-closed contract surface. This includes node
-        top-level fields outside the defined node_fields set (id, execution_type, description, subscribes_to, event_handlers,
+        top-level fields outside the defined node_fields set (execution_type, description, subscribes_to, event_handlers,
         state_schema, state_table, timers, gate_state, produces) and malformed external tool-provider dispatch
         rate-limit declarations on HTTP tools, MCP servers, or policy.web_search_provider.
       when: boot-only
@@ -9286,7 +9394,7 @@ tool_model:
       activity input populated from verified inbound GitHub event context. The deployment record stores the app/client id,
       installation id, API base URL, and RSA private key, and caches the returned installation access token until expiry.
       Runtime must fail closed when the inbound-selected installation id is absent or differs from the connected record.
-      Issue-comment bot-loop flows that consume `inbound.github.issue_comment` and call a GitHub App issue-comment
+      Issue-comment bot-loop flows that consume the typed `inbound.github.issue_comment_created` normalized event and call a GitHub App issue-comment
       connector MUST guard app/bot-authored comments before activity lowering, using an `on_fail: discard` handler guard
       or equivalent no-side-effect filter. Delivery-id dedupe alone is not sufficient because an app-authored response is a
       separate GitHub webhook delivery with a new delivery id.
@@ -9418,7 +9526,7 @@ tool_model:
         claim_settlement: selected-store inbound publication transaction plus operator_channel_claim_receipts
         machine_proof: resolved Swarm state directory operator-channel-proofs.json
         provider_fact: current packs.SatisfactionPlan text projection from satisfier-authenticated normalized v2 output
-        api: /v1/rpc channel.connect|reconnect|rebind|confirm|unbind|proof_revoke|list
+        api: /v1/rpc channel.onboarding_start|onboarding_get|onboarding_retry|confirm|unbind|proof_revoke|list
         cli: swarm channel connect|list|unbind
       principal_rule: >
         One selected store owns one deployment operator principal. A successfully authenticated bearer token resolves to
@@ -9438,13 +9546,51 @@ tool_model:
         must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
-        return the original outcome while changed input conflicts. After same-request replay handling, an unresolved
+        return the original outcome while changed input conflicts. An exact selected-store begin replay is classified
+        before credential currentness, active-interface resolution, proof planning, revision admission, fresh challenge
+        generation, or any other mutable new-ceremony precondition; a replay recheck precedes return from a failed
+        currentness gate so a racing exact commit cannot be hidden. Credential currentness gates only a genuinely new
+        ceremony or a pending approved
+        mutation after terminal replay classification. Only a successful currentness observation whose value does not match
+        proves staleness; an observation error propagates without changing the pending ceremony, proof responsibility,
+        trusted binding projection, readback, or onboarding readiness. A stale provider credential terminally settles that
+        pending identity ceremony as credential_stale; its parent onboarding responsibility releases the old admissions,
+        resets to preparing, and accepts replacement hidden input into a fresh identity ceremony. One selected-store
+        pending-reset decision serves public confirmation, live retry, and local recovery, admitting either
+        awaiting_external_identity or awaiting_operator_confirmation only for the parent's exact durably stale child.
+        It verifies child back-reference, principal, interface, and admitted credential evidence before cleanup and again
+        under the same parent revision before reset commits; admissions remain durable until cleanup completes.
+        An inherited bound-reset revision must match that stale reconnect child's expected predecessor and the exact
+        current binding, and survives every repeated pending reset. Without an inherited obligation the revision remains
+        zero. A pending stale child never creates a bound revision or proof, and cannot authorize a publishing-phase reset.
+        Missing, contradictory, retired, or superseded ownership fails closed; an old stale replay cannot reset a new child.
+        Generic advance/clear flags do not authorize this reset. If currentness changes
+        after the child commits bound but before its parent publishes activation, the parent likewise releases the old
+        admissions and resets while retaining the exact bound revision; fresh evidence may then create only an exact
+        reconnect ceremony for that current claimant, irrespective of the parent's original whole-journey verb.
+        Live drive and local recovery consume one confirmed-child reconciliation decision, including an existing child
+        confirmed before its parent's awaiting_external_identity phase advances, irrespective of the journey verb.
+        The selected-store owner
+        admits its checkpoint or reset only under the exact active parent revision, validating the child's parent,
+        principal, interface, committed binding, and predecessor revision against the current binding in the same
+        parent-locked transaction. A zero parent binding revision is a valid uncheckpointed handoff, not evidence that
+        no binding committed; after a fresh reconnect the parent may likewise still carry that exact child's predecessor
+        revision. Unrelated child/binding revisions and retired parents cannot authorize reconciliation. Cleanup retains
+        checkpointed admissions until completion and revalidates the same selected-store handoff before reset commits.
+        The retained revision requires a fresh claimant and operator confirmation whether its old credential evidence
+        now compares current or successfully stale, including original-value restoration at the same key. Observation
+        errors do not authorize reset. Pending or failed proof responsibility prevents activation publication and remains
+        a new-ceremony fence after reset; exact terminal confirmation replay may complete it. After
+        same-request replay handling, an unresolved
         pending or failed proof responsibility blocks every new same-interface connect, reconnect, or rebind regardless
         of whether the new operation would save a proof; replaying the original confirmation is the recovery path.
         Unbind remains available and atomically marks every same-interface unresolved responsibility revoked before its
         fence commits, so no later boot can recover it against the fence. The selected-store identity owner
         revision-fences and durably expires an overdue awaiting-claim or awaiting-confirmation operation when its parent
-        responsibility is driven or recovered. An expired confirmation returns CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
+        responsibility is driven or recovered. The selected-store confirmation transaction must admit any nonterminal
+        identity child only while its onboarding parent remains nonterminal and names that exact child; it serializes
+        against parent retirement, which fences new child mutation, while exact terminal child replay remains available.
+        An expired confirmation returns CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
         without an invented empty binding. Optional operation timestamps and inapplicable binding fields are absent from
         API results rather than serialized as year-one timestamps or empty enum values.
       challenge_storage_rationale: >
@@ -9455,17 +9601,27 @@ tool_model:
       proof_rule: >
         Operator-confirmed success may project one structured machine-local verified-account proof for the exact interface
         identity. The proof contains opaque provider references, provider-neutral scope, original challenge/operation,
-        minting store/deployment, confirmation, consent scope, stable proof identity, and monotonic revision; it contains
-        no provider secret or independently validatable credential. Database claim/binding settlement commits first and
-        one durable proof responsibility makes file materialization idempotently recoverable. --no-save suppresses the
-        projection. Boot may create a missing local binding from an exact active proof and must announce that source.
+        minting store/deployment, confirmation, consent scope, stable proof identity, monotonic revision, and private exact
+        provider-credential value evidence; it contains no provider secret or reusable secret digest. Every live binding,
+        including --no-save bindings, owns the same private provider evidence through the selected-store operation that
+        confirmation consumes. Database claim/binding settlement commits first and one durable proof responsibility carries
+        an exact projection of the committed binding evidence, making file materialization idempotently recoverable without
+        rereading credentials. --no-save suppresses only that proof projection. Boot may create a missing local binding from
+        an exact active v2 proof whose evidence is still current and must announce that source.
         Explicit local unbind blocks boot reuse; machine proof revocation immediately makes every exact derived binding
         non-authoritative, and re-verification creates the next proof revision. Exact confirmation replay retries either
         pending or failed proof materialization responsibility without repeating claim or binding mutation. When the
         exact planned proof ID and revision already exist after a file-success/store-completion failure, recovery must
         validate every immutable responsibility fact, preserve the original non-empty minting deployment occurrence,
-        and complete the selected-store responsibility without rewriting the proof; any mismatch fails closed. A retained
-        interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation.
+        and complete the selected-store responsibility without rewriting the proof or consulting later credential
+        currentness; currentness gates only a new proof-file write. A successful mismatch terminally fails that new write,
+        while a currentness observation error leaves the durable proof responsibility pending for retry. Any immutable
+        responsibility mismatch fails closed. A retained
+        interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation. V1 or digest-less proof
+        documents are unsupported stale material: they may be classified and quarantined, but no identity fact is decoded,
+        copied, adapted, migrated, or rewritten into v2 authority. Fresh v2 evidence requires a new confirmation ceremony.
+        An independently retained active proof remains exactly revocable after its provider credential becomes stale or
+        unavailable; revocation resolves that active proof record without treating it as current identity authority.
       readback_rule: >
         Generation-aware readback is the only operator-channel authority consumed downstream. It reports current, stale,
         unbound, or revoked from one exact retained lifecycle projection: the union of current admitted interfaces, local
@@ -9540,24 +9696,40 @@ tool_model:
         confirmation delivery owns the next step.
       credential_rule: >
         Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
-        values and reusable digests are forbidden in semantic request hashes, API idempotency rows, selected-store rows,
-        logs, traces, progress, errors, and readback. The operation first reserves exact credential roles and keys, then
-        stores only non-secret receipt and epoch evidence. Every newly written value is staged under an
+        values and reusable or unkeyed secret digests are forbidden in semantic request hashes, API idempotency rows,
+        selected-store rows, logs, traces, progress, errors, and readback. The credential subsystem alone may create and
+        compare a versioned, domain-separated keyed value seal over the exact credential key and raw value. Its random
+        seal key is durable root metadata in the writable credential file, never a credential entry; it is created only by
+        the first explicit sealing operation. Validation never creates a missing key. The normal environment/file overlay
+        seals the effective environment value through that writable key home. A standalone environment-only store rejects
+        connect, with or without --no-save, before selected-store or provider mutation and teaches configuration of a writable
+        credential file tier. Process-random seal keys and per-boot durable currentness are forbidden. Plain pre-seal
+        credential files remain ordinary key/value stores and require no migration or backfill.
+        The operation first reserves exact credential roles and keys, then privately persists role, key, admission kind,
+        keyed value seal, and a receipt only for operation-written values. The credential subsystem's one usability rule
+        runs before every receipt-writing caller and store mutation. Empty or whitespace-only input creates no value,
+        receipt, or seal authority, so corrected bytes may use the same deterministic operation receipt without migration
+        or correction-in-place behavior. Every newly written value is staged under an
         operation-owned store occurrence; replacement never overwrites the credential occurrence referenced by the
         current predecessor activation. A deterministic operation-owned write is recovered by observing its exact receipt
-        and epoch, never by rewriting or guessing the secret, and the complete admission set commits in a
+        and resealing its current exact value, never by rewriting or guessing the secret, and the complete admission set commits in a
         credentials_admitted checkpoint before provider preflight. Provider activation preflight validates the staged
         candidate's exact credential occurrence and provider identity without changing registration selection or launching
-        a registration effect. A present file-store credential without a persisted occurrence epoch fails closed at snapshot
-        admission; runtime never assigns a process-local epoch, backfills the file, or migrates that unsupported occurrence.
+        a registration effect. The admitted provider key and seal are persisted into the nested identity operation before
+        claim or confirmation; the selected-store binding commits that exact evidence in proof-backed and proofless modes.
+        Any requested v2 proof and proof responsibility carry byte-identical evidence and cannot mint from a later credential read.
         Rejection compare-deletes operation-written candidate occurrences and returns the operation
         to preparing, so resume can admit a different credential while the predecessor activation and registration remain
         current. Fresh webhook connect generates a missing signing value;
-        replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch. Reconnect,
+        replay, reconnect, and rebind do not rotate credentials without an explicitly admitted replacement value. Reconnect,
         rebind, and resume accept explicit hidden replacement credential input when the exact reserved occurrence is no
-        longer current. Every operation-written credential occurrence is owned by its receipt and epoch: terminal
-        onboarding failure and destructive teardown compare-delete only that exact occurrence after executable authority
-        retires. Durable successor activation publication, exact process publication, and activation-backed registration
+        longer current. Provider-value rotation invalidates binding and optional-proof identity evidence and requires fresh
+        same-identity reconnect confirmation; a different claimant teaches rebind. Signing-only rotation invalidates
+        activation, registration, and readiness without invalidating provider identity. Every operation-written credential
+        cleanup identity is its exact store key, deterministic retry receipt, and admitted keyed value seal. The receipt
+        alone identifies a retry, not the current value occurrence. Terminal onboarding failure and destructive teardown
+        atomically compare-delete all three facts against the current writable value after executable authority retires.
+        Durable successor activation publication, exact process publication, and activation-backed registration
         promotion each commit before predecessor occurrence retirement; nonterminal recovery resumes from the last durable
         checkpoint and derives any still-pending predecessor cleanup from retained operation evidence. A successor
         occurrence and an observed pre-existing credential are never deleted by stale cleanup.
@@ -9568,7 +9740,7 @@ tool_model:
         collision and any generation, credential-role, destination, or identity contradiction fail before publication.
         One process-local owner publishes the complete current canonical activation records. Its deterministic typed
         generation includes source variant, exact runtime-context coordinate, activation revision, complete executable
-        plan canonical value, and non-secret credential admission/epoch facts; secret values and reusable secret digests
+        plan canonical value, and private non-secret credential admission/value-seal facts; secret values and reusable secret digests
         are excluded. Before a runtime-context occurrence exists, verify, preflight, test, and serve admission use the same
         publication carrier in an explicit declared-only mode containing only configured binding plans. Declared-only
         publications cannot grant execution and cannot synthesize learned state; executable owners reject them. Replacement
@@ -9609,7 +9781,7 @@ tool_model:
         executable catalog is installed, the single-use prepared start release admits Manager.Run, completes prepared
         standing topology through the existing finalizer, and then releases the existing recovery and producer phases.
       registration_handoff_rule: >
-        A pre-binding webhook intent carries only exact registration plan, target, credential epoch, and generation facts.
+        A pre-binding webhook intent carries only exact registration plan, target, validated credential observation, and generation facts.
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external
         identity, selected-store activation publication revision-fences handoff to the current registration selection.
         Candidate credential/provider-identity admission completes before registration selection changes; failed admission
@@ -9631,6 +9803,8 @@ tool_model:
         and the existing one-attempt provider effect journal. It fabricates no workflow run, event, entity, agent, or
         inbound context. Durable dispatch acceptance is insufficient: terminal provider success for the exact activation
         and binding revisions is required, while failure or acknowledgment uncertainty remains non-successful and NOT_READY.
+        Each dispatched credential value is the exact single observation validated against the activation's durable value
+        seal; validate-then-reread and any other split currentness/value path are forbidden.
         The journal retains the authorizing onboarding revision and complete durable/live context coordinate. A proven
         prelaunch failure may clear and remint the confirmation operation only in the successor-coordinate CAS; terminal
         success retains its operation identity, and launched, response-observed, or uncertain work is never redispatched.
@@ -9639,8 +9813,11 @@ tool_model:
         reserve selected-store teardown responsibility and retire every matching pending operation and learned activation
         before identity mutation, proof-file revocation, source removal, or successor authority. Runtime refresh then fences
         registration, public runtime tools, and private activity routes. Only after that retirement, teardown removes each
-        exact operation-written credential occurrence through its receipt/epoch fence. Recovery resumes every reserved or
-        authority-retired teardown idempotently, including credential cleanup. Runtime-context shutdown performs this
+        exact operation-written credential occurrence through its key/receipt fence. Explicit interface teardown removes
+        every matching operation-owned credential. Runtime-context unload or activation supersession instead preserves only
+        the exact provider key/value-seal evidence still referenced by a current retained binding, while deleting signing
+        and every other matching operation-owned occurrence. Recovery resumes every reserved or authority-retired teardown
+        idempotently, including credential cleanup. Runtime-context shutdown performs this
         retirement while the exact context and public-ingress owner remain current, and aborts withdrawal if retirement
         fails. Authoritative bundle deletion and explicit runtime-context unload/source removal are semantic retirement;
         ordinary serve process shutdown only quiesces process work and withdraws the live occurrence, and must not invoke
@@ -9652,7 +9829,7 @@ tool_model:
         ConnectedChannelReadiness is derived, never persisted as a boolean, and reports the exact activation-publication
         generation used by API/CLI readback. READY requires one exact current coordinate,
         available channel plan, current activation and binding revisions, current proof when the binding is proof-backed,
-        current credential epochs, terminal-success confirmation for the same activation/binding, and posture-specific
+        current exact credential value seals, terminal-success confirmation for the same activation/binding, and posture-specific
         target evidence. Webhook posture additionally joins exact ingress/signing, exposure, callback, and provider
         registration generations from that same activation publication. The current activation publication, not authored
         standing-target configuration, supplies the webhook signing credential identity used by the registration/readiness
@@ -9689,7 +9866,8 @@ tool_model:
         active proof identity after unbind so the public proof-revocation route remains reachable, and every operation,
         transition, and boot presentation uses the same masked claimant fallback as canonical channel readback. When startup
         finds a nonterminal onboarding operation whose exact runtime-context coordinate is no longer present, it records a
-        runtime_context_retired terminal failure, compare-deletes only that operation's receipt/epoch-owned credentials,
+        runtime_context_retired terminal failure, atomically compare-deletes only credentials matching that operation's
+        exact store key, write receipt, and admitted keyed value seal,
         refreshes activation authority, and continues; catalog construction or contradiction errors still fail startup closed.
         Graceful process restart preserves each nonterminal operation and semantic current activation, resolves them by
         durable identity without registration-order or primary-context inference, reconciles admitted predecessor effects,
@@ -9842,6 +10020,13 @@ tool_model:
         A dedicated loopback listener fronts only `/webhooks/*`. API, JSON-RPC, WebSocket, MCP, tools, health, and
         readiness routes are absent. `/webhooks/_swarm_probe/*` is reserved for one unguessable reachability nonce and
         cannot be selected by an ingress alias.
+      bound_listener_ownership: >
+        Programmatic external-origin serve may transfer an already-bound TCP listener matching the configured
+        explicit loopback address. Successful controller construction takes ownership; the serve root closes the
+        transferred handle if startup fails before construction. The controller closes it on startup failure or
+        shutdown, including shutdown before Start. Descriptor handoff must preserve socket ownership without a
+        close-and-rebind gap. Ordinary CLI invocations still bind through the controller; external-origin port zero
+        remains unsupported. Handoff never skips nonce reachability, generation admission, or webhook-only routing.
       lifecycle: >
         Exposure is explicit and process-local. Managed quick tunnels remain development-only, while an operator-supplied
         external origin is an independent ingress capability available to retained plain serve without dev scratch,
@@ -9862,15 +10047,15 @@ tool_model:
       semantic_identity: >
         One fresh intent binds exposure generation and public origin, exact binding and target generations, compiled plan
         generation, callback route and random token, stable provider slot, and atomic provider/signing credential snapshot
-        identities. Snapshot identity is source plus store key plus a process-random epoch that changes whenever the value
-        or metadata changes; secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
+        identities. Snapshot identity is source plus store key plus a private process observation token that changes whenever
+        the value or metadata changes; it is never serialized or used as durable channel identity. Secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
         and output. The exact currently admitted runtime-generation grant fences execution and handler/readiness use but is
         deliberately excluded from semantic request identity, so an unchanged startup handoff performs no provider apply.
       callback: >
         `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits
         only a pair selected in the same immutable registration snapshot, with the exact verified token. Admission consumes
         the same Snapshot(now) currentness predicate as readiness, including current exposure generation and nonce evidence,
-        explicit exposure revocation, evidence expiry, startup authority, effect authority, credential epochs, selected pair,
+        explicit exposure revocation, evidence expiry, startup authority, effect authority, credential observations, selected pair,
         and token. Unregistered, stale-generation, expired, observation-failed, and revoked routes return not found.
       apply: >
         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
@@ -10272,12 +10457,19 @@ tool_model:
       event_name_policy: >
         New provider-trigger manifests MUST use a literal Swarm event name and carry the provider-specific event kind in
         `provider_event_type`. The `{event_type}` template form is grandfathered only for the existing GitHub and Slack
-        manifests because live subscriptions already consume `inbound.github.<event_type>` and
+        manifests because live subscriptions already consume `inbound.github.raw.<event_type>` and
         `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
         decision.
       ack.mode: >
         Both modes consume the same committed inbound_publications operation, immutable ordered event batch, and each
         event's immutable commit-time recipient-manifest fingerprint.
+        Recipient manifests use the existing complete DeliveryRoute normalization and exact-identity deduplication.
+        Precompute each normalized route's complete JSON wire bytes, order those bytes lexicographically, encode that
+        ordered JSON array, and apply the existing SHA256 fingerprint. All encoded route fields participate, including
+        full agent identity, target ownership, delivery context, payload projection, and connect execution claim.
+        Input or database readback order must not affect this identity. Nil and empty route sets encode as [].
+        Marshal errors remain fail-closed; exact-slot/projection contradiction validation remains separately authoritative.
+        No route may be dropped, nor any encoded field omitted, to reconcile a manifest mismatch.
         `after_publish` returns after normal post-commit dispatch/reconciliation completes. `durable_before_dispatch` returns
         after the parent, all child memberships, evidence event, executable events, recipient manifests, subscribed replay
         scopes, deliveries, receipts, and counters commit atomically, without waiting for post-commit pipeline dispatch,
@@ -10299,8 +10491,10 @@ tool_model:
         triggers. Missing delivery id fails before dedupe marker persistence.
       event_type: >
         `X-GitHub-Event` is the authoritative provider event type. The canonical emitted event name is
-        `inbound.github.<normalized_event_type>` and the payload includes provider, provider_event_id, event_type,
-        provider_event_type, provider_delivery_id, original payload, redacted headers, and received_at.
+        `inbound.github.raw.<normalized_event_type>` and the raw payload includes provider, provider_event_id, event_type,
+        provider_event_type, provider_delivery_id, original payload, redacted headers, and received_at. Pack-declared typed
+        normalized outputs use distinct `inbound.github.<business_event>` names so raw and typed schemas never compete for
+        one event identity.
     - provider: slack
       issue: "#1691"
       signature: >
@@ -11677,21 +11871,22 @@ flow_model:
       importable schemas, but it must error rather than silently omit an invalid
       concrete declaration.
   compiled_event_schema_projection:
-    status: implemented_presence_preserving_w3
+    status: implemented_recursive_structural_presence
     owner: internal/runtime/contracts.WorkflowContractBundle.CompiledEventSchemas
     rule: Downstream compilers consume one immutable admitted CompiledEventSchema projection and never inspect events.yaml, EventCatalogEntry maps, retired required lists, route aliases, or generated-event registries directly. The projection enumerates only exact authored declarations after filesystem-flow and event admission, in canonical (flow_path, qualified_event_name) order. Pattern declarations, generated events, provider mappings, and noncanonical receiver restatements do not become declaration identities.
-    fields: Each declaration carries its canonical flow path and qualified authored event name, authored classification, a closed ordered field set with admitted semantic schema and IsOptional, an optional already-admitted scalar business key, canonical acceptance-schema bytes and digest, and diagnostic source provenance. Diagnostic source is never identity or hash input. Readbacks are mutation-isolated.
+    fields: Each declaration carries its canonical flow path and qualified authored event name, authored classification, a closed ordered recursive structural field set with admitted semantic schema and optionality on every named-record field edge, an optional already-admitted scalar business key, canonical acceptance-schema bytes and digest, and diagnostic source provenance. Diagnostic source is never identity or hash input. Readbacks are mutation-isolated.
     canonical_schema_owner: >-
       internal/runtime/contracts eventSchemaFromCatalogEntry lowers admitted type meaning;
       internal/runtime/eventschema.CanonicalAcceptanceSchema owns the accepted schema subset; and
       internal/runtime/canonicaljson owns canonical bytes and their sha256 digest. Consumers must not reserialize or
       independently hash raw event declarations.
     current_grammar_adapter: >-
-      The presence-preserving W3 adapter derives IsOptional exactly once from
-      the admitted trailing-`?` spelling. Requiredness defaults to true; the
-      marker never survives in the semantic type and the retired required-list
-      syntax is not represented. `key:` is admitted only after its referenced
-      field is proved required with boolean, number, or string semantics.
+      The presence-preserving adapter derives field-edge optionality exactly once
+      from the admitted trailing-`?` spelling for both event fields and nested named-record fields through
+      `internal/yamlsource`. Requiredness defaults to true; the marker never survives in the semantic type and the
+      retired required-list syntax is not represented. `key:` is admitted only after its referenced field is proved
+      required with boolean, number, or string semantics. Raw YAML nodes, local suffix trimming, and parallel string-only
+      type projections are not downstream authority.
     migration_boundary: >-
       The stable compiled interface and W3 event-family migration are complete.
       Producer-only exact-flow ownership and compiled-connect receiver delivery projections
@@ -11699,8 +11894,7 @@ flow_model:
       business keys, field types and optionality, descriptions, refinements,
       citations, payload requiredness, event metadata, receiver aliases and
       generated carries, plus source-artifact-identified boundary snapshots. The
-      remaining decoder families continue under #2300 without reopening event
-      grammar or compatibility paths.
+      remaining unrelated decoder families continue under #2300 without reopening event/named-record field grammar or compatibility paths.
   stateless_flows:
     description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
       flow is an example: it receives inputs, filters them, and emits results without maintaining per-entity state.'
@@ -12712,7 +12906,7 @@ durable_data_resources:
     rule: ResourceVersionID hashes only the canonical semantic manifest. Provenance and import attempt identity are attached evidence and are never identity inputs.
     keyless_rows: Every row has a 1-based ordinal. Source order and duplicate payload multiplicity are preserved; row identity and lookup are (version_id, ordinal). Delta compares canonical payload multiplicity and reports order_changed when equal multisets differ in order.
     keyed_rows: Every row has a 1-based ordinal and a canonical typed boolean, number, or string business key. Duplicate business keys reject the whole input. Rows are byte-sorted by canonical business-key bytes for digesting, storage, activation, and replay; delta and named lookup use the business key.
-    import_normalization: External null in an optional field normalizes to omission recursively. Null in required fields and null list elements reject. Internal rows never contain null as an optionality representation.
+    import_normalization: External null in an optional field consumes the same recursive structural field-edge owner as event admission and normalizes to omission recursively. Null in required fields and null list elements reject. Internal rows never contain null as an optionality representation.
     atomicity: One invalid row rejects the entire candidate and reports all bounded row defects. No partial version or head mutation exists.
     empty_input: Canonical empty JSONL is a valid zero-row candidate. Standalone and fused inputs admit its canonical empty Base64 encoding and persist row_count zero without a sentinel row.
   source_operations:
@@ -12787,6 +12981,13 @@ platform_tables:
       - Schema, auth/idempotency-like, operator/system, authored product config/topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
       - 'Admitted source retention is request-scoped by `runtime.nuke.include_source_artifacts`: `false` preserves `source_artifacts`; `true` deletes `source_artifacts` only inside the destructive-reset cleanup transaction after serializing persisted run creation and failing closed if any persisted-source run remains outside the cleanup plan.'
       - Apply executes in one database transaction, reports per-table dry-run/apply counts, rolls back on any SQL/FK/order error, and produces no successful result unless the transaction commits.
+      - runtime_reset_operations survives cleanup. The retained process capability owns reset admission and immutable phase receipts independently of the API completion cache. Keyed retries bind the original actor, key and request hash; unkeyed admission has a fresh UUID. Conflicts and completed-result replay precede context withdrawal or fresh inventory.
+      - Reset quiescence commits its exact previous-status outcome with cancellation in the existing run-lifecycle transaction. Cleanup commits its receipt with deletion and any empty-source-topology mutation in the retained process transaction. Callers cannot advance either effect phase through a separate journal save.
+      - A failed effect acknowledgment is not evidence of rollback. The reset coordinator reads the exact durable successor receipt under a bounded cancellation-independent context before proceeding; missing, contradictory, or unreadable evidence leaves execution fenced. Receipt reconciliation never repeats the effect or compensates an uncertain transaction.
+      - PostgreSQL and SQLite cleanup consume the same closed cleanup catalog, scope predicates, preserved-reference severing, and retained-authority guards. Only run-set binding, timestamp comparison, and transaction locking differ privately. SQLite cleanup, topology mutation, and the cleanup receipt commit in one selected write transaction; no write transaction spans runtime quiescence or external container effects.
+      - Reset admission captures the canonical source-set plan, or its explicit absence, in the same retained transaction as operation identity. Historical identity lookup precedes reading current topology. This snapshot is immutable through every later phase. Cleanup validates the current source set against the recorded snapshot inside its transaction; source deletion requires the matching empty-topology mutation when admitted sources exist.
+      - Pending phase continuation consumes the recorded plan and every committed receipt rather than collecting fresh inventory or repeating completed quiescence, cleanup, or container settlement. A recorded partial response remains immutable even when pending resource recovery subsequently succeeds. Recovery that still has unsettled resources fails closed before startup admission.
+      - Process-local reset convergence is bound to the durable operation UUID. Retrying an uncertain final journal acknowledgment for that same converged operation cannot withdraw, reconstruct, or release its successor runtime or projections. A pending planning failure remains fenced until the operation can settle; planning errors alone do not authorize reconstruction and later re-planning over live execution.
     classifications:
       delete_by_event_join:
         - event_receipts
@@ -12850,6 +13051,7 @@ platform_tables:
         - standing_services
         - runs
       preserve:
+        - runtime_reset_operations
         - runtime_store_metadata
         - resource_declarations
         - resource_bundle_declarations
@@ -13262,9 +13464,11 @@ platform_tables:
         runtime recovery, admin commands). source_route, target_route, and target_set are the canonical pin-routing
         identities; legacy entity_id and flow_instance are receiver-context projections. idempotency_key for external
         dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
-        and fork/replay. payload_bytes is the authoritative exact admitted payload used by identity, hydration,
-        retry, recovery, replay, and fork. payload is an atomically derived JSON query projection only and cannot
-        become execution or duplicate authority. execution_mode is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it from provider or backend names.'
+        and fork/replay. payload_bytes plus the five payload_schema_* coordinates are the authoritative exact admitted
+        payload and pinned schema evidence used by identity, hydration, retry, recovery, replay, and fork. payload is an
+        atomically derived JSON query projection only and cannot become execution or duplicate authority. execution_mode
+        is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it
+        from provider or backend names.'
       ddl: |
         CREATE TABLE events (
             insertion_sequence          BIGSERIAL PRIMARY KEY,
@@ -13278,6 +13482,11 @@ platform_tables:
             scope                       TEXT NOT NULL CHECK (scope IN ('entity', 'flow', 'global')),
             payload                     JSONB NOT NULL,
             payload_bytes               BYTEA NOT NULL,
+            payload_schema_bundle_hash  TEXT NOT NULL CHECK (payload_schema_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            payload_schema_flow_id       TEXT CHECK (payload_schema_flow_id IS NULL OR payload_schema_flow_id = TRIM(payload_schema_flow_id)),
+            payload_schema_event_key     TEXT NOT NULL CHECK (payload_schema_event_key = TRIM(payload_schema_event_key) AND NULLIF(payload_schema_event_key, '') IS NOT NULL),
+            payload_schema_digest        TEXT NOT NULL CHECK (payload_schema_digest ~ '^sha256:[0-9a-f]{64}$'),
+            payload_schema_class         TEXT NOT NULL CHECK (payload_schema_class IN ('authored', 'imported', 'generated', 'pattern', 'platform', 'schema_less')),
             execution_mode              TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             chain_depth                 INTEGER NOT NULL CHECK (chain_depth >= 0),
             produced_by                 TEXT NOT NULL CHECK (produced_by = TRIM(produced_by) AND NULLIF(produced_by, '') IS NOT NULL),
@@ -13419,7 +13628,8 @@ platform_tables:
       description: >-
         Durable owner of one connect, reconnect, rebind, or unbind operation. It owns exact request replay,
         challenge lifecycle, provider-authenticated claimant, operator confirmation, binding revision, and
-        the bounded proof-file projection responsibility. A challenge cannot be terminally consumed without
+        the exact private provider-credential key/value-seal evidence from onboarding plus the bounded optional proof-file
+        projection responsibility. A challenge cannot be terminally consumed without
         either a bound result or the explicit rejected/expired terminal disposition.
       ddl: |
         CREATE TABLE operator_channel_operations (
@@ -13432,11 +13642,14 @@ platform_tables:
             channel_pack_version TEXT NOT NULL,
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
+            provider_credential_key TEXT,
+            provider_credential_value_seal TEXT,
+            onboarding_operation_id UUID,
             request_key_hash TEXT NOT NULL UNIQUE,
             request_hash TEXT NOT NULL,
             expected_binding_revision BIGINT NOT NULL CHECK (expected_binding_revision >= 0),
             challenge TEXT UNIQUE,
-            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','expired','unbound')),
+            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','credential_stale','expired','unbound')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             binding_revision BIGINT CHECK (binding_revision > 0),
             external_account_reference TEXT,
@@ -13461,7 +13674,8 @@ platform_tables:
             completed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL,
             CHECK ((operation_kind = 'unbind' AND challenge IS NULL AND state = 'unbound') OR (operation_kind <> 'unbind' AND challenge IS NOT NULL)),
-            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
+            CHECK ((operation_kind = 'unbind' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL) OR (operation_kind <> 'unbind' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL)),
+            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected','credential_stale') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
             CHECK ((state IN ('bound','unbound')) = (binding_revision IS NOT NULL)),
             CHECK ((save_proof AND planned_proof_id IS NOT NULL AND planned_proof_revision IS NOT NULL) OR (NOT save_proof AND planned_proof_id IS NULL AND planned_proof_revision IS NULL)),
             CHECK ((proof_status IN ('pending','active','failed','revoked') AND proof_id IS NOT NULL AND proof_revision IS NOT NULL) OR (proof_status = 'skipped' AND proof_id IS NULL AND proof_revision IS NULL)),
@@ -13472,8 +13686,10 @@ platform_tables:
     operator_channel_bindings:
       description: >-
         Current selected-store local binding or explicit unbind fence for one exact pack-qualified interface.
-        A bound row is authoritative only when its semantic generation is current and any referenced machine-local
-        proof identity/revision remains active. Unbind is persisted state, never inferred from row absence.
+        Every current binding owns the provider-credential key/value-seal evidence established by its confirmation,
+        independently of whether a machine proof was requested. A bound row is authoritative only when that evidence and
+        semantic generation are current and any referenced machine-local proof identity/revision remains active. Unbind is
+        persisted state, never inferred from row absence.
       ddl: |
         CREATE TABLE operator_channel_bindings (
             interface_key TEXT PRIMARY KEY,
@@ -13483,6 +13699,8 @@ platform_tables:
             channel_pack_version TEXT NOT NULL,
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
+            provider_credential_key TEXT,
+            provider_credential_value_seal TEXT,
             external_account_reference TEXT,
             conversation_reference TEXT,
             conversation_scope TEXT CHECK (conversation_scope IS NULL OR conversation_scope IN ('direct','shared')),
@@ -13494,7 +13712,7 @@ platform_tables:
             proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
             operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
             updated_at TIMESTAMPTZ NOT NULL,
-            CHECK ((status = 'current' AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
+            CHECK ((status = 'current' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
             CHECK (source <> 'local_proof' OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
             INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
             INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
@@ -13503,7 +13721,8 @@ platform_tables:
       description: >-
         Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
         reconnect, or rebind operation. Secret values and reusable secret digests are forbidden;
-        only admitted credential key, receipt, and epoch metadata may be stored. Request-key replay,
+        only private admitted credential key, keyed value seal, admission kind, and operation-write receipt may be stored.
+        Public DTOs omit value seals, and observed credentials own no receipt. Request-key replay,
         target-slot exclusion, phase transitions, selected-store activation publication, exact process
         publication, registration promotion, and predecessor cleanup are revision fenced.
       ddl: |
@@ -13716,6 +13935,28 @@ platform_tables:
             reason TEXT NOT NULL,
             recorded_at TIMESTAMPTZ NOT NULL,
             UNIQUE (provider, provider_event_id, interface_key)
+        );
+    runtime_reset_operations:
+      description: >-
+        Reset-family durable identity, immutable plan and exact phase outcomes, independent of
+        the API idempotency cache. Keyed admission binds actor and key permanently; unkeyed
+        admission uses a fresh operation UUID. At most one unfinished reset owns active_slot.
+        Cleanup evidence commits in the same retained-process transaction as cleanup and topology.
+        The record includes the immutable admitted source-set plan, with null denoting no installed topology.
+        Admission also captures each exact predecessor projection disposal identity and whether its workspace
+        can create managed containers, so death before plan persistence does not erase resource scope.
+        Historical completed outcomes never confer current-process runtime availability.
+      ddl: |
+        CREATE TABLE runtime_reset_operations (
+            operation_id UUID PRIMARY KEY,
+            actor_token_id TEXT NOT NULL,
+            idempotency_key TEXT,
+            revision BIGINT NOT NULL CHECK (revision > 0),
+            phase TEXT NOT NULL CHECK (phase IN ('admitted','planned','quiesced','cleanup_committed','containers_settled','completed')),
+            active_slot INTEGER UNIQUE CHECK (active_slot = 1),
+            record JSONB NOT NULL,
+            UNIQUE (actor_token_id, idempotency_key),
+            CHECK ((phase = 'completed' AND active_slot IS NULL) OR (phase <> 'completed' AND active_slot IS NOT NULL AND active_slot = 1))
         );
     agent_topology_source_set_head:
       description: >-
@@ -13977,7 +14218,9 @@ platform_tables:
             execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             provenance         JSONB NOT NULL,
             projected_at       TIMESTAMPTZ,
+            projection         JSONB,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((projected_at IS NULL) = (projection IS NULL)),
             INDEX idx_agent_lifecycle_outbox_pending (created_at) WHERE projected_at IS NULL
         );
     runtime_external_effect_operations:
@@ -16779,6 +17022,10 @@ run_model:
       redispatch that effect. Staged historical non-agent work still refuses with non_agent_delivery_replay_unsupported
       before execution; no continuation framework, fallback or legacy-store path is introduced.'
     selected_contract_supported_execution: Selected-contract fork execution binds to an exact persisted bundle-v2 source artifact and canonical declaration identities. It never accepts a local source path or reconstructs declaration identitys.
+    selected_contract_payload_preservation: >-
+      Selected-contract source preparation derives fork-local request/result identities from the fork-local frontier
+      event and typed selected-fork lineage without rewriting historical request payload bytes. EventBus validates
+      those bytes against the selected target contract and persists them unchanged with the target schema binding.
     contract_swap_boot_resume_admission: 'Contract-swap boot/resume readiness for fixed-event forks is owned by
       runtime.run_fork.contract_swap_boot_resume_admission. This owner is non-mutating and consumes the durable
       store.run_fork.selected_contract_binding, runtime.run_fork.selected_contract_execution_admission,
@@ -17471,6 +17718,12 @@ platform_events:
     examples:
       dotted_event_key: 'platform-spec.yaml#platform_events.catalog["platform.boot"].payload'
       simple_owner: platform-spec.yaml#engine.error_model.dead_letter_schema
+  payload_presence:
+    rule: Platform catalog payload fields use the same required-by-default structural grammar as product events and named records.
+      Exactly one trailing `?` on the complete field type marks that field optional; the marker is removed from the effective type.
+    nested_records: Nested platform payload mappings apply the same rule recursively.
+    retired: Parallel `required:` lists and prose-derived optional/nullable meaning are invalid. Runtime null from an external
+      optional field lowers to omission during canonical event admission; platform producers emit omission directly.
   catalog:
     event.replayed:
       description: Durable operator audit evidence that an existing event delivery was replayed. This audit event is diagnostic evidence and is not an author-story occurrence.
@@ -17487,20 +17740,11 @@ platform_events:
         replay_event_id: uuid
         audit_event_id: uuid
         run_id: uuid
-        entity_id: uuid (optional)
+        entity_id: uuid?
         subscribers: array of string
         triggered_by: string
-        actor_token_id: string (optional)
+        actor_token_id: string?
         original_deliveries: array of object
-      required:
-      - original_event_id
-      - original_event_name
-      - replay_event_id
-      - audit_event_id
-      - run_id
-      - subscribers
-      - triggered_by
-      - original_deliveries
       produced_by_type: platform
     platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.
@@ -17535,21 +17779,31 @@ platform_events:
       payload:
         activity_id: string
         tool: string
-        bundle_hash: string (optional; required for a request released by proposed_effect approval; omitted for an immediate unapproved request)
-        workflow_version: string (optional; required for a request released by proposed_effect approval; omitted for an immediate unapproved request)
+        bundle_hash:
+          type: string?
+          description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
+        workflow_version:
+          type: string?
+          description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
         input: object
         effect_class: string
         success_event: string
         failure_event: string
-        revision_event: string (optional; generated typed feedback event for an approved activity)
-        rejected_event: string (optional; generated typed rejection event for an approved activity)
+        revision_event:
+          type: string?
+          description: Generated typed feedback event for an approved activity.
+        rejected_event:
+          type: string?
+          description: Generated typed rejection event for an approved activity.
         retry_max_attempts: integer
         retry_backoff: string
         fork_policy: string
         entity_id: string
         node_id: string
         flow_id: string
-        flow_instance: string (optional; exact producing flow instance)
+        flow_instance:
+          type: string?
+          description: Exact producing flow instance.
         handler_event_key: string
         source_event_id: string
         source_run_id: string
@@ -17557,8 +17811,12 @@ platform_events:
         parent_event_id: string
         chain_depth: integer
         attempt: integer
-        loop_generation: object (optional; durable bounded-loop attempt identity)
-        loop_stage: string (optional; source stage claimed with the attempt)
+        loop_generation:
+          type: object?
+          description: Durable bounded-loop attempt identity.
+        loop_stage:
+          type: string?
+          description: Source stage claimed with the attempt.
       produced_by_type: platform
     platform.agent_failed:
       description: Agent session failed after retry.
@@ -17572,7 +17830,7 @@ platform_events:
       payload:
         agent_id: string
         flow_instance: string
-        entity_id: string (nullable)
+        entity_id: string?
         failure: platform.failure/v1 envelope
         retry_count: integer
         last_event_type: string
@@ -17590,10 +17848,10 @@ platform_events:
       payload:
         agent_id: string
         flow_instance: string
-        entity_id: string (nullable)
+        entity_id: string?
         failure: platform.failure/v1 envelope
         stack_trace: string
-        conversation_id: string (nullable)
+        conversation_id: string?
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.event_quarantined:
@@ -17623,7 +17881,7 @@ platform_events:
       routing_class: event_loop_routable
       scope: global
       payload:
-        flow_instance: string
+        flow_instance: string?
         dead_letter_count: integer
         window_minutes: integer
         sample_events: array
@@ -17649,15 +17907,6 @@ platform_events:
         threshold_seconds: integer
         stalled_for_seconds: integer
         emitted_at: string (ISO 8601)
-      required:
-      - run_id
-      - operational_state
-      - blocking_layer
-      - blocking_reason
-      - last_progress_at
-      - threshold_seconds
-      - stalled_for_seconds
-      - emitted_at
       produced_by_type: platform
     platform.reset:
       description: Admin-initiated platform state reset. Emitted ONLY when a human administrator explicitly triggers a reset
@@ -17693,18 +17942,10 @@ platform_events:
         agent_id: string
         entity_id: string
         flow_instance: string
-        tool_name: string (nullable)
+        tool_name: string?
         action: string
         failure: platform.failure/v1 envelope
         timestamp: string (ISO 8601)
-      required:
-      - agent_id
-      - entity_id
-      - flow_instance
-      - tool_name
-      - action
-      - failure
-      - timestamp
       produced_by_type: platform
     platform.budget_threshold_crossed:
       description: LLM spend crossed a configured threshold. The platform monitors spend_ledger against policy-defined thresholds
@@ -17747,7 +17988,9 @@ platform_events:
       payload:
         reason: string
         paused_by: string
-        last_failure: platform.failure/v1 envelope (nullable; present for safety-triggered pauses and absent for operator control pauses)
+        last_failure:
+          type: platform.failure/v1 envelope?
+          description: Present for safety-triggered pauses and absent for operator control pauses.
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.resumed:
@@ -17789,17 +18032,8 @@ platform_events:
         run_id: string
         run_id_resolution: string (specified)
         source: string
-        operator_id: string (nullable)
+        operator_id: string?
         timestamp: string (ISO 8601)
-      required:
-      - operation_id
-      - agent_id
-      - directive_text
-      - mode
-      - run_id
-      - run_id_resolution
-      - source
-      - timestamp
       produced_by_type: platform
     platform.agent_started:
       description: Agent session created and ready to process events.
@@ -17812,7 +18046,7 @@ platform_events:
       scope: flow
       payload:
         agent_id: string
-        flow_instance: string (nullable)
+        flow_instance: string?
         memory_enabled: boolean
         memory_source: string (authored | platform_default)
         model: string
@@ -17847,23 +18081,34 @@ platform_events:
           reason_code: string
           recovery_on_startup: boolean
           recovery_inspection_complete: boolean
-          startup_blocking_timer_count: integer (present when recovery inspection completed)
-          standing_timer_obligation_count: integer (present when recovery inspection completed)
-          timer_obligations: TimerObligationSnapshot (present when recovery inspection completed)
+          startup_blocking_timer_count:
+            type: integer?
+            description: Present when recovery inspection completed.
+          standing_timer_obligation_count:
+            type: integer?
+            description: Present when recovery inspection completed.
+          timer_obligations:
+            type: TimerObligationSnapshot?
+            description: Present when recovery inspection completed.
+          delivery_recovery_inventory:
+            type: object?
+            description: Present when recovery inspection completed.
           schedule_replay_count: integer
           schedule_skip_count: integer
           schedule_drop_count: integer
           manager_replay_count: integer
           manager_skip_count: integer
           manager_drop_count: integer
-          failure: optional platform.failure/v1 envelope
+          failure: platform.failure/v1 envelope?
         static_agents_started: array<string>
         flow_required_agents_started: array<string>
         system_containers_started: array<string>
         self_check_required: boolean
-        self_check_passed: boolean (nullable)
+        self_check_passed:
+          type: boolean?
+          description: Omitted until the post-publish self-check completes.
       notes:
-      - 'self_check_passed is nullable because platform.boot is the event verified by the post-publish self-check; the event MUST NOT claim a pass before that verification completes.'
+      - 'self_check_passed is omitted because platform.boot is the event verified by the post-publish self-check; the event MUST NOT claim a pass before that verification completes.'
       produced_by_type: platform
     platform.inbound_recorded:
       description: External event received and persisted. Emitted when an event enters the system from an external source
@@ -17885,14 +18130,6 @@ platform_events:
         event_ids: array<string>
         event_names: array<string>
         output_count: integer
-      required:
-      - publication_id
-      - provider
-      - provider_event_id
-      - entity_id
-      - event_ids
-      - event_names
-      - output_count
       produced_by_type: platform
     platform.recovery_failed:
       description: Crash recovery failed during event replay. Unrecoverable state.
@@ -17905,7 +18142,7 @@ platform_events:
       scope: global
       payload:
         failure: platform.failure/v1 envelope
-        failed_event_id: string (nullable)
+        failed_event_id: string?
         timestamp: string (ISO 8601)
       produced_by_type: platform
     mailbox.card_decided:
@@ -17927,16 +18164,6 @@ platform_events:
         card_content_hash: text
         decision_schema_hash: text
         bundle_hash: text
-      required:
-      - card_id
-      - anchor_kind
-      - anchor
-      - decision_id
-      - verdict
-      - fields
-      - card_content_hash
-      - decision_schema_hash
-      - bundle_hash
       produced_by_type: platform
     mailbox.card_deferred:
       description: Platform evidence event emitted when an operator defers a pending typed decision card without deciding it.
@@ -17950,9 +18177,6 @@ platform_events:
       payload:
         card_id: uuid
         until: timestamp
-      required:
-      - card_id
-      - until
       produced_by_type: platform
     mailbox.card_superseded:
       description: >-
@@ -17969,12 +18193,8 @@ platform_events:
       payload:
         card_id: uuid
         anchor_kind: text
-        stage_activation_id: uuid
+        stage_activation_id: uuid?
         reason: text
-      required:
-      - card_id
-      - anchor_kind
-      - reason
       produced_by_type: platform
     mailbox.card_expired:
       description: >-
@@ -17994,11 +18214,6 @@ platform_events:
         anchor_kind: text
         cause: text
         deadline_at: timestamp
-      required:
-      - card_id
-      - anchor_kind
-      - cause
-      - deadline_at
       produced_by_type: platform
     human_task.approved:
       description: Product-facing platform event emitted after an operator approves a persisted human task.
@@ -18016,13 +18231,6 @@ platform_events:
         fields: object
         decided_by: text
         decided_at: timestamp
-      required:
-      - card_id
-      - requester_agent_id
-      - status
-      - fields
-      - decided_by
-      - decided_at
       produced_by_type: platform
     human_task.rejected:
       description: Product-facing platform event emitted after an operator rejects a persisted human task.
@@ -18040,13 +18248,6 @@ platform_events:
         fields: object
         decided_by: text
         decided_at: timestamp
-      required:
-      - card_id
-      - requester_agent_id
-      - status
-      - fields
-      - decided_by
-      - decided_at
       produced_by_type: platform
     human_task.deferred:
       description: Product-facing platform event emitted when a persisted human task is deferred without terminally deciding it.
@@ -18062,11 +18263,6 @@ platform_events:
         status: text
         cause: text
         resume_at: timestamp
-      required:
-      - card_id
-      - status
-      - cause
-      - resume_at
       produced_by_type: platform
     human_task.expired:
       description: Product-facing platform event emitted when a persisted human task reaches its terminal timeout decision.
@@ -18082,11 +18278,6 @@ platform_events:
         status: text
         cause: text
         deadline_at: timestamp
-      required:
-      - card_id
-      - status
-      - cause
-      - deadline_at
       produced_by_type: platform
   routing_rules:
     description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
@@ -19516,7 +19707,10 @@ workspace_model:
     reset_policy:
     - Destructive reset may stop only containers whose typed identity proves owner=runtime, reset_eligible=true, and kind
       is agent or flow.
-    - scaffold and system containers are platform-created but reset_eligible=false and must be preserved by destructive reset.
+    - scaffold and system containers are platform-created but reset_eligible=false, so the reset stop selector excludes them.
+      Retiring a source projection separately removes every container proven to belong to that exact projection, including
+      scaffold and system containers, before releasing its source files. Durable writable workspace backing identities and
+      data survive; preservation is not a promise to keep retired projection containers alive.
     - Unlabeled, unregistered, operator-managed, postgres/tool-gateway, name-only, and ambiguous containers are preserved
       fail-closed. A Swarm-looking container name is not ownership proof.
     - Destructive reset planning captures managed container refs before run-scoped DB cleanup can remove supporting runtime
@@ -20218,9 +20412,17 @@ test_specification:
         an unknown or duplicate claim, an unproved active claim, or companion
         metadata that disagrees with the filesystem is a test failure. External
         proof records additionally fail on missing or duplicate sources, missing
-        executor packages, absence of exactly one unfiltered package owner in
-        every required CI profile, unknown or multiply credited claims, and
-        malformed repository-relative paths. The required verify/boot gate runs
+        executor packages, incomplete or overlapping package execution in
+        any required CI profile, unknown or multiply credited claims, and
+        malformed repository-relative paths. The executor package remains the
+        semantic proof owner. Every required profile selects the identical set of
+        count-1 execution units: either one unfiltered unit or exhaustive disjoint
+        top-level partitions. The repository Go test/example/fuzz declaration census
+        must match each proof exactly once and every unit must match a proof.
+        Subtest filters are forbidden: all subtests and backend cases remain selected.
+        Additions, omissions, overlaps, empty units and profile drift fail closed.
+        Existing per-unit budgets and required-summary enforcement remain binding.
+        The required verify/boot gate runs
         every classified tier fixture, discovered example package, and admitted
         archetype through the supported verifier, reports every failing bundle in
         one pass, and is mutation-proven through live recursive discovery to name
@@ -20296,7 +20498,7 @@ test_specification:
       promoted_by: '#2168, #2321'
       source: internal/releasee2e/testdata/golden_agent_workload
       executor: github.com/division-sh/swarm/internal/releasee2e
-      ci_owner: hitl-releasee2e-full
+      ci_owner: hitl-releasee2e-rest
       process_boundary: >
         The executor builds the current swarm binary for public structural commands and a separate go test -c
         serveapp binary with TestOwnedMockLifecycleProcessEntry for retained mock execution (H). The child uses
@@ -20337,7 +20539,7 @@ test_specification:
       promoted_by: '#2008, #2321'
       source: internal/releasee2e/testdata/full_lifecycle/standing_telegram
       executor: github.com/division-sh/swarm/internal/releasee2e
-      ci_owner: hitl-releasee2e-full
+      ci_owner: hitl-releasee2e-rest
       purpose: >
         Own one production-shaped compiled-process conformance profile that crosses cold authored source admission,
         standing activation, provider ingress, template routing, mock agent execution, workflow timer and decision-card
@@ -20410,7 +20612,7 @@ test_specification:
         M21: Dev restart exposes a strictly later public started_at and none of the predecessor exact event, delivery, or card facts; deterministic service, run, generation, and standing ingress entity IDs may recur.
         M22: Fresh dev ingress converges exactly once from the empty public history after epoch replacement.
         M23: The release fixture's finite-source guard and canonical-routing overlay independently prove the same explicit source root without introducing a second topology owner.
-        M24: The mandatory unfiltered CI owner executes smoke in PR profiles and all five journeys in full/nightly profiles.
+        M24: The mandatory top-level CI partition executes this complete proof, including smoke in PR profiles and all five journeys in full/nightly profiles; the package census proves exhaustive disjoint coverage across required units.
       supported_surfaces:
       - compiled swarm verify --json
       - compiled swarm test admission (T) and internal retained mock lifecycle child (H)
@@ -20745,7 +20947,7 @@ test_specification:
           generation. Missing required schemas or external provenance fails closed. Mutable declared/learned deployment
           activations are a separate ChannelActivationGeneration and do not alter historical workflow/source identity.
         excluded: >-
-          channel deployment destinations, activation runtime tools and private targets, activation credential references/epochs,
+          channel deployment destinations, activation runtime tools and private targets, activation credential references/value seals,
           readiness, scenario assertions, response values, mutable runtime state, and unrelated source internals
       execution_profile:
         owner: internal/runtime/scenarioexecution
@@ -24207,8 +24409,9 @@ cli_specification:
       behavior: >
         API-only complete connected-channel lifecycle. `connect <provider>`, `reconnect <provider>`, and
         `rebind <provider>` select one exact bundle/interface/target candidate and consume the durable onboarding
-        operation through start/get/retry. The nested satisfier-authenticated identity ceremony remains owned by
-        channel.connect|reconnect|rebind plus channel.confirm, but those lower RPCs are not a second whole-journey CLI.
+        operation through start/get/retry. The onboarding owner persists the exact admitted provider-credential evidence
+        into the nested satisfier-authenticated identity ceremony; channel.confirm remains the only lower-level public
+        mutation because explicit operator confirmation is a separate user step.
         Provider credentials enter only through hidden TTY input or stdin and are never accepted in argv. `list`
         consumes the composed identity/activation/readiness projection. `status` selects one activation by exact
         interface/bundle/target coordinate. `unbind` durably retires selected-store
@@ -27066,9 +27269,6 @@ api_specification:
         - conversation.fork_delete
         - channel.onboarding_start
         - channel.onboarding_retry
-        - channel.connect
-        - channel.reconnect
-        - channel.rebind
         - channel.unbind
         - channel.confirm
         - channel.proof_revoke
@@ -30590,11 +30790,12 @@ api_specification:
         required: [operation_id, kind, principal_id, interface, state, revision, save_proof, proof_status, requested_at]
         properties:
           operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          onboarding_operation_id: {$ref: '#/components/schemas/OpaqueId'}
           kind: {type: string, enum: [connect, reconnect, rebind, unbind]}
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
           interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
           challenge: {type: string, pattern: '^SWARM-[A-Z2-7]{16}$'}
-          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, expired, unbound]}
+          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, credential_stale, expired, unbound]}
           revision: {type: integer, minimum: 1}
           binding_revision: {type: integer, minimum: 1}
           external_account_reference: {type: string}
@@ -30633,7 +30834,7 @@ api_specification:
         additionalProperties: false
         required: [format, proof_id, revision, status, interface, external_account_reference, conversation_reference, conversation_scope, method, challenge, original_operation_id, minting_store_id, minting_deployment_id, verified_at, operator_confirmed, consent_scopes]
         properties:
-          format: {type: string, const: swarm-verified-account-proof-v1}
+          format: {type: string, const: swarm-verified-account-proof-v2}
           proof_id: {$ref: '#/components/schemas/OpaqueId'}
           revision: {type: integer, minimum: 1}
           status: {type: string, enum: [active, revoked]}
@@ -30701,13 +30902,12 @@ api_specification:
       ChannelCredentialAdmission:
         type: object
         additionalProperties: false
-        required: [role, store_key, kind, receipt, epoch]
+        required: [role, store_key, kind]
         properties:
           role: {type: string, minLength: 1}
           store_key: {type: string, minLength: 1}
           kind: {type: string, enum: [written, observed]}
           receipt: {type: string, minLength: 1}
-          epoch: {type: string, minLength: 1}
       ChannelOnboardingOperation:
         type: object
         additionalProperties: false
@@ -35001,42 +35201,6 @@ api_specification:
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]
-    channel.connect:
-      tier: must_have
-      description: Begin an exact revision-fenced binding for an unbound v2 channel interface. The returned short-lived challenge is not a credential; only a current satisfier-authenticated text fact followed by operator confirmation can bind it.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 0}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
-    channel.reconnect:
-      tier: must_have
-      description: Re-verify the same authenticated account and conversation against the current exact binding revision and active interface generation.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
-    channel.rebind:
-      tier: must_have
-      description: Replace a current binding with a different satisfier-authenticated claimant after explicit operator confirmation; it never silently selects or overwrites an account.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
     channel.confirm:
       tier: must_have
       description: Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome and retries pending or failed proof projection without repeating claim or binding mutation; rejection omits binding.
@@ -35048,7 +35212,7 @@ api_specification:
       - {name: approve, required: true, schema: {type: boolean}}
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED, IDEMPOTENCY_CONFLICT]
     channel.unbind:
       tier: must_have
       description: Persist an explicit revision-fenced local unbind for a current or retained listed interface so an available machine proof cannot silently recreate the deployment binding.
@@ -35125,7 +35289,7 @@ api_specification:
       description: |
         Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed workspace-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.
 
-        `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences plan -> quiescence -> cleanup -> managed-container stop. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner; false preserves source artifact rows. In DB-loaded RuntimeContextManager mode, successful or partial apply-mode runtime.nuke requests with `include_source_artifacts=true` also mark loaded BundleContext entries unavailable/unloaded so later supported admissions fail closed with BUNDLE_UNAVAILABLE; `include_source_artifacts=false` must not deactivate loaded contexts. Public final-response idempotency follows the v1 API idempotency convention.
+        `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences durable operation admission/replay -> complete-context admission withdrawal and join -> persisted plan -> persisted-work quiescence -> cleanup -> managed-container settlement -> context convergence. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner. True atomically commits empty source topology with cleanup and leaves contexts unavailable, including on partial container failure. False preserves the identical admitted artifact set and source topology, temporarily withdraws execution for cleanup, then reconstructs fresh runtime generations and workspace projections before republishing the complete set. It must not leave successfully reconstructed retained contexts terminally unloaded. No original source directory is reread and no changed source is admitted. Public final-response idempotency follows the v1 API convention; it is only a response cache, not authority to repeat domain cleanup or to skip process-local reconstruction after a crash.
       scope:
         required:
         - control:runtime
@@ -36032,49 +36196,49 @@ agent_lifecycle_authority:
     operation_identity: After per-agent serialization, derive one stable operation id from the agent id, authoritative expected lifecycle occurrence (runtime epoch, generation, and phase), candidate config revision, normalized subordinate plan, and exact dynamic readiness authority when present. Retry while that expected occurrence and authority remain current reuses the id; the same candidate and plan after any intervening committed generation or readiness-plan revision is a distinct operation. A candidate whose revision already equals the authoritative current cell is a no-op and creates no lifecycle operation.
     session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
   recovery:
-    rule: Recovery hydrates only durable non-terminal cells. Separately, the selected-store lifecycle diagnostic owner atomically projects pending historical occurrences through the canonical runtime-log encoder and named event Tx port with acknowledgement. Projection failure leaves the row pending, is reported nonrecursively, and never repeats or reverses a lifecycle transition.
-  diagnostic_projection:
-    owner: existing lifecycle persistence owner, composed with the existing named runtime-log event owner and selected-fork provenance owner
-    enqueue: >-
-      The original transition transaction stores required provenance and execution_mode with each occurrence.
-      Origin has independent normal/selected_contract_fork ownership and observation/accepted_event causality.
-      Snapshot the complete concrete agent identity, exact process/source binding and descriptor actor mode.
-      Observations have no parent and use actor mode; causal diagnostics require an already persisted same-run
-      accepted parent and use that parent's mode. Invalid causal origin never degrades to observation.
-      Selected origins require the issued execution, binding, source/fork IDs, generation and fingerprints;
-      validate these through the existing selected-fork owner, never payload tags or projector context.
-      Requested origin participates in operation replay conflict identity. Missing or conflicting origin rolls
-      back enqueue and the original transition. There are no schema defaults, old-store readers or backfills.
-    projection: >-
-      Each bounded batch processes at most 100 occurrences, with one transaction per occurrence and an
-      independently committed prefix. Lock the run before selecting/locking its exact pending occurrence.
-      Queue selection hints are not projection authority; after run locking, a removed queue has no occurrence
-      to project. Never recreate a deleted occurrence or acknowledge a missing row. Validate the operation,
-      transition, concrete coordinate, timestamp, process/source and historical origin before the named append.
-      Append the event using outbox_id/created_at, canonical no_subscriber_by_design settlement and acknowledge
-      in the same transaction; finalize authoractivity/revision once. Failure rolls back both event and ack.
-      An event without its acknowledgement, or an acknowledged event with missing/conflicting canonical facts,
-      is corruption, not an old-store repair opportunity. Concurrent projectors use this selected-store boundary,
-      not a manager-local mutex. No optional log sink can acknowledge durable work.
-    historical: >-
-      Delayed projection uses retained immutable operation/transition/provenance facts. Normal shutdown, retired
-      grants, changed/deleted current actors and closed selected executions do not require a live lease to project.
-      Missing retained historical evidence fails closed. The caller's run, mode, source and runtime lineage are
-      not facts of the diagnostic occurrence.
-    fork_validation: >-
-      Both selected-fork validators consume the exact read-only acknowledged observation relation within their
-      run transaction. Verify event ID, canonical payload bytes, timestamp, run, execution mode, producer, scope,
-      absent parent, no-delivery settlement and absent deliveries. Only those exact observations may be excluded
-      from the final stray-event count. Never insert them into recursive selected-tree roots or use them to admit
-      a descendant, delivery, effect or source freeze. All ordinary causal and selected activity rules remain intact.
-    lifecycle_failure: >-
-      Clear successfully completed retirement responsibility independently of auxiliary projection failure.
-      Preserve original lifecycle, provider and cleanup failures; report diagnostic failure via the existing
-      process sink rather than recursively logging it into the same outbox. Startup hydration and joined shutdown
-      retain explicit diagnostic-error attribution without reversing committed lifecycle outcomes. Joined work and store teardown ordering
-      remain unchanged; no detached worker, retry framework or error suppression is introduced.
+    rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.
+    diagnostic_settlement: >-
+      RuntimeLogger constructs the lifecycle diagnostic payload from the immutable outbox agent/run identity rather
+      than the consuming runtime context. The lifecycle producer snapshots its typed diagnostic lineage in the
+      outbox payload using the existing diagnostic-lineage owner; its run must match the immutable agent identity.
+      Later projection retains that lineage and cannot adopt a consuming runtime's lineage.
+      PersistLifecycleDiagnostic validates the exact outbox snapshot and commits
+      the admitted diagnostic-direct event with projected_at and its projection receipt in one selected-store
+      transaction. First settlement compiles the immutable producer's explicit ParentEventID, or SubjectEventID
+      when no explicit parent exists, into events.source_event_id through canonical same-run event-reference
+      admission. Missing, foreign or malformed causal references fail closed while the run exists; they must not
+      silently become parentless diagnostics. Genuinely parentless observations remain run-scoped.
+      The receipt retains the event identity, admitted parent_event_id and lineage_disposition
+      (causal_explicit, causal_subject, parentless or historical_cleanup), canonical payload,
+      timestamp and execution mode. The diagnostic logger's root posture determines mode at first settlement; replay
+      consumes the recorded receipt, never the retry caller's posture or lineage. This non-routed diagnostic mode is
+      not executable authority. Concurrent consumers return the same committed outcome. Missing persistence, conflicting
+      identity or payload, rollback and unreadable acknowledgment evidence cannot acknowledge the row. The independent
+      MarkAgentLifecycleDiagnosticProjected operation is forbidden.
+    diagnostic_history: >-
+      Pending diagnostics retain original run coordinates as audit payload even when cleanup has deleted that run.
+      Under the same transaction, existing runs are protected against concurrent deletion and receive ordinary
+      causal or genuinely parentless diagnostics; absent runs receive standalone diagnostic-direct events with an
+      explicit historical_cleanup receipt and no live parent edge. Original producer coordinates remain immutable
+      audit evidence, not executable selected-fork lineage. There is no failed-insert
+      fallback and no synthesized run. An acknowledged outbox replays its retained receipt without requiring the
+      event to remain present, so later cleanup cannot cause log resurrection. Only newly committed projection
+      publishes a process-local recorder notification; recorder notification is not durable acknowledgment authority.
   destructive_cleanup_quiescence:
-    runtime_nuke: Apply-mode runtime.nuke closes admission and awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
+    runtime_nuke: Apply-mode runtime.nuke withdraws the complete affected context set and fences every runtime and standing occurrence before waiting for any predecessor to drain. It awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
+    reset_reconstruction: The existing process lifecycle supervisor owns reset reconstruction and final shutdown; RuntimeContextManager owns complete-set withdrawal, staged installation, and publication. When include_source_artifacts is false, retain the identical admitted source set and allocate fresh runtime occurrences, generation grants, source projections, and workspace lifecycles. Rebind all execution handlers, fork consumers, MCP, standing and channel publication, monitoring, and final-close records before reopening admission. Original directories are not reread, and already retired runtime or workspace lifecycles cannot be reopened. Reconstruction failure leaves the entire set unavailable rather than publishing a partial set.
+    reset_execution_convergence: Runtime.PrepareStart uses the ordinary startup interpreter through subscription readiness, integrity checks, provider preflight, and topology preparation without admitting managed execution or starting delivery recovery and autonomous producers. Every reset candidate must prepare successfully before complete-set publication. Publication exposes metadata for consumer refresh but does not release execution; RuntimeContextManager fences bundle, run, channel, standing-service, and standing-recovery acquisition until the supervisor releases the exact complete published set after consumer convergence. Prepared execution release is single-use and rejects cancellation or retirement. API and MCP dispatch remain fenced until execution startup completes.
+    reset_startup_mcp_transport: The execution fence does not prohibit the current prepared generation grant's MCP capability preflight. The existing MCP gateway authenticates and resolves the registered typed startup probe authority; the runtime matches the exact grant, state version, process owner, and generation and admits the request under its own Runtime.WorkOccurrence. Startup requests are joined before grant retirement. Request method, probe-shaped payload, or bearer authentication alone cannot exempt application execution. Unknown, expired, unregistered, foreign, settled, admitted, or retired startup authority cannot use this pre-execution path. Ordinary MCP execution remains subject to RuntimeContextManager acquisition and complete-set convergence. The existing unsupported multi-context Claude CLI posture is unchanged.
+    reset_resource_lifetimes: Runtime and standing work must join before workspace ReleaseSourceProjection or caller projection release. A request that selected a generation-specific handler or gateway retains that exact runtime occurrence through handler settlement. The process-owned reset request never holds the runtime lease it must drain. The already-booted control API remains available for state readback and outcome replay while executable readiness and public ingress are withdrawn.
+    reset_historical_lookup: Under the operation lease and retained possession, the reset owner looks up the exact operation identity before reading current source topology or process-local projection inventory. Recorded responses and request conflicts cannot depend on the availability of later projections. Only a genuinely new admission captures current projection disposal identities; admission still checks keyed identity and snapshots source topology atomically.
+    reset_startup_continuation: Under retained process authority and before source loading or ingestion, the existing reset coordinator resumes only uncommitted effects from the exact pending receipt. Its owned continuation retains reset serialization through process-local startup convergence; closing or cancelling an interrupted startup does not complete the receipt. Reconstruction selects only the recorded retained source set, validates identical admitted artifacts, and uses complete-set prepared startup. A source-clearing reset reconstructs no runtime and exposes only unloaded control-plane behavior and outcome replay. Only successful reconstruction and exact execution-authority convergence complete the durable operation before readiness. Historical completed outcomes never reenter startup reconstruction or destructive effects.
+    reset_container_identity: Reset inventory, durable plans, and serialized outcomes retain the immutable Docker object ID together with the complete canonical container identity, including admitted bundle hash, source projection, and data projection. The ID is recorded before cleanup and external effects. Settlement inspects and stops only that recorded object ID; it never resolves a durable target by its reusable name, even when a replacement has identical labels. Missing recorded objects are settled without affecting a successor. Missing IDs fail closed rather than falling back to name lookup. Settlement also compares the exact planned source/projection identity. A lost acknowledgment is reconciled against that exact object; a still-running, foreign, or uninspectable target remains a failure. Retired entity containers are not reset targets.
+    reset_projection_identity: Reset admission records exact source projection cleanup coordinates from the existing sourceartifact owner before any predecessor is withdrawn. Each disposable projection has an immutable ownership marker outside its mounted admitted-source tree. Crash recovery inventories only managed-container scopes belonging to those recorded source/projection identities, never all containers sharing a bundle hash. After exact container settlement and before source reconstruction, sourceartifact removes only the recorded projection directory whose marker still matches; missing directories are settled, changed or symlinked ownership fails closed, and successor projections remain untouched. Disposal identities survive released handles but cannot reopen source access. Content-addressed shared data projections are not disposable runtime source projections; their exact identities remain attached to container settlement.
+    reset_projection_settlement: Live release and crash cleanup use the same sourceartifact disposal owner. Recursive source deletion retains the ownership marker through every retryable failure. Marker removal occurs only after the source tree is absent; the final empty envelope is removed non-recursively. An interrupted final unlink may leave an empty envelope, which is settled without inferring source ownership or recursively deleting unmarked contents. Unknown envelope entries, nonempty unmarked roots, and changed directory identities fail closed.
+    reset_projection_resource_disposal: Projection disposal is broader than the reset-eligible container stop catalog. After predecessor work joins, both live release and startup recovery use the existing Docker workspace owner to enumerate all runtime-owned objects with the exact admitted bundle and projection identity, including scaffold, system, agent, flow, stopped and partially created objects. Every selected object is inspected and removed by immutable Docker ID before source files are removed. Unresolved removal retains the source tree and fence; acknowledgment uncertainty is reconciled by exact-ID inspection. Foreign projections, successor projections and durable workspace volumes are never disposal targets.
+    reset_reconstruction_allocations: Before creating a reconstruction projection directory or any container, the existing reset operation journal durably appends its exact planned sourceartifact cleanup identity and managed-workspace disposition. Allocation intents are append-only evidence separate from the immutable admitted request and committed effect receipts. Both live reconstruction and startup continuation consume this same owner. An interrupted continuation settles all recorded abandoned allocations before allocating another successor, including after repeated recovery crashes. Final convergence reads the advanced journal revision and cannot erase allocation evidence. Same-process converged retries do not destroy their current successor.
+    reset_cleanup_attempt_clock: RequestedAt remains immutable admission evidence. Every uncommitted cleanup attempt evaluates directive expiry and other current-time authority gates using the current attempt time, including same-key continuation and startup recovery. No retry may waive an unexpired authority gate or rewrite a committed cleanup receipt.
+    reset_empty_topology: Successfully recovered source-clearing reset leaves a valid zero-context source set, not an incomplete constructor. New keyed or unkeyed resets with either source-retention mode must complete over that empty set without synthesizing runtimes or restoring source. Exact outcome replay and conflicting-key rejection remain authoritative, and a successful empty reset releases its active operation slot.
     other_ordering: Manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Selected-store compatibility migration and backfill paths do not exist.
     diagnostic_lifetime: >-
       Ordinary selected execution close retains diagnostic occurrences for delayed projection. Admitted destructive
@@ -36407,6 +36571,10 @@ filesystem_source_model:
   local_root_selection:
     default: the captured invocation directory
     current_directory_spelling: omission or dot (`.`)
+    selected_root_aliases: |
+      ResolveSourceRoot requires a nonempty absolute invocation coordinate already owned by the CLI; it never consults ambient cwd. Relative operands are projected from that coordinate without lexically collapsing parent traversals before resolving symlinks. The selected root is canonicalized once, resolving symlink aliases (including ancestor aliases), and must be an existing directory. Missing, broken, cyclic, or file-valued selections fail closed. Omission and dot retain the captured invocation-directory authority. This selection rule does not relax included-member no-follow admission or promise transactional filesystem selection.
+    invocation_invariance: |
+      With effective config and platform inputs fixed, relative/absolute operands under or outside cwd, omission/dot, explicit root aliases, and symlinked invocation directories selecting the same tree have identical verification outcomes, bundle hashes, catalog labels, static-data IDs, and static content. Host paths in diagnostics are not semantic identity. Catalog reconstruction and runtime read_flow_data consume admitted bytes, not the original directory.
     rule: |
       Omission and `.` select exactly the captured invocation directory. One positional root is the only alternate. There is no ancestor, repository, manifest, package, config, environment, selected-context, or inferred-project fallback. For `swarm test`, the first positional slot is always the root; targeting one scenario from cwd therefore uses `swarm test . <scenario-label>`.
     source_aware_commands:
@@ -36526,6 +36694,10 @@ filesystem_source_model:
       Persisted boot, recovery, replay, and fork decode the selected-store blob and compile only the reconstructed artifact. They never require or inspect the original filesystem. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
     process_epoch_rule: |
       Serve admits its complete source set once before runtime publication and keeps it fixed for the process epoch. Editing the original directory cannot replace a live runtime source. A different local artifact or persisted hash requires a new serve process; project reload and dynamic project replacement are retired rather than emulated.
+      Retained-source destructive reset is an execution-lifetime reconstruction of that identical admitted set, not source replacement. It consumes the already admitted artifact bytes and canonical serve construction inputs to mint fresh runtime and projection lifetimes. It does not restore retired bundle-management helpers or admit edited source bytes.
+  startup_integrity:
+    owner: internal/runtime/startuprecovery.Recover
+    rule: Both selected stores expose the read-only StartupRecovery availability product. Before runtime startup or readiness, serve checks all active non-standing run source references, then reads each distinct available source artifact through the selected artifact reader and validates canonical bytes and exact requested hash with sourceartifact.Persisted.Validate. Row presence alone is not integrity. Missing, corrupt, mismatched, or unreadable artifacts fail closed with the affected run and hash; this path never deletes or terminalizes run history, removes containers, or restores source files. Pending destructive-reset recovery is a separate operation and must settle before ordinary startup.
   runtime_projection:
     owner: internal/sourceartifact projection lifecycle
     mount: /opt/swarm/source
@@ -36535,8 +36707,12 @@ filesystem_source_model:
       The source mount is mandatory, not best-effort. Docker eager scaffold/system creation and lazy scaffold/system/per-agent/per-flow resolution require a live lifecycle binding and successful source-projection validation before container creation or start. A missing or released projection fails closed; no consumer may suppress the error, omit the mount, and advertise /opt/swarm/source as available. Host and Docker reject an unavailable projection even when earlier boot validation succeeded. Host target construction propagates final mount-descriptor validation errors instead of returning an empty source backing path.
     host_release: |
       Host release installs a permanent admission fence before waiting for admitted workspace operations to finish. New prerequisite, validation, system-workspace, execution-resolution, capability-resolution, and binding operations are rejected after the fence. Release then clears the Host binding and relinquishes its retained projection handle. A caller retaining another handle cannot reopen the released lifecycle; repeated release is harmless.
+    release_retry: |
+      A released projection handle cannot be retained or used again. Failed filesystem removal retains the exact private cleanup target until deletion succeeds; retry never decrements the handle reference twice or reopens execution. Host and Docker lifecycle owners retain that cleanup handle across release failures, even though the workspace lifecycle remains permanently fenced.
+    docker_release: |
+      Docker release retains each creation intent's complete canonical container identity. After fencing and joining admitted workspace operations, it inspects the named target and requires exact identity equality before removing the immutable inspected Docker object ID, never the reusable name. Missing targets are settled; changed, foreign, malformed, or uninspectable identities fail closed. An uncertain removal acknowledgment is reconciled against the exact object ID. Any unresolved target retains the source filesystem and keeps the lifecycle permanently fenced. Runtime reset inventory is restricted to the process supervisor's exact admitted source/projection lifetimes; global runtime labels alone do not authorize another process's containers.
     rule: |
-      Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one freshly minted process-local projection identity. Retained handles preserve that identity; separate materializations mint different identities even for the same bundle_hash. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the exact projection binding before prerequisite or system-workspace creation, including single- and multi-context serve and selected-source rebind. Docker container names and runtime labels include both bundle and projection identity, so neither running nor stopped containers from another process projection can be reused. After runtime drain, the lifecycle removes every container it created for that projection, including partially launched containers, before the projection filesystem is released; acknowledgment loss is reconciled by exact owned-name removal and a released lifecycle cannot restart. Process projection identity is never writable-workspace identity: one canonical owner derives every Docker named volume and Host workspace directory from a length-framed `(full validated bundle_hash, closed workspace kind, exact typed semantic identity)` tuple. The derived key is backend-neutral and injective for the platform contract: bundle digests are never truncated, and flow identities are never passed through display-slug normalization. Per-agent and per-flow-instance backings therefore attach to fresh process containers under the same durable names. Scaffold and system support volumes are bundle-owned operational state, are retained across process replacement, and are excluded from source-projection teardown; projection teardown removes containers only. The retired entity-container workspace and selected-store slug lookup do not exist. Hash-only container identity, fixed-name compatibility, hash-keyed queues, and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
+      Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one freshly minted process-local projection identity. Retained handles preserve that identity; separate materializations mint different identities even for the same bundle_hash. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the exact projection binding before prerequisite or system-workspace creation, including single- and multi-context serve and selected-source rebind. Docker container names and runtime labels include both bundle and projection identity, so neither running nor stopped containers from another process projection can be reused. After runtime drain, the lifecycle removes every container it created for that projection, including partially launched containers, before the projection filesystem is released; acknowledgment loss is reconciled by readback of the exact inspected Docker object ID and a released lifecycle cannot restart. Process projection identity is never writable-workspace identity: one canonical owner derives every Docker named volume and Host workspace directory from a length-framed `(full validated bundle_hash, closed workspace kind, exact typed semantic identity)` tuple. The derived key is backend-neutral and injective for the platform contract: bundle digests are never truncated, and flow identities are never passed through display-slug normalization. Per-agent and per-flow-instance backings therefore attach to fresh process containers under the same durable names. Scaffold and system support volumes are bundle-owned operational state, are retained across process replacement, and are excluded from source-projection teardown; projection teardown removes containers only. The retired entity-container workspace and selected-store slug lookup do not exist. Hash-only container identity, fixed-name compatibility, hash-keyed queues, and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
   retired_surface:
     behavior: fail_closed_with_teaching_error_or_absent_public_surface
     no_compatibility: true

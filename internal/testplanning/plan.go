@@ -122,40 +122,31 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		sort.Strings(shards[i].Packages)
 	}
 	units := append([]ProofUnit(nil), shards...)
-	specialPackageUses := map[string]int{}
-	for _, id := range profilePolicy.Units {
-		for _, pkg := range policy.Units[id].Packages {
-			specialPackageUses[pkg]++
-		}
-	}
 	for _, id := range profilePolicy.Units {
 		specialUnit := policy.Units[id]
-		weight := 0.0
 		for _, pkg := range specialUnit.Packages {
 			if !discovered[pkg] {
 				return RunPlan{}, fmt.Errorf("unit %s package %s is absent from discovered inventory", id, pkg)
 			}
-			packageWeight, ok := model.Packages[pkg]
-			if !ok {
-				packageWeight = policy.Planning.UnknownPackageSeconds
-			} else if packageWeight <= 0 {
-				packageWeight = 0.1
-			}
-			weight += packageWeight / float64(specialPackageUses[pkg])
 		}
 		unitPackages, err := canonicalStrings(specialUnit.Packages)
 		if err != nil {
 			return RunPlan{}, fmt.Errorf("unit %s: %w", id, err)
 		}
-		units = append(units, ProofUnit{
+		unit := ProofUnit{
 			ID:            id,
 			Packages:      unitPackages,
 			Run:           specialUnit.Run,
 			CountMode:     specialUnit.CountMode,
 			EnvironmentID: specialUnit.EnvironmentID,
 			BudgetClass:   specialUnit.BudgetClass,
-			WeightSeconds: weight,
-		})
+		}
+		weight, measured := model.UnitSeconds(profile, unit)
+		if !measured {
+			weight = policy.Planning.UnknownPackageSeconds
+		}
+		unit.WeightSeconds = weight
+		units = append(units, unit)
 	}
 	plan := RunPlan{
 		Version:        RunPlanVersion,
@@ -272,7 +263,16 @@ func MatrixJSON(plan RunPlan) ([]byte, error) {
 	matrix := struct {
 		Include []entry `json:"include"`
 	}{Include: make([]entry, 0, len(plan.Units))}
-	for _, unit := range plan.Units {
+	// Offer expensive units first without changing the digest-bound plan. Actions
+	// controls admission; this ordering does not promise a runner start order.
+	ordered := append([]ProofUnit(nil), plan.Units...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].WeightSeconds == ordered[j].WeightSeconds {
+			return ordered[i].ID < ordered[j].ID
+		}
+		return ordered[i].WeightSeconds > ordered[j].WeightSeconds
+	})
+	for _, unit := range ordered {
 		matrix.Include = append(matrix.Include, entry{Unit: unit.ID})
 	}
 	return json.Marshal(matrix)

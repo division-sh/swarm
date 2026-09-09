@@ -1,5 +1,4 @@
 send-notification:
-  id: send-notification
   execution_type: system_node
   subscribes_to: [automation.requested]
   event_handlers:

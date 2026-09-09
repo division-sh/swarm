@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -504,6 +506,16 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 	if opts.SourceArtifactFact.Validate() != nil {
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
+	}
+	if binder, ok := store.(interface {
+		SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
+	}); ok {
+		binder.SetEventPayloadAdmitter(opts.PayloadAdmitter)
+	}
 	if opts.TemplateInstanceActivator != nil && opts.TemplateInstancePlanner == nil {
 		owner := newExternalTestFlowInstanceActivationOwner(opts.TemplateInstanceActivator)
 		opts.TemplateInstancePlanner = owner
@@ -548,6 +560,11 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	if opts.SourceArtifactFact.Validate() != nil {
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
+	}
+	if opts.PayloadAdmitter == nil {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
+		}
 	}
 	if opts.WorkOwner == nil {
 		process := worklifetime.NewProcess()

@@ -108,6 +108,8 @@ type executionFrame struct {
 	state                     ExecutionState
 	result                    ExecutionResult
 	rule                      *runtimecontracts.HandlerRuleEntry
+	payloadType               *runtimecontracts.ResolvedCatalogType
+	entityType                *runtimecontracts.ResolvedCatalogType
 	ruleSource                handlerRuleSource
 	ruleIndex                 int
 	payload                   map[string]any
@@ -122,6 +124,7 @@ type executionFrame struct {
 	joinResultType            runtimecontracts.CatalogTypeReference
 	loopPlan                  *runtimecontracts.WorkflowLoopPlan
 	loopActivation            *loopruntime.Activation
+	collectionPlan            runtimecontracts.WorkflowHandlerCollectionPlan
 }
 
 type handlerRuleSource string
@@ -648,11 +651,20 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	}
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
+	payloadType := e.executionPayloadType(req)
+	entityType, _ := semanticview.ResolveEntityStructuralType(e.deps.Source, req.Node.FlowPath())
+	collectionPlan, err := e.resolveHandlerCollectionPlan(req)
+	if err != nil {
+		return executionFrame{}, err
+	}
 	return executionFrame{
 		ctx:                      ctx,
 		req:                      req,
 		base:                     base,
 		payload:                  payload,
+		payloadType:              payloadType,
+		entityType:               entityType,
+		collectionPlan:           collectionPlan,
 		topLevelDataAccumulation: req.Handler.DataAccumulation,
 		state: ExecutionState{
 			State:       state,
@@ -672,6 +684,18 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 		},
 		ruleIndex: -1,
 	}, nil
+}
+
+func (e *Executor) resolveHandlerCollectionPlan(req ExecutionRequest) (runtimecontracts.WorkflowHandlerCollectionPlan, error) {
+	bundle, ok := semanticview.Bundle(e.deps.Source)
+	if !ok || bundle == nil {
+		return runtimecontracts.WorkflowHandlerCollectionPlan{}, fmt.Errorf("collection dataflow requires a loaded contract bundle")
+	}
+	eventType := strings.TrimSpace(req.HandlerEventKey)
+	if eventType == "" {
+		eventType = strings.TrimSpace(string(req.Event.Type()))
+	}
+	return bundle.ResolveHandlerCollectionPlan(req.Node, eventType, req.Handler)
 }
 
 func (e *Executor) runSteps(frame *executionFrame) error {
@@ -981,15 +1005,20 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.SourcePath, spec.Source)
-	items := executionItems(sourceValue)
-	if len(items) == 0 {
-		entityValue, _ := resolveContractPath(current, frame.state, spec.EntitiesPath, spec.Entities)
-		items = executionItems(entityValue)
+	plan, err := e.queryCollectionPlan(frame)
+	if err != nil {
+		return err
 	}
+	items, err := e.collectionItems(frame, plan.Source)
+	if err != nil {
+		return err
+	}
+	current := e.currentContext(frame)
 	if filter := strings.TrimSpace(spec.Filter); filter != "" {
-		compiled, err := compileExecutionCondition(filter)
+		options := frameExpressionOptions(frame)
+		itemType := plan.Source.ItemType.Clone()
+		options.ItemType = &itemType
+		compiled, err := compileExecutionCondition(filter, options)
 		if err != nil {
 			return err
 		}
@@ -1008,11 +1037,10 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 	}
 	var value any = items
 	switch {
-	case strings.TrimSpace(spec.GroupBy) != "":
+	case plan.GroupBy != nil:
 		grouped := map[string]any{}
 		for _, item := range items {
-			scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
-			resolved, err := scope.resolveOperand(strings.TrimSpace(spec.GroupBy), executionOperandDefaultItem)
+			resolved, err := collectionFieldValue(item, *plan.GroupBy)
 			if err != nil {
 				return err
 			}
@@ -1025,28 +1053,18 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		value = grouped
 	case spec.Count:
 		value = len(items)
-	case len(spec.Select) > 0:
+	case len(plan.Select) > 0:
 		selected := make([]any, 0, len(items))
 		for _, item := range items {
-			obj, ok := asObject(item)
-			if !ok {
-				continue
-			}
-			projected := map[string]any{}
-			for _, field := range spec.Select {
-				field = strings.TrimSpace(field)
-				if field == "" {
-					continue
-				}
-				if fieldValue, ok := obj[field]; ok {
-					projected[field] = fieldValue
-				}
+			projected, err := projectCollectionItem(item, plan.Select)
+			if err != nil {
+				return err
 			}
 			selected = append(selected, projected)
 		}
 		value = selected
 	}
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.query"), value); err != nil {
+	if err := e.writeStepValue(frame, plan.StoreAs, value); err != nil {
 		return err
 	}
 	return nil
@@ -1138,10 +1156,20 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
+	if frame.collectionPlan.Filter == nil {
+		return fmt.Errorf("filter collection plan is unavailable")
+	}
+	resolution := *frame.collectionPlan.Filter
+	items, err := e.collectionItems(frame, resolution)
+	if err != nil {
+		return err
+	}
 	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	items := executionItems(sourceValue)
-	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition))
+	condition := strings.TrimSpace(spec.Condition)
+	options := frameExpressionOptions(frame)
+	itemType := resolution.ItemType.Clone()
+	options.ItemType = &itemType
+	compiled, err := compileExecutionCondition(condition, options)
 	if err != nil {
 		return err
 	}
@@ -1167,9 +1195,13 @@ func (e *Executor) stepReduce(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	items := executionItems(sourceValue)
+	if frame.collectionPlan.Reduce == nil {
+		return fmt.Errorf("reduce collection plan is unavailable")
+	}
+	items, err := e.collectionItems(frame, *frame.collectionPlan.Reduce)
+	if err != nil {
+		return err
+	}
 	value := executionReduceValue(items, strings.TrimSpace(spec.Operation))
 	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.reduce"), value); err != nil {
 		return err
@@ -1182,10 +1214,20 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
+	if frame.collectionPlan.Count == nil {
+		return fmt.Errorf("count collection plan is unavailable")
+	}
+	resolution := *frame.collectionPlan.Count
+	items, err := e.collectionItems(frame, resolution)
+	if err != nil {
+		return err
+	}
 	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
-	items := executionItems(sourceValue)
-	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition))
+	condition := strings.TrimSpace(spec.Condition)
+	options := frameExpressionOptions(frame)
+	itemType := resolution.ItemType.Clone()
+	options.ItemType = &itemType
+	compiled, err := compileExecutionCondition(condition, options)
 	if err != nil {
 		return err
 	}
@@ -1902,13 +1944,17 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	itemsValue, _ := resolveContractPath(frame.base, frame.state, spec.ItemsPath, spec.ItemsFrom)
-	items := sliceFromAny(itemsValue)
-	current := e.currentContext(frame)
+	plan, err := e.groupByCollectionPlan(frame)
+	if err != nil {
+		return err
+	}
+	items, err := e.collectionItems(frame, plan.Source)
+	if err != nil {
+		return err
+	}
 	grouped := make(map[string]any)
 	for _, item := range items {
-		scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
-		resolved, err := scope.resolveOperand(strings.TrimSpace(spec.Key), executionOperandDefaultItem)
+		resolved, err := collectionFieldValue(item, plan.Key)
 		if err != nil {
 			return err
 		}
@@ -1919,7 +1965,7 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 		existing, _ := grouped[key].([]any)
 		grouped[key] = append(existing, item)
 	}
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.group_by"), grouped); err != nil {
+	if err := e.writeStepValue(frame, plan.StoreAs, grouped); err != nil {
 		return err
 	}
 	return nil
@@ -2052,14 +2098,139 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 
 func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {
 	allowJoin := frame != nil && (frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout)
+	options := frameExpressionOptions(frame)
 	if !allowJoin {
-		return workflowexpr.ValueExpressionOptions{}
+		return options
 	}
-	options := workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinResultType: frame.joinResultType}
+	options.AllowJoin = true
+	options.JoinResultType = frame.joinResultType
 	if frame.req.JoinDeclaration.Mode() == timeridentity.JoinRefModeFanOutDelivery {
 		options.JoinContext = workflowexpr.JoinContextFanOutDelivery
 	}
 	return options
+}
+
+func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {
+	if frame == nil {
+		return workflowexpr.ValueExpressionOptions{}
+	}
+	options := workflowexpr.ValueExpressionOptions{}
+	if frame.payloadType != nil {
+		value := frame.payloadType.Clone()
+		options.PayloadType = &value
+	}
+	if frame.entityType != nil {
+		value := frame.entityType.Clone()
+		options.EntityType = &value
+	}
+	return options
+}
+
+func (e *Executor) queryCollectionPlan(frame *executionFrame) (runtimecontracts.WorkflowQueryCollectionPlan, error) {
+	if frame == nil || frame.collectionPlan.Query == nil {
+		return runtimecontracts.WorkflowQueryCollectionPlan{}, fmt.Errorf("query collection plan requires an execution frame")
+	}
+	return *frame.collectionPlan.Query, nil
+}
+
+func (e *Executor) groupByCollectionPlan(frame *executionFrame) (runtimecontracts.WorkflowGroupByCollectionPlan, error) {
+	if frame == nil || frame.collectionPlan.GroupBy == nil {
+		return runtimecontracts.WorkflowGroupByCollectionPlan{}, fmt.Errorf("group_by collection plan requires an execution frame")
+	}
+	return *frame.collectionPlan.GroupBy, nil
+}
+
+func (e *Executor) collectionItems(frame *executionFrame, source runtimecontracts.WorkflowCollectionItemResolution) ([]any, error) {
+	switch source.Kind {
+	case runtimecontracts.WorkflowCollectionSourcePath:
+		value, ok := resolveContractPath(e.currentContext(frame), frame.state, source.Path, source.Source)
+		if !ok {
+			return nil, fmt.Errorf("collection source %q is unavailable at runtime", source.Source)
+		}
+		return executionItems(value), nil
+	case runtimecontracts.WorkflowCollectionSourceEntityTable:
+		if e.deps.EntityCollections == nil {
+			return nil, fmt.Errorf("query entities %q requires the runtime entity collection reader", source.EntityType)
+		}
+		flowID := strings.TrimSpace(source.FlowID)
+		if flowID == "" {
+			flowID = strings.TrimSpace(frame.req.ExecutionFlowID.String())
+		}
+		if flowID == "" {
+			flowID = strings.TrimSpace(frame.state.State.WorkflowName)
+		}
+		rows, err := e.deps.EntityCollections.QueryEntityCollection(frame.ctx, frame.req.Event.RunID(), flowID, source.EntityType)
+		if err != nil {
+			return nil, fmt.Errorf("query entities %q: %w", source.EntityType, err)
+		}
+		items := make([]any, len(rows))
+		for index, row := range rows {
+			items[index] = cloneStringAnyMap(row)
+		}
+		return items, nil
+	default:
+		return nil, fmt.Errorf("collection source %q has unsupported runtime kind %q", source.Source, source.Kind)
+	}
+}
+
+func collectionFieldValue(item any, field runtimecontracts.WorkflowCollectionFieldResolution) (any, error) {
+	object, ok := asObject(item)
+	if !ok {
+		return nil, fmt.Errorf("collection item for field %s must be an object", field.Name)
+	}
+	value, present := object[field.Name]
+	if !present || value == nil {
+		return nil, fmt.Errorf("collection item missing required field %s", field.Name)
+	}
+	return value, nil
+}
+
+func projectCollectionItem(item any, fields []runtimecontracts.WorkflowCollectionFieldResolution) (map[string]any, error) {
+	object, ok := asObject(item)
+	if !ok {
+		return nil, fmt.Errorf("query select requires object collection items")
+	}
+	projected := make(map[string]any, len(fields))
+	for _, field := range fields {
+		value, present := object[field.Name]
+		if !present || value == nil {
+			if field.IsOptional {
+				continue
+			}
+			return nil, fmt.Errorf("query select item missing required field %s", field.Name)
+		}
+		projected[field.Name] = value
+	}
+	return projected, nil
+}
+
+func (e *Executor) executionPayloadType(req ExecutionRequest) *runtimecontracts.ResolvedCatalogType {
+	if e == nil || e.deps.Source == nil {
+		return nil
+	}
+	eventType := strings.TrimSpace(req.HandlerEventKey)
+	if eventType == "" {
+		eventType = strings.TrimSpace(string(req.Event.Type()))
+	}
+	flowID := strings.TrimSpace(req.ExecutionFlowID.String())
+	if flowID == "" {
+		flowID = strings.TrimSpace(req.Node.FlowPath())
+	}
+	if strings.Contains(eventType, "*") {
+		concreteEvent := string(req.Event.Type())
+		resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(e.deps.Source, req.Node, concreteEvent)
+		if !resolved.Matched || resolved.HandlerEventKey != eventType {
+			return nil
+		}
+		// A pattern admits concrete occurrences, but is not itself a schema declaration.
+		eventType = concreteEvent
+	}
+	resolution := semanticview.ResolveEventSchema(e.deps.Source, flowID, eventType)
+	if !resolution.HasStructural {
+		return nil
+	}
+	value := resolution.StructuralType.Clone()
+	return &value
 }
 
 func (e *Executor) joinPlan(req ExecutionRequest) (runtimecontracts.WorkflowJoinPlan, bool) {
@@ -2182,14 +2353,17 @@ func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accpro
 }
 
 func accumulatorTypedView(binding accprojection.Binding, item map[string]any) (map[string]any, error) {
-	out := make(map[string]any, len(binding.SourceNamedType.Fields))
-	for fieldName := range binding.SourceNamedType.Fields {
-		fieldName = strings.TrimSpace(fieldName)
+	out := make(map[string]any, len(binding.SourceType.Fields))
+	for _, spec := range binding.SourceType.Fields {
+		fieldName := strings.TrimSpace(spec.Name)
 		if fieldName == "" {
 			continue
 		}
 		value, ok := item[fieldName]
 		if !ok {
+			if spec.IsOptional {
+				continue
+			}
 			return nil, fmt.Errorf("source item missing required typed-view field %q", fieldName)
 		}
 		out[fieldName] = cloneProjectionValue(value)
@@ -2198,11 +2372,22 @@ func accumulatorTypedView(binding accprojection.Binding, item map[string]any) (m
 }
 
 func (e *Executor) projectAccumulatorItem(frame *executionFrame, binding accprojection.Binding, source map[string]any) (map[string]any, error) {
-	out := make(map[string]any, len(binding.TargetNamedType.Fields))
-	for fieldName := range binding.TargetNamedType.Fields {
+	out := make(map[string]any, len(binding.TargetType.Fields))
+	for _, spec := range binding.TargetType.Fields {
+		fieldName := spec.Name
 		rawExpr, ok := binding.Project[fieldName]
 		if !ok {
+			if spec.IsOptional {
+				continue
+			}
 			return nil, fmt.Errorf("project missing target field %q", fieldName)
+		}
+		if sourceExpr, isSource := rawExpr.(string); isSource {
+			if sourceField, isSourceField := strings.CutPrefix(strings.TrimSpace(sourceExpr), "source."); isSourceField {
+				if _, present := source[strings.TrimSpace(sourceField)]; !present && spec.IsOptional {
+					continue
+				}
+			}
 		}
 		value, err := e.evaluateProjectionExpression(frame, rawExpr, source)
 		if err != nil {
@@ -2293,7 +2478,7 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 	}
 	// Resolve emit.fields against the current execution context so
 	// data_accumulation and rule-selected writes are visible to emitted payloads.
-	transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, joinExpressionOptions(frame))
+	transformed, err := e.emitFieldsPayload(frame, emitSpec, emitSpec.EventType(), joinExpressionOptions(frame))
 	if err != nil {
 		return err
 	}
@@ -2329,7 +2514,7 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 		if emitSpec.HasFields() && len(activeEmits) == 1 && len(frame.state.Transformed) > 0 {
 			payload = frame.state.Transformed
 		} else if emitSpec.HasFields() {
-			transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, joinExpressionOptions(frame))
+			transformed, err := e.emitFieldsPayload(frame, emitSpec, eventType, joinExpressionOptions(frame))
 			if err != nil {
 				return err
 			}
@@ -2416,7 +2601,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		if field == "" {
 			continue
 		}
-		value, ok, err := evalExpressionValue(base, frame.state, expr, workflowexpr.ValueExpressionOptions{})
+		value, ok, err := evalExpressionValue(base, frame.state, expr, frameExpressionOptions(frame))
 		if err != nil {
 			return fmt.Errorf("activity.input.%s: %w", field, err)
 		}
@@ -2902,11 +3087,18 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 func (e *Executor) executionContext(frame *executionFrame, step Step) ExecutionContext {
 	req := frame.req
 	req.State = frame.state.State
+	var payloadType *runtimecontracts.ResolvedCatalogType
+	if frame.payloadType != nil {
+		value := frame.payloadType.Clone()
+		payloadType = &value
+	}
 	return ExecutionContext{
-		Request:   req,
-		Base:      e.currentContext(frame),
-		Step:      step,
-		Completed: append([]Step(nil), frame.result.ExecutedSteps...),
+		Request:     req,
+		Base:        e.currentContext(frame),
+		PayloadType: payloadType,
+		EntityType:  frameExpressionOptions(frame).EntityType,
+		Step:        step,
+		Completed:   append([]Step(nil), frame.result.ExecutedSteps...),
 	}
 }
 
@@ -2933,7 +3125,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 	id = strings.TrimSpace(id)
 	check = strings.TrimSpace(check)
 	if check != "" {
-		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame), joinExpressionOptions(frame))
 		if err == nil {
 			evaluated := []string{check}
 			if id != "" {
@@ -2957,7 +3149,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 		return false, []string{id}, fmt.Errorf("guard %q is not executable", id)
 	}
 	if strings.TrimSpace(entry.Check) != "" {
-		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame), joinExpressionOptions(frame))
 		if err == nil {
 			return passed, []string{id}, nil
 		}
@@ -2989,7 +3181,7 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 		if condition == "" || strings.EqualFold(condition, "else") {
 			return rule, idx, nil
 		}
-		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame), joinExpressionOptions(frame))
 		if err != nil {
 			context, contextErr := handlerSelectionContext(source)
 			if contextErr != nil {
@@ -3197,6 +3389,7 @@ func (e *Executor) lowerEmitSpecForFrame(frame *executionFrame, site string, spe
 		Node:             frame.req.Node,
 		TriggerEventType: triggerEvent,
 		Site:             site,
+		SchemaProvider:   e.deps.Source,
 	}, spec)
 }
 
@@ -3250,6 +3443,27 @@ func selectedActivitySpec(handler runtimecontracts.SystemNodeEventHandler, rule 
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
 	return e.shapeEmitPayloadWithContext(frame.ctx, frame, eventType, payload)
+}
+
+func (e *Executor) emitFieldsPayload(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, options workflowexpr.ValueExpressionOptions) (map[string]any, error) {
+	if frame == nil {
+		return nil, fmt.Errorf("emit expression frame is required")
+	}
+	flowID := strings.TrimSpace(frame.req.ExecutionFlowID.String())
+	resolution := semanticview.ResolveEventSchema(e.deps.Source, flowID, strings.TrimSpace(eventType))
+	return emitFieldsPayload(e.currentContext(frame), frame.state, spec, options, func(target string, base workflowexpr.ValueExpressionOptions) workflowexpr.ValueExpressionOptions {
+		if !resolution.HasStructural {
+			return base
+		}
+		field, ok := resolution.StructuralType.FieldPath(target)
+		if !ok {
+			return base
+		}
+		valueType := field.Type.Clone()
+		base.ResultType = &valueType
+		base.ResultOptional = field.IsOptional
+		return base
+	})
 }
 
 func (e *Executor) shapeEmitPayloadWithContext(ctx context.Context, frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
@@ -3520,7 +3734,7 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 		}
 		emitSpec.Event = eventType
 		payload := map[string]any{}
-		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{})
+		transformed, err := e.emitFieldsPayload(frame, emitSpec, eventType, frameExpressionOptions(frame))
 		if err != nil {
 			return err
 		}

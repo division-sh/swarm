@@ -37,6 +37,23 @@ func TestEntityToolLeafSelectorNames_GuardsRecursiveNamedTypes(t *testing.T) {
 	}
 }
 
+func TestEntityContractJSONSchemaRequiresOnlyRequiredNestedFields(t *testing.T) {
+	contract := entityruntime.Contract{Types: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+		"Contact": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+			"name":  {Type: "text"},
+			"email": {Type: "text", IsOptional: true},
+		}},
+	}}}
+	schema := entityContractJSONSchema(contract, "Contact", map[string]struct{}{})
+	if got := schema["required"]; !reflect.DeepEqual(got, []string{"name"}) {
+		t.Fatalf("required = %#v, want [name]", got)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok || properties["email"] == nil {
+		t.Fatalf("properties = %#v, want optional email schema retained", schema["properties"])
+	}
+}
+
 func TestEntityToolWritablePathNames_ExcludesMaterializedFields(t *testing.T) {
 	contract := entityruntime.Contract{
 		Entity: runtimecontracts.EntityContract{

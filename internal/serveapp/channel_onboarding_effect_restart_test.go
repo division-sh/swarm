@@ -41,14 +41,16 @@ func runChannelOnboardingAdmittedEffectRestart(t *testing.T, backend servedparit
 	t.Cleanup(telegram.Close)
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	disableChannelOnboardingBusinessConsumers(t, sourceRoot)
-	publicListen := reserveChannelOnboardingListenAddress(t)
+	publicListener := reserveChannelOnboardingListener(t)
+	publicListen := publicListener.Addr().String()
 	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
 
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
-		SelfCheck: true, AbandonActiveRuns: true, Verbose: true,
+		PublicWebhookListener: publicListener,
+		SelfCheck:             true, AbandonActiveRuns: true, Verbose: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true,
 	}
 	switch backend {
@@ -68,6 +70,7 @@ func runChannelOnboardingAdmittedEffectRestart(t *testing.T, backend servedparit
 		t.Fatalf("unsupported backend %q", backend)
 	}
 	process := startChannelOnboardingCrashServeProcess(t, opts, telegram.URL)
+	assertChannelListenerReserved(t, publicListen)
 	endpoint := process.endpoint(t)
 	var arrived <-chan struct{}
 	var release func()
@@ -90,6 +93,7 @@ func runChannelOnboardingAdmittedEffectRestart(t *testing.T, backend servedparit
 	if err := process.kill(); err != nil {
 		t.Fatalf("kill served process at %s: %v", phase, err)
 	}
+	assertChannelListenerReserved(t, publicListen)
 	release()
 	select {
 	case code := <-command.done:
@@ -117,6 +121,7 @@ func runChannelOnboardingAdmittedEffectRestart(t *testing.T, backend servedparit
 	if err := process.stop(); err != nil {
 		t.Fatalf("stop restarted %s process: %v", phase, err)
 	}
+	assertChannelListenerReserved(t, publicListen)
 }
 
 type channelOnboardingEffectRestartCommand struct {

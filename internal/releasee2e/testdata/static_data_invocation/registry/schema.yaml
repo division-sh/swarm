@@ -1,0 +1,13 @@
+name: registry
+mode: template
+instance: request_key
+initial_state: pending
+terminal_states: [complete]
+states: [pending, reading, complete]
+pins:
+  inputs:
+    events:
+      - event: child.requested
+        resolution: {mode: select-or-create}
+  outputs:
+    events: [child.completed]
