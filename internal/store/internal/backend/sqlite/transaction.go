@@ -268,8 +268,16 @@ func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, o
 	if err = operation(ctx, tx); err != nil {
 		return err
 	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
 	if err = tx.Commit(); err != nil {
 		discard = true
+		// Only this owner's Commit result is classified here. Automatic rollback
+		// can win after the context check; callback and cleanup errors stay intact.
+		if err == sql.ErrTxDone && ctx.Err() != nil {
+			return ctx.Err()
+		}
 		var coded interface{ Code() int }
 		if !errors.As(err, &coded) || (coded.Code()&255 != 5 && coded.Code()&255 != 6) {
 			return &transactionTerminationError{err}

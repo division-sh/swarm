@@ -25,6 +25,7 @@ type exitFaultConnector struct {
 	commitAfterError atomic.Bool
 	opens, closes    atomic.Int32
 	beforeBegin      context.CancelFunc
+	afterCommit      context.CancelFunc
 }
 
 func (c *exitFaultConnector) Driver() driver.Driver { return &modernc.Driver{} }
@@ -73,6 +74,9 @@ func (t *exitFaultTx) Rollback() error {
 }
 func (t *exitFaultTx) Commit() error {
 	err := t.Tx.Commit()
+	if t.owner.afterCommit != nil {
+		t.owner.afterCommit()
+	}
 	if err == nil && t.owner.commitAfterError.Swap(false) {
 		return errInjectedCommit
 	}
@@ -81,7 +85,7 @@ func (t *exitFaultTx) Commit() error {
 
 func TestTransactionExitFaultDisposition(t *testing.T) {
 	for _, poolSize := range []int{1, 3} {
-		for _, scenario := range []string{"success", "callback", "rollback_failure", "panic_rollback_failure", "committed_error", "cancel_callback", "cancel_before_acquire"} {
+		for _, scenario := range []string{"success", "callback", "rollback_failure", "panic_rollback_failure", "committed_error", "cancel_committed_error", "cancel_callback", "cancel_before_acquire"} {
 			t.Run(scenario+string(rune('0'+poolSize)), func(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "fault.db")
 				control := &exitFaultConnector{path: "file:" + path}
@@ -109,8 +113,11 @@ func TestTransactionExitFaultDisposition(t *testing.T) {
 				if scenario == "rollback_failure" || scenario == "panic_rollback_failure" {
 					control.rollbackFail.Store(true)
 				}
-				if scenario == "committed_error" {
+				if scenario == "committed_error" || scenario == "cancel_committed_error" {
 					control.commitAfterError.Store(true)
+				}
+				if scenario == "cancel_committed_error" {
+					control.afterCommit = cancel
 				}
 				if scenario == "cancel_before_acquire" {
 					cancel()
@@ -152,17 +159,17 @@ func TestTransactionExitFaultDisposition(t *testing.T) {
 				if scenario == "rollback_failure" && (!errors.Is(err, primary) || !errors.Is(err, errInjectedCleanup)) {
 					t.Fatalf("lost primary/cleanup errors: %v", err)
 				}
-				if scenario == "committed_error" && !errors.Is(err, errInjectedCommit) {
+				if (scenario == "committed_error" || scenario == "cancel_committed_error") && !errors.Is(err, errInjectedCommit) {
 					t.Fatalf("lost uncertain commit: %v", err)
 				}
-				if (scenario == "cancel_callback" || scenario == "cancel_before_acquire") && !errors.Is(err, context.Canceled) {
+				if (scenario == "cancel_callback" || scenario == "cancel_before_acquire" || scenario == "cancel_committed_error") && !errors.Is(err, context.Canceled) {
 					t.Fatalf("lost cancellation: %v", err)
 				}
 				if scenario == "success" && err != nil {
 					t.Fatal(err)
 				}
 				want := 0
-				if scenario == "success" || scenario == "committed_error" {
+				if scenario == "success" || scenario == "committed_error" || scenario == "cancel_committed_error" {
 					want = 1
 				}
 				other, err := sql.Open("sqlite", "file:"+path)

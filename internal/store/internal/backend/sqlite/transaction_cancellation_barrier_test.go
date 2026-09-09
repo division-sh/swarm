@@ -156,6 +156,9 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 						if callbackError && !errors.Is(err, primary) {
 							t.Fatalf("lost callback error: %v", err)
 						}
+						if !callbackError && errors.Is(err, sql.ErrTxDone) {
+							t.Fatalf("automatic rollback manufactured a commit failure: %v", err)
+						}
 						if rollbackFirst {
 							// The driver is physically closed, although database/sql has not
 							// returned from Close to decrement its pool accounting yet.
@@ -184,6 +187,33 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 					})
 				}
 			}
+		}
+	}
+}
+
+func TestTransactionDoesNotSuppressCallbackTxDone(t *testing.T) {
+	for _, read := range []bool{false, true} {
+		for _, canceled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("read=%t/canceled=%t", read, canceled), func(t *testing.T) {
+				b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "callback.db"))
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				callback := func(context.Context, *sql.Tx) error {
+					if canceled {
+						cancel()
+					}
+					return fmt.Errorf("independent callback transaction: %w", sql.ErrTxDone)
+				}
+				var err error
+				if read {
+					err = b.RunReadTransaction(ctx, callback)
+				} else {
+					err = b.RunTransaction(ctx, "callback result", callback)
+				}
+				if !errors.Is(err, sql.ErrTxDone) || (canceled && !errors.Is(err, context.Canceled)) {
+					t.Fatalf("independent callback result lost: %v", err)
+				}
+			})
 		}
 	}
 }
