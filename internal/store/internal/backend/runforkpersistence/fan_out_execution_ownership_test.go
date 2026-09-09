@@ -166,6 +166,10 @@ func fanOutOwnershipFixture(t *testing.T, flow, kind string) (runfork.RunForkPla
 
 func assertFanOutCapsuleFieldPartition(t *testing.T, source, child fanoutobligation.Capsule) {
 	t.Helper()
+	receiverType := reflect.TypeOf(fanoutobligation.ExecutionReceiver{})
+	if receiverType.NumField() != 2 || receiverType.Field(0).Name != "Node" || receiverType.Field(1).Name != "Target" {
+		t.Fatal("execution receiver field census changed; publication authority must not enter the capsule")
+	}
 	immutable := []string{"NodeKey", "ExecutionFlowID", "HandlerEventKey", "CurrentState", "ChainDepth", "Lineage", "Entity", "PlatformEntity", "Computed", "Accumulated", "Join", "StateFields", "StateBookkeeping", "StateGates"}
 	executable := []string{"EntityID", "Route", "ProducerSource", "Receiver", "Loop"}
 	if len(immutable)+len(executable) != reflect.TypeOf(source).NumField() {

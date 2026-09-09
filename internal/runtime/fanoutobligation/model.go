@@ -95,12 +95,9 @@ func ProjectExecutionReceiver(route events.DeliveryRoute) (ExecutionReceiver, er
 	if _, err := route.Identity(); err != nil {
 		return ExecutionReceiver{}, err
 	}
-	if !route.Recipient.IsNode() {
+	node, ok := route.Recipient.Node()
+	if !ok {
 		return ExecutionReceiver{}, fmt.Errorf("fan-out execution receiver requires a node")
-	}
-	node, err := identity.ParseExecutableNodeKey(route.Recipient.ID())
-	if err != nil {
-		return ExecutionReceiver{}, err
 	}
 	return ExecutionReceiver{Node: node, Target: route.Target}, nil
 }
