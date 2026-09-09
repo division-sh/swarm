@@ -19,6 +19,7 @@ escalation_paths:
   - ^internal/testtiming/
   - ^cmd/swarm-test-timing/
 special_packages:
+  - github.com/division-sh/swarm/internal/apiv1
   - github.com/division-sh/swarm/internal/cliapp
   - github.com/division-sh/swarm/internal/releasee2e
   - github.com/division-sh/swarm/internal/runtime/cataloge2e
@@ -56,6 +57,8 @@ profiles:
       - serveapp-receivers
       - contracts-first
       - contracts-rest
+      - api-operator
+      - api-rest
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -96,6 +99,8 @@ profiles:
       - serveapp-receivers
       - contracts-first
       - contracts-rest
+      - api-operator
+      - api-rest
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -136,6 +141,8 @@ profiles:
       - serveapp-receivers
       - contracts-first
       - contracts-rest
+      - api-operator
+      - api-rest
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -176,6 +183,8 @@ profiles:
       - serveapp-receivers
       - contracts-first
       - contracts-rest
+      - api-operator
+      - api-rest
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -188,6 +197,22 @@ profiles:
       - store-runtime-full-06
       - testpostgres-full
 units:
+  # Full-profile CI34347597064: TestO* takes 77s; other API proofs take 46s.
+  # Keep whole top-level proofs, including their backend and negative-case rows.
+  api-operator:
+    packages:
+      - github.com/division-sh/swarm/internal/apiv1
+    run: '^TestO.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  api-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/apiv1
+    run: '^(Test($|[^O].*)|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
   catalog-required-inventory:
     packages:
       - github.com/division-sh/swarm/internal/testcatalog

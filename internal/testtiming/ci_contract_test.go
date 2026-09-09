@@ -316,6 +316,20 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "runtime", "contracts"), contractsPatterns)
+	apiPatterns := make([]*regexp.Regexp, 0, 2)
+	for _, id := range []string{"api-operator", "api-rest"} {
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/apiv1"}) || unit.Run == "" || unit.CountMode != "count-1" {
+			t.Fatalf("%s must retain its complete uncached API partition", id)
+		}
+		apiPatterns = append(apiPatterns, regexp.MustCompile(unit.Run))
+		for name, profile := range policy.Profiles {
+			if !slices.Contains(profile.Units, id) {
+				t.Fatalf("profile %s omits API partition %s", name, id)
+			}
+		}
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "apiv1"), apiPatterns)
 	storeUnit, ok := policy.Units["store-full"]
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
