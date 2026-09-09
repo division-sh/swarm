@@ -58,7 +58,7 @@ These are local working-tree checkpoints. Final exact-head accounting remains du
 | Persistence authority inventory | PASS 17.934s; /tmp/agent-g-rebase-inventory-v2.log. Every moved/removed private SQL and prepared-start callback finding classified; no blanket allowlist. |
 | New retained static-data invocation shard, SQLite/PostgreSQL | PASS 50.115s; /tmp/agent-g-rebase-release-v2.log. Earlier child rejection exposed the retired required MCP port in the test protocol; removed it rather than selecting a port. |
 | Broad diagnostic race count=3 with four-minute package budget | NOT PASS: both packages hit cumulative package timeout while progressing through individual tests; no reported assertion failure or data race. /tmp/agent-g-rebase-diagnostic-race.log is retained. Reissued through swarm-test with 15-minute package allowance; no scenario/workload assertion changed. |
-| Whole full-profile suite | Queued via go run ./cmd/swarm-test -- -count=1 -timeout=30m ./...; /tmp/agent-g-rebase-integrated-full.log. |
+| Whole full-profile suite | First integration run FAILED in four packages; /tmp/agent-g-rebase-integrated-full.log. CLI fixture failures were repaired in 15dfc47b2. Additional failures and repairs are recorded below; a new full run is required. |
 
 ## Remaining Acceptance
 
@@ -69,7 +69,24 @@ fixture fields, retained singleton setup/selection semantics and all assertions,
 and removed the now-no-op posture rewrite in the pure-system-node release proof.
 The three failing CLI tests pass together (15.720s), recorded in
 /tmp/agent-g-rebase-cli-fixtures.log. The first full run remains failed, not a green
-receipt; its remaining packages are being allowed to finish to collect all failures.
+receipt. The completed run also identified these bounded integration debts:
+
+- The retained mock harness put workspace state in an authored-source directory.
+  Move that state under the reserved .swarm directory; preserve invocation-root
+  and omitted/dot/alias verification, including missing-data negative assertions.
+- The startup source guard named the retired loader. Assert both shared composition
+  loading and reset-recovery loading remain after selected-store activation.
+- B's causal selected-fork diagnostic fixture supplied only caller lineage. Issue
+  and claim the durable fork execution, enqueue the accepted-event origin, then
+  quiesce/close before delayed projection and activation. The targeted proof passes
+  in /tmp/agent-g-rebase-causal-fixture.log; no payload-tag exception is restored.
+- G's provider-state release used container-name deletion. Delegate to upstream's
+  existing identity-checked projection cleanup owner, retaining the strict release
+  assertion that every removal targets a created immutable Docker ID. No new
+  cleanup owner or provider-volume deletion is introduced.
+- The diagnostic history reader now uses the same canonical JSON decoder as the
+  pending diagnostic reader. Exact fork history proofs pass in
+  /tmp/agent-g-rebase-canonical-reader.log.
 
 Final full-profile and managed race results, current-head live/restart proof credit,
 and final PR proof audits are still required. No extra Claude/Telegram calls or

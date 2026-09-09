@@ -80,7 +80,7 @@ func runOwnedMockLifecycle(ctx context.Context, root, retainedRoot string, opts 
 		return 1, err
 	}
 	cfg := configResult.Config
-	cfg.Workspace.HostRoot = filepath.Join(retainedRoot, ".lifecycle-workspaces")
+	cfg.Workspace.HostRoot = filepath.Join(retainedRoot, ".swarm", "lifecycle-workspaces")
 	paths, err := cliapp.ResolveCLISourcePlatformSpecPaths(root, cliapp.CLISourcePlatformSpecPathOptions{SourceRoot: opts.SourceRoot, ConfigPath: opts.ConfigPath, PlatformSpecPath: opts.PlatformSpecPath})
 	if err != nil {
 		return 1, err
