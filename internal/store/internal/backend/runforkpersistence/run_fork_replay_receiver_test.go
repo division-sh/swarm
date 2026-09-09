@@ -174,3 +174,28 @@ func TestReplayExistingRootReceiverProjectsCanonicalChildOwnership(t *testing.T)
 		t.Fatalf("replay retained source root ownership: %+v", child)
 	}
 }
+
+func TestReplayUntargetedReceiverPreservesAbsence(t *testing.T) {
+	snapshot, event, delivery := replayReceiverProjectionFixture(t, "flow")
+	delivery.Route.Target = events.DeliveryTargetOwnership{}
+	delivery.Route.Initialization = events.ReceiverInitialization{}
+	delivery.Route.Materialization = events.ReceiverMaterializationPlan{}
+	var err error
+	delivery.DeliveryID, err = deliverylifecycle.DeliveryID(event.ID(), delivery.Route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: delivery}}
+	snapshot.EntityMetadata = nil
+	childRun := eventtest.UUID("replay-child")
+	before := delivery.Route
+	child, err := projectRunForkReplayInitializedReceiver(snapshot, event, delivery, childRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := before
+	want.AgentIdentity.RunID = childRun
+	if !reflect.DeepEqual(want, child) || !reflect.DeepEqual(before, delivery.Route) {
+		t.Fatalf("targetless replay invented receiver evidence: %+v", child)
+	}
+}
