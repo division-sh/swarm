@@ -256,6 +256,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	bindManagedNativeLifecycleAgentsToGrant(t, managerStore, rt.startupGrant)
+	managerStore.admitRun(t, runtimeTestManagedLifecycleRunID, rt.Options.SourceArtifactFact)
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("PrepareAuthorActivityCatalog: %v", err)
 	}
@@ -358,6 +359,7 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 		t.Fatalf("NewRuntime(candidate): %v", err)
 	}
 	bindManagedNativeLifecycleAgentsToGrant(t, managerStore, candidate.startupGrant)
+	managerStore.admitRun(t, runtimeTestManagedLifecycleRunID, candidate.Options.SourceArtifactFact)
 	if err := candidate.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("PrepareAuthorActivityCatalog(candidate): %v", err)
 	}

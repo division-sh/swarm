@@ -59,9 +59,46 @@ type runtimeTestRetainedSession struct {
 	authority       runtimestartupownership.Authority
 	plan            runtimeagenttopology.SourceSetPlan
 	agents          map[string]runtimemanager.PersistedAgent
+	runs            map[string]runtimecorrelation.SourceArtifactFact
+	grants          map[string]string
 	callback        func(runtimestartupownership.TerminalResult)
 	grantTransition func(*runtimestartupownership.GrantEvidence, runtimestartupownership.GrantEvidence)
 	released        bool
+}
+
+func newRuntimeTestRetainedSession(t testing.TB) *runtimeTestRetainedSession {
+	t.Helper()
+	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	}, "runtime_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &runtimeTestRetainedSession{authority: authority}
+}
+
+func (s *runtimeTestRetainedSession) runtimeTestStartupSession() *runtimeTestRetainedSession {
+	return s
+}
+
+func (s *runtimeTestRetainedSession) admitRun(t testing.TB, runID string, source runtimecorrelation.SourceArtifactFact) {
+	t.Helper()
+	id, err := uuid.Parse(runID)
+	if err != nil || id == uuid.Nil || id.String() != runID {
+		t.Fatalf("runtime fixture requires an exact run UUID: %q", runID)
+	}
+	if err := source.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs == nil {
+		s.runs = make(map[string]runtimecorrelation.SourceArtifactFact)
+	}
+	if previous, ok := s.runs[runID]; ok && previous != source {
+		t.Fatal("runtime fixture cannot replace a run's source")
+	}
+	s.runs[runID] = source
 }
 
 type runtimeTestRetainedSessionProvider interface {
@@ -101,7 +138,15 @@ func (s *runtimeTestRetainedSession) InstallTerminalOwner(owner runtimestartupow
 }
 
 func (s *runtimeTestRetainedSession) RecordGenerationGrantTransition(_ context.Context, previous *runtimestartupownership.GrantEvidence, next runtimestartupownership.GrantEvidence) error {
+	raw, err := canonicaljson.Bytes(next)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
+	if s.grants == nil {
+		s.grants = make(map[string]string)
+	}
+	s.grants[next.GrantID] = string(raw)
 	observe := s.grantTransition
 	s.mu.Unlock()
 	if observe != nil {
@@ -132,8 +177,33 @@ func (*runtimeTestRetainedSession) ApplyDestructiveResetCleanup(context.Context,
 	return runtimedestructivereset.CleanupResult{}, errors.New("runtime test retained session does not own destructive reset")
 }
 
-func (*runtimeTestRetainedSession) InspectRunExecutionOwnership(context.Context, runtimestartupownership.GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error) {
-	return 0, errors.New("run execution ownership requires a store-backed test session")
+func (s *runtimeTestRetainedSession) InspectRunExecutionOwnership(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (runtimemanager.RunExecutionOwnership, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if err := evidence.Validate(); err != nil {
+		return 0, err
+	}
+	raw, err := canonicaljson.Bytes(evidence)
+	if err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.released || evidence.State == runtimestartupownership.GrantRetired || s.grants[evidence.GrantID] != string(raw) {
+		return 0, errors.New("runtime fixture requires current retained generation evidence")
+	}
+	if evidence.SelectedFork != nil {
+		return 0, errors.New("normal runtime fixture cannot authorize selected execution")
+	}
+	source, ok := s.runs[runID]
+	if !ok {
+		return 0, errors.New("runtime fixture run ownership was not explicitly admitted")
+	}
+	if source.BundleHash() != evidence.BundleHash {
+		return runtimemanager.RunExecutionOtherNormalSource, nil
+	}
+	return runtimemanager.RunExecutionOwned, nil
 }
 
 func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {

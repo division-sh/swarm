@@ -240,6 +240,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
+	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 	bus.SetInterceptors(pc)
 
 	spinup := eventtest.ExistingRunRootIngress(

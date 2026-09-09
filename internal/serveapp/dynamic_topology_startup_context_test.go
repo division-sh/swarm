@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -84,6 +86,38 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 					t.Fatalf("construct runtime context %s: %v", fact.BundleHash(), err)
 				}
 				runtimes = append(runtimes, rt)
+			}
+			capability, err := selected.StartupOwnership().AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
+				OwnerID: "dynamic-topology-preflight-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := capability.Release(context.Background()); err != nil {
+					t.Errorf("release preflight process possession: %v", err)
+				}
+			})
+			var coordinates []runtimeagenttopology.SourceCoordinate
+			var desired []runtimeagenttopology.DesiredAgent
+			for index, rt := range runtimes {
+				coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: facts[index].BundleHash()}
+				agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(source, coordinate)
+				if err != nil {
+					t.Fatal(err)
+				}
+				coordinates = append(coordinates, coordinate)
+				desired = append(desired, agents...)
+			}
+			plan, err := runtimeagenttopology.NewSourceSetPlan(coordinates, desired)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := installServeSourceSet(context.Background(), capability, plan); err != nil {
+				t.Fatal(err)
+			}
+			for _, rt := range runtimes {
+				installSelectedStoreTestGeneration(t, capability, rt, plan, 1)
 			}
 			t.Cleanup(func() {
 				for _, rt := range runtimes {

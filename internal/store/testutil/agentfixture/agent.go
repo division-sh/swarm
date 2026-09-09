@@ -78,7 +78,7 @@ type fixtureSession struct {
 	mu                sync.Mutex
 	capability        runtimestartupownership.ProcessCapability
 	runtimeInstanceID string
-	grant             runtimestartupownership.GenerationGrant
+	grant             runtimestartupownership.LiveGenerationGrant
 	grantRevision     string
 	grantSourceKey    string
 }
@@ -123,6 +123,49 @@ func ProcessCapability(t testing.TB, ctx context.Context, selected Store) (runti
 	return session.capability, nil
 }
 
+// AdmitGeneration installs the caller's complete source plan before a fixture
+// Manager can inspect run ownership. Inspection itself never creates authority.
+func AdmitGeneration(t testing.TB, ctx context.Context, selected Store, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate) (runtimestartupownership.LiveGenerationGrant, error) {
+	t.Helper()
+	if err := plan.Validate(); err != nil {
+		return nil, err
+	}
+	if err := coordinate.Validate(); err != nil {
+		return nil, err
+	}
+	found := false
+	for _, source := range plan.Sources {
+		if source == coordinate {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, errors.New("fixture generation source is absent from the supplied plan")
+	}
+	session, err := fixtureSessionFor(t, ctx, selected)
+	if err != nil {
+		return nil, err
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	current, exists, err := session.capability.CurrentSourceSet(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if exists && current.Revision != plan.Revision {
+		return nil, errors.New("fixture generation admission cannot replace an existing source plan")
+	}
+	if !exists {
+		if _, err := session.capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+			OperationID: uuid.NewString(), Plan: plan,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return session.grantForExactPlan(ctx, plan, coordinate)
+}
+
 func validateFixtureStaticSourceSetRebind(ctx context.Context, selected Store, coordinate runtimeagenttopology.SourceCoordinate) ([]runtimemanager.AgentLifecycleState, error) {
 	states, err := selected.ListDurableAgentLifecycleStates(ctx)
 	if err != nil {
@@ -155,7 +198,7 @@ func validateFixtureStaticSourceSetRebind(ctx context.Context, selected Store, c
 	return states, nil
 }
 
-func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate, skipIdentityKey string) (runtimestartupownership.GenerationGrant, error) {
+func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate, skipIdentityKey string) (runtimestartupownership.LiveGenerationGrant, error) {
 	states, err := validateFixtureStaticSourceSetRebind(ctx, selected, coordinate)
 	if err != nil {
 		return nil, err
@@ -222,7 +265,7 @@ func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store,
 	return grant, nil
 }
 
-func (s *fixtureSession) grantForExactPlan(ctx context.Context, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate) (runtimestartupownership.GenerationGrant, error) {
+func (s *fixtureSession) grantForExactPlan(ctx context.Context, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate) (runtimestartupownership.LiveGenerationGrant, error) {
 	if s.grant != nil && s.grantRevision == plan.Revision && s.grantSourceKey == coordinate.Normalize().Key() {
 		if _, err := s.grant.Evidence(); err == nil {
 			return s.grant, nil
@@ -238,11 +281,11 @@ func (s *fixtureSession) grantForExactPlan(ctx context.Context, plan runtimeagen
 	return grant, nil
 }
 
-func (s *fixtureSession) issueGrant(ctx context.Context, plan runtimeagenttopology.SourceSetPlan) (runtimestartupownership.GenerationGrant, error) {
+func (s *fixtureSession) issueGrant(ctx context.Context, plan runtimeagenttopology.SourceSetPlan) (runtimestartupownership.LiveGenerationGrant, error) {
 	return s.issueGrantForSource(ctx, plan, runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash})
 }
 
-func (s *fixtureSession) issueGrantForSource(ctx context.Context, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate) (runtimestartupownership.GenerationGrant, error) {
+func (s *fixtureSession) issueGrantForSource(ctx context.Context, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate) (runtimestartupownership.LiveGenerationGrant, error) {
 	return s.capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 		BundleHash: coordinate.BundleHash, RuntimeInstanceID: s.runtimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
