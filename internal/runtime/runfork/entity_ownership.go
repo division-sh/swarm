@@ -52,8 +52,14 @@ func ProjectSelectedContractSourceEvent(sourceRunID, forkRunID string, event Run
 	if sourceRunID == "" || forkRunID == "" || sourceRunID == forkRunID {
 		return event, fmt.Errorf("selected-contract source projection requires distinct source and child runs")
 	}
-	if event.SourceEventID == "" || event.RoutingSource.Empty() {
-		return event, fmt.Errorf("selected-contract source event requires exact event identity and persisted producer routing authority")
+	if event.SourceEventID == "" {
+		return event, fmt.Errorf("selected-contract source event requires exact event identity")
+	}
+	if event.RoutingSource.Empty() {
+		if event.EventName == RunForkSelectedContractPlatformActivityEvent {
+			return event, fmt.Errorf("selected-contract activity requires persisted producer routing authority")
+		}
+		return event, nil
 	}
 	source := event.RoutingSource
 	route := source.Route()

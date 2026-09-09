@@ -112,6 +112,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 		"idempotency_key":     "issue-2361-dev-scratch-run-fork",
 	}, 30*time.Second)
 	if forkResponse.Error != nil {
+		logServedForkHandlerDiagnostics(t, servedControlProofRuntime{DB: db})
 		var kind, authority string
 		var route []byte
 		if err := db.QueryRow(`SELECT routing_source_kind, COALESCE(routing_source_authority, ''), source_route FROM events WHERE event_id=?`, published.EventID).Scan(&kind, &authority, &route); err != nil {
