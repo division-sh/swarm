@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ import (
 func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, scenario := range []string{"delayed_close", "causal_delayed_close", "causal_discard", "discard_pending", "discard_projected", "discard_rollback", "discard_race", "historical_provenance_conflict", "ack_event_conflict", "ack_without_event"} {
+			for _, scenario := range []string{"delayed_close", "causal_delayed_close", "causal_discard", "discard_pending", "discard_projected", "discard_rollback", "discard_race", "historical_provenance_conflict", "malformed_provenance", "ack_event_conflict", "ack_without_event"} {
 				t.Run(scenario, func(t *testing.T) {
 					selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 					fixture := newSelectedCompletionFixture(t, selected, db, sqlite)
@@ -65,6 +66,10 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 					}
 					if err := selected.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
 						t.Fatal(err)
+					}
+					if scenario == "malformed_provenance" {
+						proveMalformedDiagnosticProvenance(t, db, projector, item)
+						return
 					}
 					if scenario == "historical_provenance_conflict" {
 						if _, err := db.Exec(`UPDATE run_fork_selected_contract_runtime_executions SET actor_census_fingerprint='foreign' WHERE execution_id=$1`, authority.ID); err != nil {
@@ -192,4 +197,85 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func proveMalformedDiagnosticProvenance(t *testing.T, db *sql.DB, projector diagnosticProjectionTestStore, item runtimemanager.AgentLifecycleDiagnostic) {
+	t.Helper()
+	var raw []byte
+	if err := db.QueryRow(`SELECT payload FROM agent_lifecycle_diagnostic_outbox WHERE outbox_id=$1`, item.OutboxID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var original runtimemanager.AgentLifecycleTransitionResult
+	if err := json.Unmarshal(raw, &original); err != nil {
+		t.Fatal(err)
+	}
+	write := func(result runtimemanager.AgentLifecycleTransitionResult) {
+		t.Helper()
+		payload, err := json.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		provenance, err := json.Marshal(result.DiagnosticProvenance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`UPDATE agent_lifecycle_operations SET result=$2 WHERE operation_id=$1`, item.OperationID, string(payload)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`UPDATE agent_lifecycle_diagnostic_outbox SET payload=$2,provenance=$3,execution_mode=$4 WHERE outbox_id=$1`, item.OutboxID, string(payload), string(provenance), string(result.DiagnosticProvenance.EventMode)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, field := range []string{"source_run", "fork_run", "execution", "generation", "binding", "actor_census", "admission", "container_plan", "effective_config", "artifact", "actor_mode", "event_mode", "owner_missing", "causal_without_parent", "observation_with_parent", "missing_parent"} {
+		t.Run(field, func(t *testing.T) {
+			changed := original
+			p := &changed.DiagnosticProvenance
+			switch field {
+			case "source_run":
+				p.Origin.SourceRunID = uuid.NewString()
+			case "fork_run":
+				p.Origin.SelectedFork.ForkRunID = uuid.NewString()
+			case "execution":
+				p.Origin.SelectedFork.ExecutionID = uuid.NewString()
+			case "generation":
+				p.Origin.SelectedFork.Generation++
+			case "binding":
+				p.BindingID = uuid.NewString()
+			case "actor_census":
+				p.Origin.SelectedFork.ActorCensusFingerprint = "foreign"
+			case "admission":
+				p.Origin.SelectedFork.AdmissionFingerprint = "foreign"
+			case "container_plan":
+				p.Origin.SelectedFork.ContainerPlanFingerprint = "foreign"
+			case "effective_config":
+				p.Origin.SelectedFork.EffectiveConfigFingerprint = "foreign"
+			case "artifact":
+				changed.ProcessBinding.BundleHash = "sha256:foreign"
+			case "actor_mode":
+				p.ActorMode = executionmode.Mock
+			case "event_mode":
+				p.EventMode = executionmode.Mock
+			case "owner_missing":
+				p.Origin.Owner = ""
+			case "causal_without_parent":
+				p.Origin.Causality = runtimemanager.LifecycleDiagnosticAcceptedEvent
+			case "observation_with_parent":
+				p.Origin.ParentEventID = uuid.NewString()
+			case "missing_parent":
+				p.Origin.Causality, p.Origin.ParentEventID = runtimemanager.LifecycleDiagnosticAcceptedEvent, uuid.NewString()
+			}
+			// Matching copied payload/provenance is insufficient: the durable
+			// lifecycle/fork owners must still reject altered historical authority.
+			write(changed)
+			defer write(original)
+			if n, err := projector.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err == nil || n != 0 {
+				t.Fatalf("forged %s projected n=%d error=%v", field, n, err)
+			}
+			assertDiagnosticCounts(t, db, item.OutboxID, 0, 1)
+		})
+	}
+	if n, err := projector.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err != nil || n != 1 {
+		t.Fatalf("restored authority failed n=%d error=%v", n, err)
+	}
+	assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
 }
