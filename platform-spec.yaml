@@ -14080,7 +14080,10 @@ platform_tables:
         Durable non-authoritative projection queue for lifecycle diagnostics. Its complete
         run-scoped agent coordinate, actor/event modes and typed enqueue-time provenance are
         immutable historical snapshots, not live foreign-key selectors or caller-context tags.
-        The outbox UUID and created_at are the diagnostic event identity and timestamp.
+        The outbox UUID identifies the diagnostic occurrence, not the event. Event identity
+        is derived as specified by agent_lifecycle_authority.diagnostic_projection.projection;
+        created_at supplies the event timestamp. Diagnostic mode and replay follow
+        agent_lifecycle_authority.recovery.diagnostic_settlement.
         Diagnostic event persistence and acknowledgement commit atomically through the existing
         event owner. Selected-fork discard deletes these projection rows with the discarded events;
         ordinary execution close retains them. Old selected stores are unsupported.
@@ -16173,8 +16176,11 @@ platform_tables:
       - >-
         Durable lifecycle projection consumes the same explicit-facts runtime-log encoder and
         named event transaction port as ordinary runtime logging. It never calls an optional
-        logger before a separate acknowledgement. Its stable ID/time, run, mode, parent and
-        structured detail come from the validated occurrence, not the projector caller context.
+        logger before a separate acknowledgement. Its stable ID/time, run, parent and
+        structured detail follow agent_lifecycle_authority.diagnostic_projection and
+        recovery.diagnostic_settlement. Immutable producer provenance is not diagnostic mode
+        authority: the first logger's root posture supplies mode and the committed receipt
+        freezes it for replay, as defined by agent_lifecycle_authority.recovery.diagnostic_settlement.
       - >
         Tool-execution entries that consume external tool-provider dispatch admission include machine-readable
         details fields `rate_limit_scope`, `rate_limit_bucket_hash`, `rate_limit_limit`, `rate_limit_period_ms`,
@@ -36176,7 +36182,8 @@ agent_lifecycle_authority:
       eventpersistence settlement transaction, retaining an independently committed prefix. No agentpersistence
       projector or separate acknowledgment writer exists. First live-run settlement validates the immutable
       operation, transition, identity, timestamp and historical selected-fork relation before canonical append.
-      The deterministic event ID is derived from swarm:lifecycle-diagnostic: plus outbox_id using UUID SHA1/OID.
+      The deterministic event ID is UUIDv5 (SHA1, OID namespace) of the UTF-8 string
+      "swarm:lifecycle-diagnostic:" concatenated with outbox_id. It is not the outbox occurrence UUID.
       Event append and complete projection receipt commit together. Recovery.diagnostic_history governs admitted
       reset: absent live owners do not invalidate retained historical receipts or authorize event resurrection.
     fork_validation: >-

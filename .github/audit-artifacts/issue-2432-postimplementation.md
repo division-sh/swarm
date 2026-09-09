@@ -1,6 +1,32 @@
 # Post-Implementation Proof Audit: #2432
 
-**Final implementation proof; independent merge review required.** B's PR #2440 merged as
+## PR #2441 Review Pass 1 Repair
+
+The table description and runtime-log encoding summary incorrectly contradicted
+the integrated settlement contract. They now reference the canonical
+`agent_lifecycle_authority.diagnostic_projection.projection` and
+`recovery.diagnostic_settlement` rules: outbox occurrence UUID is not event UUID;
+event ID is UUIDv5/OID of `swarm:lifecycle-diagnostic:` plus outbox_id. Immutable
+actor/parent modes remain producer provenance. First logger root posture owns
+non-executable diagnostic mode; receipt replay cannot adopt a later caller's mode.
+No runtime behavior or settlement owner was changed to match the obsolete prose.
+
+| Review manifestation | Status | Exact proof |
+| --- | --- | --- |
+| Encoding/table summaries assign mode to producer provenance | reproduced and fixed | Spec summaries reconciled; TestLifecycleDiagnosticSettlementIdentityAndModeOnBothStores covers mock enqueue/live first logger/mock replay and the converse on SQLite and PostgreSQL, retaining one event and unchanged receipt. |
+| Table summary aliases occurrence UUID and derived event UUID | reproduced and fixed | Same real-store test derives UUIDv5/OID explicitly, reads the exact event, rejects occurrence-ID equality, and proves no event exists at outbox_id. |
+
+Both-store new matrix passes (1.434s); settlement/atomic controls pass three
+repetitions (17.323s); API-spec tests pass (1.499s). Source search checked all current
+outbox/encoding/projection summaries. Watchlist b1eff4d already records this
+integration defect; no additional writer, issue or architecture is introduced.
+Repaired-head full-profile qualification and required CI are pending. The earlier
+closure statement is superseded until those checks complete, not retroactively
+credited from the preceding successful full-suite receipt.
+
+## Previous Qualified Receipt
+
+**Historical qualification preceding review pass 1.** B's PR #2440 merged as
 47c0e70d8ef89a2c99f0be4af632f24692121b83. The serialized integration ruling
 https://github.com/division-sh/swarm/issues/2432#issuecomment-5604559542 supersedes
 the historical reset freeze recorded in issue-2432-reset-integration-escalation.md.
