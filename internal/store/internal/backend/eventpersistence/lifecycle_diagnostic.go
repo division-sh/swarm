@@ -194,9 +194,6 @@ func (s *EventPostgresOwner) PersistLifecycleDiagnostic(ctx context.Context, ite
 	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
-	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
-		return false, err
-	}
 	inserted := false
 	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 		var err error
@@ -211,9 +208,6 @@ func (s *EventSQLiteOwner) PersistLifecycleDiagnostic(ctx context.Context, item 
 		return false, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
 		return false, err
 	}
 	inserted := false

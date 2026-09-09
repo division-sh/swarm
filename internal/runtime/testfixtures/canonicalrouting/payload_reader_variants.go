@@ -33,9 +33,9 @@ func CopyLocalWildcardPayload(t testing.TB, variant LocalWildcardPayloadVariant)
 		"worker/schema.yaml":   "name: worker\nmode: static\ninitial_state: active\nstates: [active]\npins:\n  inputs:\n    events:\n      - event: start\n        source: external\n",
 		"worker/entities.yaml": "work: {}\n",
 		"worker/events.yaml":   "start: {}\ntask.done:\n  work_id: text\ntask.failed:\n  work_id: " + secondType + "\n",
-		"worker/nodes.yaml":    "observer:\n  id: observer\n  execution_type: system_node\n  subscribes_to: [\"" + pattern + "\"]\n  event_handlers:\n    \"" + pattern + "\":\n      rules:\n        accept:\n          condition: payload.work_id != \"\"\n",
+		"worker/nodes.yaml":    "observer:\n  execution_type: system_node\n  subscribes_to: [\"" + pattern + "\"]\n  event_handlers:\n    \"" + pattern + "\":\n      rules:\n        accept:\n          condition: payload.work_id != \"\"\n",
 	}
-	files["worker/nodes.yaml"] += "producer:\n  id: producer\n  execution_type: system_node\n  subscribes_to: [start, task.done]\n  produces: [task.done, task.failed]\n  event_handlers:\n    start:\n      emit:\n        event: task.done\n        fields:\n          work_id: {literal: work-1}\n    task.done:\n      emit:\n        event: task.failed\n        fields:\n          work_id: {literal: " + secondValue + "}\n"
+	files["worker/nodes.yaml"] += "producer:\n  execution_type: system_node\n  subscribes_to: [start, task.done]\n  produces: [task.done, task.failed]\n  event_handlers:\n    start:\n      emit:\n        event: task.done\n        fields:\n          work_id: {literal: work-1}\n    task.done:\n      emit:\n        event: task.failed\n        fields:\n          work_id: {literal: " + secondValue + "}\n"
 	for path, contents := range files {
 		writeClosedVariantFile(t, root, path, contents)
 	}
@@ -53,7 +53,6 @@ func CopyScalarFanOutPayloadReader(t testing.TB) string {
 		"scanner/entities.yaml": "scan: {}\n",
 		"scanner/events.yaml":   "scan.requested:\n  industries: \"[text]\"\nmarket_research.industry_assigned:\n  industry: text\n  taxonomy_categories: \"[text]\"\n",
 		"scanner/nodes.yaml": `scan-orchestrator:
-  id: scan-orchestrator
   execution_type: system_node
   subscribes_to: [scan.requested]
   produces: [market_research.industry_assigned]
@@ -69,7 +68,6 @@ func CopyScalarFanOutPayloadReader(t testing.TB) string {
             industry: industry
             taxonomy_categories: "[industry]"
 observer:
-  id: observer
   execution_type: system_node
   subscribes_to: [market_research.industry_assigned]
   event_handlers:

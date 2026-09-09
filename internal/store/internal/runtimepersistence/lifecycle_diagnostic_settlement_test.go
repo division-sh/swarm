@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -48,6 +49,52 @@ func (s lostDiagnosticAcknowledgment) PersistLifecycleDiagnostic(ctx context.Con
 	return inserted, err
 }
 
+func TestLifecycleDiagnosticPayloadAdmissionFailureIsAtomicBothStores(t *testing.T) {
+	for _, sqlite := range []bool{true, false} {
+		t.Run(fmt.Sprintf("sqlite=%t", sqlite), func(t *testing.T) {
+			store, db := newLifecycleDiagnosticTestStore(t, sqlite)
+			ctx := testAuthorActivityContext()
+			item := createLifecycleDiagnostic(t, ctx, store)
+			binder := store.(interface {
+				SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
+			})
+			logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil)
+			attempts := 0
+			admissionErr := errors.New("diagnostic payload rejected")
+			binder.SetEventPayloadAdmitter(func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+				attempts++
+				return events.PayloadAdmission{}, admissionErr
+			})
+			if err := logger.ProjectLifecycleDiagnostic(ctx, item); !errors.Is(err, admissionErr) {
+				t.Fatalf("expected canonical admission rejection, got %v", err)
+			}
+			if attempts != 1 || diagnosticLogCount(t, db, item.OutboxID) != 0 {
+				t.Fatalf("rejected admission persisted a diagnostic or bypassed admission: attempts=%d", attempts)
+			}
+			pending, err := store.ListPendingAgentLifecycleDiagnostics(ctx, 100)
+			if err != nil || len(pending) != 1 {
+				t.Fatalf("rejected diagnostic must remain pending: pending=%d err=%v", len(pending), err)
+			}
+			binder.SetEventPayloadAdmitter(func(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+				attempts++
+				return storeTestPayloadAdmitter(ctx, event, flowID)
+			})
+			for i := 0; i < 2; i++ {
+				if err := logger.ProjectLifecycleDiagnostic(ctx, item); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if attempts != 2 || diagnosticLogCount(t, db, item.OutboxID) != 1 {
+				t.Fatalf("retry must admit and persist exactly once: attempts=%d", attempts)
+			}
+			pending, err = store.ListPendingAgentLifecycleDiagnostics(ctx, 100)
+			if err != nil || len(pending) != 0 {
+				t.Fatalf("accepted diagnostic must settle: pending=%d err=%v", len(pending), err)
+			}
+		})
+	}
+}
+
 func TestLifecycleDiagnosticSettlementFailureCuts(t *testing.T) {
 	for _, sqlite := range []bool{true, false} {
 		for _, phase := range []string{"log", "acknowledgment", "lost_ack"} {
@@ -64,7 +111,7 @@ func TestLifecycleDiagnosticSettlementFailureCuts(t *testing.T) {
 				} else {
 					removeFault = installLifecycleDiagnosticFailure(t, db, sqlite, phase)
 				}
-				if err := runtimepkg.NewRuntimeLogger(persistence, executionposture.Live).ProjectLifecycleDiagnostic(ctx, item); err == nil {
+				if err := runtimepkg.NewRuntimeLogger(persistence, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, item); err == nil {
 					t.Fatal("faulted diagnostic settlement succeeded")
 				}
 				if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
@@ -82,7 +129,7 @@ func TestLifecycleDiagnosticSettlementFailureCuts(t *testing.T) {
 					t.Fatalf("pending=%d want=%d err=%v", len(pending), wantPending, err)
 				}
 				removeFault()
-				logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
+				logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil)
 				for i := 0; i < 2; i++ {
 					if err := logger.ProjectLifecycleDiagnostic(ctx, item); err != nil {
 						t.Fatal(err)
@@ -217,7 +264,7 @@ func TestLifecycleDiagnosticRejectsMissingSinkAndAlteredSnapshot(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			item := createLifecycleDiagnostic(t, ctx, store)
 			var nilLogger *runtimepkg.RuntimeLogger
-			for _, logger := range []*runtimepkg.RuntimeLogger{nilLogger, runtimepkg.NewRuntimeLogger(nil, executionposture.Live)} {
+			for _, logger := range []*runtimepkg.RuntimeLogger{nilLogger, runtimepkg.NewRuntimeLogger(nil, executionposture.Live, nil)} {
 				if err := logger.ProjectLifecycleDiagnostic(ctx, item); err == nil {
 					t.Fatal("missing logger/persistence acknowledged diagnostic")
 				}
@@ -227,7 +274,7 @@ func TestLifecycleDiagnosticRejectsMissingSinkAndAlteredSnapshot(t *testing.T) {
 				t.Fatal("missing bus logger acknowledged diagnostic")
 			}
 			wrongStore, _ := newLifecycleDiagnosticTestStore(t, sqlite)
-			if err := runtimepkg.NewRuntimeLogger(wrongStore, executionposture.Live).ProjectLifecycleDiagnostic(ctx, item); err == nil {
+			if err := runtimepkg.NewRuntimeLogger(wrongStore, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, item); err == nil {
 				t.Fatal("wrong selected store acknowledged diagnostic")
 			}
 			mutations := []struct {
@@ -244,7 +291,7 @@ func TestLifecycleDiagnosticRejectsMissingSinkAndAlteredSnapshot(t *testing.T) {
 				t.Run(mutation.name, func(t *testing.T) {
 					wrong := item
 					mutation.edit(&wrong)
-					if err := runtimepkg.NewRuntimeLogger(store, executionposture.Live).ProjectLifecycleDiagnostic(ctx, wrong); err == nil {
+					if err := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, wrong); err == nil {
 						t.Fatal("altered immutable snapshot acknowledged")
 					}
 				})
@@ -284,7 +331,7 @@ func TestLifecycleDiagnosticSettlementOnBothStores(t *testing.T) {
 			ready.Add(16)
 			for i := 0; i < 16; i++ {
 				go func(selected lifecycleDiagnosticTestStore) {
-					logger := runtimepkg.NewRuntimeLogger(selected, executionposture.Live)
+					logger := runtimepkg.NewRuntimeLogger(selected, executionposture.Live, nil)
 					foreign := runtimecorrelation.WithRunID(ctx, uuid.NewString())
 					foreign = runtimecorrelation.WithRuntimeLineage(foreign, runtimecorrelation.RuntimeLineage{
 						Owner: "foreign-consumer", RunID: uuid.NewString(),
@@ -337,12 +384,12 @@ func TestLifecycleDiagnosticSettlementOnBothStores(t *testing.T) {
 				t.Fatalf("transitions=%d err=%v", transitions, err)
 			}
 			// The committed receipt, not the replay caller's posture, owns projection.
-			if err := runtimepkg.NewRuntimeLogger(store, executionposture.MockOnly).ProjectLifecycleDiagnostic(ctx, item); err != nil {
+			if err := runtimepkg.NewRuntimeLogger(store, executionposture.MockOnly, nil).ProjectLifecycleDiagnostic(ctx, item); err != nil {
 				t.Fatal(err)
 			}
 			wrong := item
 			wrong.OperationID = uuid.NewString()
-			if err := runtimepkg.NewRuntimeLogger(store, executionposture.Live).ProjectLifecycleDiagnostic(ctx, wrong); err == nil {
+			if err := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, wrong); err == nil {
 				t.Fatal("conflicting immutable snapshot accepted")
 			}
 		})
@@ -364,6 +411,7 @@ func newIndependentLifecycleDiagnosticStores(t *testing.T, sqlite bool) (lifecyc
 				_ = next.Close()
 				t.Fatal(err)
 			}
+			next.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 			return next, func() {
 				if err := next.Close(); err != nil {
 					t.Error(err)
@@ -443,7 +491,7 @@ func TestLifecycleDiagnosticCompetingStartupManagersBeforeAdmission(t *testing.T
 				makeManager := func(selected lifecycleDiagnosticTestStore) *runtimemanager.AgentManager {
 					t.Helper()
 					bus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), runtimebus.EventBusOptions{
-						Logger: diagnosticRuntimeLoggerHook{runtimepkg.NewRuntimeLogger(selected, executionposture.Live)},
+						Logger: diagnosticRuntimeLoggerHook{runtimepkg.NewRuntimeLogger(selected, executionposture.Live, nil)},
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -530,7 +578,7 @@ func TestLifecycleDiagnosticDurablePageBoundaryAndReopen(t *testing.T) {
 				t.Fatalf("page=%d err=%v", len(page), err)
 			}
 			projector, closeProjector := reopen()
-			logger := runtimepkg.NewRuntimeLogger(projector, executionposture.Live)
+			logger := runtimepkg.NewRuntimeLogger(projector, executionposture.Live, nil)
 			for _, item := range page {
 				if err := logger.ProjectLifecycleDiagnostic(ctx, item); err != nil {
 					closeProjector()
@@ -557,7 +605,7 @@ func TestLifecycleDiagnosticDurablePageBoundaryAndReopen(t *testing.T) {
 			// must survive loss of the complete projecting handle.
 			next, closeNext := reopen()
 			defer closeNext()
-			logger = runtimepkg.NewRuntimeLogger(next, executionposture.MockOnly)
+			logger = runtimepkg.NewRuntimeLogger(next, executionposture.MockOnly, nil)
 			pending, err := next.ListPendingAgentLifecycleDiagnostics(ctx, 100)
 			if err != nil || len(pending) != 1 {
 				t.Fatalf("reopened pending=%d err=%v", len(pending), err)
@@ -592,7 +640,7 @@ func TestLifecycleDiagnosticResetHistoryOnBothStores(t *testing.T) {
 				store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 				ctx := testAuthorActivityContext()
 				item := createLifecycleDiagnostic(t, ctx, store)
-				logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
+				logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil)
 				if before {
 					if err := logger.ProjectLifecycleDiagnostic(ctx, item); err != nil {
 						t.Fatal(err)
@@ -606,7 +654,7 @@ func TestLifecycleDiagnosticResetHistoryOnBothStores(t *testing.T) {
 				if _, err := capability.ApplyDestructiveResetCleanup(ctx, request, nil); err != nil {
 					t.Fatal(err)
 				}
-				after := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
+				after := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil)
 				for i := 0; i < 2; i++ {
 					if err := after.ProjectLifecycleDiagnostic(runtimecorrelation.WithRunID(ctx, uuid.NewString()), item); err != nil {
 						t.Fatal(err)

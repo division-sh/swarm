@@ -2427,7 +2427,7 @@ func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *te
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"complete-task": {
-				ID: "complete-task", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+				ExecutionType: runtimecontracts.SystemNodeExecutionType,
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.requested": {Guard: &runtimecontracts.GuardSpec{Check: `payload.task.id != ""`}},
 				},
@@ -3275,7 +3275,6 @@ func schemaBoundActivityInputSource(expression, payloadType string, toolInputTyp
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
-				ID: "worker",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"work.received": {Activity: runtimecontracts.ActivitySpec{Tool: "notify", Input: map[string]runtimecontracts.ExpressionValue{
 						"value": runtimecontracts.CELExpression(expression),
@@ -3302,7 +3301,6 @@ func schemaBoundQueryFilterSource(expression string) semanticview.Source {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"query-node": {
-				ID: "query-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"work.received": {Query: &runtimecontracts.QuerySpec{Source: "payload.items", Filter: expression, StoreAs: "metadata.rows"}},
 				},
@@ -3354,7 +3352,7 @@ func TestRunCollectionItemConditionsUseSharedSourceOwner(t *testing.T) {
 					}},
 				},
 				Nodes: map[string]runtimecontracts.SystemNodeContract{
-					"collection-node": {ID: "collection-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.received": tc.handler}},
+					"collection-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.received": tc.handler}},
 				},
 			})
 			report := Run(context.Background(), source, Options{})

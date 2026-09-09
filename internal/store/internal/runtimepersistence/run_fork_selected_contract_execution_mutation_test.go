@@ -1610,7 +1610,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 		SelectedForkContext: true, Classification: runtimecorrelation.RuntimeLineageClassificationForkLocal,
 	})
 	item := createLifecycleDiagnosticWithIdentity(t, producer, pg, identity)
-	if err := runtimepkg.NewRuntimeLogger(pg, executionposture.Live).ProjectLifecycleDiagnostic(ctx, item); err != nil {
+	if err := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, item); err != nil {
 		t.Fatal(err)
 	}
 	run, parent, disposition := diagnosticProjectionLineage(t, db, false, item)

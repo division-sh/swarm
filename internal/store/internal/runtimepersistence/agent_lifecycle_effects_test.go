@@ -287,7 +287,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	if err != nil || len(diagnostics) != 3 {
 		t.Fatalf("pending lifecycle diagnostics = %#v err=%v, want spawn, start, and restart", diagnostics, err)
 	}
-	if err := runtimepkg.NewRuntimeLogger(store.(runtimepkg.RuntimeLogPersistence), executionposture.Live).ProjectLifecycleDiagnostic(ctx, diagnostics[0]); err != nil {
+	if err := runtimepkg.NewRuntimeLogger(store.(runtimepkg.RuntimeLogPersistence), executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, diagnostics[0]); err != nil {
 		t.Fatalf("project lifecycle diagnostic: %v", err)
 	}
 	diagnostics, err = diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)

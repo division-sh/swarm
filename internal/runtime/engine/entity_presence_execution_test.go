@@ -44,7 +44,7 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 						"work.received": {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"items": {Type: "list<text>"}}, Required: []string{"items"}}},
 						"work.result":   {Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"note": {Type: "text"}}, Required: []string{"note"}}},
 					},
-					Nodes: map[string]rc.SystemNodeContract{"worker": {ID: "worker", EventHandlers: map[string]rc.SystemNodeEventHandler{"work.received": handler}}},
+					Nodes: map[string]rc.SystemNodeContract{"worker": {EventHandlers: map[string]rc.SystemNodeEventHandler{"work.received": handler}}},
 				}
 				executor, err := NewExecutor(RuntimeDependencies{Source: semanticview.Wrap(bundle), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{}}, schemaBoundWildcardEvaluator{})
 				if err != nil {
