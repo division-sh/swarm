@@ -15,13 +15,14 @@ import (
 )
 
 type ciWorkflowStep struct {
-	ID              string         `yaml:"id"`
-	Name            string         `yaml:"name"`
-	If              string         `yaml:"if"`
-	ContinueOnError bool           `yaml:"continue-on-error"`
-	Run             string         `yaml:"run"`
-	Uses            string         `yaml:"uses"`
-	With            map[string]any `yaml:"with"`
+	ID              string            `yaml:"id"`
+	Name            string            `yaml:"name"`
+	If              string            `yaml:"if"`
+	ContinueOnError bool              `yaml:"continue-on-error"`
+	Run             string            `yaml:"run"`
+	Uses            string            `yaml:"uses"`
+	With            map[string]any    `yaml:"with"`
+	Env             map[string]string `yaml:"env"`
 }
 
 func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
@@ -128,10 +129,13 @@ func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 		}
 	}
 	aggregate := findWorkflowStep(workflow.Jobs["timing-budget"].Steps, "Evaluate complete plan-bound evidence")
-	for _, want := range []string{"-evaluate-budget", "-plan test-results/plan/proof-plan.json", "-evidence-root test-results/evidence"} {
+	for _, want := range []string{"-evaluate-budget", "-plan test-results/plan/proof-plan.json", "-evidence-root test-results/evidence", "-workflow-head-sha \"$WORKFLOW_HEAD_SHA\""} {
 		if aggregate == nil || !strings.Contains(aggregate.Run, want) {
 			t.Fatalf("aggregate missing %q", want)
 		}
+	}
+	if aggregate.Env["WORKFLOW_HEAD_SHA"] != "${{ github.event.pull_request.head.sha || github.sha }}" {
+		t.Fatal("job identity must come from the triggering event, not the merge checkout or jobs evidence")
 	}
 	if !strings.Contains(workflow.Jobs["required-tests"].Name, "Required test summary") || !strings.Contains(workflow.Jobs["sqlite-local-dev"].Name, "SQLite local smoke") {
 		t.Fatal("stable branch-protection check names drifted")

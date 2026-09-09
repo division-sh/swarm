@@ -31,6 +31,7 @@ type config struct {
 	jobsPath        string
 	workflowRunID   int64
 	workflowAttempt int
+	workflowHeadSHA string
 	budgetPath      string
 	resultJSONPath  string
 	event           string
@@ -66,6 +67,7 @@ func main() {
 	flag.StringVar(&cfg.jobsPath, "jobs", "", "paginated Actions jobs evidence for the exact attempt")
 	flag.Int64Var(&cfg.workflowRunID, "workflow-run-id", 0, "exact workflow run ID")
 	flag.IntVar(&cfg.workflowAttempt, "workflow-attempt", 0, "exact workflow run attempt")
+	flag.StringVar(&cfg.workflowHeadSHA, "workflow-head-sha", "", "triggering event head SHA used by Actions job metadata, distinct from a PR merge checkout")
 	flag.StringVar(&cfg.budgetPath, "policy", ".github/test-timing-budgets.yaml", "timing budget policy")
 	flag.StringVar(&cfg.resultJSONPath, "result-json", "", "machine-readable budget result path")
 	flag.StringVar(&cfg.event, "event", "", "GitHub event name")
@@ -251,7 +253,7 @@ func evaluateBudget(cfg config) error {
 		result.Problems = append(result.Problems, fmt.Sprintf("read whole-job evidence: %v", jobsErr))
 		result.Status = testtiming.BudgetIncomplete
 	}
-	testtiming.AttachJobEvidence(&result, plan, cfg.workflowRunID, cfg.workflowAttempt, jobs)
+	testtiming.AttachJobEvidence(&result, plan, cfg.workflowRunID, cfg.workflowAttempt, cfg.workflowHeadSHA, jobs)
 	if err := writeJSON(cfg.resultJSONPath, result); err != nil {
 		return err
 	}
