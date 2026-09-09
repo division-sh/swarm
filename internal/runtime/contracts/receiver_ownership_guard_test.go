@@ -23,8 +23,6 @@ func receiverOwnerConstructorBudget() map[string]int {
 		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute":                   2,
 		"runtime/bus::deliveryTargetOwnershipFromDescriptor":                                   2,
 		"runtime/pipeline::ClassifyDeliveryTargetOwnership":                                    4,
-		"runtime/pipeline::acquireDeliveryTargetByDeclaredKey":                                 1,
-		"runtime/pipeline::acquireSelectOrCreateMaterializingTarget":                           2,
 		"runtime/bus::selectedRunTargetOwnerProjection.withActivationPlans [descriptor]":       1,
 		"runtime/bus::ActiveAgentDescriptor.TargetDescriptor [descriptor]":                     1,
 		"runtime/bus::ActiveFlowInstanceDescriptor.TargetDescriptor [descriptor]":              1,

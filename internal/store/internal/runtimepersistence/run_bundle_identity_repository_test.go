@@ -542,7 +542,6 @@ var bundleIdentityFixtureLedger = []string{
 	"internal/runtime/pipeline/handler_engine_transaction_test.go",
 	"internal/runtime/pipeline/human_task_expiry_transaction_test.go",
 	"internal/runtime/pipeline/run_scoped_test_helpers_test.go",
-	"internal/runtime/pipeline/select_entity_test.go",
 	"internal/runtime/pipeline/workflow_gate_lifecycle_test.go",
 	"internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
 	"internal/runtime/pipeline/workflow_instance_store_run_scope_test.go",

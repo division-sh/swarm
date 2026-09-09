@@ -1286,7 +1286,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
-	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	contractsRoot := canonicalrouting.CopyForkChronologicalDispatch(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
@@ -1338,6 +1338,10 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	}
 	if result.ForkEvents[0].SourceEventID != earlierEventID || result.ForkEvents[1].SourceEventID != laterEventID {
 		t.Fatalf("sequential fork execution order = %#v, want [%s %s]", result.ForkEvents, earlierEventID, laterEventID)
+	}
+	var outputs int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.processed'`, result.Materialization.ForkRunID).Scan(&outputs); err != nil || outputs != 2 {
+		t.Fatalf("chronological execution did not commit both handler outputs: count=%d err=%v", outputs, err)
 	}
 }
 
