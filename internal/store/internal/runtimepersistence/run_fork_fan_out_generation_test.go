@@ -54,13 +54,23 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			if store, ok := fixture.store.(*SQLiteRuntimeStore); ok && !selectedExecution {
+				// The receipt fixture freezes July settlement time; actual schedule
+				// preparation and acceptance must share the live store clock.
+				store.nowFn = func() time.Time { return time.Now().UTC() }
+			}
 			for _, cell := range []struct {
 				name             string
 				loop, historical bool
 			}{{"current", true, false}, {"historical", true, true}, {"no_loop", false, false}} {
 				t.Run(cell.name, func(t *testing.T) {
 					repo := canonicalrouting.RepoRoot(t)
-					bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutConsumer(t, cell.loop, true), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+					completeBarrier := !selectedExecution && cell.loop && !cell.historical
+					root := canonicalrouting.CopyForkFanOutConsumer(t, cell.loop, true)
+					if completeBarrier {
+						root = canonicalrouting.CopyForkFanOutCompletionConsumer(t)
+					}
+					bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -187,8 +197,10 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						t.Fatalf("fork actual intent/barrier: %v", err)
 					}
 					projectedGeneration := generation
+					protectedRuns := []string{runID}
 					if forkAgain {
 						firstChild := child.ForkRunID
+						protectedRuns = append(protectedRuns, firstChild)
 						checkpoint := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "fork.checkpoint", "operator", "", []byte(`{}`), 0, firstChild, events.EventEnvelope{}, eventtest.RootRoutingSource(firstChild), at.Add(3*time.Minute))
 						if err := insertCanonicalEventRecordFixture(ctx, fixture.store, checkpoint); err != nil {
 							t.Fatal(err)
@@ -293,7 +305,16 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						// the current loop's exact stale-generation refusal.
 						expectedFailure = "loop_revision_stale"
 					}
-					consumeForkFanOutEmissions(t, fixture, backend.name, source, ctx, copied, claim, emissions, expectedFailure)
+					beforeConsumption := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+					defer func() {
+						afterConsumption := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+						for _, protected := range protectedRuns {
+							if !reflect.DeepEqual(forkContentionRowsForRun(t, beforeConsumption, protected), forkContentionRowsForRun(t, afterConsumption, protected)) {
+								t.Errorf("child ordinal/barrier consumption changed source run %s", protected)
+							}
+						}
+					}()
+					consumeForkFanOutEmissions(t, fixture, backend.name, source, ctx, copied, claim, emissions, expectedFailure, completeBarrier)
 				})
 			}
 		})

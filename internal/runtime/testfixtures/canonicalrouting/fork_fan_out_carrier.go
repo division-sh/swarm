@@ -3,8 +3,30 @@ package canonicalrouting
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// CopyForkFanOutCompletionConsumer exposes all authored loop members at the
+// delivery-barrier outcome, separately from deferred ordinal evaluation.
+func CopyForkFanOutCompletionConsumer(t testing.TB) string {
+	t.Helper()
+	root := CopyForkFanOutConsumer(t, true, true)
+	for path, replacement := range map[string][2]string{
+		"events.yaml": {"batch.completed:\n  total: integer\n  revision_id: text", "batch.completed:\n  total: integer\n  revision_id: text\n  loop_id: text\n  activation_id: text\n  attempt: integer\n  max_attempts: integer"},
+		"nodes.yaml":  {"              revision_id: {ref: loop.revision_id}\n", "              revision_id: {ref: loop.revision_id}\n              loop_id: {ref: loop.id}\n              activation_id: {ref: loop.activation_id}\n              attempt: {ref: loop.attempt}\n              max_attempts: {ref: loop.max_attempts}\n"},
+	} {
+		body, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(string(body), replacement[0]) != 1 {
+			t.Fatalf("expected one barrier completion site in %s", path)
+		}
+		writeClosedVariantFile(t, root, path, strings.Replace(string(body), replacement[0], replacement[1], 1))
+	}
+	return root
+}
 
 // CopyForkFanOutConsumer retains the carrier and adds an actual authored receiver.
 func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
