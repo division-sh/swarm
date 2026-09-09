@@ -15,7 +15,7 @@ func CopyForkLoopRetainedJoinSeparateCheckpoint(t testing.TB) string {
               completed: {ref: join.completed}
 `, "")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "subscribes_to: [work.requested, review.requested, review.retry, review.closed]", "subscribes_to: [work.requested, review.requested, review.retry, review.closed, checkpoint.requested]")
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  event_handlers:\n", `  event_handlers:
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  event_handlers:\n    work.requested:\n", `  event_handlers:
     checkpoint.requested:
       loop: {admit: revision, from: reviewing}
       advances_to: reviewing
@@ -24,6 +24,7 @@ func CopyForkLoopRetainedJoinSeparateCheckpoint(t testing.TB) string {
         fields:
           revision_id: {ref: loop.revision_id}
           completed: {literal: 1}
+    work.requested:
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - {event: work.requested, source: external}", "      - {event: work.requested, source: external}\n      - {event: checkpoint.requested, source: external}")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.requested:\n", "checkpoint.requested:\n  revision_id: text\nwork.requested:\n")
@@ -52,6 +53,7 @@ pins:
   inputs:
     events:
       - {event: work.requested, source: external}
+      - {event: work.bootstrap, source: external}
       - {event: review.retry, source: external}
       - {event: review.closed, source: external}
 `,
@@ -59,7 +61,9 @@ pins:
   members: {type: "[text]"}
   window: text
 `,
-		"events.yaml": `work.requested:
+		"events.yaml": `work.bootstrap:
+  token: text
+work.requested:
   token: text
 review.requested:
   token: text
@@ -71,11 +75,22 @@ review.closed:
   revision_id: text
 join.observed:
   revision_id: text
-  completed: int
+  completed: integer
   swarm:
     consumer: external
 `,
-		"nodes.yaml": `controller:
+		"nodes.yaml": `initializer:
+  id: initializer
+  execution_type: system_node
+  subscribes_to: [work.bootstrap]
+  event_handlers:
+    work.bootstrap:
+      create_entity: true
+      emit:
+        event: work.requested
+        fields:
+          token: {ref: payload.token}
+controller:
   id: controller
   execution_type: system_node
   subscribes_to: [work.requested, review.requested, review.retry, review.closed]

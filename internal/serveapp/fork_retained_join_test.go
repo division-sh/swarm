@@ -43,7 +43,7 @@ func testServedJoinWriterForkRetainedGenerations(t *testing.T, separateCheckpoin
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "work.requested", "bundle_hash": rt.BundleHash,
+				"event_name": "work.bootstrap", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "member-one"}, "idempotency_key": "retained-join-start",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
@@ -84,6 +84,36 @@ func testServedJoinWriterForkRetainedGenerations(t *testing.T, separateCheckpoin
 					t.Fatalf("ordinary join did not complete truthfully: %+v", join)
 				}
 			}
+			if !separateCheckpoint {
+				rows, err := rt.DB.Query(`SELECT payload FROM events WHERE run_id=$1 AND event_name='join.observed'`, started.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				observed := map[string]int{}
+				for rows.Next() {
+					var raw []byte
+					if err := rows.Scan(&raw); err != nil {
+						t.Fatal(err)
+					}
+					var payload struct {
+						RevisionID string `json:"revision_id"`
+						Completed  int    `json:"completed"`
+					}
+					if err := json.Unmarshal(raw, &payload); err != nil || payload.Completed != 1 {
+						t.Fatalf("join outcome lost typed completion: %s %v", raw, err)
+					}
+					observed[payload.RevisionID]++
+				}
+				if err := rows.Err(); err != nil {
+					t.Fatal(err)
+				}
+				if err := rows.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(observed, map[string]int{first.RevisionID: 1, current.RevisionID: 1}) {
+					t.Fatalf("join outcomes substituted captured generation: %#v", observed)
+				}
+			}
 			if separateCheckpoint {
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "checkpoint.requested", "run_id": started.RunID, "source_event_id": started.EventID,
@@ -104,6 +134,9 @@ func testServedJoinWriterForkRetainedGenerations(t *testing.T, separateCheckpoin
 			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
 			child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
 			if err != nil {
+				if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
+					t.Fatal("refused join-history materialization changed source state")
+				}
 				t.Fatalf("materialize real completed join history: %v", err)
 			}
 			childLoop, childJoins := readRetainedRootJoins(t, rt, child.ForkRunID)
