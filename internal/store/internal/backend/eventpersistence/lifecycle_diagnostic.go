@@ -21,11 +21,13 @@ import (
 )
 
 type lifecycleDiagnosticProjection struct {
-	EventID       string             `json:"event_id"`
-	RunID         string             `json:"run_id"`
-	Payload       json.RawMessage    `json:"payload"`
-	CreatedAt     time.Time          `json:"created_at"`
-	ExecutionMode executionmode.Mode `json:"execution_mode"`
+	ParentEventID      string             `json:"parent_event_id"`
+	LineageDisposition string             `json:"lineage_disposition"`
+	EventID            string             `json:"event_id"`
+	RunID              string             `json:"run_id"`
+	Payload            json.RawMessage    `json:"payload"`
+	CreatedAt          time.Time          `json:"created_at"`
+	ExecutionMode      executionmode.Mode `json:"execution_mode"`
 }
 
 func sameDiagnosticJSON(a, b []byte) bool {
@@ -88,12 +90,32 @@ func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, story *privat
 		return false, fmt.Errorf("lifecycle diagnostic snapshot conflict")
 	}
 	eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:lifecycle-diagnostic:"+item.OutboxID)).String()
+	lineage, err := item.ProducerLineage()
+	if err != nil {
+		return false, err
+	}
+	parent, disposition := lineage.ParentEventID, "causal_explicit"
+	if parent == "" {
+		parent, disposition = lineage.SubjectEventID, "causal_subject"
+	}
+	if parent == "" {
+		disposition = "parentless"
+	} else if _, err := uuid.Parse(parent); err != nil {
+		return false, fmt.Errorf("invalid lifecycle diagnostic producer parent: %w", err)
+	}
 	if projected != nil {
 		var receipt lifecycleDiagnosticProjection
 		if json.Unmarshal(projection, &receipt) != nil || receipt.EventID != eventID ||
 			(receipt.RunID != "" && receipt.RunID != fields.RunID) || !receipt.ExecutionMode.Valid() ||
 			!receipt.CreatedAt.Equal(at) || !sameDiagnosticJSON(receipt.Payload, record.Payload) {
 			return false, fmt.Errorf("lifecycle diagnostic projection receipt conflict")
+		}
+		if receipt.LineageDisposition == "historical_cleanup" {
+			if receipt.RunID != "" || receipt.ParentEventID != "" {
+				return false, fmt.Errorf("historical lifecycle diagnostic receipt has live lineage")
+			}
+		} else if receipt.RunID != fields.RunID || receipt.ParentEventID != parent || receipt.LineageDisposition != disposition {
+			return false, fmt.Errorf("lifecycle diagnostic projection lineage conflict")
 		}
 		return false, nil
 	}
@@ -110,12 +132,20 @@ func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, story *privat
 		return false, fmt.Errorf("admit lifecycle diagnostic history: %w", err)
 	}
 	receipt := lifecycleDiagnosticProjection{EventID: eventID, RunID: existingRun, Payload: record.Payload, CreatedAt: at, ExecutionMode: record.ExecutionMode}
+	receipt.ParentEventID, receipt.LineageDisposition = parent, disposition
 	facts := events.EventFacts{ID: eventID, Type: events.EventTypePlatformRuntimeLog,
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
 		Payload:  record.Payload, CreatedAt: at, ExecutionMode: receipt.ExecutionMode}
 	var event events.Event
 	if existingRun == "" {
+		receipt.ParentEventID, receipt.LineageDisposition = "", "historical_cleanup"
 		event, err = events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: facts})
+	} else if parent != "" {
+		// The canonical append owner admits the persisted same-run reference in
+		// this transaction; missing/foreign parents cannot be demoted to roots.
+		event, err = events.NewCausalDiagnosticDirectEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{
+			RunID: existingRun, ParentEventID: parent, ExecutionMode: receipt.ExecutionMode,
+		}})
 	} else {
 		event, err = events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: existingRun})
 	}

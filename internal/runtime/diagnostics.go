@@ -90,18 +90,11 @@ func EncodeLifecycleDiagnosticLog(item diaglog.LifecycleDiagnostic) ([]byte, err
 	}
 	detail["agent_identity"] = fields
 	entry := RuntimeLogEntry{Level: diaglog.LevelInfo, Component: "agent-lifecycle", Action: item.EventName, AgentID: item.AgentID}
-	if stored, ok := item.Payload["producer_lineage"]; ok {
-		raw, err := json.Marshal(stored)
-		if err != nil {
-			return nil, err
-		}
-		var lineage runtimecorrelation.RuntimeLineage
-		if err := json.Unmarshal(raw, &lineage); err != nil {
-			return nil, err
-		}
-		if lineage.RunID != item.Identity.RunID {
-			return nil, fmt.Errorf("lifecycle diagnostic producer lineage differs from immutable run")
-		}
+	lineage, err := item.ProducerLineage()
+	if err != nil {
+		return nil, err
+	}
+	if lineage.RunID != "" {
 		runtimeLogAddLineageDetails(detail, runtimeLogLineageForEntry(lineage, entry))
 	}
 	return json.Marshal(runtimeLogPayload("info", entry.Component, entry.Action, entry, detail, item.Identity.RunID, "", ""))

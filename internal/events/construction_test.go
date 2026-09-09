@@ -58,6 +58,7 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	// Exact outbox settlement chooses live-run versus retained history inside its transaction.
 	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewRunScopedDiagnosticDirectEvent"}:  1,
 	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewStandaloneDiagnosticDirectEvent"}: 1,
+	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewCausalDiagnosticDirectEvent"}:     1,
 }
 
 var productionRootConstructorAllowlist = map[runtimeConstructorCallsite]int{
