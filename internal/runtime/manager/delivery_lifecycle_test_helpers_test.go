@@ -67,6 +67,7 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			target_route BLOB NOT NULL,
 				target_set BLOB NOT NULL,
 				operator_reference_event_id TEXT,
+				inherited_fan_out_origin BLOB,
 				route_settlement BLOB NOT NULL
 			)`,
 		`CREATE TABLE event_deliveries (

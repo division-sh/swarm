@@ -39,6 +39,9 @@ func Load(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record
 	if err := record.Validate(); err != nil {
 		return eventrecord.Record{}, false, fmt.Errorf("load event record: %w", eventrecord.Corrupt(record.EventID, err))
 	}
+	if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
+		return eventrecord.Record{}, false, err
+	}
 	return record.Clone(), true, nil
 }
 
@@ -64,6 +67,11 @@ func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.
 			return nil, err
 		}
 	}
+	for _, record := range loaded {
+		if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
+			return nil, err
+		}
+	}
 	return orderRecords(ordered, loaded)
 }
 
@@ -76,18 +84,18 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-			route_settlement, operator_reference_event_id
+			route_settlement, operator_reference_event_id, inherited_fan_out_origin
 		) VALUES (
 			$1, $2::uuid, NULLIF($3,'')::uuid, $4, NULLIF($5,''), NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9::jsonb, $10::bytea,
 			$11, $12, $13, $14, NULLIF($15,'')::uuid, $16,
 			$17, NULLIF($18,''), $19::jsonb, $20::jsonb, $21::jsonb,
-			$22::jsonb, NULLIF($23,'')::uuid
+			$22::jsonb, NULLIF($23,'')::uuid, NULLIF($24,'')::jsonb
 		) ON CONFLICT (event_id) DO NOTHING
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
 		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload, record.ExecutionMode,
 		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt,
 		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID)
+		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
 	if err != nil {
 		return false, fmt.Errorf("append event record: %w", err)
 	}
@@ -121,7 +129,7 @@ const selectRecord = `
 		COALESCE(e.routing_source_authority, ''), e.source_route, e.target_route, e.target_set, e.route_settlement,
 		COALESCE(e.operator_reference_event_id::text, ''),
 		COALESCE(sf.source_run_id::text, ''), COALESCE(sf.source_event_id::text, ''),
-		COALESCE(sf.selection_authority, ''), COALESCE(sf.lineage_owner_count, 0)
+		COALESCE(sf.selection_authority, ''), COALESCE(sf.lineage_owner_count, 0), COALESCE(e.inherited_fan_out_origin::text, '')
 	FROM events e
 	LEFT JOIN (
 		SELECT candidate.*,
@@ -145,6 +153,7 @@ func scanTargets(record *eventrecord.Record) []any {
 		&record.SourceRoute, &record.TargetRoute, &record.TargetSet, &record.RouteSettlement, &record.OperatorReferencedEventID,
 		&record.SelectedForkSourceRunID, &record.SelectedForkSourceEventID, &record.SelectedForkAuthorityStamp,
 		&record.SelectedForkLineageOwners,
+		&record.InheritedFanOutOrigin,
 	}
 }
 

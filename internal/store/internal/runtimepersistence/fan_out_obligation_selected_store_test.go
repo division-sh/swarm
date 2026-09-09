@@ -22,6 +22,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -254,12 +255,37 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("construct mixed-route source: %v", err)
 			}
+			producer, err := identity.AdmitExecutableNodeDeclaration("producer", "fan-out-producer")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// This is a store publication-cardinality fixture, not an ordinal
+			// evaluator. Its captured producer must nevertheless be the same
+			// exact execution owner as every prepared publication.
+			var capsuleRaw []byte
+			if err := db.QueryRowContext(runCtx, `SELECT capsule FROM fan_out_intents WHERE run_id=$1`, fixture.runID).Scan(&capsuleRaw); err != nil {
+				t.Fatal(err)
+			}
+			var capsule fanoutobligation.Capsule
+			if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
+				t.Fatal(err)
+			}
+			capsule.NodeKey, capsule.ExecutionFlowID, capsule.EntityID = producer.Key(), "producer", sourceRoute.EntityID
+			capsule.Route = runtimeflowidentity.StoredRoute("producer", "producer", "producer")
+			capsule.ProducerSource = routingSource
+			capsuleRaw, err = json.Marshal(capsule)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(runCtx, `UPDATE fan_out_intents SET capsule=$1 WHERE run_id=$2`, string(capsuleRaw), fixture.runID); err != nil {
+				t.Fatal(err)
+			}
 			planCtx := runtimedelivery.WithRoute(runCtx, events.DeliveryRoute{Target: events.MustExistingEntityTarget(sourceRoute)})
 			plans := make([]runtimebus.EnginePublicationPlan, 0, 3)
 			for ordinal, name := range []string{"mixed.none", "mixed.one", "mixed.multi"} {
 				event := eventtest.ChildForProducerWithRoutingSource(
-					uuid.NewString(), events.EventType("producer/"+name), eventtest.Producer(events.EventProducerNode, "fan-out-producer"), "",
-					[]byte(`{}`), 0,
+					uuid.NewString(), events.EventType("producer/"+name), eventtest.Producer(events.EventProducerNode, producer.Key()), "",
+					[]byte(`{}`), capsule.ChainDepth+1,
 					events.EventLineage{RunID: fixture.runID, ParentEventID: fixture.eventID, ExecutionMode: executionmode.Live},
 					events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), routingSource, fixture.createdAt.Add(time.Duration(ordinal+1)*time.Second),
 				)

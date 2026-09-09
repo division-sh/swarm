@@ -22,6 +22,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/fanoutorigin"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -233,7 +234,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, claim 
 		return input, err
 	}
 	input.Trigger = triggers[0].Event
-	triggerInLineage, err := fanOutSourceRunInLineage(ctx, db, postgres, intent.Request.Key.RunID, input.Trigger.RunID())
+	triggerInLineage, err := fanoutorigin.SourceRunInLineage(ctx, db, postgres, intent.Request.Key.RunID, input.Trigger.RunID())
 	if err != nil {
 		return input, err
 	}
@@ -253,7 +254,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, claim 
 		}
 		input.Items, err = collectionFieldRangeFromJSON(input.Trigger.Payload(), intent.Source.Field, intent.Request.Cardinality, intent.Cursor, endOrdinal)
 	case fanoutobligation.SourceEntityField:
-		inLineage, lineageErr := fanOutSourceRunInLineage(ctx, db, postgres, intent.Request.Key.RunID, intent.Source.RunID)
+		inLineage, lineageErr := fanoutorigin.SourceRunInLineage(ctx, db, postgres, intent.Request.Key.RunID, intent.Source.RunID)
 		if lineageErr != nil {
 			return input, lineageErr
 		}
@@ -279,36 +280,6 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, claim 
 		return input, err
 	}
 	return input, nil
-}
-
-func fanOutSourceRunInLineage(ctx context.Context, db *sql.DB, postgres bool, intentRunID, sourceRunID string) (bool, error) {
-	query := `
-		WITH RECURSIVE lineage(run_id) AS (
-			SELECT ?
-			UNION
-			SELECT runs.forked_from_run_id
-			FROM runs
-			JOIN lineage ON runs.run_id=lineage.run_id
-			WHERE runs.forked_from_run_id IS NOT NULL
-		)
-		SELECT EXISTS(SELECT 1 FROM lineage WHERE run_id=?)`
-	if postgres {
-		query = `
-			WITH RECURSIVE lineage(run_id) AS (
-				SELECT $1::uuid
-				UNION
-				SELECT runs.forked_from_run_id
-				FROM runs
-				JOIN lineage ON runs.run_id=lineage.run_id
-				WHERE runs.forked_from_run_id IS NOT NULL
-			)
-			SELECT EXISTS(SELECT 1 FROM lineage WHERE run_id=$2::uuid)`
-	}
-	var found bool
-	if err := db.QueryRowContext(ctx, query, intentRunID, sourceRunID).Scan(&found); err != nil {
-		return false, fmt.Errorf("validate fan-out entity source run lineage: %w", err)
-	}
-	return found, nil
 }
 
 func collectionFieldRangeFromJSON(raw []byte, field string, want, start, end int) ([]any, error) {
@@ -589,6 +560,33 @@ func commitFanOutChunk(
 		if len(command.Outcomes) > intent.NextChunkSize || intent.Cursor+len(command.Outcomes) > intent.Request.Cardinality {
 			return fmt.Errorf("fan-out chunk exceeds claimed range")
 		}
+		var trigger events.Event
+		for _, outcome := range command.Outcomes {
+			if outcome.Publication == nil {
+				continue
+			}
+			var records []events.PersistedReplayEvent
+			if postgres {
+				records, err = hydratePostgresPersistedReplayEvents(txctx, tx, []string{intent.Request.Capsule.Lineage.ParentEventID})
+			} else {
+				records, err = hydrateSQLitePersistedReplayEvents(txctx, tx, []string{intent.Request.Capsule.Lineage.ParentEventID})
+			}
+			if err != nil {
+				return err
+			}
+			if len(records) != 1 || records[0].ReplayFailure != nil {
+				return fmt.Errorf("fan-out chunk requires the exact immutable trigger")
+			}
+			trigger = records[0].Event
+			inLineage, err := fanoutorigin.SourceRunInLineage(txctx, tx, postgres, intent.Request.Key.RunID, trigger.RunID())
+			if err != nil {
+				return err
+			}
+			if !inLineage {
+				return fmt.Errorf("fan-out chunk trigger is outside the destination fork lineage")
+			}
+			break
+		}
 		for index, outcome := range command.Outcomes {
 			wantOrdinal := intent.Cursor + index
 			if outcome.Ordinal != wantOrdinal {
@@ -602,7 +600,11 @@ func commitFanOutChunk(
 				if !ok {
 					return fmt.Errorf("fan-out publication %d has unexpected type %T", index, outcome.Publication)
 				}
-				committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), handoff)
+				projection, err := fanoutobligation.PrepareOrdinalEmission(intent, trigger, outcome.Ordinal)
+				if err != nil {
+					return err
+				}
+				committed, err := store.commitFanOutPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), projection, handoff)
 				if err != nil {
 					return fanOutPublicationSemanticError(outcome.Ordinal, err)
 				}

@@ -153,6 +153,20 @@ func (c PublicationCommand) Validate() error {
 	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
 		return err
 	}
+	return c.validatePublicationFacts()
+}
+
+// ValidateFanOut checks the prepared command's shape, not its write authority.
+// Only the named chunk transaction may admit an inherited origin against its
+// locked intent and the exact source-run lineage.
+func (c PublicationCommand) ValidateFanOut() error {
+	if c.Commit.Event.Event().AdmissionClass() != events.EventAdmissionInheritedFanOut {
+		return c.Validate()
+	}
+	return c.validatePublicationFacts()
+}
+
+func (c PublicationCommand) validatePublicationFacts() error {
 	if err := events.ValidatePersistentEvent(c.Commit.Event.Event()); err != nil {
 		return err
 	}

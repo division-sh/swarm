@@ -71,6 +71,9 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveSQLiteRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "thin SQLite adapter consumes the shared contextual event point"}
 	}
+	for edge, allowance := range inheritedFanOutBoundaryAllowances() {
+		allowed[edge] = allowance
+	}
 	return allowed
 }
 
@@ -146,7 +149,7 @@ func TestRunForkHistoricalAdmissionConsumers(t *testing.T) {
 // Discover consumers before compiler loading so a newly introduced reader in a
 // different production package cannot hide outside a fixed package allowlist.
 func historicalBoundaryPackages(root string) ([]string, error) {
-	dirs := map[string]bool{"./internal/store/internal/backend/runforkpersistence": true, "./internal/store/internal/backend/runforkrevision": true}
+	dirs := map[string]bool{"./internal/events": true, "./internal/store/internal/backend/runforkpersistence": true, "./internal/store/internal/backend/runforkrevision": true}
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -164,7 +167,7 @@ func historicalBoundaryPackages(root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if !bytes.Contains(raw, []byte("run_fork_fact_revisions")) && !bytes.Contains(raw, []byte("runforkpersistence")) && !bytes.Contains(raw, []byte("runforkrevision")) && !bytes.Contains(raw, []byte("DecodeHistoricalSnapshot")) && !bytes.Contains(raw, []byte("/runtime/runfork\"")) {
+		if !bytes.Contains(raw, []byte("run_fork_fact_revisions")) && !bytes.Contains(raw, []byte("runforkpersistence")) && !bytes.Contains(raw, []byte("runforkrevision")) && !bytes.Contains(raw, []byte("DecodeHistoricalSnapshot")) && !bytes.Contains(raw, []byte("/runtime/runfork\"")) && !bytes.Contains(raw, []byte("/events\"")) && !bytes.Contains(raw, []byte("fanoutobligation")) && !bytes.Contains(raw, []byte("fanoutorigin")) && !bytes.Contains(raw, []byte("eventrecord")) && !bytes.Contains(raw, []byte("/runtime/bus\"")) {
 			return nil
 		}
 		relative, err := filepath.Rel(root, filepath.Dir(path))
@@ -247,6 +250,9 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 					break
 				}
 				callee := historicalBoundaryFunction(fn)
+				if inheritedFanOutBoundaryReference(callee) {
+					add(n, "reference:"+callee)
+				}
 				switch callee {
 				case historicalBoundaryWriter + "FactKey", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
 					"runtime/runfork::NewTerminalBarrierHistory", historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory",
@@ -487,6 +493,9 @@ import (
     "bytes"
     delivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
     history "github.com/division-sh/swarm/internal/runtime/runfork"
+    events "github.com/division-sh/swarm/internal/events"
+    fanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+    bus "github.com/division-sh/swarm/internal/runtime/bus"
 )
 type unexpectedReader struct{}
 // Private package-local stand-in: no exported historical compatibility seam.
@@ -495,6 +504,16 @@ type eventAlias = runForkRevisionEvent
 func (arbitrary *unexpectedReader) mintTerminalHistory() {
     alias := history.NewTerminalBarrierHistory
     _ = alias
+}
+func (arbitrary *unexpectedReader) mintOrigin() {
+    mint := events.NewInheritedFanOutOrigin
+    alias := mint
+    _ = alias
+    prepare := fanout.PrepareOrdinalEmission
+    _ = prepare
+}
+func (arbitrary *unexpectedReader) admitOrigin(other bus.PublicationCommand) error {
+    return other.ValidateFanOut()
 }
 func (arbitrary *unexpectedReader) decode(raw []byte) error {
     var fact eventAlias
@@ -549,6 +568,9 @@ func ordinaryBusiness(raw []byte) error {
 	findings := historicalBoundaryCollect(pkg, info, fset, file)
 	got := historicalBoundaryProblems(findings, historicalBoundaryAllowances(), false)
 	want := []string{
+		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:events::NewInheritedFanOutOrigin",
+		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:runtime/fanoutobligation::PrepareOrdinalEmission",
+		historicalBoundaryOwner + "unexpectedReader.admitOrigin/reference:runtime/bus::PublicationCommand.ValidateFanOut",
 		historicalBoundaryOwner + "unexpectedReader.mintTerminalHistory/reference:runtime/runfork::NewTerminalBarrierHistory",
 		historicalBoundaryOwner + "unexpectedReader.decode/raw_decode",
 		historicalBoundaryOwner + "unexpectedReader.appendRunForkHistoricalFact/raw_decode",

@@ -3718,6 +3718,19 @@ handler_specification:
           terminal-history projection consumed by replay admission, selected frontier and materialization; other
           recipients on the event remain independently classified. Missing or contradictory evidence fails closed.
           Terminal status is not rewritten to delivered, and no child occurrence, delivery or schedule is created.
+          A newly executed suffix ordinal of an inherited intent is not a replay or root ingress. It carries an
+          explicit inherited_fan_out origin: destination run, original trigger run/event (possibly an ancestor of
+          the immediate source), triggering delivery, declaration identity, pinned bundle and semantic digest,
+          and ordinal. source_event_id remains absent; ordinary child causal parents remain strictly same-run.
+          One ordinal-emission owner projects this distinction for evaluation and validates it for chunk commit.
+          Only the named fan-out chunk transaction may persist this class, after locking the exact intent claim,
+          checking the immutable trigger and inherited lineage, and matching every origin/execution coordinate.
+          Event, origin, committed ordinal outcome, receiver obligations and cursor advance are atomic. Generic
+          publication cannot authorize this event class. Durable readback validates the unique committed ordinal
+          owner against the immutable event origin and capsule. Fixed-revision admission validates that same
+          semantic relation against its captured intent and outcome, not current live state. Public event readback
+          exposes inherited_fan_out_origin separately from source_event_id. Neither capture nor readback copies
+          the trigger, invents a root or grants selected deferred-work authority under #642.
     join:
       field: join
       type: object
@@ -13283,7 +13296,7 @@ platform_tables:
       ddl: |
         CREATE TABLE events (
             insertion_sequence          BIGSERIAL PRIMARY KEY,
-            event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'replay', 'selected_fork_replay', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
+            event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'replay', 'selected_fork_replay', 'inherited_fan_out', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             event_id                    UUID NOT NULL UNIQUE,
             run_id                      UUID REFERENCES runs(run_id),
             event_name                  TEXT NOT NULL CHECK (event_name = TRIM(event_name) AND NULLIF(event_name, '') IS NOT NULL),
@@ -13306,13 +13319,15 @@ platform_tables:
             target_set                  JSONB NOT NULL,
             route_settlement            JSONB NOT NULL,
             operator_reference_event_id UUID,
+            inherited_fan_out_origin    JSONB,
             handler_node                TEXT,
             idempotency_key             TEXT,
             CHECK ((scope = 'entity' AND entity_id IS NOT NULL) OR (scope = 'flow' AND entity_id IS NULL AND NULLIF(TRIM(COALESCE(flow_instance, '')), '') IS NOT NULL) OR (scope = 'global' AND entity_id IS NULL AND NULLIF(TRIM(COALESCE(flow_instance, '')), '') IS NULL)),
-            CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class IN ('root_ingress', 'operator_injected', 'selected_fork_replay') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND (source_event_id IS NULL OR run_id IS NOT NULL))),
-            CHECK (event_class NOT IN ('root_ingress', 'operator_injected', 'selected_fork_replay') OR run_id IS NOT NULL),
+            CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class IN ('root_ingress', 'operator_injected', 'selected_fork_replay', 'inherited_fan_out') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND (source_event_id IS NULL OR run_id IS NOT NULL))),
+            CHECK (event_class NOT IN ('root_ingress', 'operator_injected', 'selected_fork_replay', 'inherited_fan_out') OR run_id IS NOT NULL),
+            CHECK ((event_class = 'inherited_fan_out' AND inherited_fan_out_origin IS NOT NULL AND produced_by_type = 'node') OR (event_class <> 'inherited_fan_out' AND inherited_fan_out_origin IS NULL)),
             CHECK ((event_class = 'operator_injected') OR operator_reference_event_id IS NULL),
-            CHECK ((event_class IN ('root_ingress', 'operator_injected') AND produced_by_type = 'external') OR (event_class = 'child' AND produced_by_type IN ('node', 'agent', 'platform')) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND produced_by_type = 'platform') OR event_class IN ('replay', 'selected_fork_replay')),
+            CHECK ((event_class IN ('root_ingress', 'operator_injected') AND produced_by_type = 'external') OR (event_class = 'child' AND produced_by_type IN ('node', 'agent', 'platform')) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND produced_by_type = 'platform') OR event_class IN ('replay', 'selected_fork_replay', 'inherited_fan_out')),
             CHECK ((event_name IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class = 'diagnostic_direct') OR (event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class <> 'diagnostic_direct')),
             CHECK (event_name <> 'platform.runtime_log' OR produced_by = 'runtime'),
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),

@@ -125,7 +125,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			execution_mode TEXT NOT NULL, chain_depth INTEGER NOT NULL, produced_by TEXT NOT NULL,
 			produced_by_type TEXT NOT NULL, source_event_id TEXT, created_at TIMESTAMP NOT NULL,
 			routing_source_kind TEXT NOT NULL, routing_source_authority TEXT, source_route BLOB NOT NULL,
-				target_route BLOB NOT NULL, target_set BLOB NOT NULL, operator_reference_event_id TEXT,
+				target_route BLOB NOT NULL, target_set BLOB NOT NULL, operator_reference_event_id TEXT, inherited_fan_out_origin BLOB,
 				route_settlement BLOB NOT NULL
 		)`,
 		`CREATE TABLE event_deliveries (
