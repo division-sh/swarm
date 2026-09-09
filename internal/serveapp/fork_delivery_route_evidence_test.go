@@ -20,15 +20,15 @@ type servedForkDeliveryEvidence struct {
 
 func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, runID string) map[string]servedForkDeliveryEvidence {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT delivery_id,event_id,route_identity,subscriber_type,subscriber_id,CAST(delivery_target_route AS TEXT),CAST(delivery_context AS TEXT),CAST(delivery_payload_projection AS TEXT),CAST(connect_execution_claim AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
+	rows, err := rt.DB.Query(`SELECT delivery_id,event_id,route_identity,subscriber_type,subscriber_id,CAST(delivery_target_route AS TEXT),CAST(delivery_context AS TEXT),CAST(delivery_payload_projection AS TEXT),CAST(connect_execution_claim AS TEXT),CAST(receiver_materialization_plan AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	out := map[string]servedForkDeliveryEvidence{}
 	for rows.Next() {
-		var id, eventID, identity, kind, recipient, target, contextJSON, projection, claim string
-		if err := rows.Scan(&id, &eventID, &identity, &kind, &recipient, &target, &contextJSON, &projection, &claim); err != nil {
+		var id, eventID, identity, kind, recipient, target, contextJSON, projection, claim, initialization string
+		if err := rows.Scan(&id, &eventID, &identity, &kind, &recipient, &target, &contextJSON, &projection, &claim, &initialization); err != nil {
 			t.Fatal(err)
 		}
 		if kind != "node" {
@@ -45,6 +45,15 @@ func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, 
 		var route events.DeliveryRoute
 		if err := json.Unmarshal(wire, &route); err != nil {
 			t.Fatal(err)
+		}
+		route, err = events.RestoreReceiverMaterializationRecord(route, []byte(initialization))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !route.Initialization.Empty() {
+			if err := route.Initialization.ValidatePublication(runID, eventID); err != nil {
+				t.Fatal(err)
+			}
 		}
 		identityFact, err := route.Identity()
 		if err != nil || events.EncodeDeliveryRouteIdentity(identityFact) != identity {
