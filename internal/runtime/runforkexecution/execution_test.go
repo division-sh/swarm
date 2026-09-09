@@ -1965,8 +1965,25 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabilityAuthority(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-host-token")
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var db *sql.DB
+			var selected runtimestartupownership.Store
+			var owner SelectedContractExecutionOwner
+			if backend == "sqlite" {
+				s := storetest.StartSQLiteRuntimeStore(t)
+				db, selected, owner = storetest.Database(s), s, selectedContractSQLiteExecutionOwnerForTest(t, s)
+			} else {
+				_, db, _ = testutil.StartPostgres(t)
+				s := storetest.AdmitPostgresRuntimeStore(t, db)
+				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
+			}
+			proveSelectedForkClaudeOAuth(t, backend, db, selected, owner)
+		})
+	}
+}
+
+func proveSelectedForkClaudeOAuth(t *testing.T, backend string, db *sql.DB, selected runtimestartupownership.Store, owner SelectedContractExecutionOwner) {
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	sourceContractsRoot := filepath.Join(repoRoot, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")
@@ -1979,7 +1996,7 @@ func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabili
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	processCapability := selectedContractTestProcessCapability(t, ctx, selected)
 
 	captureDir := t.TempDir()
 	dockerPath := filepath.Join(captureDir, "fake-docker.sh")
@@ -2092,12 +2109,10 @@ fi
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002303, 0).UTC()
-	seedSelectedExecutionRootSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
-	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
-	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
+	seedSelectedClaudeExecutionSource(t, ctx, backend, db, selected, loaded, sourceRunID, entityID, sourceEventID, at)
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, AllowSourceFreeze: true,
-		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
+		Owner: owner, SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
 			Config: cfg, ProviderCredentials: providerCredentials, ProcessCapability: processCapability,
@@ -2108,35 +2123,10 @@ fi
 		},
 	})
 	if err != nil {
-		var receiptFailure, deadLetterFailure, completionEvidence, agentEvidence, eventEvidence string
-		_ = db.QueryRowContext(ctx, `SELECT COALESCE(failure::text,'') FROM event_receipts WHERE failure IS NOT NULL ORDER BY updated_at DESC LIMIT 1`).Scan(&receiptFailure)
-		_ = db.QueryRowContext(ctx, `SELECT COALESCE(failure::text,'') FROM dead_letters WHERE failure IS NOT NULL ORDER BY created_at DESC LIMIT 1`).Scan(&deadLetterFailure)
-		_ = db.QueryRowContext(ctx, `
-			SELECT COALESCE(json_agg(json_build_object(
-				'attempt_id', a.attempt_id, 'attempt_state', a.state, 'attempt_failure', a.failure,
-				'operation_state', o.state, 'origin_run_id', a.origin_run_id,
-				'origin_subscriber_id', a.origin_subscriber_id
-			) ORDER BY a.authorized_at)::text, '[]')
-			FROM runtime_external_effect_attempts a
-			JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		`).Scan(&completionEvidence)
-		_ = db.QueryRowContext(ctx, `
-			SELECT COALESCE(json_agg(json_build_object(
-				'run_id', run_id, 'agent_id', agent_id, 'name_owner', agent_name_owner,
-				'name_source', agent_name_source, 'route_presence', agent_route_presence,
-				'flow_scope_key', flow_scope_key, 'flow_instance_id', flow_instance_id,
-				'flow_instance', flow_instance, 'status', status
-			) ORDER BY run_id, agent_id)::text, '[]') FROM agents
-		`).Scan(&agentEvidence)
-		_ = db.QueryRowContext(ctx, `
-			SELECT COALESCE(json_agg(json_build_object(
-				'event_id', event_id, 'event_name', event_name, 'source_event_id', source_event_id,
-				'produced_by_type', produced_by_type, 'produced_by', produced_by,
-				'source_route', source_route, 'payload', payload
-			) ORDER BY created_at, event_id)::text, '[]')
-			FROM events
-			WHERE run_id IN (SELECT run_id FROM agents)
-		`).Scan(&eventEvidence)
+		snapshot := selectedPreparationDatabaseSnapshot(t, db, backend)
+		for _, table := range []string{"event_receipts", "dead_letters", "runtime_external_effect_attempts", "runtime_external_effect_operations", "agents", "events"} {
+			t.Logf("selected Claude failure evidence %s: %s", table, snapshot[table])
+		}
 		captures := map[string]string{}
 		for _, name := range []string{"count", "1.args", "1.stdin", "2.args", "2.stdin", "2.mcp-error", "3.mcp-error"} {
 			if raw, readErr := os.ReadFile(filepath.Join(captureDir, name)); readErr == nil {
@@ -2144,7 +2134,7 @@ fi
 			}
 		}
 		failure, _ := runtimefailures.EnvelopeFromError(err)
-		t.Fatalf("ExecuteSelectedContractRunFork: %v\nfailure detail: %#v\nlatest receipt failure: %s\nlatest dead letter failure: %s\ncompletion evidence: %s\nagent evidence: %s\nevent evidence: %s\ncaptures: %#v", err, failure.Detail, receiptFailure, deadLetterFailure, completionEvidence, agentEvidence, eventEvidence, captures)
+		t.Fatalf("ExecuteSelectedContractRunFork: %v\nfailure detail: %#v\ncaptures: %#v", err, failure.Detail, captures)
 	}
 	countRaw, err := os.ReadFile(filepath.Join(captureDir, "count"))
 	if err != nil {
@@ -2195,14 +2185,26 @@ fi
 	if !strings.Contains(string(startupInput), "Startup validation probe") || strings.Contains(string(liveInput), "Startup validation probe") {
 		t.Fatalf("selected-fork invocation order is not startup then live: startup=%q live=%q", startupInput, liveInput)
 	}
+	rows, err := db.QueryContext(ctx, `SELECT payload FROM events WHERE run_id = $1`, result.Materialization.ForkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var emitted int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND payload->>'fork_result' = 'selected-fork-flow-complete'
-	`, result.Materialization.ForkRunID).Scan(&emitted); err != nil {
-		t.Fatalf("count selected-fork flow-scoped MCP emission: %v", err)
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["fork_result"] == "selected-fork-flow-complete" {
+			emitted++
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		t.Fatal(err)
 	}
 	if emitted != 1 {
 		t.Fatalf("selected-fork flow-scoped MCP emissions = %d, want 1", emitted)
@@ -2293,16 +2295,14 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 		WHERE o.selected_execution_id IS NULL
 		  AND o.authority_kind = 'startup_probe'
-		  AND o.startup_authority_id = $2::uuid
-		  AND o.authority_id = s.authority_id::text
+		  AND o.startup_authority_id = $2
+		  AND o.authority_id = CAST(s.authority_id AS TEXT)
 		  AND a.adapter = 'claude_cli_startup_probe'
 		  AND a.state = 'settled'
 		  AND s.execution_kind = 'selected_fork_preparation'
-		  AND s.execution_authority_id = $1::text
+		  AND s.execution_authority_id = $1
 		  AND s.run_id IS NULL
 		  AND s.actor_id = 'test-agent'
-		  AND s.surface->'authority'->>'kind' = 'startup_probe'
-		  AND s.surface->'tools'->0->'evidence' @> '[{"kind":"mcp_listed","status":"confirmed"}]'::jsonb
 	`, preparation.PreparationID, preparation.Coordinates.ProcessAuthorityID).Scan(&startupSurfaces, &startupAttempts); err != nil {
 		t.Fatalf("load selected Claude startup capability evidence: %v", err)
 	}
@@ -2311,13 +2311,13 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 	}
 	var rawStartupSurface string
 	if err := db.QueryRowContext(ctx, `
-		SELECT s.surface::text
+		SELECT s.surface
 		FROM managed_agent_capability_surfaces s
 		JOIN runtime_external_effect_attempts a ON a.capability_surface_id = s.surface_id
 		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 		WHERE o.selected_execution_id IS NULL
-		  AND o.startup_authority_id = $2::uuid
-		  AND s.execution_authority_id = $1::text
+		  AND o.startup_authority_id = $2
+		  AND s.execution_authority_id = $1
 		  AND a.adapter = 'claude_cli_startup_probe'
 		  AND a.state = 'settled'
 		  AND s.run_id IS NULL
@@ -2332,28 +2332,40 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 	if err := preparation.ValidateSurface(preparation.Actors[0], startupSurface); err != nil {
 		t.Fatal(err)
 	}
+	if len(startupSurface.Tools) == 0 {
+		t.Fatal("startup surface has no tools")
+	}
+	confirmed := false
+	for _, evidence := range startupSurface.Tools[0].Evidence {
+		if evidence.Kind == "mcp_listed" && evidence.Status == managedcapabilities.EvidenceConfirmed {
+			confirmed = true
+		}
+	}
+	if !confirmed {
+		t.Fatal("startup surface lacks confirmed MCP listing evidence")
+	}
 	assertSelectedForkClaudeManagedSurface(t, startupSurface, preparation.PreparationID, "", managedcapabilities.AuthorityStartupProbe)
 
 	var attemptSurfaceID, turnSurfaceID, rawSurface string
 	if err := db.QueryRowContext(ctx, `
-		SELECT a.capability_surface_id::text, t.capability_surface_id::text, s.surface::text
+		SELECT a.capability_surface_id, t.capability_surface_id, s.surface
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 		JOIN agent_turns t ON t.completion_attempt_id = a.attempt_id
 		JOIN managed_agent_capability_surfaces s ON s.surface_id = a.capability_surface_id
-		WHERE o.selected_execution_id = $1::uuid
+		WHERE o.selected_execution_id = $1
 		  AND a.adapter = 'claude_cli'
 		  AND a.state = 'settled'
-		  AND t.run_id = $2::uuid
+		  AND t.run_id = $2
 		  AND t.agent_id = 'test-agent'
 	`, proof.RuntimeExecutionID, result.Materialization.ForkRunID).Scan(&attemptSurfaceID, &turnSurfaceID, &rawSurface); err != nil {
 		rows, queryErr := db.QueryContext(ctx, `
-			SELECT a.adapter, a.state, COALESCE(a.capability_surface_id::text,''),
-			       COALESCE(t.capability_surface_id::text,''), COALESCE(t.failure::text,'')
+			SELECT a.adapter, a.state, COALESCE(CAST(a.capability_surface_id AS TEXT),''),
+			       COALESCE(CAST(t.capability_surface_id AS TEXT),''), COALESCE(CAST(t.failure AS TEXT),'')
 			FROM runtime_external_effect_attempts a
 			JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 			LEFT JOIN agent_turns t ON t.completion_attempt_id = a.attempt_id
-			WHERE o.selected_execution_id = $1::uuid
+			WHERE o.selected_execution_id = $1
 			ORDER BY a.authorized_at
 		`, proof.RuntimeExecutionID)
 		if queryErr == nil {
@@ -2385,7 +2397,7 @@ func assertSelectedForkCompletionModelAlias(t testing.TB, ctx context.Context, d
 		FROM spend_ledger l
 		JOIN runtime_external_effect_attempts a ON a.attempt_id = l.external_effect_attempt_id
 		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-		WHERE o.selected_execution_id = $1::uuid
+		WHERE o.selected_execution_id = $1
 		  AND a.adapter = $2
 	`, executionID, adapter, llmselection.ModelAliasRegular).Scan(&total, &canonical); err != nil {
 		t.Fatalf("load selected completion model aliases: %v", err)
@@ -2448,10 +2460,27 @@ func assertSelectedForkClaudeManagedSurface(t testing.TB, surface managedcapabil
 }
 
 func TestSelectedForkPreparedPreflightUsesExactProviderPromptAndExecutesEligibleMCPToolCall(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			if backend == "sqlite" {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				proveSelectedForkPreparedPreflight(t, storetest.Database(selected), selected)
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				proveSelectedForkPreparedPreflight(t, db, storetest.AdmitPostgresRuntimeStore(t, db))
+			}
+		})
+	}
+}
+
+func proveSelectedForkPreparedPreflight(t *testing.T, db *sql.DB, selected interface {
+	runtimestartupownership.Store
+	runtimeeffects.Store
+	managedcapabilities.Persistence
+}) {
+	t.Helper()
 	ctx := runForkTestContext(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	process := selectedContractTestProcessCapability(t, ctx, pg)
+	process := selectedContractTestProcessCapability(t, ctx, selected)
 	processEvidence, err := process.Evidence()
 	if err != nil {
 		t.Fatal(err)
@@ -2511,7 +2540,7 @@ func TestSelectedForkPreparedPreflightUsesExactProviderPromptAndExecutesEligible
 			BundleHash: runForkTestBundleHash, SourceFingerprint: strings.Repeat("1", 64), AdmittedPlanFingerprint: strings.Repeat("2", 64), ConfigurationFingerprint: strings.Repeat("3", 64), CatalogFingerprint: catalog.Fingerprint(),
 		}, ActorPlanFingerprint: planFingerprint,
 	}}
-	surfaceIDs, err := swaruntime.ValidatePreparedSelectedForkProviderPreflight(ctx, cfg, binding, catalog, turns, preparationID, process, []swaruntime.PreparedSelectedForkProviderProbe{probe}, liveTestEffectController(pg), pg)
+	surfaceIDs, err := swaruntime.ValidatePreparedSelectedForkProviderPreflight(ctx, cfg, binding, catalog, turns, preparationID, process, []swaruntime.PreparedSelectedForkProviderProbe{probe}, liveTestEffectController(selected), selected)
 	if err != nil {
 		t.Fatalf("ValidateManagedProviderPreflight: %v", err)
 	}
@@ -2532,22 +2561,36 @@ func TestSelectedForkPreparedPreflightUsesExactProviderPromptAndExecutesEligible
 	if len(surfaceIDs) != 1 {
 		t.Fatalf("selected-fork startup surfaces = %#v, want one", surfaceIDs)
 	}
-	var persisted int
+	var raw []byte
 	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
+		SELECT surface
 		FROM managed_agent_capability_surfaces
-		WHERE surface_id = $1::uuid
+		WHERE surface_id = $1
 		  AND authority_kind = 'startup_probe'
 		  AND execution_kind = 'selected_fork_preparation'
-		  AND execution_authority_id = $2::text
+		  AND execution_authority_id = $2
 		  AND run_id IS NULL
 		  AND actor_id = 'selected-health-agent'
-		  AND surface->'tools'->0->'evidence' @> '[{"kind":"mcp_listed","status":"confirmed"}]'::jsonb
-	`, surfaceIDs[0], preparationID).Scan(&persisted); err != nil {
-		t.Fatalf("count selected-fork eligible-call capability surface: %v", err)
+	`, surfaceIDs[0], preparationID).Scan(&raw); err != nil {
+		t.Fatalf("read selected-fork eligible-call capability surface: %v", err)
 	}
-	if persisted != 1 {
-		t.Fatalf("selected-fork eligible-call capability surfaces = %d, want 1", persisted)
+	var surface managedcapabilities.Surface
+	if err := json.Unmarshal(raw, &surface); err != nil {
+		t.Fatal(err)
+	}
+	if err := surface.ValidateEffective(); err != nil {
+		t.Fatalf("persisted preparation surface: %v", err)
+	}
+	confirmed := false
+	for _, tool := range surface.Tools {
+		if tool.Name == "health_check" {
+			for _, evidence := range tool.Evidence {
+				confirmed = confirmed || (evidence.Kind == "mcp_listed" && evidence.Status == managedcapabilities.EvidenceConfirmed)
+			}
+		}
+	}
+	if !confirmed || !surface.ActorIdentity.IsZero() || surface.ActorPlan != plan || surface.Authority.RunID != "" || surface.Authority.ExecutionAuthorityID != preparationID {
+		t.Fatalf("selected-fork eligible-call surface lost exact prospective evidence: %+v", surface)
 	}
 	for _, table := range []string{"runs", "agents", "run_fork_selected_contract_runtime_executions", "runtime_generation_grants"} {
 		var count int
