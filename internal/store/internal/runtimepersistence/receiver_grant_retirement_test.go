@@ -253,26 +253,14 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					}
 					return
 				}
-				if retireErr == nil {
-					if durableGrantState != string(startupownership.GrantRetired) {
-						t.Fatalf("retirement returned before durable fact: %s", durableGrantState)
-					}
-					if _, acquired := outcome.result.Acquired(); acquired || after.ClaimVersion != before.ClaimVersion || attempts != 0 {
-						t.Errorf("retired grant admitted a new durable claim after retirement committed: disposition=%s claimVersion=%d attempts=%d", outcome.result.Disposition, after.ClaimVersion, attempts)
-					}
-				} else {
-					if !errors.Is(retireErr, context.DeadlineExceeded) {
-						t.Fatalf("unexpected retirement error: %v", retireErr)
-					}
-					if durableGrantState != string(startupownership.GrantAdmitted) {
-						t.Fatalf("blocked retirement changed grant: %s", durableGrantState)
-					}
-					if _, acquired := outcome.result.Acquired(); !acquired || after.ClaimVersion != 1 || attempts != 1 {
-						t.Fatalf("live fenced claim failed: %+v attempts=%d", outcome.result, attempts)
-					}
-					if err := grant.Retire(ctx); err != nil {
-						t.Fatalf("retire after claim commit: %v", err)
-					}
+				if !errors.Is(retireErr, context.DeadlineExceeded) || durableGrantState != string(startupownership.GrantAdmitted) {
+					t.Fatalf("claim-wins did not fence retirement through commit: retire=%v grant=%s claim=%s claimVersion=%d attempts=%d", retireErr, durableGrantState, outcome.result.Disposition, after.ClaimVersion, attempts)
+				}
+				if _, acquired := outcome.result.Acquired(); !acquired || after.ClaimVersion != 1 || attempts != 1 {
+					t.Fatalf("live fenced claim failed: %+v attempts=%d", outcome.result, attempts)
+				}
+				if err := grant.Retire(ctx); err != nil {
+					t.Fatalf("retire after claim commit: %v", err)
 				}
 			})
 		}
