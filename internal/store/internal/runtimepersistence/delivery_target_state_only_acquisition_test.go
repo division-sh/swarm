@@ -461,7 +461,7 @@ func admitStateOnlyAcquisitionEntityContracts(t *testing.T, base *runtimecontrac
 		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), "review_item: {}\n")
 	}
 
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-only-acquisition\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-only-acquisition\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "entities.yaml"), "review_item: {}\n")
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {
