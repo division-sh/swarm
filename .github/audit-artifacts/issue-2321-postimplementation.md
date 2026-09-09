@@ -1,6 +1,34 @@
 # Post-Implementation Proof Audit: #2321
 
-Agent-g. **Final implementation proof; independent merge review required.** Code/test head:
+## PR #2441 Review Pass 1 Repair
+
+The changes-needed review of cea51bf81 identified one missed CI consumer and two
+stale diagnostic spec summaries. The prior elimination claim is superseded pending
+repaired-head qualification and required CI. No runtime owner or product boundary
+changes in this correction. M2 now includes hidden `.github/fixtures` producers and
+the actual `sqlite-local-dev` public command in `.github/workflows/ci.yml`.
+`TestCIExecutionSelectionConsumers` reproduced both the obsolete fixture and its
+workflow consumer before deletion. The fixture supplied no legitimate deployment
+facts, so it and the `--config` argument are removed, not replaced by mock proof.
+The guard walks hidden CI fixture YAML and pins the real no-selector live command.
+
+Focused config/structural controls pass (3.268s), API-spec tests pass (1.499s), and
+the actual compiled `swarm run start examples/routing/root-ingress --event
+item.received --payload <valid JSON file> --api-port 18091`, with the test DSN unset
+and a disposable unchanged source copy, exits 0: completed, event_count=3,
+entity_count=1. Receipt: `/tmp/agent-g-pr2441-sqlite-smoke.log`. No provider messages
+or settled delivery replays were performed. Required repaired-head CI and new
+full-profile qualification are pending; old successful receipts remain historical.
+
+The diagnostic contract correction and exact dual-store proofs are recorded in
+the separate #2432 table. Watchlist decision: consume the reviewer's existing
+`maintenance-and-cleanup.yaml#invariant_suite_coverage` refinement b1eff4d without
+modifying concurrent docs work. No new issue, framework or pre-audit is needed.
+#2353 LSF-028/029 remain observed/unclassified residuals, not fixed by later passes.
+
+## Previous Qualified Receipt
+
+Agent-g. **Historical qualification preceding review pass 1.** Code/test head:
 `be9e98fe3fb2504b68dcefa487eaec66a222a519`, based on merged B #2440 at
 `47c0e70d8ef89a2c99f0be4af632f24692121b83`. Final integrated full-profile
 swarm-test passed at qualifying HEAD `1f5680f25bdb7fc988ac5e74a9c8bb27c1698336`
@@ -97,7 +125,7 @@ with the separately dated live/network-disabled Docker receipts stated explicitl
 | Row | Classification | Exact proof |
 | --- | --- | --- |
 | M1 untouched archetypes | reproduced and fixed | TestScaffoldAdmittedArchetypesRunUneditedZeroCredentialSQLite (T); TestCommandLiveUneditedScaffoldReadiness (L). |
-| M2 shipped configuration | reproduced and fixed | TestScaffoldEmbedsNoHiddenDeploymentConfig; TestCatalogRequiredVerifyGateRejectsAddedDeploymentArtifact and catalog inventory. |
+| M2 shipped configuration, hidden CI fixtures and workflow invocation | reproduced and fixed | TestScaffoldEmbedsNoHiddenDeploymentConfig; TestCatalogRequiredVerifyGateRejectsAddedDeploymentArtifact and catalog inventory; TestCIExecutionSelectionConsumers fails before both CI producer/consumer removals and passes after; actual compiled selector-free live SQLite smoke exits 0 with event_count=3/entity_count=1. Required repaired-head CI remains pending. |
 | M3 retired selectors | reproduced and fixed | TestLoadRejectsRetiredExecutionPosture; TestCommandConfigRejectsMaskedExecutionSelectors. |
 | M4 invocation/source roots | execution-proven through the same corrected path | TestGoldenInvocationRootDevReadiness; TestCommandLiveUneditedScaffoldReadiness; unchanged authored-tree comparisons. |
 | M5 live source doubles | reproduced and fixed | TestCommandOwnedAgentSelection; TestCommandSelectionSeparatesSourceDoubleFromLiveDescriptor; TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles; provisioned L journey. |
