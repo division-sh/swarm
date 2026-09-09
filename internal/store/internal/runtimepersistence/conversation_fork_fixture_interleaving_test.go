@@ -28,8 +28,7 @@ func (c *forkFixtureAdmissionContext) Done() <-chan struct{} {
 }
 
 func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
-	defer cancel()
+	ctx := testAuthorActivityContext()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var armed, held atomic.Bool
 	var once sync.Once
@@ -60,6 +59,9 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Bound the held-writer experiment, not schema construction under -race.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	done := make(chan error, 1)
 	armed.Store(true)
 	go func() {
