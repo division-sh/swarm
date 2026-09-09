@@ -10,8 +10,11 @@ Agent-g; one combined #2321/#2432/#2439 PR, separate repair commits/proof tables
 The branch was carefully rebased with merge resolutions reapplied; B's single
 eventpersistence settlement owner replaces G's agentpersistence projector. Final
 full-profile swarm-test passed at qualifying HEAD 1f5680f25bdb7fc988ac5e74a9c8bb27c1698336,
-code/test tree be9e98fe3fb2504b68dcefa487eaec66a222a519; subsequent final audit edits
-are documentation only. Lead disposition
+code/test tree be9e98fe3fb2504b68dcefa487eaec66a222a519. Subsequent changes are
+audit documents and two gofmt alignment corrections in serveapp/main.go; comparing
+that file against gofmt of the qualified source is byte-identical. No executable
+tokens, tests or spec changed. The initial CI static-format failure remains a
+failed receipt. Lead disposition
 issuecomment-5607051620 records LSF-028/029 as explicit #2353 residual risks,
 not an indefinite historical-evidence blocker or a claim that they were fixed.
 Live/restart at runtime head 5426deb7b passed on both stores with distinct failed-attempt
