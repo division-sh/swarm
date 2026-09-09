@@ -1,7 +1,6 @@
 package releasee2e
 
 import (
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -19,14 +18,14 @@ func TestGoldenBurstPartitionsPreserveBothRepetitionsAndWorkload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]bool{}
-	raceBuilds, backendExecutions := 0, 0
+	seen := map[int]bool{}
+	raceBuilds, backendExecutions, parallelBackends := 0, 0, 0
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
 			continue
 		}
-		if strings.HasPrefix(fn.Name.Name, "TestGoldenAgentWorkloadBurstConcurrency") {
+		if strings.HasPrefix(fn.Name.Name, "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends") {
 			if len(fn.Body.List) != 1 {
 				t.Fatalf("%s must execute exactly one unfiltered iteration", fn.Name.Name)
 			}
@@ -35,7 +34,7 @@ func TestGoldenBurstPartitionsPreserveBothRepetitionsAndWorkload(t *testing.T) {
 				t.Fatalf("%s has no direct iteration call", fn.Name.Name)
 			}
 			call, ok := expr.X.(*ast.CallExpr)
-			if !ok || len(call.Args) != 3 {
+			if !ok || len(call.Args) != 2 {
 				t.Fatalf("%s has invalid iteration arguments", fn.Name.Name)
 			}
 			owner, ok := call.Fun.(*ast.Ident)
@@ -47,28 +46,21 @@ func TestGoldenBurstPartitionsPreserveBothRepetitionsAndWorkload(t *testing.T) {
 				t.Fatalf("%s must name an exact iteration", fn.Name.Name)
 			}
 			iteration, err := strconv.Atoi(literal.Value)
-			if err != nil || iteration < 1 || iteration > goldenBurstIterations || !strings.HasSuffix(fn.Name.Name, "Iteration"+literal.Value) {
+			if err != nil || iteration < 1 || iteration > goldenBurstIterations || seen[iteration] || !strings.HasSuffix(fn.Name.Name, "Iteration"+literal.Value) {
 				t.Fatalf("duplicate, missing, or renamed burst iteration: %s", fn.Name.Name)
 			}
-			backendLiteral, ok := call.Args[2].(*ast.BasicLit)
-			if !ok || backendLiteral.Kind != token.STRING {
-				t.Fatalf("%s must name an exact backend", fn.Name.Name)
-			}
-			backend, err := strconv.Unquote(backendLiteral.Value)
-			if err != nil || (backend != "sqlite" && backend != "postgres") {
-				t.Fatalf("invalid burst backend in %s", fn.Name.Name)
-			}
-			key := fmt.Sprintf("%s/%d", backend, iteration)
-			if seen[key] {
-				t.Fatalf("duplicate burst cell %s", key)
-			}
-			seen[key] = true
+			seen[iteration] = true
 		}
 		if fn.Name.Name == "runGoldenAgentWorkloadBurstIteration" {
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
 				if !ok {
 					return true
+				}
+				if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Parallel" {
+					if receiver, ok := selector.X.(*ast.Ident); ok && receiver.Name == "t" {
+						parallelBackends++
+					}
 				}
 				name, ok := call.Fun.(*ast.Ident)
 				if ok {
@@ -83,7 +75,7 @@ func TestGoldenBurstPartitionsPreserveBothRepetitionsAndWorkload(t *testing.T) {
 			})
 		}
 	}
-	if len(seen) != 2*goldenBurstIterations || raceBuilds != 1 || backendExecutions != 1 {
-		t.Fatalf("burst coverage: iterations=%v race builds=%d backend executions=%d", seen, raceBuilds, backendExecutions)
+	if len(seen) != goldenBurstIterations || raceBuilds != 1 || backendExecutions != 2 || parallelBackends != 2 {
+		t.Fatalf("burst coverage: iterations=%v race builds=%d backend executions=%d parallel backends=%d", seen, raceBuilds, backendExecutions, parallelBackends)
 	}
 }
