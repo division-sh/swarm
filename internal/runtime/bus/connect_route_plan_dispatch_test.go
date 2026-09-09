@@ -2669,6 +2669,10 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 	}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": minted}),
 	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want create-resolution route %#v", store.routes[eventID], want)
 	}
