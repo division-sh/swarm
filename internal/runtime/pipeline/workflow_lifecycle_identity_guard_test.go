@@ -20,7 +20,6 @@ func TestWorkflowLifecycleIdentityConsumersDoNotReintroduceFallbacks(t *testing.
 		"workflow_gate_decision.go",
 		"workflow_gate_terminal.go",
 		"workflow_state_persistence.go",
-		"select_entity.go",
 		"workflow_instance_route_recovery.go",
 	}
 	forbidden := []string{

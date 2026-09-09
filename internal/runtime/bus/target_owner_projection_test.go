@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -63,6 +64,25 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 				t.Fatalf("owner = %#v, want %#v", got, test.want.Normalized())
 			}
 		})
+	}
+}
+
+func TestTargetOwnerDedupPreservesUnavailableEvidenceInBothOrders(t *testing.T) {
+	blueprint := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}
+	active := ActiveTargetDescriptor{ID: "one", FlowInstance: blueprint.FlowInstance, EntityID: eventtest.UUID("exact-owner")}
+	unavailable := active
+	unavailable.Availability = runtimepipeline.NewDeliveryTargetAvailability("active", "draining", false)
+	for _, descriptors := range [][]ActiveTargetDescriptor{{active, unavailable}, {unavailable, active}} {
+		projection := selectedRunTargetOwnerProjection{required: true}
+		for _, descriptor := range descriptors {
+			projection.descriptors = appendActiveTargetDescriptor(projection.descriptors, descriptor)
+		}
+		if len(projection.descriptors) != 2 {
+			t.Fatalf("dedup erased contradictory availability: %#v", projection.descriptors)
+		}
+		if _, err := projection.resolveSelectedRoute(blueprint); err == nil || !strings.Contains(err.Error(), "owner is unavailable") {
+			t.Fatalf("agent/exact-route projection admitted unavailable receiver: %v", err)
+		}
 	}
 }
 

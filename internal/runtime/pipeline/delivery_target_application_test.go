@@ -13,14 +13,13 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
-func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLiteAndPostgres(t *testing.T) {
+func TestDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db, store := openHandlerEntityRequirementStore(t, backend)
@@ -52,10 +51,7 @@ func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLite
 				testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			expected := map[string]any{"account_id": "account-1"}
-			instanceID, err := selectOrCreateEntityInstanceID(source, "review", expected)
-			if err != nil {
-				t.Fatal(err)
-			}
+			instanceID := "composition-selected"
 			identity := deriveFlowInstanceIdentity(source, "review", instanceID)
 			target := events.RouteIdentity{FlowID: "review", FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
 			owner := events.MustMaterializingEntityTarget(target)
@@ -64,7 +60,7 @@ func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLite
 			if err != nil {
 				t.Fatalf("prepare zero-match materializing application: %v", err)
 			}
-			if !application.Owner().MaterializingEntity() || application.EntityID() != identity.EntityID || application.State().Metadata["account_id"] != "account-1" {
+			if !application.Owner().MaterializingEntity() || application.EntityID() != identity.EntityID || application.State().Metadata["account_id"] != nil {
 				t.Fatalf("zero-match application = owner:%#v entity:%q state:%#v", application.Owner(), application.EntityID(), application.State())
 			}
 
@@ -107,11 +103,11 @@ func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLite
 				t.Fatalf("committed target rerouted after restart: route=%#v entity=%q", application.Route(), application.EntityID())
 			}
 
-			exact.Fields = map[string]any{"account_id": "conflict"}
+			exact.EntityType = "wrong_entity_type"
 			if err := store.upsert(ctx, exact); err != nil {
 				t.Fatalf("seed exact target conflict: %v", err)
 			}
-			if _, err := restarted.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, owner); err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
+			if _, err := restarted.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, owner); err == nil || !strings.Contains(err.Error(), "entity_type") {
 				t.Fatalf("conflicting exact target error = %v", err)
 			}
 			sibling, exists, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, siblingPath))
@@ -127,13 +123,7 @@ func TestDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPaylo
 		t.Run(backend, func(t *testing.T) {
 			db, store := openHandlerEntityRequirementStore(t, backend)
 			bundle := workflowJoinLifecycleBundle(t)
-			node := bundle.Nodes["join-node"]
-			handler := node.EventHandlers["item.completed"]
-			handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
-				Field: "portfolio_id", Ref: "payload.portfolio_id", RefPath: paths.Parse("payload.portfolio_id"),
-			}}}
-			node.EventHandlers["item.completed"] = handler
-			bundle.Nodes["join-node"] = node
+			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 
 			plan := bundle.Semantics.Joins[0]
 			plan.Node = mustPipelineNode("", "join-node")
@@ -810,18 +800,24 @@ func TestDeliveryTargetApplicationProjectsExactOwnerIntoEmptyPreviewAndRejectsCo
 	}
 }
 
-func TestCompileDeliveryTargetCompatibilityPolicyKeepsDependencyAndAcquisitionIndependent(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{
-		SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
-			Field: "account_id", Ref: "payload.account_id", RefPath: paths.Parse("payload.account_id"),
-		}}},
-		Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
-	}
-	policy, err := CompileDeliveryTargetCompatibilityPolicy(nil, runtimeidentity.ExecutableNode{}, "review", "work.keyed", handler)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if policy.Dependency != DeliveryTargetExistingEntityRequired || policy.Acquisition != DeliveryTargetAcquisitionSelect {
-		t.Fatalf("policy = %#v, want existing-required plus select", policy)
+func TestCompileDeliveryTargetCompatibilityPolicyUsesOnlyHandlerStateRequirement(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+		want    DeliveryTargetEntityDependency
+	}{
+		{"optional", runtimecontracts.SystemNodeEventHandler{}, DeliveryTargetEntityOptional},
+		{"accumulator", runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}, DeliveryTargetExistingEntityRequired},
+		{"initialize", runtimecontracts.SystemNodeEventHandler{CreateEntity: true}, DeliveryTargetEntityMaterializing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy, err := CompileDeliveryTargetCompatibilityPolicy(nil, runtimeidentity.ExecutableNode{}, "review", "work.keyed", tc.handler)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if policy.Dependency != tc.want {
+				t.Fatalf("policy=%#v want %v", policy, tc.want)
+			}
+		})
 	}
 }

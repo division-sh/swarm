@@ -77,7 +77,7 @@ func requireForkedPipelineRefusal(t *testing.T, label string, err error) {
 	}
 }
 
-func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testing.T) {
+func TestForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadback(t *testing.T) {
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedPipelineBackend(t, backend)
@@ -92,10 +92,6 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			}
 			if err := fixture.store.create(fixture.ctx, instance); err != nil {
 				t.Fatal(err)
-			}
-			before, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, fixture.runID, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
-			if err != nil || len(before) != 1 {
-				t.Fatalf("active selector before freeze = %d, %v", len(before), err)
 			}
 			fixture.freeze(t)
 
@@ -113,10 +109,6 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			}))
 			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef), identity.NormalizeEntityID(entityID), fixture.frozenAt))
 
-			after, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, fixture.runID, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
-			if err != nil || len(after) != 0 {
-				t.Fatalf("active selector after freeze = %d, %v", len(after), err)
-			}
 			preserved, ok, err := fixture.store.Load(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef))
 			if err != nil || !ok || preserved.CurrentState != "active" {
 				t.Fatalf("preserved workflow = %#v found=%v err=%v", preserved, ok, err)

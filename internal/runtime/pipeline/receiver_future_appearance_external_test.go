@@ -17,22 +17,22 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
+func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
 		for _, conflict := range []bool{false, true} {
-			name := "same_key"
+			name := "exact_receiver_reuse"
 			if conflict {
-				name = "conflicting_key"
+				name = "conflicting_entity_type"
 			}
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-				source, node := targetedDeclaredKeyExecutionSource(t, "select_or_create_future")
+				source, node := targetedDeclaredKeyExecutionSource(t, "select_or_create")
 				module := proposedEffectProofModule{source: source,
 					workflow: runtimepipeline.NewWorkflowDefinition("review", []runtimepipeline.WorkflowStage{{Name: "active"}, {Name: "done", Terminal: true}}, nil),
 					nodes: []runtimepipeline.WorkflowNode{{Node: node, Subscriptions: []events.EventType{"work.keyed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType,
@@ -75,60 +75,19 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				evt := targetedDeclaredKeyPublication(t, ctx, bus, source, runID, payload, events.RouteIdentity{}, time.Now().UTC())
-				handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
-				if err != nil {
-					t.Fatal(err)
-				}
-				reader, ok := selected.events.(runtimepipeline.WorkflowInstancePersistenceReader)
-				if !ok {
-					t.Fatal("selected store has no workflow reader")
-				}
-				future, err := runtimepipeline.ClassifyDeliveryTargetOwnership(runtimepipeline.DeliveryTargetOwnershipRequest{
-					Context: ctx, Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node), Handler: handler, WorkflowInstances: reader,
-				})
-				if err != nil || !future.MaterializingEntity() {
-					t.Fatalf("declared-key future acquisition: %#v %v", future, err)
-				}
-				// Install the exact compiled subscriber route, not an entity descriptor
-				// or row. This test starts at the admitted template-route boundary.
-				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, future.Route().FlowInstance)}); err != nil {
-					t.Fatal(err)
-				}
-				evt, err = events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), future.Route()))
-				if err != nil {
-					t.Fatal(err)
-				}
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil || len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Target.MaterializingEntity() {
-					t.Fatalf("zero-match future admission: plan=%#v err=%v", plan, err)
-				}
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatal(err)
-				}
-				prepared, found, err := selected.events.LoadPreparedPublishEvent(ctx, evt.ID())
-				if err != nil || !found || len(prepared.DeliveryRoutes) != 1 {
-					t.Fatalf("committed future: found=%t err=%v routes=%#v", found, err, prepared.DeliveryRoutes)
-				}
-				target := prepared.DeliveryRoutes[0].Target
-				if target != plan.DeliveryRoutes[0].Target {
-					t.Fatal("publish changed future admission")
-				}
-				route := runtimeflowidentity.RouteForInstancePath(target.Route().FlowInstance)
-				identity := testRunScopedWorkflowInstanceForRun(runID, target.Route().FlowInstance)
-				if _, found, err := pc.Load(ctx, identity); err != nil || found {
-					t.Fatalf("future existed before appearance: found=%t err=%v", found, err)
-				}
-				key := "appearing-key"
-				if conflict {
-					key = "foreign-key"
-				}
+				instancePath := "review/" + receiverKey
+				route := runtimeflowidentity.RouteForInstancePath(instancePath)
+				identity := testRunScopedWorkflowInstanceForRun(runID, instancePath)
+				entityID := runtimeflowidentity.EntityID(instancePath)
 				readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: route.InstanceID, InstancePath: target.Route().FlowInstance, EntityID: target.Route().EntityID, HasStoredPath: true},
+					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: route.InstanceID, InstancePath: instancePath, EntityID: entityID, HasStoredPath: true},
 					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
-				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, StorageRef: target.Route().FlowInstance, EntityID: target.Route().EntityID,
+				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, StorageRef: instancePath, EntityID: entityID,
 					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
-					Fields: map[string]any{"receiver_id": receiverKey, "account_id": key, "owner": "appeared"}, RuntimeReadiness: &readiness}
+					Fields: map[string]any{"receiver_id": receiverKey, "account_id": "stored-business-key", "owner": "appeared"}, RuntimeReadiness: &readiness}
+				// Composition activation establishes the receiver before handler execution.
+				// There is no lawful second, payload-derived future receiver to invent.
 				if _, err := pc.MaterializeInitialEntry(ctx, identity, instance, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
@@ -138,6 +97,37 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 					t.Fatal(err)
 				}
+				evt, err = events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
+				if err != nil || len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Target.ExistingEntity() {
+					t.Fatalf("composition receiver admission: plan=%#v err=%v", plan, err)
+				}
+				if err := bus.Publish(ctx, evt); err != nil {
+					t.Fatal(err)
+				}
+				prepared, found, err := selected.events.LoadPreparedPublishEvent(ctx, evt.ID())
+				if err != nil || !found || len(prepared.DeliveryRoutes) != 1 {
+					t.Fatalf("committed receiver: found=%t err=%v routes=%#v", found, err, prepared.DeliveryRoutes)
+				}
+				target := prepared.DeliveryRoutes[0].Target
+				if target != plan.DeliveryRoutes[0].Target {
+					t.Fatal("publish changed receiver admission")
+				}
+				initial, found, err := pc.Load(ctx, identity)
+				if err != nil || !found || initial.EntityID != target.Route().EntityID || initial.Revision != 1 {
+					t.Fatalf("composition activation missing: %#v %t %v", initial, found, err)
+				}
+				if conflict {
+					if _, err := selected.db.ExecContext(ctx, `UPDATE entity_state SET entity_type=$1 WHERE run_id=$2 AND entity_id=$3`, "wrong_entity_type", runID, entityID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// Reconstruct the semantic consumer after publication, retaining the
+				// same durable admitted route rather than performing another election.
+				pc = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module})
 				if err := bus.Publish(ctx, evt); err != nil {
 					t.Fatalf("exact duplicate after appearance: %v", err)
 				}
@@ -147,10 +137,10 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				}
 				forward, _, outcome, executionErr := pc.InterceptDeliveryRoute(ctx, delivery, prepared.DeliveryRoutes[0])
 				if forward || executionErr != nil {
-					t.Fatalf("execute committed future: forward=%t err=%v", forward, executionErr)
+					t.Fatalf("execute committed receiver: forward=%t err=%v", forward, executionErr)
 				}
 				after, found, err := pc.Load(ctx, identity)
-				if err != nil || !found || after.EntityID != target.Route().EntityID || after.Fields["account_id"] != key || after.Fields["owner"] != "appeared" {
+				if err != nil || !found || after.EntityID != target.Route().EntityID || after.Fields["account_id"] != "stored-business-key" || after.Fields["owner"] != "appeared" {
 					t.Fatalf("exact appearance changed: %#v found=%t err=%v", after, found, err)
 				}
 				disposition, disposed := outcome.Disposition()
@@ -159,11 +149,11 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 						t.Fatalf("conflicting appearance executed: outcome=%#v revision=%d", outcome, after.Revision)
 					}
 				} else if disposed || after.Revision != 2 {
-					t.Fatalf("same-key appearance not executed exactly once: outcome=%#v revision=%d", outcome, after.Revision)
+					t.Fatalf("composition-selected receiver not executed exactly once: outcome=%#v revision=%d", outcome, after.Revision)
 				}
 				reloaded, found, err := selected.events.LoadPreparedPublishEvent(ctx, evt.ID())
 				if err != nil || !found || len(reloaded.DeliveryRoutes) != 1 || reloaded.DeliveryRoutes[0].Target != target {
-					t.Fatalf("appearance rewrote committed future: found=%t err=%v routes=%#v", found, err, reloaded.DeliveryRoutes)
+					t.Fatalf("appearance rewrote committed receiver: found=%t err=%v routes=%#v", found, err, reloaded.DeliveryRoutes)
 				}
 				unrelated, found, err := pc.Load(ctx, unrelatedIdentity)
 				if err != nil || !found || unrelated.Revision != 1 || unrelated.Fields["account_id"] != "unrelated-key" {

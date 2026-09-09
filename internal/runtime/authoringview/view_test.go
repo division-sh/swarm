@@ -1164,9 +1164,6 @@ indexer:
   subscribes_to: [observed]
   event_handlers:
     observed:
-      select_entity:
-        by:
-          id: payload.id
       data_accumulation:
         writes:
           - source_field: id

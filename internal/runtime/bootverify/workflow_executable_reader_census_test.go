@@ -29,8 +29,6 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 	}{
 		{name: "action input", handler: runtimecontracts.SystemNodeEventHandler{Action: runtimecontracts.ActionSpec{InstanceIDFrom: "entity.verticals"}}},
 		{name: "activity input", handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}},
-		{name: "select binding", handler: runtimecontracts.SystemNodeEventHandler{SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "id", Ref: "entity.verticals"}}}}},
-		{name: "select or create binding", handler: runtimecontracts.SystemNodeEventHandler{SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "id", Ref: "entity.verticals"}}}}},
 		{name: "emit field", handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{"value": entityCEL}}}},
 		{name: "guard", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "size(entity.verticals) > 0"}}},
 		{name: "direct write source", handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{SourceField: "entity.verticals", TargetRef: "metadata.copy"}}}}},

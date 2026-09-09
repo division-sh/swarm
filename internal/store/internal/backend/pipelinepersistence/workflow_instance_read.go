@@ -11,8 +11,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/lib/pq"
 )
 
 func (s *PipelinePostgresOwner) LoadWorkflowInstance(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
@@ -67,39 +65,6 @@ func (s *PipelinePostgresOwner) LoadWorkflowTargetPersistence(ctx context.Contex
 	return loadWorkflowTargetPersistence(ctx, s.backend, identity, entityID, false)
 }
 
-func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner runtimepipeline.WorkflowEntityStateSelectionOwner, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("postgres workflow entity state reader is required")
-	}
-	runID = strings.TrimSpace(runID)
-	scopeKey := owner.ScopeKey()
-	selectors = runtimepipeline.NormalizeWorkflowInstanceFieldSelectors(selectors)
-	if scopeKey == "" || len(selectors) == 0 {
-		return nil, nil
-	}
-	activeStates := runtimerunlifecycle.ActiveStates()
-	rows, err := s.backend.QueryContext(ctx, postgresWorkflowEntityStateSelect+`
-		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
-		WHERE es.run_id = $1::uuid
-		  AND EXISTS (
-			SELECT 1 FROM runs run
-			WHERE run.run_id = es.run_id AND run.status IN ($4, $5)
-		  )
-		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3 OR ($6::boolean AND es.flow_instance = $1::text))
-		  AND (fi.instance_path IS NULL OR (LOWER(BTRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
-		ORDER BY es.created_at ASC, es.entity_id ASC
-	`, runID, scopeKey, scopeKey+"/%", string(activeStates[0]), string(activeStates[1]), owner.Owns(runID))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	records, err := scanPostgresWorkflowEntityStates(rows)
-	if err != nil {
-		return nil, err
-	}
-	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
-}
-
 func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context, runID string) ([]runtimepipeline.WorkflowInstance, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres workflow instance reader is required")
@@ -109,55 +74,6 @@ func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context, runID
 		WHERE es.run_id = $1::uuid
 		ORDER BY es.created_at ASC
 	`, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanPostgresWorkflowInstances(rows)
-}
-
-func (s *PipelinePostgresOwner) SelectActiveWorkflowInstances(ctx context.Context, runID, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowInstance, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("postgres workflow instance reader is required")
-	}
-	runID = strings.TrimSpace(runID)
-	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
-	selectors = runtimepipeline.NormalizeWorkflowInstanceFieldSelectors(selectors)
-	if scopeKey == "" || len(selectors) == 0 {
-		return nil, nil
-	}
-	activeStates := runtimerunlifecycle.ActiveStates()
-	args := []any{runID, scopeKey, scopeKey + "/%", string(activeStates[0]), string(activeStates[1])}
-	var where strings.Builder
-	where.WriteString(`
-		WHERE es.run_id = $1::uuid
-		  AND EXISTS (
-			SELECT 1 FROM runs run
-			WHERE run.run_id = es.run_id AND run.status IN ($4, $5)
-		  )
-		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3)
-		  AND LOWER(BTRIM(fi.status)) = 'active'
-		  AND fi.terminated_at IS NULL
-	`)
-	terminalStates := runtimepipeline.NormalizeWorkflowInstanceExcludedStates(excludedStates)
-	if len(terminalStates) > 0 {
-		args = append(args, pq.Array(terminalStates))
-		where.WriteString(fmt.Sprintf(` AND NOT (LOWER(es.current_state) = ANY($%d::text[]))`, len(args)))
-	}
-	for _, selector := range selectors {
-		segments := runtimepipeline.WorkflowInstanceFieldSelectorPath(selector.Field)
-		if len(segments) == 0 {
-			return nil, fmt.Errorf("workflow instance selector field is required")
-		}
-		valueJSON, err := json.Marshal(selector.Value)
-		if err != nil {
-			return nil, fmt.Errorf("marshal workflow instance selector %s: %w", selector.Field, err)
-		}
-		args = append(args, pq.Array(segments), string(valueJSON))
-		where.WriteString(fmt.Sprintf(` AND es.fields #> $%d::text[] = $%d::jsonb`, len(args)-1, len(args)))
-	}
-	where.WriteString(` ORDER BY es.created_at ASC`)
-	rows, err := s.backend.QueryContext(ctx, postgresWorkflowInstanceSelect+where.String(), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -485,39 +401,6 @@ func assembleWorkflowTargetPersistence(
 	return record, nil
 }
 
-func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner runtimepipeline.WorkflowEntityStateSelectionOwner, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("sqlite workflow entity state reader is required")
-	}
-	runID = strings.TrimSpace(runID)
-	scopeKey := owner.ScopeKey()
-	selectors = runtimepipeline.NormalizeWorkflowInstanceFieldSelectors(selectors)
-	if scopeKey == "" || len(selectors) == 0 {
-		return nil, nil
-	}
-	activeStates := runtimerunlifecycle.ActiveStates()
-	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowEntityStateSelect+`
-		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
-		WHERE es.run_id = ?
-		  AND EXISTS (
-			SELECT 1 FROM runs run
-			WHERE run.run_id = es.run_id AND run.status IN (?, ?)
-		  )
-		  AND (es.flow_instance = ? OR es.flow_instance LIKE ? OR (? AND es.flow_instance = ?))
-		  AND (fi.instance_path IS NULL OR (LOWER(TRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
-		ORDER BY es.created_at ASC, es.entity_id ASC
-	`, runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey+"/%", owner.Owns(runID), runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	records, err := scanSQLiteWorkflowEntityStates(rows)
-	if err != nil {
-		return nil, err
-	}
-	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
-}
-
 func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context, runID string) ([]runtimepipeline.WorkflowInstance, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite workflow instance reader is required")
@@ -529,56 +412,6 @@ func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context, runID s
 	}
 	defer rows.Close()
 	return scanSQLiteWorkflowInstances(rows)
-}
-
-func (s *PipelineSQLiteOwner) SelectActiveWorkflowInstances(ctx context.Context, runID, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowInstance, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("sqlite workflow instance reader is required")
-	}
-	runID = strings.TrimSpace(runID)
-	activeStates := runtimerunlifecycle.ActiveStates()
-	var active bool
-	if err := s.backend.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN (?, ?))`, runID, string(activeStates[0]), string(activeStates[1])).Scan(&active); err != nil {
-		return nil, err
-	}
-	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
-	selectors = runtimepipeline.NormalizeWorkflowInstanceFieldSelectors(selectors)
-	if !active || scopeKey == "" || len(selectors) == 0 {
-		return nil, nil
-	}
-	items, err := s.ListWorkflowInstances(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	terminalStates := make(map[string]struct{})
-	for _, state := range runtimepipeline.NormalizeWorkflowInstanceExcludedStates(excludedStates) {
-		terminalStates[state] = struct{}{}
-	}
-	out := make([]runtimepipeline.WorkflowInstance, 0, len(items))
-	for _, item := range items {
-		storageRef := strings.Trim(strings.TrimSpace(item.StorageRef), "/")
-		if storageRef != scopeKey && !strings.HasPrefix(storageRef, scopeKey+"/") {
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(item.Status), "active") || !item.TerminatedAt.IsZero() {
-			continue
-		}
-		if _, terminal := terminalStates[strings.ToLower(strings.TrimSpace(item.CurrentState))]; terminal {
-			continue
-		}
-		matches := true
-		for _, selector := range selectors {
-			value, ok := runtimepipeline.WorkflowMetadataValue(item.Fields, selector.Field)
-			if !ok || !runtimepipeline.WorkflowJSONValuesEqual(value, selector.Value) {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			out = append(out, item)
-		}
-	}
-	return out, nil
 }
 
 const sqliteWorkflowInstanceSelect = `

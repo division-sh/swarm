@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -73,7 +72,6 @@ type WorkflowInstance struct {
 // selects this authority directly rather than inferring state from lifecycle.
 type WorkflowEntityStatePersistenceReader interface {
 	LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
-	SelectActiveWorkflowEntityStates(context.Context, string, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error)
 }
 
 type workflowEntityStateSelectionCardinality uint8
@@ -330,7 +328,6 @@ type WorkflowInstancePersistenceReader interface {
 	WorkflowEntityStatePersistenceReader
 	LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error)
 	ListWorkflowInstances(context.Context, string) ([]WorkflowInstance, error)
-	SelectActiveWorkflowInstances(context.Context, string, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error)
 }
 
 type WorkflowEntityStatePersistenceRecord struct {
@@ -348,47 +345,6 @@ type WorkflowEntityStatePersistenceRecord struct {
 	Accumulator    json.RawMessage
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-}
-
-// FilterWorkflowEntityStatePersistenceRecords applies the backend-neutral
-// terminal-state and declared-key semantics after a selected store has bounded
-// rows to the active run, flow scope, and lifecycle companion state.
-func FilterWorkflowEntityStatePersistenceRecords(records []WorkflowEntityStatePersistenceRecord, owner WorkflowEntityStateSelectionOwner, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
-	if !owner.Valid() {
-		return nil, fmt.Errorf("workflow entity state selection requires an admitted flow owner")
-	}
-	selectors = NormalizeWorkflowInstanceFieldSelectors(selectors)
-	excluded := make(map[string]struct{})
-	for _, state := range NormalizeWorkflowInstanceExcludedStates(excludedStates) {
-		excluded[state] = struct{}{}
-	}
-	out := make([]WorkflowEntityStatePersistenceRecord, 0, len(records))
-	for _, record := range records {
-		if !owner.Owns(record.FlowInstance) {
-			continue
-		}
-		if _, skip := excluded[strings.ToLower(strings.TrimSpace(record.CurrentState))]; skip {
-			continue
-		}
-		var fields map[string]any
-		if len(record.Fields) > 0 {
-			if err := json.Unmarshal(record.Fields, &fields); err != nil {
-				return nil, fmt.Errorf("decode workflow entity state fields for %s: %w", record.FlowInstance, err)
-			}
-		}
-		matched := true
-		for _, selector := range selectors {
-			value, ok := WorkflowMetadataValue(fields, selector.Field)
-			if !ok || !WorkflowJSONValuesEqual(value, selector.Value) {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			out = append(out, record)
-		}
-	}
-	return out, nil
 }
 
 func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersistenceRecord, route runtimeflowidentity.Route, workflowName, workflowVersion, mode string) (WorkflowInstance, error) {
@@ -630,13 +586,6 @@ type workflowInstanceLifecycleOwner interface {
 	RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
 }
 
-type WorkflowInstanceFieldSelector struct {
-	Field string
-	Value any
-}
-
-type workflowInstanceFieldSelector = WorkflowInstanceFieldSelector
-
 // WorkflowPersistence is an opaque selected-backend construction value. It
 // carries storage mechanics into pipeline construction without exposing the
 // concrete workflow store to runtime consumers.
@@ -819,17 +768,6 @@ func (s *workflowInstanceStore) list(ctx context.Context, runID string) ([]Workf
 		return nil, nil
 	}
 	return s.instanceReader.ListWorkflowInstances(ctx, runID)
-}
-
-func (s *workflowInstanceStore) selectActiveByFields(ctx context.Context, runID, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
-	return s.selectActiveByFieldsExported(ctx, runID, scopeKey, selectors, excludedStates)
-}
-
-func (s *workflowInstanceStore) selectActiveByFieldsExported(ctx context.Context, runID, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
-	if s == nil || s.instanceReader == nil {
-		return nil, nil
-	}
-	return s.instanceReader.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
 func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
@@ -1085,64 +1023,6 @@ func (s *workflowInstanceStore) QueryEntityCount(ctx context.Context, runID stri
 			Value: predicate.Value,
 		},
 	})
-}
-
-func normalizeWorkflowInstanceFieldSelectors(selectors []workflowInstanceFieldSelector) []workflowInstanceFieldSelector {
-	out := make([]workflowInstanceFieldSelector, 0, len(selectors))
-	for _, selector := range selectors {
-		field := strings.TrimSpace(selector.Field)
-		if field == "" {
-			continue
-		}
-		out = append(out, workflowInstanceFieldSelector{Field: field, Value: selector.Value})
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Field < out[j].Field
-	})
-	return out
-}
-
-func NormalizeWorkflowInstanceFieldSelectors(selectors []WorkflowInstanceFieldSelector) []WorkflowInstanceFieldSelector {
-	return normalizeWorkflowInstanceFieldSelectors(selectors)
-}
-
-func normalizeWorkflowInstanceExcludedStates(states []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(states))
-	for _, state := range states {
-		state = strings.ToLower(strings.TrimSpace(state))
-		if state == "" {
-			continue
-		}
-		if _, ok := seen[state]; ok {
-			continue
-		}
-		seen[state] = struct{}{}
-		out = append(out, state)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func NormalizeWorkflowInstanceExcludedStates(states []string) []string {
-	return normalizeWorkflowInstanceExcludedStates(states)
-}
-
-func workflowInstanceFieldSelectorPath(field string) []string {
-	parts := strings.Split(strings.TrimSpace(field), ".")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		out = append(out, part)
-	}
-	return out
-}
-
-func WorkflowInstanceFieldSelectorPath(field string) []string {
-	return workflowInstanceFieldSelectorPath(field)
 }
 
 func decodeWorkflowInstancePersistedProjection(

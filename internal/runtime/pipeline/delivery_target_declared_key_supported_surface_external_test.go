@@ -32,7 +32,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 		{name: "postgres", open: openPostgresGateRecoveryStore},
 	} {
 		for _, acquisition := range []string{"select", "select_or_create"} {
-			for _, keyRelation := range []string{"agreement", "conflict", "later_match"} {
+			for _, keyRelation := range []string{"agreement", "business_difference", "conflict", "later_match"} {
 				t.Run(storeCase.name+"/"+acquisition+"/"+keyRelation, func(t *testing.T) {
 					selected := storeCase.open(t)
 					runID := uuid.NewString()
@@ -66,7 +66,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					competingEntityID := runtimeflowidentity.EntityID(competingPath)
 					payloadKey := "payload-key"
 					exactKey := payloadKey
-					if keyRelation == "conflict" {
+					if keyRelation == "business_difference" {
 						exactKey = "different-exact-key"
 					}
 					createdAt := time.Now().UTC()
@@ -140,6 +140,11 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						// EventBus commit. Execution must validate, not rerun acquisition.
 						materialize(instances[1])
 					}
+					if keyRelation == "conflict" {
+						if _, err := selected.db.ExecContext(ctx, `UPDATE entity_state SET entity_type=$1 WHERE run_id=$2 AND entity_id=$3`, "wrong_entity_type", runID, exactEntityID); err != nil {
+							t.Fatal(err)
+						}
+					}
 					delivery, err := events.NewDeliveryEvent(prepared.Event.Event(), prepared.DeliveryRoutes[0])
 					if err != nil {
 						t.Fatalf("construct targeted declared-key delivery: %v", err)
@@ -158,8 +163,8 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						if executionErr != nil {
 							t.Fatalf("execute exact key agreement: %v", executionErr)
 						}
-						if _, disposed := outcome.Disposition(); disposed {
-							t.Fatalf("exact key agreement disposition = %#v", outcome)
+						if disposition, disposed := outcome.Disposition(); disposed {
+							t.Fatalf("exact key agreement disposition = %s failure=%+v", disposition.Kind(), disposition.Failure())
 						}
 						if exact.Revision != 2 || competing.Revision != 1 || exact.Fields["owner"] != "exact" || competing.Fields["owner"] != "competing" {
 							t.Fatalf("agreement mutations: exact=%#v competing=%#v", exact, competing)
@@ -185,7 +190,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						failureText = failure.Detail.Code
 					}
 					if executionErr != nil {
-						if want := acquisition + "_entity_conflict"; !strings.Contains(failureText, want) {
+						if want := "entity_type"; !strings.Contains(failureText, want) {
 							t.Fatalf("key conflict failure = %q, want %q", failureText, want)
 						}
 					}

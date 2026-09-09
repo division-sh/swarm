@@ -246,7 +246,7 @@ func ValidateLoopHandlerCombination(handler SystemNodeEventHandler) error {
 	if err != nil {
 		return err
 	}
-	if handler.CreateEntity || (handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()) {
+	if handler.CreateEntity {
 		return fmt.Errorf("loop operation requires an existing workflow instance and cannot create or select-or-create an entity")
 	}
 	if strings.TrimSpace(handler.Condition) != "" || strings.TrimSpace(handler.Logic) != "" {

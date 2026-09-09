@@ -121,6 +121,25 @@ func applyMaterializedEngineStateMutationForTest(
 	}
 }
 
+func assertEntityStateField(t *testing.T, db *sql.DB, entityID, field string, want any) {
+	t.Helper()
+	var gotRaw []byte
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
+		SELECT fields -> $3
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, testPipelineRunID, entityID, field).Scan(&gotRaw); err != nil {
+		t.Fatalf("load entity_state fields for %s: %v", entityID, err)
+	}
+	wantRaw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal wanted entity_state field %s: %v", field, err)
+	}
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("entity_state.fields[%q] = %s, want %s", field, gotRaw, wantRaw)
+	}
+}
+
 func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"research_context": map[string]any{"summary": "done"}},

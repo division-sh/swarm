@@ -358,7 +358,6 @@ func ValidateJoinHandlerIsolation(handler SystemNodeEventHandler) error {
 		}
 	}
 	add("create_entity", handler.CreateEntity)
-	add("select_or_create_entity", handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty())
 	add("guard", handler.Guard != nil)
 	add("condition", strings.TrimSpace(handler.Condition) != "")
 	add("rules", len(handler.Rules) > 0)

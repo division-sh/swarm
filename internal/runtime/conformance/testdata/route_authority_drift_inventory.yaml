@@ -1122,6 +1122,20 @@ seam_families:
       route generations. Tests consume and settle the real local carriers;
       the adapters do not expose production tokenless subscription or
       retirement authority.
+  - id: exact_receiver_materialization_dependency
+    layer: route_plan_authority
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/receiver_materialization.go
+    search_dimensions: [descriptor_evidence, route_plan_source_reason]
+    notes: >
+      The publication-local binder consumes exact compiled receiver claims and
+      the canonical node target classification. Agent descriptors can reject
+      contradictory ownership but cannot select a receiver or grant readiness.
+      ReceiverMaterializationPlan owns complete dependency admission. The real
+      node/agent, renamed-agent, sibling/nested, competing-materializer and
+      duplicate-publication proofs exercise this consumer; those proofs do not
+      discharge the separately recorded root and selected-frontier failures.
   - id: catalog_and_fixture_route_behavior
     layer: test_fixture_semantics
     classification: valid_consumer

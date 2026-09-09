@@ -11,9 +11,6 @@ import (
 func CopyTargetedDeclaredKey(t testing.TB, acquisition string) string {
 	t.Helper()
 	instanceField := "receiver_id"
-	if acquisition == "select_or_create_future" {
-		acquisition, instanceField = "select_or_create", "account_id"
-	}
 	if acquisition != "select" && acquisition != "select_or_create" {
 		t.Fatalf("unsupported declared-key acquisition %q", acquisition)
 	}
@@ -54,18 +51,15 @@ pins:
         resolution: {mode: %s}
 `, instanceField, strings.ReplaceAll(acquisition, "_", "-")))
 	writeClosedVariantFile(t, root, "review/entities.yaml", "review_entity:\n  receiver_id: {type: text, indexed: true}\n  account_id: {type: text, indexed: true}\n  owner: {type: text, _unused_reason: distinguishes existing receiver state}\n")
-	writeClosedVariantFile(t, root, "review/nodes.yaml", fmt.Sprintf(`key-consumer:
+	writeClosedVariantFile(t, root, "review/nodes.yaml", `key-consumer:
   id: key-consumer
   execution_type: system_node
   subscribes_to: [work.keyed]
   event_handlers:
     work.keyed:
-      %s_entity:
-        by:
-          account_id: payload.account_id
       accumulate:
         into: items
         from: payload
-`, acquisition))
+`)
 	return root
 }

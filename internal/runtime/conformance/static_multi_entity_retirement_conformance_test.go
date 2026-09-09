@@ -52,7 +52,12 @@ func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyStaticMultiEntityRetirement(t, tc.handler))
+			root := canonicalrouting.CopyStaticMultiEntityRetirement(t, tc.handler)
+			if tc.handler == canonicalrouting.StaticRetirementSelect || tc.handler == canonicalrouting.StaticRetirementSelectOrCreate {
+				assertRetiredReceiverSelectorLoadError(t, root)
+				return
+			}
+			source := loadCanonicalRoutingSource(t, root)
 			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), source, runtimebootverify.Options{})
 			if tc.checkID != "" {
 				if !staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, tc.wantMessage) {
@@ -116,6 +121,15 @@ func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
 				t.Fatalf("root/default-static non-materializing handler must not be forced into retired acquisition, got %#v", report.Errors())
 			}
 		})
+	}
+}
+
+func assertRetiredReceiverSelectorLoadError(t *testing.T, root string) {
+	t.Helper()
+	repo := conformanceRepoRoot(t)
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err == nil || !strings.Contains(err.Error(), "RETIRED: handler field") || !strings.Contains(err.Error(), "composition boundary") {
+		t.Fatalf("retired receiver election must fail strict loading: %v", err)
 	}
 }
 
