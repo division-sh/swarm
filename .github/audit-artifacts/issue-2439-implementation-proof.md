@@ -5,6 +5,12 @@ Gate: https://github.com/division-sh/swarm/issues/2439#issuecomment-5602701049.
 This supplements the reviewer-completed pre-implementation audit on #2439; it
 does not ask for a new gate. Final integrated suite and PR review are pending.
 
+Update: the pre-master-integration combined full-profile suite exited 0 at the
+eb4c8c613 code checkpoint. Current-master integration is 34d86df18; its final
+suite was cancelled while queued after an independent #2432 reset-retention
+contradiction was reproduced. See issue-2432-reset-integration-escalation.md.
+This does not retract the focused SQLite exit proofs or assert final PR closure.
+
 ## Class And Owners
 
 Working class: selected SQLite transaction termination and exact-connection
