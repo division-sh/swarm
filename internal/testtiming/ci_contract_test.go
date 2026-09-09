@@ -330,6 +330,20 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "apiv1"), apiPatterns)
+	conformancePatterns := make([]*regexp.Regexp, 0, 2)
+	for _, id := range []string{"conformance-1", "conformance-2"} {
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/conformance"}) || unit.Run == "" || unit.CountMode != "count-1" {
+			t.Fatalf("%s must retain its complete uncached conformance partition", id)
+		}
+		conformancePatterns = append(conformancePatterns, regexp.MustCompile(unit.Run))
+		for name, profile := range policy.Profiles {
+			if !slices.Contains(profile.Units, id) {
+				t.Fatalf("profile %s omits conformance partition %s", name, id)
+			}
+		}
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "runtime", "conformance"), conformancePatterns)
 	storeUnit, ok := policy.Units["store-full"]
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)

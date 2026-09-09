@@ -24,6 +24,7 @@ special_packages:
   - github.com/division-sh/swarm/internal/releasee2e
   - github.com/division-sh/swarm/internal/runtime/cataloge2e
   - github.com/division-sh/swarm/internal/runtime
+  - github.com/division-sh/swarm/internal/runtime/conformance
   - github.com/division-sh/swarm/internal/runtime/contracts
   - github.com/division-sh/swarm/internal/runtime/llm
   - github.com/division-sh/swarm/internal/serveapp
@@ -59,6 +60,8 @@ profiles:
       - contracts-rest
       - api-operator
       - api-rest
+      - conformance-1
+      - conformance-2
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -101,6 +104,8 @@ profiles:
       - contracts-rest
       - api-operator
       - api-rest
+      - conformance-1
+      - conformance-2
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -143,6 +148,8 @@ profiles:
       - contracts-rest
       - api-operator
       - api-rest
+      - conformance-1
+      - conformance-2
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -185,6 +192,8 @@ profiles:
       - contracts-rest
       - api-operator
       - api-rest
+      - conformance-1
+      - conformance-2
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -197,6 +206,21 @@ profiles:
       - store-runtime-full-06
       - testpostgres-full
 units:
+  # CI34349231066: TestF*/TestH* total 69s; the complement totals 56s.
+  conformance-1:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^Test[FH].*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  conformance-2:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^(Test($|[^FH].*)|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
   # Full-profile CI34347597064: TestO* takes 77s; other API proofs take 46s.
   # Keep whole top-level proofs, including their backend and negative-case rows.
   api-operator:
