@@ -76,6 +76,9 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err != nil {
 		return runtimeengine.ActionExecution{}, err
 	}
+	if err := pc.validateArtifactRepoOutputContract(execCtx, spec, repoID, requestID, sourceEventID); err != nil {
+		return runtimeengine.ActionExecution{}, err
+	}
 	partitionKey := ""
 	provenance := map[string]any{}
 	displaySlug := ""
@@ -103,6 +106,10 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	files, treeHash, err := prepareArtifactRepoFiles(execCtx.Base, spec)
 	if err != nil {
 		return fail(artifactRepoClassify(err, runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid", "validate_input"))
+	}
+	manifest := artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, artifactRepoPublicScheme+repoID, "", treeHash, files)
+	if err := pc.validateArtifactRepoManifestOutput(execCtx, spec, manifest); err != nil {
+		return runtimeengine.ActionExecution{}, err
 	}
 	if previousRequest := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Fields[spec.Output.LastRequestID])); previousRequest == requestID {
 		if currentManifest, ok := execCtx.Request.State.StateCarrier.Fields[spec.Output.FileManifest].(map[string]any); ok {
@@ -158,7 +165,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		return fail(artifactRepoClassify(err, runtimefailures.ClassDependencyUnavailable, "artifact_repo_commit_failed", "commit_repository"))
 	}
 	repoURL := artifactRepoPublicScheme + repoID
-	manifest := artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, treeHash, files)
+	manifest = artifactRepoManifest(repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, treeHash, files)
 	successPayload, err := artifactRepoSuccessPayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, repoURL, ref, manifest)
 	if err != nil {
 		return fail(err)
@@ -193,9 +200,10 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(_ context.Co
 		spec.Output.LastRequestID:     requestID,
 		spec.Output.LastSourceEventID: sourceEventID,
 	}
+	state := artifactRepoResultState(execCtx, fields)
 	failureEvent := strings.TrimSpace(spec.FailureEvent)
 	if failureEvent == "" {
-		return runtimeengine.ActionExecution{State: artifactRepoResultState(execCtx, fields)}, cause
+		return runtimeengine.ActionExecution{State: state}, cause
 	}
 	payload, payloadErr := artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, failureValue)
 	if payloadErr != nil {
@@ -208,7 +216,7 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(_ context.Co
 	if queueErr != nil {
 		return runtimeengine.ActionExecution{}, errors.Join(cause, queueErr)
 	}
-	return runtimeengine.ActionExecution{State: artifactRepoResultState(execCtx, fields), EmitIntents: []runtimeengine.EmitIntent{intent}}, nil
+	return runtimeengine.ActionExecution{State: state, EmitIntents: []runtimeengine.EmitIntent{intent}}, nil
 }
 
 func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(_ context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoURL, ref string, manifest map[string]any, requestID, sourceEventID string, successPayload map[string]any) (runtimeengine.ActionExecution, error) {
@@ -218,19 +226,19 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(_ context.Co
 		spec.Output.FileManifest:  manifest,
 		spec.Output.Status:        "committed",
 		spec.Output.LastRequestID: requestID,
-		spec.Output.Failure:       nil,
+		spec.Output.Failure:       map[string]any{},
 	}
+	fields[spec.Output.LastSourceEventID] = sourceEventID
+	state := artifactRepoResultState(execCtx, fields)
 	successEvent := strings.TrimSpace(spec.SuccessEvent)
 	if successEvent == "" {
-		fields[spec.Output.LastSourceEventID] = sourceEventID
-		return runtimeengine.ActionExecution{State: artifactRepoResultState(execCtx, fields)}, nil
+		return runtimeengine.ActionExecution{State: state}, nil
 	}
 	intent, err := pc.artifactRepoResultEvent(execCtx, successEvent, successPayload)
 	if err != nil {
 		return runtimeengine.ActionExecution{}, err
 	}
-	fields[spec.Output.LastSourceEventID] = sourceEventID
-	return runtimeengine.ActionExecution{State: artifactRepoResultState(execCtx, fields), EmitIntents: []runtimeengine.EmitIntent{intent}}, nil
+	return runtimeengine.ActionExecution{State: state, EmitIntents: []runtimeengine.EmitIntent{intent}}, nil
 }
 
 func (pc *PipelineCoordinator) artifactRepoResultEvent(execCtx runtimeengine.ExecutionContext, eventType string, payload map[string]any) (runtimeengine.EmitIntent, error) {
@@ -478,6 +486,10 @@ func artifactRepoOutputsComplete(metadata map[string]any, spec *runtimecontracts
 		return false
 	}
 	if got := strings.TrimSpace(asString(metadata[spec.Output.Status])); got != "committed" {
+		return false
+	}
+	failure, ok := metadata[spec.Output.Failure].(map[string]any)
+	if !ok || failure == nil || len(failure) != 0 {
 		return false
 	}
 	if strings.TrimSpace(asString(metadata[spec.Output.RepoURL])) == "" {

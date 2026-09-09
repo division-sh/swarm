@@ -3927,7 +3927,15 @@ handler_specification:
             product-specific path segments.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
             contract must declare the output fields it wants persisted; status is committed or failed, failure records the
-            canonical platform.failure/v1 envelope when present, and current_ref updates only after git commit/ref verification succeeds.
+            nonempty canonical platform.failure/v1 envelope for failure and the empty JSON object {} for no failure, never null.
+            Every successful fresh commit, same-tree request, provider-history reconstruction, and failure-to-success recovery
+            explicitly clears any old failure to {}. This entity-state convention does not add a failure field to success events.
+            Distinct mapped output fields must admit their receiving entity values through the canonical named-type and
+            entity-state admission owners before provider side effects. Provider refs are opaque text; current_ref and a
+            named file_manifest.ref must admit unrestricted text, rather than a sampled hash, enum, equality, or refinement
+            that could reject the provider's eventual value. The failure field admits unrestricted JSON objects; prepared
+            manifest values and both status outcomes are checked before provider access. current_ref updates only after
+            git commit/ref verification succeeds.
             Provider history must record every accepted request_id and content/tree identity durably enough to reject historical
             request-id conflicts after intervening commits, including accepted same-tree/no-op requests. If git history contains
             the accepted request but entity output persistence is missing or stale, retry reconstructs and persists the
