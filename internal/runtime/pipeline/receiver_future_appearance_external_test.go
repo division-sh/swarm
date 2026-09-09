@@ -2,11 +2,11 @@ package pipeline_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -32,7 +32,7 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				runID := uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-				source, node := targetedDeclaredKeyExecutionSource(t, "select_or_create")
+				source, node := targetedDeclaredKeyExecutionSource(t, "select_or_create_future")
 				module := proposedEffectProofModule{source: source,
 					workflow: runtimepipeline.NewWorkflowDefinition("review", []runtimepipeline.WorkflowStage{{Name: "active"}, {Name: "done", Terminal: true}}, nil),
 					nodes: []runtimepipeline.WorkflowNode{{Node: node, Subscriptions: []events.EventType{"work.keyed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType,
@@ -54,12 +54,12 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				unrelatedIdentity := testRunScopedWorkflowInstanceForRun(runID, unrelatedPath)
 				unrelatedReadiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: unrelatedRoute.InstanceID, InstancePath: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath), HasStoredPath: true},
-					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: "1", ExecutionMode: executionmode.Live,
+					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
 				if _, err := pc.MaterializeInitialEntry(ctx, unrelatedIdentity, runtimepipeline.WorkflowInstance{
 					InstanceID: unrelatedRoute.InstanceID, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
-					WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active", EntityType: "review_entity",
-					Fields: map[string]any{"account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
+					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
+					Fields: map[string]any{"receiver_id": unrelatedRoute.InstanceID, "account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
 				}, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
@@ -69,7 +69,12 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedIdentity}); err != nil {
 					t.Fatal(err)
 				}
-				evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.keyed", "operator", "", []byte(`{"account_id":"appearing-key","item":"accepted"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+				receiverKey := uuid.NewString()
+				payload, err := json.Marshal(map[string]any{"receiver_id": receiverKey, "account_id": "appearing-key", "item": "accepted"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				evt := targetedDeclaredKeyPublication(t, ctx, bus, source, runID, payload, events.RouteIdentity{}, time.Now().UTC())
 				handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
 				if err != nil {
 					t.Fatal(err)
@@ -89,10 +94,13 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, future.Route().FlowInstance)}); err != nil {
 					t.Fatal(err)
 				}
-				evt = eventtest.ExistingRunRootIngress(evt.ID(), evt.Type(), "operator", "", []byte(`{"account_id":"appearing-key","item":"accepted"}`), 0, runID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, future.Route()), evt.CreatedAt())
+				evt, err = events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), future.Route()))
+				if err != nil {
+					t.Fatal(err)
+				}
 				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
 				if err != nil || len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Target.MaterializingEntity() {
-					t.Fatalf("zero-match future admission: routes=%#v err=%v", plan.DeliveryRoutes, err)
+					t.Fatalf("zero-match future admission: plan=%#v err=%v", plan, err)
 				}
 				if err := bus.Publish(ctx, evt); err != nil {
 					t.Fatal(err)
@@ -116,11 +124,11 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				}
 				readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: route.InstanceID, InstancePath: target.Route().FlowInstance, EntityID: target.Route().EntityID, HasStoredPath: true},
-					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: "1", ExecutionMode: executionmode.Live,
+					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
 				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, StorageRef: target.Route().FlowInstance, EntityID: target.Route().EntityID,
-					WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active", EntityType: "review_entity",
-					Fields: map[string]any{"account_id": key, "owner": "appeared"}, RuntimeReadiness: &readiness}
+					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
+					Fields: map[string]any{"receiver_id": receiverKey, "account_id": key, "owner": "appeared"}, RuntimeReadiness: &readiness}
 				if _, err := pc.MaterializeInitialEntry(ctx, identity, instance, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}

@@ -136,6 +136,7 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			delivery_context BLOB NOT NULL,
 			delivery_payload_projection BLOB NOT NULL,
 			connect_execution_claim BLOB NOT NULL,
+			receiver_materialization_plan BLOB NOT NULL DEFAULT 'null',
 			execution_authority_kind TEXT NOT NULL,
 			authority_bundle_hash TEXT NOT NULL,
 			execution_authority_id TEXT NOT NULL,

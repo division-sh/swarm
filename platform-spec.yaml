@@ -1382,7 +1382,28 @@ contract_formats:
             publication is not ownership evidence. Node intents are classified
             independently against the selected-run snapshot. A node's speculative materialization result is not receiving
             activation evidence for an agent; only actual selected ownership or an admitted receiver activation plan supplies
-            that authority, so intent order cannot create it. Missing,
+            that authority, so intent order cannot create it. The closed ReceiverMaterializationPlan binds the exact run,
+            publication, admitted RoutingSource, materializing target, materializer delivery route identity and complete
+            dependent agent route identities. Dependent identities in this plan identify their pre-binding routes; each
+            final durable agent route identity includes the complete plan. The materializer retains its ordinary route
+            identity. Complete publication validation checks both directions of this relation, rejects ambiguous suppliers,
+            and cannot accept a dropped dependent plan. The plan is committed with the publication and delivery obligations,
+            never manufactured from current descriptors during recovery. It is future ownership, not evidence of execution.
+            Agent claims and continuation eligibility require the exact materializer's successful settlement and actual
+            persisted target state admitted by the workflow target owner, the exact
+            admitted agent lifecycle cell, and the matching live normal or selected generation grant. An agent descriptor
+            with an explicit entity must agree; lawful descriptor absence does not erase the materializer's exact ownership.
+            The claim transaction consumes the retained execution-grant fence. Awaiting materialization or readiness
+            creates no agent attempt, timer or polling loop; canonical commit and readiness signals wake the existing
+            continuation owner. Retryable materialization retains its existing retry policy. Terminal materializer failure
+            atomically terminalizes its dependent obligations through the delivery owner, with exact failure/outcome and
+            dead-letter evidence and no provider execution. Run cancellation retains the ordinary run-terminalization owner.
+            A successful node settlement without its exact target state terminalizes dependents as
+            receiver_materialization_missing rather than pretending the entity exists or waiting forever. Agent-only
+            template activation uses its existing lifecycle commit owner, but a future-target agent still requires exact
+            persisted state and readiness before claim. Publication duplicates validate the stored aggregate; they never
+            trust a caller's replacement plan or repair damaged dependency evidence.
+            Missing,
             ambiguous, malformed, stale, foreign, contradictory, or disagreeing owner evidence fails before event, delivery,
             settlement, lifecycle, warning, or reply mutation during publication admission. A nested static receiver uses
             only its actual receiving-owned entity or receiving activation. Supported create and auto-materializing work
@@ -14423,6 +14444,7 @@ platform_tables:
             delivery_context JSONB NOT NULL,
             delivery_payload_projection JSONB NOT NULL,
             connect_execution_claim JSONB NOT NULL,
+            receiver_materialization_plan JSONB NOT NULL DEFAULT 'null'::jsonb,
             execution_authority_kind TEXT NOT NULL CHECK (execution_authority_kind IN ('normal_runtime', 'selected_contract_fork')),
             authority_bundle_hash TEXT NOT NULL CHECK (authority_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             execution_authority_id TEXT NOT NULL CHECK (NULLIF(TRIM(execution_authority_id), '') IS NOT NULL),

@@ -39,7 +39,9 @@ const (
 // Adapter contains the private SQL mechanics for the executable-delivery
 // owner. Runtime consumers receive Store, never Adapter or a transaction.
 type Adapter struct {
-	dialect Dialect
+	dialect           Dialect
+	receiverExecution ReceiverExecutionAdmission
+	receiverTarget    ReceiverTargetPersistence
 }
 
 func NewAdapter(dialect Dialect) (*Adapter, error) {
@@ -90,6 +92,22 @@ func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID 
 		return nil, err
 	}
 	routes = events.NormalizeDeliveryRoutes(routes)
+	for _, route := range routes {
+		if route.Materialization.Empty() {
+			continue
+		}
+		event, err := a.materializationEvent(ctx, tx, eventID)
+		if err != nil {
+			return nil, err
+		}
+		if event.RunID() != runID {
+			return nil, fmt.Errorf("receiver materialization run contradicts publication")
+		}
+		if err := events.ValidateReceiverMaterializations(event, routes); err != nil {
+			return nil, err
+		}
+		break
+	}
 	if len(routes) == 0 {
 		return nil, nil
 	}
@@ -205,7 +223,7 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 }
 
 func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligation Obligation) (DurableHandoffProof, error) {
-	target, deliveryContext, projection, connectClaim, err := encodeRoute(obligation.Route())
+	target, deliveryContext, projection, connectClaim, materialization, err := encodeRoute(obligation.Route())
 	if err != nil {
 		return DurableHandoffProof{}, err
 	}
@@ -235,14 +253,14 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 			execution_authority_id, execution_authority_generation,
 			selected_execution_id, selected_fork_run_id, selected_execution_generation,
 			status, retry_count, max_retries, next_eligible_at, claim_version,
-			created_at, updated_at
+			created_at, updated_at, receiver_materialization_plan
 		) VALUES (
 			$1::uuid, NULLIF($2, '')::uuid, $3::uuid, $4, $5, $6,
 			$7, $8, $9, $10, $11, $12,
 			$13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
 			$17, $18, $19, $20,
 			NULLIF($21, '')::uuid, NULLIF($22, '')::uuid, $23,
-			'pending', 0, $24, $25, 0, $25, $25
+			'pending', 0, $24, $25, 0, $25, $25, $26::jsonb
 		) ON CONFLICT (event_id, route_identity) DO NOTHING`
 	args := []any{
 		obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()),
@@ -251,7 +269,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
 		string(target), string(deliveryContext), string(projection), string(connectClaim),
 		string(obligation.Authority().Kind()), bundleHash, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
-		selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now,
+		selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now, string(materialization),
 	}
 	if a.dialect == DialectSQLite {
 		query = `
@@ -264,14 +282,14 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 				execution_authority_id, execution_authority_generation,
 				selected_execution_id, selected_fork_run_id, selected_execution_generation,
 				status, retry_count, max_retries, next_eligible_at, claim_version,
-				created_at, updated_at
+				created_at, updated_at, receiver_materialization_plan
 			) VALUES (
 				?1, NULLIF(?2, ''), ?3, ?4, ?5, ?6,
 				?7, ?8, ?9, ?10, ?11, ?12,
 				?13, ?14, ?15, ?16,
 				?17, ?18, ?19, ?20,
 				NULLIF(?21, ''), NULLIF(?22, ''), ?23,
-				'pending', 0, ?24, ?25, 0, ?26, ?27
+				'pending', 0, ?24, ?25, 0, ?26, ?27, ?28
 			)
 			ON CONFLICT(event_id, route_identity) DO NOTHING`
 		args = []any{
@@ -281,7 +299,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 			agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
 			string(target), string(deliveryContext), string(projection), string(connectClaim),
 			string(obligation.Authority().Kind()), bundleHash, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
-			selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now, now, now,
+			selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now, now, now, string(materialization),
 		}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
@@ -376,6 +394,16 @@ func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, story runtim
 	default:
 		result.Disposition = ClaimInvariantInvalid
 		result.Invariant = fmt.Errorf("%w: unknown delivery status", ErrConflict)
+		return result, nil
+	}
+	ready, err := a.materializationReady(ctx, tx, record, tx)
+	if err != nil {
+		result.Disposition, result.Invariant = ClaimInvariantInvalid, err
+		return result, nil
+	}
+	if !ready {
+		result.Disposition = ClaimDeferred
+		result.Snapshot = snapshotAt(record, now)
 		return result, nil
 	}
 	claimed, err := a.claimLocked(ctx, tx, story, record, leaseTTL)
@@ -510,8 +538,7 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 		if !record.Authority.Equal(authority) {
 			item.Disposition = ClaimWrongAuthority
 		} else {
-			item.Disposition = continuationDisposition(record, now)
-			item.Wake = continuationWake(record, item.Disposition, now)
+			item.Disposition, item.Wake, item.Invariant = a.continuationWithMaterialization(ctx, tx, record, now)
 		}
 		page.Items = append(page.Items, item)
 	}
@@ -559,11 +586,12 @@ func (a *Adapter) ObserveContinuation(
 	if err != nil {
 		return ContinuationObservation{}, err
 	}
-	disposition := continuationDisposition(record, now)
+	disposition, wake, invariant := a.continuationWithMaterialization(ctx, q, record, now)
 	return ContinuationObservation{
 		DeliveryID:  deliveryID,
 		Disposition: disposition,
-		Wake:        continuationWake(record, disposition, now),
+		Wake:        wake,
+		Invariant:   invariant,
 	}, nil
 }
 
@@ -2204,11 +2232,15 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, story runtimea
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	now, err := a.databaseNow(ctx, tx)
+	failure, err := parentTerminalizationFailure(reason)
 	if err != nil {
 		return nil, err
 	}
-	failure, err := parentTerminalizationFailure(reason)
+	return a.terminalizeDeliveries(ctx, tx, story, ids, reason, failure)
+}
+
+func (a *Adapter) terminalizeDeliveries(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, ids []string, reason string, failure runtimefailures.Envelope) ([]Terminalization, error) {
+	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -2221,6 +2253,9 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, story runtimea
 		record, err := a.loadByID(ctx, tx, id, true)
 		if err != nil {
 			return nil, err
+		}
+		if record.Status == StatusDelivered || record.Status == StatusDeadLetter {
+			continue
 		}
 		version := record.ClaimVersion + 1
 		query := `UPDATE event_deliveries SET status = 'dead_letter', reason_code = $1, failure = $2::jsonb, retry_count = retry_count, next_eligible_at = NULL, claim_version = $3, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = $4, updated_at = $4 WHERE delivery_id = $5::uuid AND claim_version = $6`
@@ -2527,7 +2562,7 @@ func (a *Adapter) selectRecord() string {
 				d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 				d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
 				d.delivery_target_route, d.delivery_context,
-				d.delivery_payload_projection, d.connect_execution_claim, d.execution_authority_kind, d.authority_bundle_hash,
+				d.delivery_payload_projection, d.connect_execution_claim, d.receiver_materialization_plan, d.execution_authority_kind, d.authority_bundle_hash,
 				d.execution_authority_id, d.execution_authority_generation,
 				COALESCE(d.selected_execution_id, ''), COALESCE(d.selected_fork_run_id, ''),
 				COALESCE(d.selected_execution_generation, 0),
@@ -2549,7 +2584,7 @@ func (a *Adapter) selectRecord() string {
 			d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 			d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
 			d.delivery_target_route, d.delivery_context,
-			d.delivery_payload_projection, d.connect_execution_claim, d.execution_authority_kind, d.authority_bundle_hash,
+			d.delivery_payload_projection, d.connect_execution_claim, d.receiver_materialization_plan, d.execution_authority_kind, d.authority_bundle_hash,
 			d.execution_authority_id, d.execution_authority_generation,
 			COALESCE(d.selected_execution_id::text, ''), COALESCE(d.selected_fork_run_id::text, ''),
 			COALESCE(d.selected_execution_generation, 0),
@@ -2573,14 +2608,14 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	var agentFlowScopeKey, agentFlowInstanceID, agentFlowInstancePath string
 	var authorityBundleHash, authorityExecutionID, selectedExecutionID, selectedForkRunID string
 	var authorityGeneration, selectedGeneration uint64
-	var targetRaw, contextRaw, projectionRaw, connectClaimRaw, failureRaw []byte
+	var targetRaw, contextRaw, projectionRaw, connectClaimRaw, materializationRaw, failureRaw []byte
 	var nextEligible, claimExpires, started, settled, created, updated any
 	err := row.Scan(
 		&record.DeliveryID, &record.EventID, &record.RunID, &routeIdentity,
 		&subscriberType, &record.SubscriberID,
 		&agentNameOwner, &agentNameSource, &agentRoutePresence,
 		&agentFlowScopeKey, &agentFlowInstanceID, &agentFlowInstancePath,
-		&targetRaw, &contextRaw, &projectionRaw, &connectClaimRaw,
+		&targetRaw, &contextRaw, &projectionRaw, &connectClaimRaw, &materializationRaw,
 		&authorityKind, &authorityBundleHash, &authorityExecutionID, &authorityGeneration,
 		&selectedExecutionID, &selectedForkRunID, &selectedGeneration,
 		&status, &record.RetryCount, &record.MaxRetries, &nextEligible, &record.ClaimVersion,
@@ -2640,6 +2675,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		contextRaw,
 		projectionRaw,
 		connectClaimRaw,
+		materializationRaw,
 	)
 	if err != nil {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery route: %v", ErrConflict, err)
@@ -2774,25 +2810,32 @@ func queryDatabaseTime(ctx context.Context, q interface {
 	return now.UTC().Truncate(time.Microsecond), nil
 }
 
-func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, []byte, error) {
+func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, []byte, []byte, error) {
 	route = route.Normalized()
 	target, err := json.Marshal(route.Target)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	deliveryContext, err := json.Marshal(route.Context)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	projection, err := json.Marshal(route.PayloadProjection)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	connectClaim, err := json.Marshal(route.ConnectClaim)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
-	return target, deliveryContext, projection, connectClaim, nil
+	materialization := []byte("null")
+	if !route.Materialization.Empty() {
+		materialization, err = json.Marshal(route.Materialization)
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+	}
+	return target, deliveryContext, projection, connectClaim, materialization, nil
 }
 
 func deliveryRouteAgentStorageFields(route events.DeliveryRoute) (agentidentity.StorageFields, error) {
@@ -2821,7 +2864,7 @@ func decodeRoute(
 	class SubscriberClass,
 	subscriberID string,
 	agentFields agentidentity.StorageFields,
-	targetRaw, contextRaw, projectionRaw, connectClaimRaw []byte,
+	targetRaw, contextRaw, projectionRaw, connectClaimRaw, materializationRaw []byte,
 ) (events.DeliveryRoute, error) {
 	var target events.DeliveryTargetOwnership
 	var deliveryContext events.DeliveryContext
@@ -2869,14 +2912,15 @@ func decodeRoute(
 	default:
 		return events.DeliveryRoute{}, fmt.Errorf("unsupported delivery subscriber class %q", class)
 	}
-	return events.DeliveryRoute{
+	route := events.DeliveryRoute{
 		Recipient:         recipient,
 		AgentIdentity:     identity,
 		Target:            target,
 		Context:           deliveryContext,
 		PayloadProjection: projection,
 		ConnectClaim:      connectClaim,
-	}.Normalized(), nil
+	}.Normalized()
+	return events.RestoreDeliveryMaterialization(route, materializationRaw)
 }
 
 func encodeFailure(failure *runtimefailures.Envelope) (string, error) {

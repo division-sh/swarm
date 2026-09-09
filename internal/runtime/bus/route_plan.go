@@ -283,6 +283,7 @@ type RoutePlanDeliveryIntent struct {
 	AgentIdentity     agentidentity.Identity
 	TargetBlueprint   events.RouteIdentity
 	TargetOwnership   events.DeliveryTargetOwnership
+	Materialization   events.ReceiverMaterializationPlan
 	Handler           runtimepipeline.DeliveryTargetHandler
 	Context           events.DeliveryContext
 	PayloadProjection events.DeliveryPayloadProjection
@@ -482,14 +483,7 @@ func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 		if !intent.Persist {
 			continue
 		}
-		out = append(out, events.DeliveryRoute{
-			Recipient:         intent.Recipient,
-			AgentIdentity:     intent.AgentIdentity,
-			Target:            intent.TargetOwnership,
-			Context:           intent.Context,
-			PayloadProjection: intent.PayloadProjection,
-			ConnectClaim:      intent.ConnectClaim,
-		})
+		out = append(out, intent.deliveryRoute())
 	}
 	return events.NormalizeDeliveryRoutes(out)
 }
@@ -512,14 +506,7 @@ func (p RoutePlan) liveDispatchDeliveryRoutes() []events.DeliveryRoute {
 				continue
 			}
 		}
-		out = append(out, events.DeliveryRoute{
-			Recipient:         intent.Recipient,
-			AgentIdentity:     intent.AgentIdentity,
-			Target:            intent.TargetOwnership,
-			Context:           intent.Context,
-			PayloadProjection: intent.PayloadProjection,
-			ConnectClaim:      intent.ConnectClaim,
-		})
+		out = append(out, intent.deliveryRoute())
 	}
 	return events.NormalizeDeliveryRoutes(out)
 }
@@ -702,6 +689,7 @@ func routePlanDeliveryIntentsFromAdmittedRoutes(routes []events.DeliveryRoute, p
 			AgentIdentity:     route.AgentIdentity,
 			TargetBlueprint:   route.Target.Route(),
 			TargetOwnership:   route.Target,
+			Materialization:   route.Materialization,
 			Context:           route.Context,
 			PayloadProjection: route.PayloadProjection,
 			ConnectClaim:      route.ConnectClaim,
@@ -883,16 +871,17 @@ func mergeRoutePlanLiveRecipientAuthority(current, candidate RoutePlanLiveRecipi
 }
 
 type deliveryIntentKey struct {
-	recipient      events.DeliveryRecipient
-	agentIdentity  agentidentity.Identity
-	target         events.RouteIdentity
-	targetOwner    events.DeliveryTargetOwnership
-	handler        runtimepipeline.DeliveryTargetHandler
-	replyContextID string
-	projection     string
-	connectClaim   events.ConnectExecutionClaim
-	agentLifecycle agentLifecycleAdmission
-	connectPlan    events.ConnectPlanIdentity
+	recipient       events.DeliveryRecipient
+	agentIdentity   agentidentity.Identity
+	target          events.RouteIdentity
+	targetOwner     events.DeliveryTargetOwnership
+	handler         runtimepipeline.DeliveryTargetHandler
+	replyContextID  string
+	projection      string
+	connectClaim    events.ConnectExecutionClaim
+	agentLifecycle  agentLifecycleAdmission
+	connectPlan     events.ConnectPlanIdentity
+	materialization events.DeliveryRouteIdentity
 }
 
 func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlanDeliveryIntent {
@@ -935,6 +924,14 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 			connectClaim:   intent.ConnectClaim,
 			agentLifecycle: intent.AgentLifecycle,
 			connectPlan:    intent.ConnectPlan,
+		}
+		if !intent.Materialization.Empty() {
+			var err error
+			key.materialization, err = intent.deliveryRoute().Identity()
+			if err != nil {
+				out = append(out, intent)
+				continue
+			}
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist

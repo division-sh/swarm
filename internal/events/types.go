@@ -666,12 +666,13 @@ func (r DeliveryRecipient) LocalID() string {
 func (r DeliveryRecipient) Code() string { return r.kind.storageCode() }
 
 type DeliveryRoute struct {
-	Recipient         DeliveryRecipient         `json:"-"`
-	AgentIdentity     agentidentity.Identity    `json:"agent_identity,omitempty"`
-	Target            DeliveryTargetOwnership   `json:"delivery_target_ownership,omitempty"`
-	Context           DeliveryContext           `json:"delivery_context,omitempty"`
-	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
-	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
+	Recipient         DeliveryRecipient           `json:"-"`
+	AgentIdentity     agentidentity.Identity      `json:"agent_identity,omitempty"`
+	Target            DeliveryTargetOwnership     `json:"delivery_target_ownership,omitempty"`
+	Context           DeliveryContext             `json:"delivery_context,omitempty"`
+	PayloadProjection DeliveryPayloadProjection   `json:"delivery_payload_projection,omitempty"`
+	ConnectClaim      ConnectExecutionClaim       `json:"connect_execution_claim,omitempty"`
+	Materialization   ReceiverMaterializationPlan `json:"-"`
 }
 
 type deliveryRouteWire struct {
@@ -682,6 +683,7 @@ type deliveryRouteWire struct {
 	Context           DeliveryContext           `json:"delivery_context,omitempty"`
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
 	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
+	Materialization   json.RawMessage           `json:"receiver_materialization_plan,omitempty"`
 }
 
 func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
@@ -689,9 +691,20 @@ func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
 	if err := r.ConnectClaim.validateRecipient(r.Recipient); err != nil {
 		return nil, err
 	}
+	var materialization json.RawMessage
+	if !r.Materialization.Empty() {
+		if err := r.Materialization.validateDependent(r); err != nil {
+			return nil, err
+		}
+		var err error
+		materialization, err = json.Marshal(r.Materialization)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return json.Marshal(deliveryRouteWire{
 		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), AgentIdentity: r.AgentIdentity,
-		Target: r.Target, Context: r.Context, PayloadProjection: r.PayloadProjection, ConnectClaim: r.ConnectClaim,
+		Target: r.Target, Context: r.Context, PayloadProjection: r.PayloadProjection, ConnectClaim: r.ConnectClaim, Materialization: materialization,
 	})
 }
 
@@ -720,7 +733,8 @@ func (r *DeliveryRoute) UnmarshalJSON(raw []byte) error {
 		Recipient: recipient, AgentIdentity: wire.AgentIdentity, Target: wire.Target,
 		Context: wire.Context, PayloadProjection: wire.PayloadProjection, ConnectClaim: wire.ConnectClaim,
 	}.Normalized()
-	return nil
+	*r, err = RestoreDeliveryMaterialization(*r, wire.Materialization)
+	return err
 }
 
 // ConnectExecutionClaim is the opaque proof that one delivery was admitted
@@ -965,6 +979,18 @@ func ParseDeliveryRouteIdentity(raw string) (DeliveryRouteIdentity, error) {
 // relevant route fact. The normalized route remains persisted for exact
 // duplicate comparison and hydration.
 func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
+	if !r.Materialization.Empty() {
+		if err := r.Materialization.validateDependent(r); err != nil {
+			return DeliveryRouteIdentity{}, err
+		}
+	}
+	return r.identity(true)
+}
+
+// The dependency binds the agent's pre-dependency execution facts. Its final
+// durable route identity additionally includes that dependency. Node route
+// identities never omit execution facts and cannot carry a dependency.
+func (r DeliveryRoute) identity(includeMaterialization bool) (DeliveryRouteIdentity, error) {
 	r = r.Normalized()
 	if r.Recipient.Empty() {
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type and id are required")
@@ -1002,22 +1028,29 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 		claim := r.ConnectClaim
 		connectClaim = &claim
 	}
+	var materialization *ReceiverMaterializationPlan
+	if includeMaterialization && !r.Materialization.Empty() {
+		copy := r.Materialization
+		materialization = &copy
+	}
 	canonical, err := json.Marshal(struct {
-		SubscriberType string                  `json:"subscriber_type"`
-		SubscriberID   string                  `json:"subscriber_id"`
-		AgentIdentity  agentidentity.Identity  `json:"agent_identity,omitempty"`
-		Target         DeliveryTargetOwnership `json:"target_ownership"`
-		Context        DeliveryContext         `json:"context"`
-		Projection     map[string]string       `json:"projection"`
-		ConnectClaim   *ConnectExecutionClaim  `json:"connect_claim,omitempty"`
+		SubscriberType  string                       `json:"subscriber_type"`
+		SubscriberID    string                       `json:"subscriber_id"`
+		AgentIdentity   agentidentity.Identity       `json:"agent_identity,omitempty"`
+		Target          DeliveryTargetOwnership      `json:"target_ownership"`
+		Context         DeliveryContext              `json:"context"`
+		Projection      map[string]string            `json:"projection"`
+		ConnectClaim    *ConnectExecutionClaim       `json:"connect_claim,omitempty"`
+		Materialization *ReceiverMaterializationPlan `json:"receiver_materialization_plan,omitempty"`
 	}{
-		SubscriberType: r.Recipient.Code(),
-		SubscriberID:   r.Recipient.ID(),
-		AgentIdentity:  r.AgentIdentity,
-		Target:         r.Target,
-		Context:        r.Context,
-		Projection:     projection.Fields(),
-		ConnectClaim:   connectClaim,
+		SubscriberType:  r.Recipient.Code(),
+		SubscriberID:    r.Recipient.ID(),
+		AgentIdentity:   r.AgentIdentity,
+		Target:          r.Target,
+		Context:         r.Context,
+		Projection:      projection.Fields(),
+		ConnectClaim:    connectClaim,
+		Materialization: materialization,
 	})
 	if err != nil {
 		return DeliveryRouteIdentity{}, fmt.Errorf("encode delivery route identity: %w", err)
@@ -1897,6 +1930,7 @@ func (r DeliveryRoute) Normalized() DeliveryRoute {
 		Context:           r.Context.Normalized(),
 		PayloadProjection: r.PayloadProjection.Normalized(),
 		ConnectClaim:      r.ConnectClaim,
+		Materialization:   r.Materialization,
 	}
 }
 

@@ -32,12 +32,7 @@ func AuthorizeRetainedGrantLifecycleTx(ctx context.Context, tx *sql.Tx, req mana
 	if err := evidence.Validate(); err != nil {
 		return err
 	}
-	expected := manager.ProcessExecutionBinding{
-		ProcessAuthorityID: evidence.ProcessAuthorityID, ProcessOwnerID: evidence.ProcessOwnerID,
-		ProcessBootID: evidence.ProcessBootID, GenerationGrantID: evidence.GrantID,
-		BundleHash: evidence.BundleHash, RuntimeInstanceID: evidence.RuntimeInstanceID,
-		RuntimeGeneration: evidence.RuntimeGeneration,
-	}
+	expected := processBindingForGrant(evidence)
 	if req.ProcessBinding != expected || evidence.State == startupownership.GrantRetired {
 		return errors.New("lifecycle generation grant is retired or differs from the retained process binding")
 	}
@@ -57,6 +52,15 @@ func AuthorizeRetainedGrantLifecycleTx(ctx context.Context, tx *sql.Tx, req mana
 		return fmt.Errorf("%w: %s", manager.ErrRunExecutionNotOwned, req.Identity.RunID)
 	}
 	return nil
+}
+
+func processBindingForGrant(evidence startupownership.GrantEvidence) manager.ProcessExecutionBinding {
+	return manager.ProcessExecutionBinding{
+		ProcessAuthorityID: evidence.ProcessAuthorityID, ProcessOwnerID: evidence.ProcessOwnerID,
+		ProcessBootID: evidence.ProcessBootID, GenerationGrantID: evidence.GrantID,
+		BundleHash: evidence.BundleHash, RuntimeInstanceID: evidence.RuntimeInstanceID,
+		RuntimeGeneration: evidence.RuntimeGeneration,
+	}
 }
 
 // InspectRunExecutionOwnershipTx verifies current grant evidence and classifies

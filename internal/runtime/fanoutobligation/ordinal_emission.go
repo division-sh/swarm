@@ -75,7 +75,8 @@ func ordinalEmission(key IntentKey, plan contracts.FanOutPlanRef, capsule Capsul
 func (p OrdinalEmission) NewEvent(facts events.EventFacts) (events.Event, error) {
 	if p.node == "" || facts.Producer.Type != events.EventProducerNode || facts.Producer.ID != p.node ||
 		facts.ChainDepth != p.depth || facts.RoutingSource != p.source {
-		return events.Event{}, fmt.Errorf("fan-out emission disagrees with immutable producer, depth or source")
+		var absent events.Event
+		return absent, fmt.Errorf("fan-out emission disagrees with immutable producer, depth or source")
 	}
 	facts.TaskID, facts.ExecutionMode = p.lineage.TaskID, p.lineage.ExecutionMode
 	if p.origin != nil {

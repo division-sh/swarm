@@ -3069,7 +3069,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
 	}
 	requireNoConnectRoutePlanBusEvent(t, hostileReplacement, "replacement topology must not capture historical replay")
-	if routes := store.routes[eventID]; len(routes) != 1 || routes[0] != committedRoute {
+	if routes := store.routes[eventID]; len(routes) != 1 || !reflect.DeepEqual(routes[0], committedRoute) {
 		t.Fatalf("persisted route changed across replacement-topology restart: %#v, want unchanged %#v", routes, committedRoute)
 	}
 }

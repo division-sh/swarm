@@ -113,6 +113,26 @@ func (h DeliveryTargetHandler) resolve(source semanticview.Source, eventType eve
 	return resolved.Handler, resolved.Matched
 }
 
+// MaterializesReceiver consumes the same handler compatibility policy used by
+// target classification and execution. A select-only observer never becomes a
+// materializer merely because another same-plan owner is future-valued.
+func (h DeliveryTargetHandler) MaterializesReceiver(source semanticview.Source, eventType events.EventType) (bool, error) {
+	handler, found := h.resolve(source, eventType)
+	if !found {
+		return false, fmt.Errorf("receiver materializer lacks an admitted handler")
+	}
+	if h.eventType != "" {
+		eventType = h.eventType
+	}
+	policy, err := CompileDeliveryTargetCompatibilityPolicy(source, h.Node(), h.ExecutionFlowID(source), eventType, handler)
+	if err != nil {
+		return false, err
+	}
+	return policy.Acquisition == DeliveryTargetAcquisitionCreate ||
+		policy.Acquisition == DeliveryTargetAcquisitionSelectOrCreate ||
+		(policy.Dependency == DeliveryTargetEntityMaterializing && policy.Acquisition != DeliveryTargetAcquisitionSelect), nil
+}
+
 // AdmitDeliveryTargetHandler admits one exact authored declaration owner. The
 // concrete event is resolved later so wildcard subscriptions remain bounded by
 // the same owner without freezing a pattern as an executable handler.

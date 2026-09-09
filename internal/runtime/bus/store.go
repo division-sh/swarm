@@ -271,6 +271,9 @@ func (p PreparedPublishEvent) Validate() error {
 	if err := events.ValidateDeliveryRoutes(p.DeliveryRoutes); err != nil {
 		return fmt.Errorf("prepared publication delivery routes: %w", err)
 	}
+	if err := events.ValidateReceiverMaterializations(p.Event.Event(), p.DeliveryRoutes); err != nil {
+		return fmt.Errorf("prepared publication receiver dependencies: %w", err)
+	}
 	if err := p.Settlement.Validate(p.DeliveryRoutes); err != nil {
 		return fmt.Errorf("prepared publication route settlement: %w", err)
 	}

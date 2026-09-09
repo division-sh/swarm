@@ -48,11 +48,7 @@ func (p RoutePlan) recipientActuals() ([]PublishRecipientActual, error) {
 		if err := validateRecipientIntentProducer(intent); err != nil {
 			return nil, fmt.Errorf("recipient intent %d: %w", index, err)
 		}
-		route := events.DeliveryRoute{
-			Recipient: intent.Recipient, AgentIdentity: intent.AgentIdentity,
-			Target: intent.TargetOwnership, Context: intent.Context,
-			PayloadProjection: intent.PayloadProjection, ConnectClaim: intent.ConnectClaim,
-		}
+		route := intent.deliveryRoute()
 		if err := events.ValidateDeliveryRoutes([]events.DeliveryRoute{route}); err != nil {
 			return nil, fmt.Errorf("recipient intent %d: %w", index, err)
 		}

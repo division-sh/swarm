@@ -1455,7 +1455,7 @@ func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRo
 		if want.ConnectClaim.Empty() {
 			got.ConnectClaim = events.ConnectExecutionClaim{}
 		}
-		if got == want {
+		if reflect.DeepEqual(got, want) {
 			return true
 		}
 	}
