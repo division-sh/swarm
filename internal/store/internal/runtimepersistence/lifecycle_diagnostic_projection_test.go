@@ -66,6 +66,7 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 					if err := s.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 						t.Fatal(err)
 					}
+					s.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 					return s, s.backend.ConstructionHandle(), func() { _ = s.Close() }
 				}
 			} else {
@@ -107,6 +108,15 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 					t.Fatalf("cross-run attribution %s: %v", runID, err)
 				}
 			}
+			// Force each independent handle to win; concurrent selection alone can
+			// hide missing admission on the losing handle.
+			for index, owner := range []diagnosticProjectionTestStore{first, second} {
+				item := enqueueDiagnosticTestAgent(t, first, fmt.Sprintf("forced-handle-%d", index))
+				if err := runtimepkg.NewRuntimeLogger(owner, executionposture.Live, nil).ProjectLifecycleDiagnostic(context.Background(), item); err != nil {
+					t.Fatalf("handle %d projection: %v", index, err)
+				}
+				assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
+			}
 			closeSecond()
 			later := enqueueDiagnosticTestAgent(t, first, "lost-response-worker")
 			if _, err := (diagnosticLostResult{first}).ProjectAgentLifecycleDiagnostics(context.Background(), 100); err == nil {
@@ -122,6 +132,11 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 			for _, item := range []diaglog.LifecycleDiagnostic{left, right, later} {
 				assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
 			}
+			pending := enqueueDiagnosticTestAgent(t, first, "reopened-handle-winner")
+			if err := runtimepkg.NewRuntimeLogger(reopened, executionposture.Live, nil).ProjectLifecycleDiagnostic(context.Background(), pending); err != nil {
+				t.Fatalf("reopened pending projection: %v", err)
+			}
+			assertDiagnosticCounts(t, db, pending.OutboxID, 1, 0)
 		})
 	}
 }
