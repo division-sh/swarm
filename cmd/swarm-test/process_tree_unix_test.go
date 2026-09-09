@@ -27,7 +27,7 @@ const (
 func TestSwarmTestSignalTerminatesProcessTreeAndPreservesResult(t *testing.T) {
 	if os.Getenv(signalFixtureEnv) == "1" {
 		pidPath := os.Getenv(signalFixturePIDEnv)
-		if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		if err := publishSignalFixturePID(pidPath, os.Getpid(), nil); err != nil {
 			t.Fatal(err)
 		}
 		for {
@@ -51,6 +51,12 @@ func TestSwarmTestSignalTerminatesProcessTreeAndPreservesResult(t *testing.T) {
 			if err := command.Start(); err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() {
+				if command.ProcessState == nil {
+					_ = command.Process.Signal(syscall.SIGTERM)
+					_ = command.Wait()
+				}
+			})
 			pid := waitForSignalFixturePID(t, pidPath)
 			if err := command.Process.Signal(test.signal); err != nil {
 				t.Fatal(err)
@@ -131,6 +137,41 @@ func signalTestEnvironment(env []string, stateHome string, extra ...string) []st
 	}
 	filtered = append(filtered, "XDG_STATE_HOME="+stateHome, testpostgres.SourceEnv+"="+signalFixtureStateDSN)
 	return append(filtered, extra...)
+}
+
+func publishSignalFixturePID(path string, pid int, beforeWrite func()) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".child-pid-*")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	defer os.Remove(f.Name())
+	if beforeWrite != nil {
+		beforeWrite()
+	}
+	if _, err := f.WriteString(strconv.Itoa(pid) + "\n"); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+func TestSignalFixturePIDPublicationIsAtomic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "child.pid")
+	const pid = 12345
+	if err := publishSignalFixturePID(path, pid, func() {
+		// This exact create-before-write cut produced the empty PID in CI.
+		if raw, err := os.ReadFile(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("uncommitted PID became visible: %q err=%v", raw, err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitForSignalFixturePID(t, path); got != pid {
+		t.Fatalf("published PID=%d, want %d", got, pid)
+	}
 }
 
 func waitForSignalFixturePID(t *testing.T, path string) int {
