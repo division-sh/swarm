@@ -129,6 +129,9 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 		}
 		return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: node intent escaped canonical preclassification", intent.Recipient.ID())
 	}
+	if err := completeReceiverInitializations(&plan); err != nil {
+		return RoutePlan{}, err
+	}
 	ledger, err := p.resolveConnectEvaluation(plan.ConnectEvaluation, plan.DeliveryIntents)
 	if err != nil {
 		return RoutePlan{}, err

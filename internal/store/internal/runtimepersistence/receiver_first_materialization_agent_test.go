@@ -215,7 +215,12 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 							if err := json.Unmarshal(original, &corrupt); err != nil {
 								t.Fatal(err)
 							}
-							corrupt["run_id"], _ = json.Marshal(uuid.NewString())
+							var dependency map[string]json.RawMessage
+							if err := json.Unmarshal(corrupt["dependency"], &dependency); err != nil {
+								t.Fatal(err)
+							}
+							dependency["run_id"], _ = json.Marshal(uuid.NewString())
+							corrupt["dependency"], _ = json.Marshal(dependency)
 							bad, err := json.Marshal(corrupt)
 							if err != nil {
 								t.Fatal(err)
@@ -374,10 +379,16 @@ func requireReceiverDependencyCorruptionRefused(t *testing.T, ctx context.Contex
 	if err := fixture.db.QueryRowContext(ctx, `SELECT receiver_materialization_plan FROM event_deliveries WHERE delivery_id=$1`, id).Scan(&original); err != nil {
 		t.Fatal(err)
 	}
-	for _, variant := range []string{"erased", "wrong_run", "wrong_event", "missing_materializer", "changed_source", "missing_dependents"} {
+	for _, variant := range []string{"erased", "wrong_run", "wrong_event", "missing_materializer", "changed_source", "missing_dependents", "supplier_erased", "supplier_run", "supplier_event", "supplier_kind", "dependency_erased"} {
 		t.Run("durable_corruption_"+variant, func(t *testing.T) {
-			var wire map[string]json.RawMessage
-			if err := json.Unmarshal(original, &wire); err != nil {
+			var record, wire, supplier map[string]json.RawMessage
+			if err := json.Unmarshal(original, &record); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(record["dependency"], &wire); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(record["initialization"], &supplier); err != nil {
 				t.Fatal(err)
 			}
 			switch variant {
@@ -391,8 +402,23 @@ func requireReceiverDependencyCorruptionRefused(t *testing.T, ctx context.Contex
 				wire["routing_source"] = json.RawMessage(`{"kind":"absent"}`)
 			case "missing_dependents":
 				wire["dependent_route_identities"] = json.RawMessage(`[]`)
+			case "supplier_run":
+				supplier["run_id"], _ = json.Marshal(uuid.NewString())
+			case "supplier_event":
+				supplier["event_id"], _ = json.Marshal(uuid.NewString())
+			case "supplier_kind":
+				supplier["kind"] = json.RawMessage(`"flow_lifecycle"`)
+				delete(supplier, "node")
 			}
-			bad, err := json.Marshal(wire)
+			record["dependency"], _ = json.Marshal(wire)
+			record["initialization"], _ = json.Marshal(supplier)
+			if variant == "supplier_erased" {
+				record["initialization"] = json.RawMessage(`null`)
+			}
+			if variant == "dependency_erased" {
+				record["dependency"] = json.RawMessage(`null`)
+			}
+			bad, err := json.Marshal(record)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -93,7 +93,7 @@ func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID 
 	}
 	routes = events.NormalizeDeliveryRoutes(routes)
 	for _, route := range routes {
-		if route.Materialization.Empty() {
+		if route.Materialization.Empty() && route.Initialization.Empty() && !(route.Recipient.IsAgent() && route.Target.MaterializingEntity()) {
 			continue
 		}
 		event, err := a.materializationEvent(ctx, tx, eventID)
@@ -2681,6 +2681,11 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery route: %v", ErrConflict, err)
 	}
 	derived, err := record.Route.Identity()
+	if !record.Route.Initialization.Empty() {
+		if initErr := record.Route.Initialization.ValidatePublication(record.RunID, record.EventID); initErr != nil {
+			return deliveryRecord{}, fmt.Errorf("%w: %v", ErrConflict, initErr)
+		}
+	}
 	if err != nil || derived != identity {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery route identity mismatch", ErrConflict)
 	}
@@ -2828,12 +2833,9 @@ func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, []byte, []
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	materialization := []byte("null")
-	if !route.Materialization.Empty() {
-		materialization, err = json.Marshal(route.Materialization)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
+	materialization, err := events.EncodeReceiverMaterializationRecord(route)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
 	}
 	return target, deliveryContext, projection, connectClaim, materialization, nil
 }
@@ -2920,7 +2922,7 @@ func decodeRoute(
 		PayloadProjection: projection,
 		ConnectClaim:      connectClaim,
 	}.Normalized()
-	return events.RestoreDeliveryMaterialization(route, materializationRaw)
+	return events.RestoreReceiverMaterializationRecord(route, materializationRaw)
 }
 
 func encodeFailure(failure *runtimefailures.Envelope) (string, error) {

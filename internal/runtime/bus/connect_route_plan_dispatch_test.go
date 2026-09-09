@@ -3603,6 +3603,11 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 2 {
 		t.Fatalf("preflight = failure:%q routes:%#v, want node plus pending agent route", preflight.TargetFailure, preflight.DeliveryRoutes)
 	}
+	for _, route := range preflight.DeliveryRoutes {
+		if !route.Initialization.FlowLifecycle() || !route.Materialization.Empty() {
+			t.Fatalf("activation-created receiver gained a node dependency: %+v", route)
+		}
+	}
 	if slices.Contains(preflight.Recipients, identity.AgentID()) {
 		t.Fatalf("live recipients = %#v, created agent must remain pending until its lifecycle route is published", preflight.Recipients)
 	}
