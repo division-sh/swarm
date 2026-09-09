@@ -767,7 +767,7 @@ func runForkBarrierFixedRevisionMatrix(t *testing.T, generationMode string) {
 					}
 					childHandle := handle
 					if generationMode != "" {
-						childHandle = assertG28ForkBarrier(t, ctx, db, owner.(runtimegenericschedule.Store), fixture, materialized.ForkRunID, sourceBarrier, generationMode)
+						childHandle = assertForkBarrierGeneration(t, ctx, db, owner.(runtimegenericschedule.Store), fixture, materialized.ForkRunID, sourceBarrier, generationMode)
 					}
 					assertFanOutBarrierState(t, ctx, db, materialized.ForkRunID, fixture.deliveryID, fixture.semanticPath, tc.status, summary, expectedForkBarrierSchedule(tc.status, childHandle.TaskID()))
 					assertForkBarrierScheduleState(t, ctx, db, materialized.ForkRunID, tc.status)

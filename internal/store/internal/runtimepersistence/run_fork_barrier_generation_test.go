@@ -26,7 +26,7 @@ func TestForkBarrierGenerationCorrespondenceBothStores(t *testing.T) {
 	}
 }
 
-func readG28Loop(t *testing.T, ctx context.Context, db *sql.DB, runID string) loopruntime.Activation {
+func readForkBarrierLoop(t *testing.T, ctx context.Context, db *sql.DB, runID string) loopruntime.Activation {
 	t.Helper()
 	var raw []byte
 	if err := db.QueryRowContext(ctx, `SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
@@ -47,11 +47,11 @@ func readG28Loop(t *testing.T, ctx context.Context, db *sql.DB, runID string) lo
 	return activations[0]
 }
 
-func assertG28ForkBarrier(t *testing.T, ctx context.Context, db *sql.DB, owner genericschedule.Store, fixture fanOutOwnerFixture, childRun string, sourceBarrier *fanoutbarrier.Barrier, mode string) timeridentity.TimerHandle {
+func assertForkBarrierGeneration(t *testing.T, ctx context.Context, db *sql.DB, owner genericschedule.Store, fixture fanOutOwnerFixture, childRun string, sourceBarrier *fanoutbarrier.Barrier, mode string) timeridentity.TimerHandle {
 	t.Helper()
 	sourceHandle := sourceBarrier.Registration.Handle
-	source := readG28Loop(t, ctx, db, fixture.runID)
-	child := readG28Loop(t, ctx, db, childRun)
+	source := readForkBarrierLoop(t, ctx, db, fixture.runID)
+	child := readForkBarrierLoop(t, ctx, db, childRun)
 	sourceRef, _ := sourceHandle.JoinRef()
 	if !source.OwnsGeneration(sourceRef.Generation()) ||
 		(mode == "historical" && source.Attempt != sourceRef.Generation().Attempt+1) ||
