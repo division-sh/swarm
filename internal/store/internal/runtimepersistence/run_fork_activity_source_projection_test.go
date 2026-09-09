@@ -233,13 +233,9 @@ func seedSelectedOrdinaryRootProjectionFixture(t *testing.T, fixture authorActiv
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := events.NewChildEvent(events.ChildEventInput{
-		Facts:   events.EventFacts{ID: eventID, Type: "ordinary.ready", Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "workflow"}, Payload: raw, ChainDepth: 1, Envelope: events.EnvelopeForSourceRoute(events.EventEnvelope{}, source.Route()), RoutingSource: source, CreatedAt: at.Add(time.Second)},
-		Lineage: events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	event := eventtest.ChildForProducerWithRoutingSource(eventID, "ordinary.ready", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", raw, 1,
+		events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, source.Route()), source, at.Add(time.Second))
 	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -406,13 +402,8 @@ func seedSelectedActivityProjectionFixture(t *testing.T, fixture authorActivityR
 	if independentTarget {
 		envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver/other", EntityID: uuid.NewString()})
 	}
-	event, err := events.NewChildEvent(events.ChildEventInput{
-		Facts:   events.EventFacts{ID: eventID, Type: "platform.activity_requested", Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "workflow"}, Payload: payload, ChainDepth: 1, Envelope: envelope, RoutingSource: source, CreatedAt: at.Add(time.Second)},
-		Lineage: events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	event := eventtest.ChildForProducerWithRoutingSource(eventID, "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
+		events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live}, envelope, source, at.Add(time.Second))
 	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, nil); err != nil {
 		t.Fatal(err)
 	}

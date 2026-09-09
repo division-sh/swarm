@@ -597,21 +597,15 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 	return out, nil
 }
 
-type runForkEntityIdentity = runfork.EntityIdentity
-
-type runForkEntityProjection = runfork.EntityProjection
-
-type RunForkEntityProjection = runForkEntityProjection
-
-func projectRunForkEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance string) (runForkEntityProjection, error) {
+func projectRunForkEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance string) (runfork.EntityProjection, error) {
 	return runfork.ProjectEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance)
 }
 
-func ProjectRunForkEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance string) (RunForkEntityProjection, error) {
+func ProjectRunForkEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance string) (runfork.EntityProjection, error) {
 	return projectRunForkEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance)
 }
 
-func projectRunForkEntityIdentity(sourceRunID, forkRunID, entityID, flowInstance string) (runForkEntityIdentity, error) {
+func projectRunForkEntityIdentity(sourceRunID, forkRunID, entityID, flowInstance string) (runfork.EntityIdentity, error) {
 	projection, err := runfork.ProjectEntityOwnership(sourceRunID, forkRunID, entityID, flowInstance)
 	return projection.Fork, err
 }

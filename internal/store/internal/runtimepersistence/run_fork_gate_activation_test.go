@@ -723,12 +723,12 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			ctx := testAuthorActivityContext()
 			sourceRunID := uuid.NewString()
 			now := time.Date(2026, 7, 14, 19, 0, 0, 0, time.UTC)
-			requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
 			cards := admitTestPostgresStore(t, db)
-			card, continuation := newRootProposedEffectTestCard(t, sourceRunID, now)
+			source := selectedActivityProducerSourceWithLoops(t, false, false)
+			ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: cards}, sourceRunID, source)
+			card, continuation := newDeclaredRootActivityCard(t, sourceRunID, now, source)
 			if err := commitSemanticParentFixture(ctx, cards, sourceRunID, continuation.SourceEventID, now); err != nil {
 				t.Fatal(err)
 			}
@@ -786,12 +786,12 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				) VALUES (
 					$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, $2::text, $5, $6,
 					$7, $8, 'non_idempotent_write', 1, $9, $10, $11,
-					$12::uuid, $13, $14::jsonb, $15::jsonb, 'input-hash', '{}'::jsonb, '', $16, $17, $16
+					$12::uuid, $13, $14::jsonb, $15::jsonb, 'input-hash', $18::jsonb, '', $16, $17, $16
 				)
 			`, continuation.RequestEventID, sourceRunID, continuation.SourceEventID, continuation.EntityID,
 				continuation.NodeID, continuation.HandlerEventKey, continuation.ActivityID, continuation.Tool, tc.status,
 				continuation.SuccessEvent, continuation.FailureEvent, storedResultEventID, resultEventType,
-				resultPayload, failure, now.Add(3*time.Minute), completedAt); err != nil {
+				resultPayload, failure, now.Add(3*time.Minute), completedAt, forkTestJSON(t, continuation.Generation)); err != nil {
 				t.Fatal(err)
 			}
 			payload, err := json.Marshal(map[string]any{
@@ -810,16 +810,8 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			if err != nil {
 				t.Fatal(err)
 			}
-			request, err := events.NewChildEvent(events.ChildEventInput{
-				Facts: events.EventFacts{ID: continuation.RequestEventID, Type: runForkActivityRequestEvent,
-					Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "workflow"},
-					Payload:  payload, ChainDepth: 1, RoutingSource: anchor.Source,
-					CreatedAt: now.Add(2 * time.Minute)},
-				Lineage: events.EventLineage{RunID: sourceRunID, ParentEventID: continuation.SourceEventID, ExecutionMode: continuation.ExecutionMode},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
+			request := eventtest.ChildForProducerWithRoutingSource(continuation.RequestEventID, runForkActivityRequestEvent, eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
+				events.EventLineage{RunID: sourceRunID, ParentEventID: continuation.SourceEventID, ExecutionMode: continuation.ExecutionMode}, events.EventEnvelope{}, anchor.Source, now.Add(2*time.Minute))
 			if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, request); err != nil {
 				t.Fatal(err)
 			}

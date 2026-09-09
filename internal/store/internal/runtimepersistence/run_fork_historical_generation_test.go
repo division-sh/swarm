@@ -26,7 +26,7 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			for _, cell := range []string{"current", "historical", "missing_original", "foreign_original", "unknown_revision"} {
+			for _, cell := range []string{"current", "historical", "external_current", "external_historical", "missing_original", "foreign_original", "unknown_revision"} {
 				t.Run(cell, func(t *testing.T) {
 					source := selectedActivityProducerSourceWithLoops(t, true, false)
 					runID := uuid.NewString()
@@ -50,7 +50,7 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					generation := activation.Generation()
-					if cell == "historical" {
+					if cell == "historical" || cell == "external_historical" {
 						if _, err := activation.Repeat("pending", uuid.NewString(), at.Add(time.Second)); err != nil {
 							t.Fatal(err)
 						}
@@ -74,7 +74,15 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 						revision = "not-owned-by-source"
 					}
 					payload := json.RawMessage(forkTestJSON(t, map[string]any{"opaque_revision": revision, "business_revision": generation.RevisionID, "large": json.Number("9007199254740993")}))
-					event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "ordinary.ready", "operator", "", payload, 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at.Add(2*time.Minute))
+					routingSource := eventtest.RootRoutingSource(runID)
+					isExternal := cell == "external_current" || cell == "external_historical"
+					if isExternal {
+						routingSource, err = events.NewExternalIngressRoutingSource(".", runID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
+					event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "ordinary.ready", "operator", "", payload, 0, runID, events.EventEnvelope{}, routingSource, at.Add(2*time.Minute))
 					agent := bustest.IdentityForRun(t, runID, "historical-agent", "")
 					route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), AgentIdentity: agent}
 					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store.(storeTestDurableEventBusStore), event, []events.DeliveryRoute{route}); err != nil {
@@ -88,7 +96,21 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 						LoadRunForkSourceRunID(context.Context, string) (string, error)
 						LoadPreparedPublishEvent(context.Context, string) (bus.PreparedPublishEvent, bool, error)
 					})
+					beforePlan := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					plan, err := owner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: event.ID()})
+					if isExternal {
+						refused := false
+						for _, blocker := range plan.UnsupportedBlockers {
+							refused = refused || blocker.Code == runfork.RunForkBlockerFlowRouteHistoryUnproven
+						}
+						if err != nil || plan.ExecutionReady || !refused {
+							t.Fatalf("scoped opaque-ingress historical refusal changed: %+v %v", plan.UnsupportedBlockers, err)
+						}
+						if !reflect.DeepEqual(beforePlan, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+							t.Fatal("unsupported scoped ingress planning mutated persistence")
+						}
+						return
+					}
 					if err != nil || !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 						t.Fatalf("historical agent policy not admitted: %+v %v", plan.UnsupportedBlockers, err)
 					}
@@ -138,7 +160,8 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					readback := prepared.Event.Event()
-					if readback.RunID() != child.ForkRunID || readback.RoutingSource().Route().EntityID != child.ForkRunID || readback.Envelope().Source != readback.RoutingSource().Route() || len(prepared.DeliveryRoutes) != 1 || prepared.DeliveryRoutes[0].AgentIdentity.RunID != child.ForkRunID {
+					wantEnvelopeSource := readback.RoutingSource().Route()
+					if readback.RunID() != child.ForkRunID || readback.RoutingSource().Kind() != routingSource.Kind() || readback.RoutingSource().Route().EntityID != child.ForkRunID || readback.Envelope().Source != wantEnvelopeSource || len(prepared.DeliveryRoutes) != 1 || prepared.DeliveryRoutes[0].AgentIdentity.RunID != child.ForkRunID {
 						t.Fatalf("historical aggregate retained source ownership: %+v", prepared)
 					}
 					var raw []byte

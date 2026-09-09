@@ -91,6 +91,8 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
+			loaded := selectedContractActivityDeclaredSource(t, server.URL, tt.effectClass, selection)
 			activityNode := mustRunForkNode("flow_a", "test-node")
 			beforeCalls := connectorCalls.Load()
 			sourceRunID := uuid.NewString()
@@ -120,6 +122,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				activityRoute, nil,
 				routingSource,
 				events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), routingSource.Route()),
+				loaded.SourceArtifactFact,
 			)
 			if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = 'flow_a' WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID); err != nil {
 				t.Fatalf("canonicalize source activity workflow state route: %v", err)
@@ -138,8 +141,6 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				seedSelectedContractActivityAttempt(t, db, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
 			}
 
-			selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
-			loaded := selectedContractActivityDeclaredSource(t, server.URL, tt.effectClass, selection)
 			admitSelectedExecutionSourceArtifact(t, ctx, db, loaded.SourceArtifactFact.BundleHash())
 			descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loaded.Source)
 			if err != nil {
@@ -271,18 +272,41 @@ func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, effe
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":          "name: activity-fork-proof\nstages:\n  pending: {initial: true}\n",
-		"entities.yaml":        "root: {}\n",
-		"flow_a/schema.yaml":   "name: flow_a\nmode: static\nstages:\n  pending: {initial: true}\n",
+		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {initial: true}\n",
+		"entities.yaml": "root: {}\n",
+		"flow_a/schema.yaml": `name: flow_a
+mode: static
+stages:
+  pending: {initial: true}
+  review: {}
+  closed: {terminal: true}
+  exhausted: {terminal: true}
+loops:
+  revision:
+    revision_field: revision_id
+    max_attempts: 3
+    escape: {advances_to: exhausted}
+`,
 		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
-		"flow_a/events.yaml":   "review.requested: {}\n",
+		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start: {}\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/nodes.yaml": `test-node:
   id: test-node
   execution_type: system_node
-  subscribes_to: [review.requested]
+  subscribes_to: [review.start, review.requested, review.retry, review.close]
   event_handlers:
+    review.start:
+      loop: {start: revision, from: pending}
+      advances_to: review
     review.requested:
+      loop: {admit: revision, from: review}
+      advances_to: review
       activity: {id: connector, tool: provider.connector}
+    review.retry:
+      loop: {repeat: revision, from: review}
+      advances_to: review
+    review.close:
+      loop: {close: revision, from: review}
+      advances_to: closed
 `,
 		"tools.yaml": fmt.Sprintf(`provider.connector:
   handler_type: http
