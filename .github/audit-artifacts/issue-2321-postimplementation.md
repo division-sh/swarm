@@ -1,17 +1,19 @@
 # Post-Implementation Proof Audit: #2321
 
-Agent-g. **Candidate, not review-ready.** Code/test head:
+Agent-g. **Final implementation proof; independent merge review required.** Code/test head:
 `be9e98fe3fb2504b68dcefa487eaec66a222a519`, based on merged B #2440 at
 `47c0e70d8ef89a2c99f0be4af632f24692121b83`. Final integrated full-profile
-swarm-test remains outstanding. The lead accepted explicit residual tracking for
+swarm-test passed at qualifying HEAD `1f5680f25bdb7fc988ac5e74a9c8bb27c1698336`
+(only audit documents differ from the code/test head). The lead accepted explicit residual tracking for
 LSF-028/029 under #2353 in issuecomment-5607051620; missing historical evidence
 does not block opening the PR after current-head defects and qualification are
-resolved. Provisioned
+resolved, as recorded below. Provisioned
 live proof has now executed successfully on both stores, with failed attempts
 retained below. This is the consolidated current claim;
 dated progress artifacts retain historical failures and receipts, not competing
-current contracts. The final PR must contain this audit as a comment, with actual
-final results, alongside separate #2432 and #2439 proof tables.
+current contracts. This audit is posted as a PR comment alongside separate #2432
+and #2439 proof tables. The final documentation-only commit does not alter the
+qualified executable/test/spec tree.
 
 ## Boundary And Authority
 
@@ -84,8 +86,8 @@ is not by itself closure proof; the named executions below are required.
 
 T = public fresh mock test; L = public live serve/dev; H = internal retained
 compiled lifecycle. H is never credited as public mock restart or genuine live
-provider execution. Classifications below are candidate claims whose full
-execution must be bound to the final head before review.
+provider execution. Classifications below use the qualified executable head,
+with the separately dated live/network-disabled Docker receipts stated explicitly.
 
 | Row | Classification | Exact proof |
 | --- | --- | --- |
@@ -164,10 +166,12 @@ complete tables, not hidden inside these rows.
 | A11 merged reset complete-set publication and source loading | execution-proven through the same corrected path | TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores; TestPreparedRuntimeStartupKeepsFirstCandidateUnadmittedWhileSecondBlocksOrFails; TestPreparedRuntimeStartupRejectsCancellationBeforeExecutionRelease; TestServeActivatesSelectedStoreBeforeProcessOwnedConstruction checks ordinary and reset loaders. |
 | A12 live forced/dev and unchanged scaffolds | execution-proven through the same corrected path | TestCommandLiveServeAndRestartParity; TestCommandLiveUneditedScaffoldReadiness, no authored source changes and no business-message credit for readiness alone. |
 
-## Closure And Remaining Proof
+## Closure And Qualification
 
 Commitment: eliminate the entire approved chosen class and its absorbed additions.
-Achieved so far: implementation and focused execution, not merge closure.
+Achieved implementation closure claim: **failure class eliminated** within the
+approved boundary, supported by the complete manifestation tables and qualified
+full-profile run. This is not independent merge approval or closure of the parents.
 Parents remain open. No same-concept selector/reader bypass is intentionally left
 as a follow-up; #2319/#1801/#2284 and #2250 are distinct boundaries. Parent tail is
 several owner-specific workstreams with low numeric-estimate confidence, not a
@@ -202,9 +206,18 @@ That run passed releasee2e (841.922s), catalog/fork (494.842s), runtimepersisten
 (558.061s), serveapp (501.481s) and cliapp (216.734s); these do not turn the whole
 command green. The stale ae8bbb782 queue request was cancelled before execution
 (exit 143) after the lead reproduced T7 and requested failure-capture repairs.
-Only G's exact queue process was signalled. A fresh full-profile swarm-test is
-queued at be9e98fe3, with 30-minute package timeout and unchanged full workload,
-in /tmp/agent-g-final-bounded-repairs-full.log.
+Only G's exact queue process was signalled. Final qualification at the same
+be9e98fe3 executable/test tree, qualifying HEAD 1f5680f25:
+
+`SWARM_TEST_PROOF_PROFILE=full go run ./cmd/swarm-test -- -count=1 -timeout=30m ./...`
+
+**PASS, exit 0**, no skips/retries added to clear a failure. It waited 13m39s for
+the shared slot, then completed the full workload. Release-process suite 840.195s,
+actual catalog/fork 503.274s, runtimepersistence 552.917s, serveapp 502.424s,
+CLI 234.210s, tools 47.785s, SQLite backend 15.800s, store/inventory 38.120s,
+API spec 1.619s. Log /tmp/agent-g-final-bounded-repairs-full.log, SHA256
+1e449b463692002e4457cfb68cdee552a3a29edbad738d679fe6ec8234307db0.
+LSF-028/029 did not recur in this qualification; that is not a causal fix claim.
 
 Bounded final corrections authorized in
 https://github.com/division-sh/swarm/issues/2321#issuecomment-5607051620:

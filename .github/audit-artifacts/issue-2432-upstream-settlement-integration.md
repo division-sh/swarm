@@ -2,6 +2,13 @@
 
 Agent-g. This is implementation progress, not a final proof audit or review request.
 
+Historical checkpoint, superseded by the final separate #2321/#2432/#2439 proof
+audits. Qualifying HEAD 1f5680f25 (code/test be9e98fe3) passed the full-profile
+swarm-test after the T7 cancellation and bounded failure-capture corrections.
+Earlier queued/frozen/failed states below remain historical records, not current
+blockers. LSF-028/029 remain explicitly observed/unclassified in #2353 under the
+lead's nonblocking historical-evidence disposition, not claimed fixed.
+
 ## Base And Binding Decision
 
 Rebased agent-g/2321-command-execution onto origin/master
