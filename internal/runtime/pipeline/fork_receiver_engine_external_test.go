@@ -96,11 +96,12 @@ func TestSelectedForkReceiverEngineAgreementBothStores(t *testing.T) {
 					if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, write, 1)), 0o600); err != nil {
 						t.Fatal(err)
 					}
-					rt, selected, db, repo := startForkEngineRuntime(t, backend, root)
+					rt, selected, db, repo, capability := startForkEngineRuntime(t, backend, root)
 					ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
 					ctx = runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
 					ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.SourceArtifactFact.BundleHash()))
 					ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
+					ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
 					runID := uuid.NewString()
 					seed := eventtest.RunCreatingRootIngress(uuid.NewString(), "start.seeded", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 					if err := rt.Bus.Publish(ctx, seed); err != nil {
@@ -140,7 +141,7 @@ func TestSelectedForkReceiverEngineAgreementBothStores(t *testing.T) {
 							SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
 							SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
 							ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
-							AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},
+							AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},
 						})
 						finished <- err
 					}()
@@ -335,7 +336,7 @@ func waitForkEngineCompletion(t *testing.T, db *sql.DB, runID string) {
 	t.Fatal("source completion did not settle")
 }
 
-func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.Runtime, *storeselected.Owner, *sql.DB, string) {
+func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.Runtime, *storeselected.Owner, *sql.DB, string, startupownership.ProcessCapability) {
 	t.Helper()
 	repo, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
@@ -433,13 +434,20 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	if err != nil {
 		t.Fatal(err)
 	}
+	family, ok := selected.RunFork()
+	if !ok {
+		t.Fatal("fork engine proof requires selected fork owner")
+	}
 	t.Cleanup(func() {
+		joinCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := family.RetireSelectedContexts(joinCtx); err != nil {
+			t.Error(err)
+		}
 		if err := rt.Shutdown(); err != nil {
 			t.Error(err)
 		}
 		process.Retire()
-		joinCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
 		if _, err := process.Join(joinCtx); err != nil {
 			t.Error(err)
 		}
@@ -447,6 +455,12 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 			t.Error(err)
 		}
 	})
+	if err := family.BindSelectedProcess(ctx, process, capability); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := family.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture)); err != nil {
+		t.Fatal(err)
+	}
 	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(module.SemanticSource(), coordinate)
 	if err != nil {
@@ -479,5 +493,5 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 		}
 		t.Cleanup(func() { _ = db.Close() })
 	}
-	return rt, selected, db, repo
+	return rt, selected, db, repo, capability
 }

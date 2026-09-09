@@ -68,14 +68,14 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
-	_, db, _ := testutil.StartPostgres(t)
 	ctx := runForkTestContext(t)
-	capability := selectedContractTestProcessCapability(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db))
+	owner := selectedContractGateOwnerForTest(t)
 	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: capability},
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: owner,
+		AgentRuntime:   SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability},
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err != nil {
 		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
@@ -112,7 +112,7 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 	}
 }
 
-func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t *testing.T) {
+func TestActivateSelectedContractRunForkRequiresExecutionOwnerBeforeReplayAdmission(t *testing.T) {
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
 	plan := testSelectedContractStateOnlyPlan(binding)
@@ -168,23 +168,15 @@ func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t
 		Store:        fakeStore,
 		SourceLoader: loader,
 	})
-	if err == nil || !strings.Contains(err.Error(), runfork.RunForkHistoricalReplayContractSwapBootResumeOwner) {
-		t.Fatalf("err = %v, want concrete store requirement for contract-swap historical replay execution", err)
+	if err == nil || !strings.Contains(err.Error(), "selected-contract execution owner is required") {
+		t.Fatalf("err = %v, want process-owned execution admission before replay planning", err)
 	}
 	if fakeStore.activateCalled {
 		t.Fatal("ActivateRunFork called, want fail closed before mutation")
 	}
-	if !fakeStore.requireCalled || result.SelectedContractExecutionAdmission == nil {
-		t.Fatalf("admission not consumed before block; require:%v result:%#v", fakeStore.requireCalled, result)
-	}
-	if result.ContractSwapBootResumeAdmission == nil ||
-		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, runfork.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
-		t.Fatalf("contract-swap admission = %#v, want non-mutating blocker before source replay block", result.ContractSwapBootResumeAdmission)
-	}
-	if result.HistoricalReplayExecutionAdmission == nil ||
-		!unsupportedBlockerHas(result.HistoricalReplayExecutionAdmission.UnsupportedBlockers, runfork.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) ||
-		!historicalReplayFactHas(result.HistoricalReplayExecutionAdmission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries, runfork.RunForkHistoricalReplayAdmissionExecutableForkWork) {
-		t.Fatalf("historical replay admission = %#v, want non-mutating replayable-source classification before source replay block", result.HistoricalReplayExecutionAdmission)
+	if fakeStore.loadBundleCalled || fakeStore.planCalled || fakeStore.requireCalled ||
+		result.SelectedContractExecutionAdmission != nil || result.ContractSwapBootResumeAdmission != nil || result.HistoricalReplayExecutionAdmission != nil {
+		t.Fatalf("unowned activation reached preparation or replay admission: store=%+v result=%#v", fakeStore, result)
 	}
 }
 
@@ -213,14 +205,14 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
-	_, db, _ := testutil.StartPostgres(t)
 	ctx := runForkTestContext(t)
-	capability := selectedContractTestProcessCapability(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db))
+	owner := selectedContractGateOwnerForTest(t)
 	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: capability},
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: owner,
+		AgentRuntime:   SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability},
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err != nil {
 		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
@@ -257,9 +249,10 @@ func TestActivateSelectedContractRunForkFailsBeforeMutationOnUnavailableSource(t
 	loader := &fakeSelectedContractSourceLoader{err: errors.New("selected source unavailable")}
 
 	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), "selected source unavailable") {
 		t.Fatalf("err = %v, want selected source failure", err)
@@ -283,9 +276,10 @@ func TestActivateSelectedContractRunForkFailsBeforePlanningOnPersistedIdentityMi
 	loader := &fakeSelectedContractSourceLoader{loaded: loaded, original: originalActivationSourceFixture(t)}
 
 	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), "bundle_hash mismatch") {
 		t.Fatalf("err = %v, want persisted bundle identity mismatch", err)
@@ -308,9 +302,10 @@ func TestActivateSelectedContractRunForkFailsBeforeMutationOnStaleBindingAdmissi
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
 	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), "selected contract binding disappeared") {
 		t.Fatalf("err = %v, want stale binding failure", err)
@@ -340,9 +335,10 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
 	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) {
 		t.Fatalf("err = %v, want preserved planner blocker", err)
@@ -350,6 +346,15 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	if fakeStore.activateCalled {
 		t.Fatal("ActivateRunFork called, want fail closed before mutation")
 	}
+}
+
+// These gate tests stub planning/mutation, but retain actual process admission.
+// Complete both-store execution is covered by the staged replay tests.
+func selectedContractGateOwnerForTest(t *testing.T) SelectedContractExecutionOwner {
+	t.Helper()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	return selectedContractExecutionOwnerForTest(t, storetest.AdmitPostgresRuntimeStore(t, db))
 }
 
 func historicalReplayFactHas(items []runfork.RunForkHistoricalReplayFactAdmission, fact, admission string) bool {

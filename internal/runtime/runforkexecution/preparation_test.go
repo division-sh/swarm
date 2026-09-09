@@ -69,7 +69,9 @@ func TestPreparedSelectedForkReleasesInvalidSourceBeforeReturning(t *testing.T) 
 			}
 			owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{contexts: &selectedForkContexts{process: process, recovered: true}}}
 			prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{
-				SourceLoader: &fakeSelectedContractSourceLoader{loaded: loaded}, ContractSelection: testContractSelection(),
+				ExpectedBundleHash: runForkTestBundleHash,
+				SourceArtifactFact: testLoadedSelectedSource(testContractSelection()).SourceArtifactFact,
+				SourceLoader:       &fakeSelectedContractSourceLoader{loaded: loaded, original: originalActivationSourceFixture(t)}, ContractSelection: testContractSelection(),
 			})
 			if prepared != nil || !errors.Is(err, cleanupFailure) || calls != 1 {
 				t.Fatalf("invalid preparation: prepared=%v err=%v cleanup calls=%d", prepared, err, calls)

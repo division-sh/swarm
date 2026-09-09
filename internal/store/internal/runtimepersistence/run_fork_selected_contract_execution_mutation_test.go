@@ -45,7 +45,7 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 		t.Fatalf("MaterializeRunFork error = %v, want non-agent blocker", err)
 	}
 
-	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{})
+	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
@@ -186,7 +186,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 		t.Fatalf("metadata source = %q, want source entity_state", got)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, laterEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, laterEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *te
 		t.Fatalf("test fixture did not diverge JSONB query projection %q from raw bytes %q", queryProjection, payload)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 		}
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestSelectedContractExecutionMaterializationKeepsCanonicalReplayScopesSourc
 				t.Fatalf("plan blockers = %#v, canonical replay scope is an admitted initial fact", plan.UnsupportedBlockers)
 			}
 
-			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 			if err != nil {
 				t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 			}
@@ -464,7 +464,7 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -649,7 +649,7 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -837,7 +837,7 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	at := time.Unix(1700003600, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -925,7 +925,7 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -964,7 +964,7 @@ func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t 
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 	seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -986,7 +986,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	at := time.Unix(1700003610, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1095,7 +1095,7 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 	seedRunForkSessionProjection(t, db, sourceRunID, "selected-session-agent", sessionID, "terminated", at)
 	selectedRevision := captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1207,7 +1207,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"), "active")
 
-			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 			if err != nil {
 				t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 			}
@@ -1262,7 +1262,7 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1303,7 +1303,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	at := time.Unix(1700003623, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1334,7 +1334,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	at := time.Unix(1700003627, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1445,7 +1445,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 	at := time.Unix(1700003630, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1482,7 +1482,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 	at := time.Unix(1700003631, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1513,7 +1513,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 	at := time.Unix(1700003632, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1543,7 +1543,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 	at := time.Unix(1700003633, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1573,7 +1573,7 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 	at := time.Unix(1700003635, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1603,7 +1603,7 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 	at := time.Unix(1700003634, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -1634,7 +1634,7 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	at := time.Unix(1700003626, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, runtimecorrelation.SourceArtifactFact{}))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
