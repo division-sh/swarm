@@ -1396,6 +1396,10 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 	if want.Target.Route().EntityID == rootTarget.EntityID {
 		t.Fatal("test identities must distinguish root causal/current owner from singleton receiver owner")
 	}
+	want.Initialization, err = events.AdmitNodeReceiverInitialization(evt, want.Target, testFlowNode(t, "consumer", "consumer-node"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
 	if err != nil {
@@ -2401,6 +2405,10 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	if got := store.events[evt.ID()].TargetRoute().Normalized(); got != want.Target.Route().Normalized() {
 		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target)
 	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want created instance route %#v", store.routes[evt.ID()], want)
 	}
@@ -2772,6 +2780,10 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 		EntityID:     activation.Instance.EntityID,
 	}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": eventID}),
+	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want event_id create-resolution route %#v", store.routes[eventID], want)
@@ -3267,6 +3279,10 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
 	}),
+	}
+	createdWant.Initialization, err = events.AdmitFlowReceiverInitialization(missing, createdWant.Target)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !deliveryRoutesContain(store.routes[missingID], createdWant) || len(store.routes[missingID]) != 1 {
 		t.Fatalf("missing persisted routes = %#v, want created route %#v", store.routes[missingID], createdWant)
@@ -3807,6 +3823,10 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
 	}),
+	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want renamed-key created route %#v", store.routes[evt.ID()], want)
