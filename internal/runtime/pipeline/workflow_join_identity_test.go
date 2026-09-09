@@ -14,11 +14,13 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
@@ -771,6 +773,69 @@ func TestRootAndFlowWorkflowJoinTimeoutFiresExactHandleAfterRestartOnBothStores(
 }
 
 func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStores(t *testing.T) {
+	runRootAndFlowWorkflowJoinLoopSupersession(t, nil)
+}
+
+// This uses real arm, repeat, cancellation and persistence owners before
+// folding their mutation records, rather than constructing retained join JSON.
+func TestWorkflowJoinRetainedGenerationMutationRoundTripBothStores(t *testing.T) {
+	runRootAndFlowWorkflowJoinLoopSupersession(t, func(t *testing.T, h *exactWorkflowJoinHarness) {
+		rows, err := h.store.testDB().QueryContext(h.ctx, `SELECT path,new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND domain='accumulator' ORDER BY created_at,mutation_id`, runtimecorrelation.RunIDFromContext(h.ctx), h.entityID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var records []mutationlog.ProjectionMutation
+		for rows.Next() {
+			var path string
+			var raw []byte
+			if err := rows.Scan(&path, &raw); err != nil {
+				t.Fatal(err)
+			}
+			var value any
+			if len(raw) != 0 {
+				if err := json.Unmarshal(raw, &value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			records = append(records, mutationlog.ProjectionMutation{Domain: mutationlog.DomainAccumulator, Path: path, NewValue: value})
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if len(records) == 0 {
+			t.Fatal("ordinary join lifecycle wrote no accumulator history")
+		}
+		projection, err := mutationlog.ReconstructEntityStateProjection(records)
+		if err != nil {
+			t.Fatal(err)
+		}
+		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, projection.Accumulator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual, err := joinruntime.List(carrier.StateBuckets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		live, err := workflowInstanceStateCarrier(h.instance())
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := joinruntime.List(live.StateBuckets)
+		if err != nil || len(want) == 0 {
+			t.Fatalf("ordinary retained joins: %#v %v", want, err)
+		}
+		if len(want) != 1 || len(want[0].Outputs) != 1 {
+			t.Fatalf("retained join must contain the real member output: %#v", want)
+		}
+		if !reflect.DeepEqual(want, actual) {
+			t.Fatalf("mutation fold lost real retained join identity/state: want=%#v got=%#v projection=%#v", want, actual, projection.Accumulator)
+		}
+	})
+}
+
+func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testing.T, *exactWorkflowJoinHarness)) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {
 			name := "root"
@@ -814,6 +879,21 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 				_, firstRef, ok := timeridentity.ParseJoinHandle(parsePayloadMap(genericSchedulePayloadForTest(t, schedule)))
 				if !ok || !firstRef.Generation().Equal(loop.Generation()) || firstRef.FlowPath() != pipelineDeclarationFlowPath(flowID) {
 					t.Fatalf("first generation handle = %#v ok=%v, loop=%#v", firstRef, ok, loop.Generation())
+				}
+				if verify != nil {
+					handler := h.bundle.Nodes["join-node"].EventHandlers["item.completed"]
+					handler.Loop = &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "awaiting"}
+					arrival := eventtest.RunCreatingRootIngress(
+						uuid.NewString(), events.EventType("item.completed"), "operator", "",
+						mustJSON(map[string]any{"member_id": "a", "result": map[string]any{"value": "retained"}, "revision_id": loop.RevisionID}), 0,
+						runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), time.Now().UTC(),
+					)
+					persistExactJoinEvent(t, h.store, h.ctx, arrival)
+					if _, err := h.pc.executeNodeContractHandler(h.ctx, pipelineNode(t, h.flowID, "join-node"), handler, workflowTriggerContext{
+						Event: arrival, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID), HandlerEventKey: "item.completed",
+					}, false); err != nil {
+						t.Fatalf("record retained member before repeat: %v", err)
+					}
 				}
 
 				eventID := uuid.NewString()
@@ -867,6 +947,9 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 				afterStale := h.instance()
 				if !exactJoinSemanticStateEqual(beforeStale, afterStale) {
 					t.Fatalf("stale generation mutated semantic state\nbefore=%#v\nafter=%#v", beforeStale, afterStale)
+				}
+				if verify != nil {
+					verify(t, h)
 				}
 			})
 		}
