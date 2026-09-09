@@ -40,6 +40,10 @@ accounts:
 				count      int
 			}{
 				{`metadata.region != ""`, true, 0},
+				{`optional.ofNonZero("").orValue("fallback") == "fallback"`, true, 0},
+				{`optional.of(metadata).value().region != ""`, true, 0},
+				{`optional.of(metadata.notes).value()[0].?note.orValue("") == ""`, true, 0},
+				{`optional.of(metadata.by_name).value()["x"].?note.orValue("") == ""`, true, 0},
 				{`entity.metadata.region != ""`, true, 0},
 				{`entity.?metadata.hasValue()`, true, 0},
 				{`fields["metadata"]["region"] != ""`, true, 0},
@@ -49,9 +53,15 @@ accounts:
 				{`metadata.by_name[?"x"].value().note == ""`, true, 0},
 				{`has(metadata.region) && metadata.region == "us"`, false, 1},
 				{`metadata.?region.orValue("") == ""`, false, 1},
+				{`optional.of(metadata).value().?region.orValue("") == ""`, false, 1},
+				{`optional.none().orValue("") == ""`, false, 2},
+				{`optional.ofNonZeroValue("").orValue("fallback") == "fallback"`, false, 2},
+				{`optional.of(metadata.notes).value().all(n, n.?note.orValue("") == "")`, false, 2},
+				{`optional.of(metadata.by_name).value()[?"x"].value().?note.orValue("") == ""`, false, 2},
 				{`fields.?metadata.value().?region.orValue("") == ""`, false, 1},
 				{`status == "open" && current_state != "missing"`, false, 2},
 				{`metadata.notes.all(n, n.?note.orValue("") == "")`, false, 2},
+				{`metadata.notes.all(entity, entity.?note.orValue("") == "")`, false, 2},
 				{`metadata.by_name[?"x"].value().?note.orValue("") == ""`, false, 2},
 			} {
 				t.Run(fmt.Sprintf("%s/populated=%t/%s", tool, populated, tc.expression), func(t *testing.T) {

@@ -55,6 +55,15 @@ func (e *StructuralPredicateEnv) CompilePredicate(expression string) (cel.Progra
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
 	}
+	return e.PredicateProgram(compiled)
+}
+
+// PredicateProgram applies shared presence/result admission to an already
+// checked AST after a reader has enforced its own namespace restrictions.
+func (e *StructuralPredicateEnv) PredicateProgram(compiled *cel.Ast) (cel.Program, error) {
+	if compiled == nil || !compiled.IsChecked() {
+		return nil, fmt.Errorf("predicate requires a checked CEL expression")
+	}
 	if compiled.OutputType() != cel.BoolType && compiled.OutputType() != cel.DynType {
 		return nil, fmt.Errorf("predicate must return bool, got %s", compiled.OutputType())
 	}

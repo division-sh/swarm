@@ -245,10 +245,7 @@ func filterEntityStateRowsCEL(expression string, rows []map[string]any, schema e
 	if err != nil {
 		return nil, err
 	}
-	if err := validateEntityFilterExpression(env, expression, schema); err != nil {
-		return nil, err
-	}
-	program, err := env.CompilePredicate(expression)
+	program, err := compileEntityFilterExpression(env, expression, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +302,13 @@ type entityFilterSelectorReference struct {
 	EntityScoped bool
 }
 
+func (r entityFilterSelectorReference) rootName() string {
+	if r.EntityScoped {
+		return "entity"
+	}
+	return strings.SplitN(r.Path, ".", 2)[0]
+}
+
 func (r entityFilterSelectorReference) display() string {
 	path := strings.TrimSpace(r.Path)
 	if path == "" {
@@ -317,19 +321,46 @@ func (r entityFilterSelectorReference) display() string {
 }
 
 func validateEntityFilterExpression(env *workflowexpr.StructuralPredicateEnv, expression string, schema entityToolSchema) error {
+	_, err := compileEntityFilterExpression(env, expression, schema)
+	return err
+}
+
+func compileEntityFilterExpression(env *workflowexpr.StructuralPredicateEnv, expression string, schema entityToolSchema) (cel.Program, error) {
 	if env == nil {
-		return fmt.Errorf("entity filter environment is not configured")
+		return nil, fmt.Errorf("entity filter environment is not configured")
 	}
 	parsed, issues := env.Parse(expression)
 	if issues != nil && issues.Err() != nil {
-		return issues.Err()
+		return nil, issues.Err()
 	}
-	for _, ref := range entityFilterSelectorReferences(parsed) {
+	checked, issues := env.Check(parsed)
+	if issues != nil && issues.Err() != nil {
+		// CEL has already rejected this expression. Only the exact failing
+		// reference may add field guidance; parsed names never admit a program.
+		for _, issue := range issues.Errors() {
+			var fieldErr error
+			celast.PreOrderVisit(parsed.NativeRep().Expr(), celast.NewExprVisitor(func(expr celast.Expr) {
+				if expr.ID() != issue.ExprID {
+					return
+				}
+				if ref, ok := entityFilterSelectorBase(expr); ok {
+					fieldErr = validateEntityFilterSelectorReference(schema, ref)
+				}
+			}))
+			if fieldErr != nil {
+				return nil, fieldErr
+			}
+		}
+		return nil, issues.Err()
+	}
+	// Checked CEL resolves function namespaces into calls rather than field
+	// receivers. Inspect that semantic tree, not the original token spelling.
+	for _, ref := range entityFilterSelectorReferences(checked) {
 		if err := validateEntityFilterSelectorReference(schema, ref); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return env.PredicateProgram(checked)
 }
 
 func entityFilterSelectorReferences(parsed *cel.Ast) []entityFilterSelectorReference {
@@ -362,7 +393,7 @@ func entityFilterSelectorReferences(parsed *cel.Ast) []entityFilterSelectorRefer
 			return
 		}
 		if expr.Kind() == celast.IdentKind && !entityFilterSelectorHasParent(expr) {
-			if ref, ok := entityFilterSelectorBase(expr); ok && (ref.EntityScoped || !bound[strings.Split(ref.Path, ".")[0]]) {
+			if ref, ok := entityFilterSelectorBase(expr); ok && !bound[ref.rootName()] {
 				key := fmt.Sprintf("%t:%s", ref.EntityScoped, ref.Path)
 				if _, exists := seen[key]; !exists {
 					seen[key] = struct{}{}
@@ -371,7 +402,7 @@ func entityFilterSelectorReferences(parsed *cel.Ast) []entityFilterSelectorRefer
 			}
 		}
 		if expr.Kind() == celast.SelectKind && !entityFilterSelectorHasParent(expr) {
-			if ref, ok := entityFilterSelectorReferenceFromExpr(expr); ok && (ref.EntityScoped || !bound[strings.Split(ref.Path, ".")[0]]) {
+			if ref, ok := entityFilterSelectorReferenceFromExpr(expr); ok && !bound[ref.rootName()] {
 				key := fmt.Sprintf("%t:%s", ref.EntityScoped, ref.Path)
 				if _, exists := seen[key]; !exists {
 					seen[key] = struct{}{}
