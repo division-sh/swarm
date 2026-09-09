@@ -676,13 +676,13 @@ func TestHandlerExecutionEntityRequirementOwnsDurableBehaviorCapabilities(t *tes
 		{name: "unrooted clear persists entity field mutation", handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}},
 		}, want: DeliveryTargetExistingEntityRequired},
-		{name: "explicit creation is acquisition independent from execution", handler: runtimecontracts.SystemNodeEventHandler{
+		{name: "explicit creation initializes the selected receiver", handler: runtimecontracts.SystemNodeEventHandler{
 			CreateEntity: true,
-		}, want: DeliveryTargetEntityOptional},
-		{name: "creation preserves platform entity identity dependency", handler: runtimecontracts.SystemNodeEventHandler{
+		}, want: DeliveryTargetEntityMaterializing},
+		{name: "creation initializes the selected platform entity dependency", handler: runtimecontracts.SystemNodeEventHandler{
 			CreateEntity: true,
 			Guard:        &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
-		}, want: DeliveryTargetExistingEntityRequired},
+		}, want: DeliveryTargetEntityMaterializing},
 		{name: "payload-only fanout is entityless safe", handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", Emit: runtimecontracts.EmitSpec{Event: "work.item", From: "payload"}},
 		}, want: DeliveryTargetEntityOptional},

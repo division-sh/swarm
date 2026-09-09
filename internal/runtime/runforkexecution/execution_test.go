@@ -1286,24 +1286,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
-	contractsRoot := t.TempDir()
-	if err := os.CopyFS(contractsRoot, os.DirFS(filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple"))); err != nil {
-		t.Fatal(err)
-	}
-	// This ordering proof needs two lawful deliveries to the same receiver.
-	// The shared fixture terminates it on the first delivery.
-	if err := os.WriteFile(filepath.Join(contractsRoot, "nodes.yaml"), []byte(`test-node:
-  id: test-node
-  execution_type: system_node
-  subscribes_to: [item.received]
-  produces: [item.processed]
-  event_handlers:
-    item.received:
-      emit:
-        event: item.processed
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	contractsRoot := canonicalrouting.CopyForkChronologicalDispatch(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
