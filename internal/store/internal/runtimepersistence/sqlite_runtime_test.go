@@ -591,6 +591,15 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			RouteRetirer:   bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}
+	// Template actors are admitted by flow readiness, not as static desired agents.
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentfixture.AdmitGeneration(t, ctx, sqliteStore, plan, coordinate); err != nil {
+		t.Fatal(err)
+	}
 	start := make(chan struct{})
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
