@@ -595,6 +595,10 @@ func TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores(t *testing.
 }
 
 func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *testing.T) {
+	runForkBarrierFixedRevisionMatrix(t, "")
+}
+
+func runForkBarrierFixedRevisionMatrix(t *testing.T, generationMode string) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
@@ -618,7 +622,15 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 			for index, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					at := base.Add(time.Duration(index) * 10 * time.Minute)
-					ctx, fixture, handle := seedDeclaredForkFanOutFixtureWithBarrier(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, tc.cardinality, at, true)
+					var ctx context.Context
+					var fixture fanOutOwnerFixture
+					var handle timeridentity.TimerHandle
+					var advanceGeneration func(bool)
+					if generationMode == "" {
+						ctx, fixture, handle = seedDeclaredForkFanOutFixtureWithBarrier(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, tc.cardinality, at, true)
+					} else {
+						ctx, fixture, handle, advanceGeneration = seedDeclaredForkFanOutGenerationFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, tc.cardinality, at, true, true)
+					}
 					var summary *fanoutbarrier.Summary
 					var sourceScheduleActivationID string
 					switch tc.status {
@@ -671,9 +683,15 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 						value := fanoutbarrier.Summary{Total: 1, Canceled: 1}
 						summary = &value
 					case fanoutbarrier.StatusSuppressedGenerationSuperseded:
-						if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET status=$1,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family='fan_out' AND semantic_path=$6`, string(tc.status), at.Add(time.Second), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
+						if advanceGeneration != nil {
+							advanceGeneration(generationMode == "current")
+							advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, at.Add(2*time.Second))
+						} else if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET status=$1,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family='fan_out' AND semantic_path=$6`, string(tc.status), at.Add(time.Second), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 							t.Fatal(err)
 						}
+					}
+					if generationMode == "historical" && tc.status != fanoutbarrier.StatusSuppressedGenerationSuperseded {
+						advanceGeneration(false)
 					}
 
 					forkPointID := uuid.NewString()
@@ -694,6 +712,17 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 						}
 					}
 					before := snapshotForkHistoricalExecutionTables(t, db, postgres)
+					var sourceBarrier *fanoutbarrier.Barrier
+					if generationMode != "" {
+						plan, err := owner.(selectedActivityProjectionStore).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: fixture.runID, At: forkPointID})
+						if err != nil || len(plan.FanOutObligations) != 1 || plan.FanOutObligations[0].Barrier == nil {
+							t.Fatalf("generation-bearing barrier at R: %+v err=%v", plan.FanOutObligations, err)
+						}
+						sourceBarrier = plan.FanOutObligations[0].Barrier
+						if !reflect.DeepEqual(sourceBarrier.Registration.Handle, handle) || sourceBarrier.Status != tc.status || !reflect.DeepEqual(sourceBarrier.Summary, summary) {
+							t.Fatalf("fixed revision changed source barrier generation/status/summary: %+v", sourceBarrier)
+						}
+					}
 					if tc.status == fanoutbarrier.StatusOutcomeDeadLettered {
 						plan, err := owner.(interface {
 							PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
@@ -736,7 +765,11 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, materialized.ForkRunID).Scan(&dispatched); err != nil || dispatched != 0 {
 						t.Fatalf("barrier materialization dispatched child events: count=%d err=%v", dispatched, err)
 					}
-					assertFanOutBarrierState(t, ctx, db, materialized.ForkRunID, fixture.deliveryID, fixture.semanticPath, tc.status, summary, expectedForkBarrierSchedule(tc.status, handle.TaskID()))
+					childHandle := handle
+					if generationMode != "" {
+						childHandle = assertG28ForkBarrier(t, ctx, db, owner.(runtimegenericschedule.Store), fixture, materialized.ForkRunID, sourceBarrier, generationMode)
+					}
+					assertFanOutBarrierState(t, ctx, db, materialized.ForkRunID, fixture.deliveryID, fixture.semanticPath, tc.status, summary, expectedForkBarrierSchedule(tc.status, childHandle.TaskID()))
 					assertForkBarrierScheduleState(t, ctx, db, materialized.ForkRunID, tc.status)
 					if tc.status == fanoutbarrier.StatusClosedPending {
 						childFixture := fixture
@@ -746,7 +779,7 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 							t.Fatalf("fork reused source schedule activation %s", sourceScheduleActivationID)
 						}
 						var childTimerID string
-						if err := db.QueryRowContext(ctx, `SELECT timer_id FROM timers WHERE run_id=$1 AND schedule_key=$2`, materialized.ForkRunID, handle.TaskID()).Scan(&childTimerID); err != nil {
+						if err := db.QueryRowContext(ctx, `SELECT timer_id FROM timers WHERE run_id=$1 AND schedule_key=$2`, materialized.ForkRunID, childHandle.TaskID()).Scan(&childTimerID); err != nil {
 							t.Fatal(err)
 						}
 						if childTimerID != childScheduleActivationID {
