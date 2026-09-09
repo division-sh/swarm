@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,15 +30,16 @@ import (
 type diagnosticProjectionTestStore interface {
 	agentfixture.Store
 	runtimemanager.AgentLifecycleDiagnosticPersistence
-	ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]runtimemanager.AgentLifecycleDiagnostic, error)
+	runtimepkg.RuntimeLogPersistence
+	ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]diaglog.LifecycleDiagnostic, error)
 }
 
 type diagnosticLostResult struct {
-	runtimemanager.AgentLifecycleDiagnosticPersistence
+	diagnosticProjectionTestStore
 }
 
 func (p diagnosticLostResult) ProjectAgentLifecycleDiagnostics(ctx context.Context, limit int) (int, error) {
-	n, err := p.AgentLifecycleDiagnosticPersistence.ProjectAgentLifecycleDiagnostics(ctx, limit)
+	n, err := projectDiagnosticTestBatch(ctx, p.diagnosticProjectionTestStore, limit)
 	if err != nil {
 		return n, err
 	}
@@ -85,7 +89,7 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					_, err := owner.ProjectAgentLifecycleDiagnostics(context.Background(), 100)
+					_, err := projectDiagnosticTestBatch(context.Background(), owner, 100)
 					errors <- err
 				}()
 			}
@@ -96,10 +100,10 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, item := range []runtimemanager.AgentLifecycleDiagnostic{left, right} {
+			for _, item := range []diaglog.LifecycleDiagnostic{left, right} {
 				assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
 				var runID string
-				if err := db.QueryRow(`SELECT run_id FROM events WHERE event_id=$1`, item.OutboxID).Scan(&runID); err != nil || runID != item.Identity.RunID {
+				if err := db.QueryRow(`SELECT run_id FROM events WHERE event_id=$1`, diagnosticEventID(item.OutboxID)).Scan(&runID); err != nil || runID != item.Identity.RunID {
 					t.Fatalf("cross-run attribution %s: %v", runID, err)
 				}
 			}
@@ -112,10 +116,10 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 			// would; a fresh connection must observe the atomic pair, not append again.
 			reopened, db, closeReopened := open()
 			defer closeReopened()
-			if n, err := reopened.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err != nil || n != 0 {
+			if n, err := projectDiagnosticTestBatch(context.Background(), reopened, 100); err != nil || n != 0 {
 				t.Fatalf("reopened replay n=%d err=%v", n, err)
 			}
-			for _, item := range []runtimemanager.AgentLifecycleDiagnostic{left, right, later} {
+			for _, item := range []diaglog.LifecycleDiagnostic{left, right, later} {
 				assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
 			}
 		})
@@ -182,14 +186,14 @@ func TestLifecycleDiagnosticBatchCardinality(t *testing.T) {
 					}
 				}
 				want := min(size, 100)
-				if n, err := selected.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err != nil || n != want {
+				if n, err := projectDiagnosticTestBatch(context.Background(), selected, 100); err != nil || n != want {
 					t.Fatalf("first batch n=%d want=%d err=%v", n, want, err)
 				}
-				if n, err := selected.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err != nil || n != size-want {
+				if n, err := projectDiagnosticTestBatch(context.Background(), selected, 100); err != nil || n != size-want {
 					t.Fatalf("tail n=%d want=%d err=%v", n, size-want, err)
 				}
 				var events, acks int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM events e JOIN agent_lifecycle_diagnostic_outbox o ON e.event_id=o.outbox_id`).Scan(&events); err != nil {
+				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name='platform.runtime_log'`).Scan(&events); err != nil {
 					t.Fatal(err)
 				}
 				if err := db.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE projected_at IS NOT NULL`).Scan(&acks); err != nil {
@@ -257,14 +261,14 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 				if result.DiagnosticProvenance.ActorMode != executionmode.Live || result.DiagnosticProvenance.EventMode != executionmode.Mock {
 					t.Fatalf("collapsed actor and causal modes: %+v", result.DiagnosticProvenance)
 				}
-				if n, err := selected.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err != nil || n != 2 {
+				if n, err := projectDiagnosticTestBatch(context.Background(), selected, 100); err != nil || n != 2 {
 					t.Fatalf("causal projection n=%d err=%v", n, err)
 				}
 				var mode, source string
-				if err := db.QueryRow(`SELECT e.execution_mode,e.source_event_id FROM events e JOIN agent_lifecycle_diagnostic_outbox o ON o.outbox_id=e.event_id WHERE o.operation_id=$1`, op).Scan(&mode, &source); err != nil {
+				if err := db.QueryRow(`SELECT e.execution_mode,e.source_event_id FROM events e JOIN agent_lifecycle_diagnostic_outbox o ON e.run_id=o.run_id WHERE o.operation_id=$1 AND e.source_event_id IS NOT NULL`, op).Scan(&mode, &source); err != nil {
 					t.Fatal(err)
 				}
-				if mode != "mock" || source != parent {
+				if mode != "live" || source != parent {
 					t.Fatalf("lost causal facts mode=%s parent=%s", mode, source)
 				}
 			})
@@ -272,13 +276,13 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 	}
 }
 
-func enqueueDiagnosticTestAgent(t *testing.T, selected diagnosticProjectionTestStore, slug string) runtimemanager.AgentLifecycleDiagnostic {
+func enqueueDiagnosticTestAgent(t *testing.T, selected diagnosticProjectionTestStore, slug string) diaglog.LifecycleDiagnostic {
 	t.Helper()
 	identity := testAgentIdentity(t, slug, "global")
 	return enqueueDiagnosticTestIdentity(t, selected, identity, runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}, executionmode.Live)
 }
 
-func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTestStore, identity agentidentity.Identity, origin runtimemanager.LifecycleDiagnosticOrigin, mode executionmode.Mode) runtimemanager.AgentLifecycleDiagnostic {
+func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTestStore, identity agentidentity.Identity, origin runtimemanager.LifecycleDiagnosticOrigin, mode executionmode.Mode) diaglog.LifecycleDiagnostic {
 	t.Helper()
 	slug := identity.AgentID()
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -311,7 +315,7 @@ func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTe
 		}
 	}
 	t.Fatal("committed lifecycle has no diagnostic occurrence")
-	return runtimemanager.AgentLifecycleDiagnostic{}
+	return diaglog.LifecycleDiagnostic{}
 }
 
 func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProjectionTestStore, db *sql.DB, sqlite bool, scenario string) {
@@ -329,7 +333,7 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 		results := make(chan error, 8)
 		for i := 0; i < 8; i++ {
 			wg.Add(1)
-			go func() { defer wg.Done(); _, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); results <- err }()
+			go func() { defer wg.Done(); _, err := projectDiagnosticTestBatch(ctx, selected, 100); results <- err }()
 		}
 		wg.Wait()
 		close(results)
@@ -348,7 +352,7 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 		} else {
 			cleanup = installDiagnosticFailureTrigger(t, db, sqlite, table, operation, "")
 		}
-		if n, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err == nil || n != 0 {
+		if n, err := projectDiagnosticTestBatch(ctx, selected, 100); err == nil || n != 0 {
 			t.Fatalf("injected failure n=%d err=%v", n, err)
 		}
 		assertDiagnosticCounts(t, db, first.OutboxID, 0, 1)
@@ -368,7 +372,7 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 		if _, err := db.Exec(`UPDATE agent_lifecycle_diagnostic_outbox SET payload='{}' WHERE outbox_id=$1`, first.OutboxID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err == nil {
+		if _, err := projectDiagnosticTestBatch(ctx, selected, 100); err == nil {
 			t.Fatal("accepted conflicting payload")
 		}
 		assertDiagnosticCounts(t, db, first.OutboxID, 0, 1)
@@ -377,19 +381,19 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 		if _, err := db.Exec(`UPDATE agent_lifecycle_diagnostic_outbox SET created_at=$2 WHERE outbox_id=$1`, first.OutboxID, first.CreatedAt.Add(time.Second)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err == nil {
+		if _, err := projectDiagnosticTestBatch(ctx, selected, 100); err == nil {
 			t.Fatal("accepted conflicting occurrence timestamp")
 		}
 		assertDiagnosticCounts(t, db, first.OutboxID, 0, 1)
 		return
 	case "missing_ack":
-		if _, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err != nil {
+		if _, err := projectDiagnosticTestBatch(ctx, selected, 100); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`UPDATE agent_lifecycle_diagnostic_outbox SET projected_at=NULL WHERE outbox_id=$1`, first.OutboxID); err != nil {
+		if _, err := db.Exec(`UPDATE agent_lifecycle_diagnostic_outbox SET projected_at=NULL,projection=NULL WHERE outbox_id=$1`, first.OutboxID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err == nil {
+		if _, err := projectDiagnosticTestBatch(ctx, selected, 100); err == nil {
 			t.Fatal("repaired corrupt event-without-ack pair")
 		}
 		assertDiagnosticCounts(t, db, first.OutboxID, 1, 1)
@@ -398,7 +402,7 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 		if _, err := db.Exec(`DELETE FROM agent_lifecycle_transition_facts WHERE operation_id=$1`, first.OperationID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err == nil {
+		if _, err := projectDiagnosticTestBatch(ctx, selected, 100); err == nil {
 			t.Fatal("accepted missing transition history")
 		}
 		assertDiagnosticCounts(t, db, first.OutboxID, 0, 1)
@@ -406,14 +410,14 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 	case "cancelled":
 		cancelled, cancel := context.WithCancel(ctx)
 		cancel()
-		if _, err := selected.ProjectAgentLifecycleDiagnostics(cancelled, 100); err == nil {
+		if _, err := projectDiagnosticTestBatch(cancelled, selected, 100); err == nil {
 			t.Fatal("cancelled projection succeeded")
 		}
 		assertDiagnosticCounts(t, db, first.OutboxID, 0, 1)
 	case "batch_prefix":
 		second := enqueueDiagnosticTestAgent(t, selected, "diagnostic-worker-two")
 		cleanup = installDiagnosticFailureTrigger(t, db, sqlite, "agent_lifecycle_diagnostic_outbox", "UPDATE", second.OutboxID)
-		if n, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err == nil || n != 1 {
+		if n, err := projectDiagnosticTestBatch(ctx, selected, 100); err == nil || n != 1 {
 			t.Fatalf("batch failure n=%d err=%v", n, err)
 		}
 		assertDiagnosticCounts(t, db, first.OutboxID, 1, 0)
@@ -424,18 +428,18 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 	if cleanup != nil {
 		defer cleanup()
 	}
-	if _, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err != nil {
+	if _, err := projectDiagnosticTestBatch(ctx, selected, 100); err != nil {
 		t.Fatal(err)
 	}
 	assertDiagnosticCounts(t, db, first.OutboxID, 1, 0)
-	if n, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err != nil || n != 0 {
+	if n, err := projectDiagnosticTestBatch(ctx, selected, 100); err != nil || n != 0 {
 		t.Fatalf("settled replay n=%d err=%v", n, err)
 	}
 	var runID, persistedMode, parent string
-	if err := db.QueryRow(`SELECT run_id,execution_mode,COALESCE(CAST(source_event_id AS TEXT),'') FROM events WHERE event_id=$1`, first.OutboxID).Scan(&runID, &persistedMode, &parent); err != nil {
+	if err := db.QueryRow(`SELECT run_id,execution_mode,COALESCE(CAST(source_event_id AS TEXT),'') FROM events WHERE event_id=$1`, diagnosticEventID(first.OutboxID)).Scan(&runID, &persistedMode, &parent); err != nil {
 		t.Fatal(err)
 	}
-	if runID != first.Identity.RunID || persistedMode != string(mode) || parent != "" {
+	if runID != first.Identity.RunID || persistedMode != "live" || parent != "" {
 		t.Fatalf("wrong immutable event facts run=%s mode=%s parent=%s", runID, persistedMode, parent)
 	}
 }
@@ -443,7 +447,7 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 func assertDiagnosticCounts(t *testing.T, db *sql.DB, id string, events, pending int) {
 	t.Helper()
 	var actualEvents, actualPending int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_id=$1`, id).Scan(&actualEvents); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_id=$1`, diagnosticEventID(id)).Scan(&actualEvents); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE outbox_id=$1 AND projected_at IS NULL`, id).Scan(&actualPending); err != nil {
@@ -526,4 +530,22 @@ func installDiagnosticFailureTrigger(t *testing.T, db *sql.DB, sqlite bool, tabl
 			}
 		}
 	}
+}
+
+func projectDiagnosticTestBatch(ctx context.Context, selected diagnosticProjectionTestStore, limit int) (int, error) {
+	items, err := selected.ListPendingAgentLifecycleDiagnostics(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	logger := runtimepkg.NewRuntimeLogger(selected, executionposture.Live)
+	for i, item := range items {
+		if err := logger.ProjectLifecycleDiagnostic(ctx, item); err != nil {
+			return i, err
+		}
+	}
+	return len(items), nil
+}
+
+func diagnosticEventID(outboxID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:lifecycle-diagnostic:"+outboxID)).String()
 }

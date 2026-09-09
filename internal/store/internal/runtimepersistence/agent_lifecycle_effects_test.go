@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"testing"
 	"time"
 
@@ -292,7 +293,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 
 	diagnosticsStore := store.(interface {
 		runtimemanager.AgentLifecycleDiagnosticPersistence
-		ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]runtimemanager.AgentLifecycleDiagnostic, error)
+		ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]diaglog.LifecycleDiagnostic, error)
 	})
 	diagnostics, err := diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)
 	if err != nil || len(diagnostics) != 3 {

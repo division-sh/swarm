@@ -961,7 +961,7 @@ func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error 
 }
 
 func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) (err error) {
-	if am == nil || am.lifecycle == nil {
+	if am == nil {
 		return nil
 	}
 	defer func() {

@@ -41,8 +41,13 @@ func (p *diagnosticForkActivationProbe) ActivateRunForkForSelectedContractExecut
 	}
 	if p.scenario != "clean" {
 		var id string
-		if err := p.h.db.QueryRowContext(ctx, `SELECT o.outbox_id FROM agent_lifecycle_diagnostic_outbox o JOIN events e ON e.event_id=o.outbox_id WHERE o.run_id=$1 AND e.source_event_id IS NULL ORDER BY o.created_at,o.outbox_id LIMIT 1`, req.ForkRunID).Scan(&id); err != nil {
+		if err := p.h.db.QueryRowContext(ctx, `SELECT outbox_id FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NOT NULL ORDER BY created_at,outbox_id LIMIT 1`, req.ForkRunID).Scan(&id); err != nil {
 			p.t.Fatal(err)
+		}
+		id = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:lifecycle-diagnostic:"+id)).String()
+		var parent string
+		if err := p.h.db.QueryRowContext(ctx, `SELECT COALESCE(CAST(source_event_id AS TEXT),'') FROM events WHERE event_id=$1`, id).Scan(&parent); err != nil || parent != "" {
+			p.t.Fatalf("expected exact parentless observation: parent=%s err=%v", parent, err)
 		}
 		if p.scenario == "corrupt_ack" {
 			if _, err := p.h.db.ExecContext(ctx, `UPDATE events SET payload='{}',payload_bytes=$2 WHERE event_id=$1`, id, []byte(`{}`)); err != nil {

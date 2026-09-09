@@ -76,7 +76,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				return p
 			}
 			process := start()
-			hash := goldenServedBundleHash(t, process.rpc)
+			hash := goldenServedBundleHash(t, process.rpc, "live")
 			persisted := map[string][]goldenEvent{}
 			for _, scope := range []string{".", "left", "right", "left/nested"} {
 				run, events := executeNodeIdentityWork(t, process, hash, scope, "before-"+scope)
@@ -86,7 +86,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 			process = start()
-			if goldenServedBundleHash(t, process.rpc) != hash {
+			if goldenServedBundleHash(t, process.rpc, "live") != hash {
 				t.Fatal("restart changed selected artifact")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)

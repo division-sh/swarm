@@ -84,7 +84,6 @@ type releaseProcessSpec struct {
 	Store                       string
 	Dev                         bool
 	APIPort                     int
-	MCPPort                     int
 	MCPListenHost               string
 	PublicWebhookBaseURL        string
 	PublicWebhookListen         string
@@ -114,20 +113,23 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	if workspaceBackend == "" {
 		workspaceBackend = "host"
 	}
-	mcpHost := options.MCPListenHost
-	if mcpHost == "" {
-		mcpHost = "127.0.0.1"
-	}
 	args := []string{"serve"}
 	if !options.DefaultExecutionSelection {
 		args = append(args, "--backend", "claude_cli", "--workspace-backend", workspaceBackend)
 	}
 	args = append(args,
 		"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.APIPort),
-		"--mcp-listen-addr", net.JoinHostPort(mcpHost, fmt.Sprint(options.MCPPort)),
+		"--mcp-listen-addr", "127.0.0.1:0",
 		"--shutdown-grace", "2s",
 		"--no-color",
 	)
+	if options.MCPListenHost != "" {
+		for i := range args {
+			if args[i] == "--mcp-listen-addr" {
+				args[i+1] = net.JoinHostPort(options.MCPListenHost, "0")
+			}
+		}
+	}
 	if options.ConfigPath != "" {
 		args = append(args, "--config", options.ConfigPath)
 	}
@@ -161,9 +163,8 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 			Store      string
 			Dev        bool
 			APIPort    int
-			MCPPort    int
 			Token      string
-		}{options.ConfigPath, options.Source, options.Store, options.Dev, options.APIPort, options.MCPPort, options.Token})
+		}{options.ConfigPath, options.Source, options.Store, options.Dev, options.APIPort, options.Token})
 		if err != nil {
 			t.Fatal(err)
 		}

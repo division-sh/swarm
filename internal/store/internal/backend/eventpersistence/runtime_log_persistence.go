@@ -9,8 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/google/uuid"
@@ -205,19 +203,4 @@ func (s *EventSQLiteOwner) PersistRuntimeLog(ctx context.Context, record runtime
 	}
 	_, err = s.CommitRuntimeLogEvent(ctx, evt)
 	return err
-}
-
-func (s *EventPostgresOwner) CommitRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, record runtimepkg.RuntimeLogPersistenceRecord) (runtimebus.EventAppendOutcome, error) {
-	admitted, err := s.admitRuntimeLogRecord(ctx, record)
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return commitRuntimeLogEventTx(ctx, s, tx, story, effects, admitted)
-}
-func (s *EventSQLiteOwner) CommitRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, record runtimepkg.RuntimeLogPersistenceRecord) (runtimebus.EventAppendOutcome, error) {
-	admitted, err := s.admitRuntimeLogRecord(ctx, record)
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return commitRuntimeLogEventTx(ctx, s, tx, story, effects, admitted)
 }

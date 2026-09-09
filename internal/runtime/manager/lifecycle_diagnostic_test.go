@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"sync/atomic"
 	"testing"
 )
@@ -12,26 +13,26 @@ type diagnosticProjectionProbe struct {
 	err   error
 }
 
-func (p *diagnosticProjectionProbe) ProjectAgentLifecycleDiagnostics(context.Context, int) (int, error) {
+func (p *diagnosticProjectionProbe) ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]diaglog.LifecycleDiagnostic, error) {
 	p.calls.Add(1)
-	return 0, p.err
+	return nil, p.err
 }
 
-func TestLifecycleDiagnosticProjectionUsesPersistenceWithoutOptionalBus(t *testing.T) {
+func TestLifecycleDiagnosticProjectionRefusesMissingLogger(t *testing.T) {
 	probe := &diagnosticProjectionProbe{}
 	am := &AgentManager{lifecycle: &agentLifecycleCoordinator{}, roles: PersistenceRoles{LifecycleDiagnostics: probe}}
-	if err := am.projectLifecycleDiagnostics(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := am.projectLifecycleDiagnostics(context.Background()); err == nil {
+		t.Fatal("missing logger was accepted")
 	}
-	if probe.calls.Load() != 1 {
-		t.Fatal("nil optional EventBus bypassed durable projection")
+	if probe.calls.Load() != 0 {
+		t.Fatal("read durable work without a settlement owner")
 	}
 }
 
 func TestLifecycleDiagnosticFailureDoesNotChangeCompletedRetirement(t *testing.T) {
 	failure := errors.New("injected durable diagnostic failure")
 	probe := &diagnosticProjectionProbe{err: failure}
-	am := &AgentManager{lifecycle: &agentLifecycleCoordinator{}, roles: PersistenceRoles{LifecycleDiagnostics: probe}}
+	am := &AgentManager{bus: newProjectionTestBus(), lifecycle: &agentLifecycleCoordinator{}, roles: PersistenceRoles{LifecycleDiagnostics: probe}}
 	if err := am.projectLifecycleDiagnostics(context.Background()); !errors.Is(err, failure) {
 		t.Fatalf("original projection failure lost: %v", err)
 	}
