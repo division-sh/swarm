@@ -132,7 +132,10 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return b.runTransactionOnce(ctx, &sql.TxOptions{ReadOnly: true}, operation)
+	err := b.runTransactionOnce(ctx, &sql.TxOptions{ReadOnly: true}, operation)
+	// database/sql may report ErrTxDone after its cancellation rollback wins.
+	// Retain the caller's cause without dropping callback or cleanup failures.
+	return errors.Join(ctx.Err(), err)
 }
 
 func (b *Backend) acquireMutation(ctx context.Context, operation mutationOperation) error {
