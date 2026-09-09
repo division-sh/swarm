@@ -23,6 +23,7 @@ special_packages:
   - github.com/division-sh/swarm/internal/releasee2e
   - github.com/division-sh/swarm/internal/runtime/cataloge2e
   - github.com/division-sh/swarm/internal/runtime
+  - github.com/division-sh/swarm/internal/runtime/contracts
   - github.com/division-sh/swarm/internal/runtime/llm
   - github.com/division-sh/swarm/internal/serveapp
   - github.com/division-sh/swarm/internal/store
@@ -39,8 +40,10 @@ profiles:
       - catalog-required-smoke
       - hitl-llm-full
       - hitl-releasee2e-rest
-      - hitl-releasee2e-burst-1
-      - hitl-releasee2e-burst-2
+      - hitl-releasee2e-burst-sqlite-1
+      - hitl-releasee2e-burst-postgres-1
+      - hitl-releasee2e-burst-sqlite-2
+      - hitl-releasee2e-burst-postgres-2
       - hitl-releasee2e-golden
       - hitl-releasee2e-journeys
       - hitl-releasee2e-invocation-1
@@ -52,6 +55,9 @@ profiles:
       - runtime-full
       - serveapp-channel
       - serveapp-runtime
+      - serveapp-receivers
+      - contracts-first
+      - contracts-rest
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -76,8 +82,10 @@ profiles:
       - catalog-runtime-staged
       - hitl-llm-full
       - hitl-releasee2e-rest
-      - hitl-releasee2e-burst-1
-      - hitl-releasee2e-burst-2
+      - hitl-releasee2e-burst-sqlite-1
+      - hitl-releasee2e-burst-postgres-1
+      - hitl-releasee2e-burst-sqlite-2
+      - hitl-releasee2e-burst-postgres-2
       - hitl-releasee2e-golden
       - hitl-releasee2e-journeys
       - hitl-releasee2e-invocation-1
@@ -89,6 +97,9 @@ profiles:
       - runtime-full
       - serveapp-channel
       - serveapp-runtime
+      - serveapp-receivers
+      - contracts-first
+      - contracts-rest
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -113,8 +124,10 @@ profiles:
       - catalog-runtime-staged
       - hitl-llm-full
       - hitl-releasee2e-rest
-      - hitl-releasee2e-burst-1
-      - hitl-releasee2e-burst-2
+      - hitl-releasee2e-burst-sqlite-1
+      - hitl-releasee2e-burst-postgres-1
+      - hitl-releasee2e-burst-sqlite-2
+      - hitl-releasee2e-burst-postgres-2
       - hitl-releasee2e-golden
       - hitl-releasee2e-journeys
       - hitl-releasee2e-invocation-1
@@ -126,6 +139,9 @@ profiles:
       - runtime-full
       - serveapp-channel
       - serveapp-runtime
+      - serveapp-receivers
+      - contracts-first
+      - contracts-rest
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -150,8 +166,10 @@ profiles:
       - catalog-runtime-staged
       - hitl-llm-full
       - hitl-releasee2e-rest
-      - hitl-releasee2e-burst-1
-      - hitl-releasee2e-burst-2
+      - hitl-releasee2e-burst-sqlite-1
+      - hitl-releasee2e-burst-postgres-1
+      - hitl-releasee2e-burst-sqlite-2
+      - hitl-releasee2e-burst-postgres-2
       - hitl-releasee2e-golden
       - hitl-releasee2e-journeys
       - hitl-releasee2e-invocation-1
@@ -163,6 +181,9 @@ profiles:
       - runtime-full
       - serveapp-channel
       - serveapp-runtime
+      - serveapp-receivers
+      - contracts-first
+      - contracts-rest
       - serveapp-other
       - serveapp-surfaces
       - serveapp-standing
@@ -249,31 +270,45 @@ units:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
-  hitl-releasee2e-burst-1:
+  hitl-releasee2e-burst-sqlite-1:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1$'
+    run: '^TestGoldenAgentWorkloadBurstConcurrencySQLiteIteration1$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
-  hitl-releasee2e-burst-2:
+  hitl-releasee2e-burst-postgres-1:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2$'
+    run: '^TestGoldenAgentWorkloadBurstConcurrencyPostgresIteration1$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  hitl-releasee2e-burst-sqlite-2:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^TestGoldenAgentWorkloadBurstConcurrencySQLiteIteration2$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  hitl-releasee2e-burst-postgres-2:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^TestGoldenAgentWorkloadBurstConcurrencyPostgresIteration2$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
   hitl-releasee2e-golden:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^TestGolden($|[^A].*|AgentWorkload($|[^B].*))$'
+    run: '^TestGolden($|[^AI].*|AgentWorkload($|[^B].*))$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
   hitl-releasee2e-journeys:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^TestC.*$'
+    run: '^Test(C.*|GoldenI.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -337,10 +372,32 @@ units:
   serveapp-runtime:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestR.*$'
+    # RE2 complement of TestReceiver; the adjacent unit owns that family.
+    run: '^TestR($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^r].*)))))))$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
+  serveapp-receivers:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestReceiver.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  contracts-first:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/contracts
+    run: '^(Test($|[^M-Z].*)|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  contracts-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/contracts
+    run: '^Test[M-Z].*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
   serveapp-surfaces:
     packages:
       - github.com/division-sh/swarm/internal/serveapp

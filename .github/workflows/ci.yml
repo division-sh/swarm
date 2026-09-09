@@ -36,10 +36,27 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Go
+        id: go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
+
+      - name: Restore shared Go modules
+        id: modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Populate shared Go modules
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: go mod download
+      - name: Save shared Go modules
+        if: github.event_name != 'pull_request' && steps.modules.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ steps.modules.outputs.cache-primary-key }}
 
       - name: Plan proof topology
         id: plan
@@ -184,6 +201,7 @@ jobs:
         with:
           ref: ${{ needs.ci-plan.outputs.execution_sha }}
       - uses: actions/setup-go@v5
+        id: go
         with:
           go-version-file: go.mod
           cache: false
@@ -192,18 +210,20 @@ jobs:
         with:
           name: ci-plan
           path: test-results/plan
+      - name: Restore shared Go modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
       - name: Restore measured Go cache
         id: go-cache-restore
         uses: actions/cache/restore@v4
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-test-${{ runner.os }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
+          path: ~/.cache/go-build
+          key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
-            go-test-${{ runner.os }}-${{ matrix.unit }}-master-
-            go-test-${{ runner.os }}-${{ matrix.unit }}-
-            go-test-${{ runner.os }}-
+            go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-${{ github.ref_name }}-
+            go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-
       - name: Run exact planned proof unit
         shell: bash
         env:
@@ -248,10 +268,8 @@ jobs:
         if: github.event_name != 'pull_request' && steps.go-cache-restore.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-test-${{ runner.os }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
+          path: ~/.cache/go-build
+          key: ${{ steps.go-cache-restore.outputs.cache-primary-key }}
       - name: Upload proof evidence
         if: always()
         uses: actions/upload-artifact@v4

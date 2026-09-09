@@ -153,18 +153,29 @@ func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 	})
 }
 
-func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1(t *testing.T) {
-	runGoldenAgentWorkloadBurstIteration(t, 1)
+func TestGoldenAgentWorkloadBurstConcurrencySQLiteIteration1(t *testing.T) {
+	runGoldenAgentWorkloadBurstIteration(t, 1, "sqlite")
 }
 
-func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2(t *testing.T) {
-	runGoldenAgentWorkloadBurstIteration(t, 2)
+func TestGoldenAgentWorkloadBurstConcurrencyPostgresIteration1(t *testing.T) {
+	runGoldenAgentWorkloadBurstIteration(t, 1, "postgres")
 }
 
-func runGoldenAgentWorkloadBurstIteration(t *testing.T, iteration int) {
+func TestGoldenAgentWorkloadBurstConcurrencySQLiteIteration2(t *testing.T) {
+	runGoldenAgentWorkloadBurstIteration(t, 2, "sqlite")
+}
+
+func TestGoldenAgentWorkloadBurstConcurrencyPostgresIteration2(t *testing.T) {
+	runGoldenAgentWorkloadBurstIteration(t, 2, "postgres")
+}
+
+func runGoldenAgentWorkloadBurstIteration(t *testing.T, iteration int, backend string) {
 	t.Helper()
 	if iteration < 1 || iteration > goldenBurstIterations {
 		t.Fatalf("invalid burst iteration %d", iteration)
+	}
+	if backend != "sqlite" && backend != "postgres" {
+		t.Fatalf("invalid burst backend %q", backend)
 	}
 	profile, continuous := goldenContinuousProofProfile(t)
 	if !continuous {
@@ -181,15 +192,13 @@ func runGoldenAgentWorkloadBurstIteration(t *testing.T, iteration int) {
 		processGOMAXPROCS: goldenBurstGOMAXPROCS,
 		runDeadline:       goldenBurstDeadline,
 	}
-	t.Run("sqlite", func(t *testing.T) {
-		t.Parallel()
-		root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-sqlite", iteration))
-		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
-	})
-	t.Run("postgres", func(t *testing.T) {
-		t.Parallel()
-		root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-postgres", iteration))
-		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
+	t.Run(backend, func(t *testing.T) {
+		root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-%s", iteration, backend))
+		store := goldenSQLiteStore(root)
+		if backend == "postgres" {
+			store = goldenPostgresStore(t, dsn)
+		}
+		runGoldenAgentWorkload(t, binaryPath, root, store, false, options)
 	})
 }
 

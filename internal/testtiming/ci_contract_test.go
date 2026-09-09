@@ -15,12 +15,57 @@ import (
 )
 
 type ciWorkflowStep struct {
+	ID              string         `yaml:"id"`
 	Name            string         `yaml:"name"`
 	If              string         `yaml:"if"`
 	ContinueOnError bool           `yaml:"continue-on-error"`
 	Run             string         `yaml:"run"`
 	Uses            string         `yaml:"uses"`
 	With            map[string]any `yaml:"with"`
+}
+
+func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(testTimingRepoRoot(t), ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]ciWorkflowJob `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	plan, proof := workflow.Jobs["ci-plan"], workflow.Jobs["proof-unit"]
+	modules := findWorkflowStep(plan.Steps, "Restore shared Go modules")
+	consumer := findWorkflowStep(proof.Steps, "Restore shared Go modules")
+	if modules == nil || consumer == nil || modules.With["path"] != "~/go/pkg/mod" || consumer.With["path"] != modules.With["path"] || consumer.With["key"] != modules.With["key"] {
+		t.Fatal("planner and proofs must share one exact module-only cache")
+	}
+	for _, identity := range []string{"runner.os", "runner.arch", "steps.go.outputs.go-version", "hashFiles('go.sum')"} {
+		if !strings.Contains(modules.With["key"].(string), identity) {
+			t.Fatalf("module cache omits %s", identity)
+		}
+	}
+	populate := findWorkflowStep(plan.Steps, "Populate shared Go modules")
+	saveModules := findWorkflowStep(plan.Steps, "Save shared Go modules")
+	if populate == nil || populate.Run != "go mod download" || saveModules == nil || saveModules.With["path"] != modules.With["path"] || saveModules.With["key"] != "${{ steps.modules.outputs.cache-primary-key }}" {
+		t.Fatal("the planner must populate the complete module graph before saving it")
+	}
+	build := findWorkflowStep(proof.Steps, "Restore measured Go cache")
+	saveBuild := findWorkflowStep(proof.Steps, "Save measured Go cache")
+	if build == nil || saveBuild == nil || build.With["path"] != "~/.cache/go-build" || saveBuild.With["path"] != build.With["path"] || saveBuild.With["key"] != "${{ steps.go-cache-restore.outputs.cache-primary-key }}" {
+		t.Fatal("build cache must not duplicate modules or use a different save identity")
+	}
+	for _, key := range strings.Split(build.With["key"].(string)+"\n"+build.With["restore-keys"].(string), "\n") {
+		if strings.TrimSpace(key) != "" && (!strings.Contains(key, "matrix.unit") || !strings.Contains(key, "steps.go.outputs.go-version")) {
+			t.Fatalf("build fallback can select another proof/toolchain: %s", key)
+		}
+	}
+	for _, step := range proof.Steps {
+		if step.Name == "Save shared Go modules" || (step.Name == "Run exact planned proof unit" && step.If != "") {
+			t.Fatal("proofs must execute on cache hit/miss and not republish module archives")
+		}
+	}
 }
 
 type ciWorkflowJob struct {
@@ -225,7 +270,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
-	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
+	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
 	var serveappPatterns []*regexp.Regexp
 	for _, id := range serveappUnits {
 		unit, exists := policy.Units[id]
@@ -235,6 +280,20 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		serveappPatterns = append(serveappPatterns, regexp.MustCompile(unit.Run))
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "serveapp"), serveappPatterns)
+	contractsPatterns := make([]*regexp.Regexp, 0, 2)
+	for _, id := range []string{"contracts-first", "contracts-rest"} {
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/contracts"}) || unit.Run == "" || unit.CountMode != "count-1" {
+			t.Fatalf("%s must retain its complete uncached contracts partition", id)
+		}
+		contractsPatterns = append(contractsPatterns, regexp.MustCompile(unit.Run))
+		for name, profile := range policy.Profiles {
+			if !slices.Contains(profile.Units, id) {
+				t.Fatalf("profile %s omits contracts partition %s", name, id)
+			}
+		}
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "runtime", "contracts"), contractsPatterns)
 	storeUnit, ok := policy.Units["store-full"]
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)

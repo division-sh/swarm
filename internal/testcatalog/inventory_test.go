@@ -279,7 +279,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if !regexp.MustCompile(policy.Units["catalog-required-inventory"].Run).MatchString("TestCatalogExternalProofPartitionsThroughInventory") {
 		t.Fatal("required inventory unit omits the partition mutation proof")
 	}
-	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-burst-1", "hitl-releasee2e-burst-2", "hitl-releasee2e-golden", "hitl-releasee2e-journeys"}
+	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-burst-sqlite-1", "hitl-releasee2e-burst-postgres-1", "hitl-releasee2e-burst-sqlite-2", "hitl-releasee2e-burst-postgres-2", "hitl-releasee2e-golden", "hitl-releasee2e-journeys"}
 	for shard := 1; shard <= 6; shard++ {
 		releaseUnits = append(releaseUnits, fmt.Sprintf("hitl-releasee2e-invocation-%d", shard))
 	}
@@ -294,7 +294,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal/releasee2e"), runs); err != nil {
 		t.Fatal(err)
 	}
-	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
+	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
 	catalogUnits := []string{"catalog-replay-1", "catalog-replay-2", "catalog-replay-3", "catalog-runtime", "catalog-runtime-staged"}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
 		var selectors []string
