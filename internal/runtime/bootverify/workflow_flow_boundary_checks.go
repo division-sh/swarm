@@ -5,12 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -355,7 +353,6 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 					continue
 				}
 				nodeRef, _ := semanticview.ResolveExecutableNodeDeclaration(c.source, validationScope.semanticFlowID, nodeID)
-				policy, policyErr := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, nodeRef, validationScope.semanticFlowID, events.EventType(eventType), handler)
 				if validationScope.retiredStatic {
 					if handler.CreateEntity {
 						c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
@@ -386,24 +383,6 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 						Location: validationScope.displayFlowID,
 					})
 				}
-				if validationScope.normalPrimary {
-					continue
-				}
-				if standingActivatedFlow(c.source, validationScope.semanticFlowID) {
-					continue
-				}
-				if policyErr == nil && policy.Dependency == runtimepipeline.DeliveryTargetEntityMaterializing {
-					continue
-				}
-				if flowInputHandlerUsesResolutionMode(c.source, validationScope.semanticFlowID, eventType, runtimecontracts.FlowInputResolutionModeFanIn) {
-					continue
-				}
-				c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
-					CheckID:  "flow_boundary_create_entity_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s input pin handler %s on node %s requires state initialization at its composition-selected receiver", validationScope.displayFlowID, eventType, nodeID),
-					Location: validationScope.displayFlowID,
-				})
 			}
 		}
 	}
@@ -483,18 +462,6 @@ func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, even
 	}
 	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
 	return eventEntryDeclaresPayloadField(proof.Entry, field)
-}
-
-func flowInputHandlerUsesResolutionMode(source semanticview.Source, flowID, handlerEvent string, mode runtimecontracts.FlowInputResolutionMode) bool {
-	if source == nil {
-		return false
-	}
-	handlerEvent = strings.TrimSpace(handlerEvent)
-	if handlerEvent == "" || mode == runtimecontracts.FlowInputResolutionModeNone {
-		return false
-	}
-	endpoint, ok := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, handlerEvent).Endpoint()
-	return ok && endpoint.ResolutionMode == mode
 }
 
 func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {
