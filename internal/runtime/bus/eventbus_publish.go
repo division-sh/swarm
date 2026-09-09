@@ -952,6 +952,20 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 }
 
 func (eb *EventBus) admitPublishEvent(ctx context.Context, evt events.Event) (context.Context, events.AdmittedEvent, error) {
+	if err := events.ValidateGenericPublishEvent(evt); err != nil {
+		return ctx, events.AdmittedEvent{}, err
+	}
+	return eb.admitPublicationEventFacts(ctx, evt)
+}
+
+func (eb *EventBus) admitEnginePublishEvent(ctx context.Context, evt events.Event) (context.Context, events.AdmittedEvent, error) {
+	if evt.AdmissionClass() != events.EventAdmissionInheritedFanOut {
+		return eb.admitPublishEvent(ctx, evt)
+	}
+	return eb.admitPublicationEventFacts(ctx, evt)
+}
+
+func (eb *EventBus) admitPublicationEventFacts(ctx context.Context, evt events.Event) (context.Context, events.AdmittedEvent, error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return ctx, events.AdmittedEvent{}, err
@@ -972,10 +986,11 @@ func (eb *EventBus) admitPublishEvent(ctx context.Context, evt events.Event) (co
 			return ctx, events.AdmittedEvent{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	ictx, admitted, err := admitEventForPublish(ctx, evt, time.Now())
+	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{Now: time.Now(), RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return ctx, events.AdmittedEvent{}, err
 	}
+	ictx := admittedEventContext(ctx, admitted)
 	evt = admitted.Event()
 	ictx, err = eb.withAuthorActivityEventDescriptor(ictx, evt)
 	if err != nil {
@@ -1758,12 +1773,16 @@ func admitEventForPublish(ctx context.Context, evt events.Event, now time.Time) 
 	if err != nil {
 		return ctx, events.AdmittedEvent{}, err
 	}
+	return admittedEventContext(ctx, admitted), admitted, nil
+}
+
+func admittedEventContext(ctx context.Context, admitted events.AdmittedEvent) context.Context {
 	event := admitted.Event()
 	ctx = events.WithDeliveryContext(ctx, event.DeliveryContext())
 	if runID := strings.TrimSpace(event.RunID()); runID != "" {
 		ctx = runtimecorrelation.WithRunID(ctx, runID)
 	}
-	return ctx, admitted, nil
+	return ctx
 }
 
 func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {

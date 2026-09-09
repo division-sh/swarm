@@ -686,6 +686,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			target_set TEXT NOT NULL CHECK (json_valid(target_set)),
 			route_settlement TEXT NOT NULL CHECK (json_valid(route_settlement)),
 			operator_reference_event_id TEXT,
+			inherited_fan_out_origin BLOB,
 			handler_node TEXT,
 			idempotency_key TEXT,
 			CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class NOT IN ('child', 'replay') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND source_event_id IS NOT NULL AND run_id IS NOT NULL)),

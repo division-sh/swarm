@@ -103,7 +103,7 @@ type Executor struct {
 type executionFrame struct {
 	ctx                       context.Context
 	req                       ExecutionRequest
-	emitLineage               *events.EventLineage
+	fanOutEmission            *fanoutobligation.OrdinalEmission
 	base                      BaseContext
 	state                     ExecutionState
 	result                    ExecutionResult
@@ -3362,18 +3362,18 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 		resolution.Envelope.Source = events.RouteIdentity{}
 	}
 	lineage := events.LineageFromEvent(frame.req.Event)
-	if frame.emitLineage != nil {
-		lineage = *frame.emitLineage
+	facts := events.EventFacts{
+		Type:     events.EventType(strings.TrimSpace(eventType)),
+		Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: frame.req.Node.Key()},
+		Payload:  encoded, ChainDepth: chainDepth, Envelope: resolution.Envelope,
+		RoutingSource: routingSource, CreatedAt: createdAt,
 	}
-	evt, err := events.NewChildEvent(events.ChildEventInput{
-		Facts: events.EventFacts{
-			Type:     events.EventType(strings.TrimSpace(eventType)),
-			Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: frame.req.Node.Key()},
-			Payload:  encoded, ChainDepth: chainDepth, Envelope: resolution.Envelope,
-			RoutingSource: routingSource, CreatedAt: createdAt,
-		},
-		Lineage: lineage,
-	})
+	var evt events.Event
+	if frame.fanOutEmission != nil {
+		evt, err = frame.fanOutEmission.NewEvent(facts)
+	} else {
+		evt, err = events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: lineage})
+	}
 	if err != nil {
 		return EmitIntent{}, fmt.Errorf("construct emitted event: %w", err)
 	}
@@ -3381,7 +3381,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	return EmitIntent{
 		Event:         evt,
 		ChainDepth:    chainDepth,
-		ParentEventID: strings.TrimSpace(lineage.ParentEventID),
+		ParentEventID: evt.ParentEventID(),
 	}, nil
 }
 

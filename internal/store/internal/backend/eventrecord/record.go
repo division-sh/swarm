@@ -86,6 +86,7 @@ type Record struct {
 	SelectedForkSourceEventID  string
 	SelectedForkAuthorityStamp string
 	SelectedForkLineageOwners  int
+	InheritedFanOutOrigin      []byte
 }
 
 func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettlement) (Record, error) {
@@ -126,6 +127,13 @@ func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettleme
 		record.SelectedForkAuthorityStamp = lineage.AuthorityStamp()
 		record.SelectedForkLineageOwners = 1
 	}
+	if origin, ok := event.InheritedFanOutOrigin(); ok {
+		var err error
+		record.InheritedFanOutOrigin, err = json.Marshal(origin)
+		if err != nil {
+			return Record{}, err
+		}
+	}
 	if err := record.Validate(); err != nil {
 		return Record{}, err
 	}
@@ -138,6 +146,7 @@ func (r Record) Clone() Record {
 	r.TargetRoute = bytes.Clone(r.TargetRoute)
 	r.TargetSet = bytes.Clone(r.TargetSet)
 	r.RouteSettlement = bytes.Clone(r.RouteSettlement)
+	r.InheritedFanOutOrigin = bytes.Clone(r.InheritedFanOutOrigin)
 	return r
 }
 
@@ -166,6 +175,7 @@ func (r Record) Validate() error {
 		events.EventAdmissionChild,
 		events.EventAdmissionReplay,
 		events.EventAdmissionSelectedForkReplay,
+		events.EventAdmissionInheritedFanOut,
 		events.EventAdmissionRuntimeControl,
 		events.EventAdmissionRuntimeDiagnostic,
 		events.EventAdmissionDiagnosticDirect:
@@ -242,6 +252,9 @@ func validateSettlementEventClass(class events.EventAdmissionClass, eventType ev
 }
 
 func (r Record) validateClassFacts() error {
+	if _, err := r.decodeInheritedFanOutOrigin(); err != nil {
+		return err
+	}
 	runID := strings.TrimSpace(r.RunID)
 	parentEventID := strings.TrimSpace(r.SourceEventID)
 	operatorReferenceID := strings.TrimSpace(r.OperatorReferencedEventID)
@@ -346,13 +359,18 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 		}
 		selectedFork = &value
 	}
+	origin, err := r.decodeInheritedFanOutOrigin()
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
 	restored, err := events.RestoreAdmittedEvent(events.RestoredEventInput{
-		Class:         r.Class,
-		Facts:         facts,
-		RunID:         r.RunID,
-		ParentEventID: r.SourceEventID,
-		OperatorRef:   operatorRef,
-		SelectedFork:  selectedFork,
+		Class:           r.Class,
+		Facts:           facts,
+		RunID:           r.RunID,
+		ParentEventID:   r.SourceEventID,
+		OperatorRef:     operatorRef,
+		SelectedFork:    selectedFork,
+		InheritedFanOut: origin,
 	})
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("decode event record %s: %w", strings.TrimSpace(r.EventID), err)
@@ -397,7 +415,8 @@ func (r Record) Equal(other Record) bool {
 		r.SelectedForkSourceRunID == other.SelectedForkSourceRunID &&
 		r.SelectedForkSourceEventID == other.SelectedForkSourceEventID &&
 		r.SelectedForkAuthorityStamp == other.SelectedForkAuthorityStamp &&
-		r.SelectedForkLineageOwners == other.SelectedForkLineageOwners
+		r.SelectedForkLineageOwners == other.SelectedForkLineageOwners &&
+		jsonEqual(r.InheritedFanOutOrigin, other.InheritedFanOutOrigin)
 }
 
 func (r Record) DecodeSettlement() (events.RouteSettlement, error) {

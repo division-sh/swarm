@@ -35,12 +35,13 @@ func newAdmittedEvent(event Event, disposition AdmittedRunDisposition) AdmittedE
 }
 
 type RestoredEventInput struct {
-	Class         EventAdmissionClass
-	Facts         EventFacts
-	RunID         string
-	ParentEventID string
-	OperatorRef   *OperatorReferenceProvenance
-	SelectedFork  *SelectedForkLineage
+	Class           EventAdmissionClass
+	Facts           EventFacts
+	RunID           string
+	ParentEventID   string
+	OperatorRef     *OperatorReferenceProvenance
+	SelectedFork    *SelectedForkLineage
+	InheritedFanOut *InheritedFanOutOrigin
 }
 
 // RestoreAdmittedEvent is the canonical durable readback boundary. It does not
@@ -67,6 +68,11 @@ func RestoreAdmittedEvent(input RestoredEventInput) (AdmittedEvent, error) {
 			return AdmittedEvent{}, fmt.Errorf("selected-fork replay durable event requires lineage")
 		}
 		event, err = NewSelectedForkReplayEvent(SelectedForkReplayEventInput{Facts: input.Facts, Lineage: *input.SelectedFork})
+	case EventAdmissionInheritedFanOut:
+		if input.InheritedFanOut == nil || input.ParentEventID != "" || input.RunID != input.InheritedFanOut.RunID() {
+			return AdmittedEvent{}, fmt.Errorf("inherited fan-out readback requires exact origin and absent causal parent")
+		}
+		event, err = NewInheritedFanOutEvent(InheritedFanOutEventInput{Facts: input.Facts, Origin: *input.InheritedFanOut})
 	case EventAdmissionRuntimeControl:
 		event, err = restoreRuntimeEvent(EventAdmissionRuntimeControl, input.Facts, input.RunID, input.ParentEventID)
 	case EventAdmissionRuntimeDiagnostic:

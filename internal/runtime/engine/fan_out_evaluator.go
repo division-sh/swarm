@@ -21,14 +21,9 @@ func (e *Executor) EvaluateFanOutOrdinal(ctx context.Context, intent fanoutoblig
 	if e == nil || e.deps.Source == nil {
 		return EmitIntent{}, ErrMissingSemanticSource
 	}
-	if err := intent.Validate(); err != nil {
+	emission, err := fanoutobligation.PrepareOrdinalEmission(intent, trigger, ordinal)
+	if err != nil {
 		return EmitIntent{}, err
-	}
-	if trigger.ID() != intent.Request.Capsule.Lineage.ParentEventID || trigger.RunID() != intent.Request.Capsule.Lineage.RunID {
-		return EmitIntent{}, fmt.Errorf("fan-out trigger disagrees with immutable intent")
-	}
-	if ordinal < intent.Cursor || ordinal >= intent.Request.Cardinality {
-		return EmitIntent{}, fmt.Errorf("fan-out ordinal %d is outside the claimed suffix [%d,%d)", ordinal, intent.Cursor, intent.Request.Cardinality)
 	}
 	capsule := intent.Request.Capsule
 	node, err := identity.ParseExecutableNodeKey(capsule.NodeKey)
@@ -89,9 +84,7 @@ func (e *Executor) EvaluateFanOutOrdinal(ctx context.Context, intent fanoutoblig
 			FanOutPlans: e.deps.Source.FanOutPlansForHandler(node, capsule.HandlerEventKey),
 		},
 		base: base, state: state, payload: payload,
-		emitLineage: &events.EventLineage{
-			RunID: intent.Request.Key.RunID, ParentEventID: trigger.ID(), TaskID: trigger.TaskID(), ExecutionMode: trigger.ExecutionMode(),
-		},
+		fanOutEmission: &emission,
 	}
 	emitSpec := plan.Emit
 	eventType := e.resolveDeclarativeEmitEventType(frame, emitSpec.EventType())

@@ -63,6 +63,7 @@ const (
 	EventAdmissionChild              EventAdmissionClass = "child"
 	EventAdmissionReplay             EventAdmissionClass = "replay"
 	EventAdmissionSelectedForkReplay EventAdmissionClass = "selected_fork_replay"
+	EventAdmissionInheritedFanOut    EventAdmissionClass = "inherited_fan_out"
 )
 
 type EventProducerType string
@@ -1045,6 +1046,7 @@ type Event struct {
 	routingSource   RoutingSource
 	operatorRef     *OperatorReferenceProvenance
 	selectedFork    *SelectedForkLineage
+	inheritedFanOut *InheritedFanOutOrigin
 }
 
 type deliveryContextKey struct{}
@@ -1092,16 +1094,17 @@ type EventLineage struct {
 }
 
 type EventFacts struct {
-	ID            string
-	Type          EventType
-	Producer      ProducerClaim
-	TaskID        string
-	Payload       json.RawMessage
-	ChainDepth    int
-	Envelope      EventEnvelope
-	RoutingSource RoutingSource
-	CreatedAt     time.Time
-	ExecutionMode executionmode.Mode
+	inheritedFanOut *InheritedFanOutOrigin
+	ID              string
+	Type            EventType
+	Producer        ProducerClaim
+	TaskID          string
+	Payload         json.RawMessage
+	ChainDepth      int
+	Envelope        EventEnvelope
+	RoutingSource   RoutingSource
+	CreatedAt       time.Time
+	ExecutionMode   executionmode.Mode
 }
 
 type RunCreatingRootIngressEventInput struct {
@@ -1445,21 +1448,22 @@ func newSemanticEvent(class EventAdmissionClass, rootIntent rootIngressRunIntent
 		return Event{}, fmt.Errorf("selected-fork lineage is only valid for selected-fork replay events")
 	}
 	evt := Event{
-		admissionClass: EventAdmissionClass(strings.TrimSpace(string(class))),
-		rootIntent:     rootIntent,
-		id:             strings.TrimSpace(facts.ID),
-		eventType:      eventType,
-		producer:       producer,
-		taskID:         strings.TrimSpace(facts.TaskID),
-		payload:        payload,
-		chainDepth:     facts.ChainDepth,
-		runID:          strings.TrimSpace(runID),
-		parentEventID:  strings.TrimSpace(parentEventID),
-		createdAt:      facts.CreatedAt,
-		executionMode:  facts.ExecutionMode,
-		routingSource:  facts.RoutingSource,
-		operatorRef:    operatorRef,
-		selectedFork:   selectedFork,
+		admissionClass:  EventAdmissionClass(strings.TrimSpace(string(class))),
+		rootIntent:      rootIntent,
+		id:              strings.TrimSpace(facts.ID),
+		eventType:       eventType,
+		producer:        producer,
+		taskID:          strings.TrimSpace(facts.TaskID),
+		payload:         payload,
+		chainDepth:      facts.ChainDepth,
+		runID:           strings.TrimSpace(runID),
+		parentEventID:   strings.TrimSpace(parentEventID),
+		createdAt:       facts.CreatedAt,
+		executionMode:   facts.ExecutionMode,
+		routingSource:   facts.RoutingSource,
+		operatorRef:     operatorRef,
+		selectedFork:    selectedFork,
+		inheritedFanOut: facts.inheritedFanOut,
 	}
 	evt.setEnvelopeClaim(envelope)
 	if !evt.createdAt.IsZero() {
@@ -1613,6 +1617,10 @@ func (e Event) Clone() Event {
 	if e.selectedFork != nil {
 		lineage := *e.selectedFork
 		cloned.selectedFork = &lineage
+	}
+	if e.inheritedFanOut != nil {
+		origin := *e.inheritedFanOut
+		cloned.inheritedFanOut = &origin
 	}
 	return cloned
 }

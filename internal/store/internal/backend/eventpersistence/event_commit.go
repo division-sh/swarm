@@ -534,6 +534,14 @@ func commitPublicationTx(
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
+	return commitValidatedPublicationTx(ctx, tx, story, effects, store, postgres, command, handoff)
+}
+
+func commitValidatedPublicationTx(
+	ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects,
+	store eventCommitTxStore, postgres bool, command runtimebus.PublicationCommand,
+	handoff *runLifecycleCandidateHandoffReservation,
+) (runtimebus.CommittedPublication, error) {
 	if command.HasAuthorScope {
 		ctx = runtimeauthoractivity.WithScope(ctx, command.AuthorScope)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -45,7 +46,7 @@ func (p EnginePublicationPlan) DurablePublicationEventID() string {
 }
 
 func (p EnginePublicationPlan) ValidateDurablePublicationPlan() error {
-	if err := p.command.Validate(); err != nil {
+	if err := p.command.ValidateFanOut(); err != nil {
 		return err
 	}
 	if p.prepared.Event.ID() != p.DurablePublicationEventID() || p.intent.Event.ID() != p.DurablePublicationEventID() {
@@ -111,7 +112,7 @@ func (eb *EventBus) PrepareEnginePublications(ctx context.Context, intents []run
 			continue
 		}
 		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
-		preparedCtx, admitted, err := eb.admitPublishEvent(intentCtx, intent.Event)
+		preparedCtx, admitted, err := eb.admitEnginePublishEvent(intentCtx, intent.Event)
 		if err != nil {
 			release()
 			return nil, err
@@ -209,7 +210,15 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 			continue
 		}
 		intent := intents[i]
-		_, admitted, err := admitEventForPublish(ctx, intent.Event, time.Now().UTC())
+		var admitted events.AdmittedEvent
+		var err error
+		if intent.Event.AdmissionClass() == events.EventAdmissionInheritedFanOut {
+			// Dispatch requires the named chunk's staged operation or exact
+			// durable readback below, never generic publication authority.
+			admitted, err = events.RevalidatePersistedEvent(intent.Event)
+		} else {
+			_, admitted, err = admitEventForPublish(ctx, intent.Event, time.Now().UTC())
+		}
 		if err != nil {
 			return err
 		}
@@ -228,9 +237,44 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		if result.handled {
 			continue
 		}
+		if intent.Event.AdmissionClass() == events.EventAdmissionInheritedFanOut {
+			if err := d.bus.requireCommittedInheritedFanOut(ctx, intent.Event); err != nil {
+				return err
+			}
+		}
 		if err := d.dispatchAndRecord(ctx, intent, nil); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// A repeated post-commit callback has no process-local operation to take. It
+// must prove the immutable occurrence through canonical readback before the
+// existing persisted-obligation recovery path can classify it (including an
+// already-terminal no-op). This never grants generic publication permission.
+func (eb *EventBus) requireCommittedInheritedFanOut(ctx context.Context, event events.Event) error {
+	reader, ok := eb.store.(PreparedPublishEventReader)
+	if !ok {
+		return fmt.Errorf("inherited fan-out dispatch requires canonical committed-event readback")
+	}
+	prepared, found, err := loadValidatedPreparedPublishEvent(ctx, reader, event.ID())
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("inherited fan-out dispatch requires exact committed chunk evidence")
+	}
+	actual, err := events.IntegrityProjection(event)
+	if err != nil {
+		return err
+	}
+	want, err := events.IntegrityProjection(prepared.Event.Event())
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(actual, want) {
+		return events.ErrEventIdentityConflict
 	}
 	return nil
 }

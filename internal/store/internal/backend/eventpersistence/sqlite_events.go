@@ -148,6 +148,9 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 }
 
 func (s *EventSQLiteOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	if admitted.Event().AdmissionClass() == events.EventAdmissionInheritedFanOut {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("inherited fan-out origin requires named chunk publication")
+	}
 	return s.appendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
 }
 
