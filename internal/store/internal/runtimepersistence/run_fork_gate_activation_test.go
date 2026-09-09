@@ -23,6 +23,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -719,6 +720,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			wantCopied bool
 		}{
 			{name: "succeeded", status: "succeeded", wantCopied: true},
+			{name: "failed", status: "failed", wantCopied: true},
 			{name: "uncertain", status: "uncertain", wantErr: "ambiguous dispatch evidence"},
 			{name: "started", status: "started", wantErr: "recorded evidence is not terminal"},
 			{name: "missing", status: "missing", wantErr: "cannot authorize a fork-local call"},
@@ -778,6 +780,19 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				var failure any
 				var completedAt any = now.Add(3 * time.Minute)
 				switch tc.status {
+				case "failed":
+					resultEventType = continuation.FailureEvent
+					storedResultEventID = activityidentity.ResultEventID(activityidentity.Fact{
+						RunID: sourceRunID, SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID,
+						Owner: owner, ExecutionFlowID: continuation.FlowID, HandlerEventKey: continuation.HandlerEventKey,
+						ActivityID: continuation.ActivityID, Tool: continuation.Tool, Attempt: 1,
+					}, continuation.FailureEvent)
+					envelope, ok := failures.EnvelopeFromError(failures.New(failures.ClassLifecycleConflict, "provider_rejected", "activity-runtime", "execute", nil))
+					if !ok {
+						t.Fatal("missing failed activity evidence")
+					}
+					failure = forkTestJSON(t, envelope)
+					resultPayload = forkTestJSON(t, map[string]any{"activity_id": continuation.ActivityID, "failure": envelope})
 				case "uncertain":
 					resultEventType = continuation.FailureEvent
 					resultPayload = `{"activity_id":"send_support_reply","failure":{"code":"provider_outcome_uncertain"}}`
@@ -879,6 +894,13 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				}
 				if !tc.wantCopied || copiedStatus != tc.status || copiedEntity != forkRunID || copiedFlow != forkRunID {
 					t.Fatalf("copied status=%q entity=%q flow=%q", copiedStatus, copiedEntity, copiedFlow)
+				}
+				copied, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, forkRequestID)
+				if err != nil || !found || copied.ResultEventType != resultEventType || copied.ResultEventID == storedResultEventID || copied.InputHash != "input-hash" {
+					t.Fatalf("terminal approved result lost fork-local identity: %#v found=%v err=%v", copied, found, err)
+				}
+				if tc.status == "failed" && (copied.Failure == nil || copied.Failure.Detail.Code != "provider_rejected") {
+					t.Fatalf("approved failed result lost its terminal failure: %#v", copied.Failure)
 				}
 			})
 		}
