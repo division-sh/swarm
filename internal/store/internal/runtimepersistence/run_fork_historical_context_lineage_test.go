@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
@@ -35,10 +36,13 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					ctx, source := seedDeclaredForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 1, at)
 					if sourceKind == "entity_field_revision" {
-						entityID, mutationID := seedFanOutEntityRevision(t, ctx, db, postgres, source.runID, `["source-item"]`, at)
-						// The reusable field-only seed does not supply lifecycle history.
-						// Materialization also requires the actual queued-state mutation.
-						if _, err := db.ExecContext(ctx, `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,old_value,new_value,writer_type,writer_id,created_at) VALUES ($1,$2,$3,'lifecycle_state','','null','"queued"','platform','fan-out-history',$4)`, uuid.NewString(), source.runID, entityID, at); err != nil {
+						// The declared carrier executes at the root. Retain its real root
+						// owner rather than substituting the unrelated root/one fixture.
+						entityID, mutationID := source.runID, uuid.NewString()
+						if _, err := db.ExecContext(ctx, `UPDATE entity_state SET fields=$2 WHERE run_id=$1 AND entity_id=$1`, source.runID, `{"items":["source-item"]}`); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := db.ExecContext(ctx, `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,old_value,new_value,writer_type,writer_id,created_at) VALUES ($1,$2,$2,'authored_field','items','null',$3,'platform','fan-out-history',$4)`, mutationID, source.runID, `["source-item"]`, at); err != nil {
 							t.Fatal(err)
 						}
 						bindFanOutEntityRevision(t, ctx, db, postgres, source, source.runID, entityID, mutationID, at)
@@ -92,8 +96,21 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 							t.Fatalf("generation %d inherited historical plan: %#v err=%v", generation, inherited.FanOutObligations, err)
 						}
 						got := inherited.FanOutObligations[0]
-						if got.Intent.Request.Key.RunID != child.ForkRunID || got.Intent.Request.Key.TriggeringDeliveryID != source.deliveryID || !reflect.DeepEqual(got.Intent.Source, original.Intent.Source) || !reflect.DeepEqual(got.Intent.Request.Capsule, original.Intent.Request.Capsule) {
+						if got.Intent.Request.Key.RunID != child.ForkRunID || got.Intent.Request.Key.TriggeringDeliveryID != source.deliveryID || !reflect.DeepEqual(got.Intent.Source, original.Intent.Source) {
 							t.Fatalf("generation %d remapped ancestor provenance into owning child: %#v; original=%#v", generation, got.Intent, original.Intent)
+						}
+						wantCapsule := original.Intent.Request.Capsule
+						if reflect.TypeOf(wantCapsule).NumField() != 19 || wantCapsule.DeliveryRoute == nil || !wantCapsule.DeliveryRoute.Target.ExistingEntity() {
+							t.Fatal("capsule census or declared root receiver changed; reclassify every field")
+						}
+						wantCapsule.Route = flowidentity.StoredRoute(".", child.ForkRunID, child.ForkRunID)
+						wantCapsule.EntityID = child.ForkRunID
+						wantCapsule.ProducerSource = eventtest.RootRoutingSource(child.ForkRunID)
+						wantDelivery := *wantCapsule.DeliveryRoute
+						wantDelivery.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: child.ForkRunID, EntityID: child.ForkRunID})
+						wantCapsule.DeliveryRoute = &wantDelivery
+						if !reflect.DeepEqual(got.Intent.Request.Capsule, wantCapsule) {
+							t.Fatalf("generation %d changed frozen capsule fields or lost child execution ownership: got=%#v want=%#v", generation, got.Intent.Request.Capsule, wantCapsule)
 						}
 						if len(got.Outcomes) != 1 || got.Outcomes[0].EventID != "" || got.Outcomes[0].SourceEventID != outcomeEvent.ID() || got.Outcomes[0].InheritedDisposition == "" {
 							t.Fatalf("generation %d inherited outcome became a fabricated local event: %#v", generation, got.Outcomes)

@@ -73,7 +73,15 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 			outcome := fanoutobligation.Outcome{Ordinal: 0, Kind: fanoutobligation.OutcomeCommitted, SourceEventID: uuid.NewString(), InheritedDisposition: "no_route"}
 			plan := runfork.RunForkPlan{SourceRunID: sourceRun, FanOutObligations: []runfork.RunForkFanOutObligation{{Intent: intent, Outcomes: []fanoutobligation.Outcome{outcome}}}}
 			refs := map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef{ref.ElementRef: ref}
-			capsule, err := json.Marshal(intent.Request.Capsule)
+			// Persist the child execution coordinates, keeping the original causal
+			// lineage. Timestamp probes must not depend on a stale source capsule.
+			childCapsule := intent.Request.Capsule
+			childCapsule.Route = flowidentity.StoredRoute(".", childID, childID)
+			childCapsule.ProducerSource, err = events.NewRootRoutingSource(childID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			capsule, err := json.Marshal(childCapsule)
 			if err != nil {
 				t.Fatal(err)
 			}

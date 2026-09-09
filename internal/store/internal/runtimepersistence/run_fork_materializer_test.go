@@ -1195,13 +1195,13 @@ func TestPostgresOperatorEventReadbackProjectsRunForkReplaySettlement(t *testing
 func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
+	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: pg}, sourceRunID, selectedActivityProducerSource(t))
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, rootEventID, at)
+	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, rootEventID, at)
 	eventID := uuid.NewString()
 	// Route-bearing replay is gated by historical route proof; this fixture isolates direct pending-delivery replay.
 	sourceEnvelope := events.EventEnvelope{
@@ -1238,6 +1238,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	sourceEvent = sourceAdmitted.Event()
 
+	ctx, releaseCatalog, err := semanticEventFixtureContext(ctx, pg, sourceEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(releaseCatalog)
 	safeAgentIdentity := runtimebustest.IdentityForRun(t, sourceRunID, "safe-agent", "")
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}
 	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, sourceRoute, runtimedelivery.StateQueued, nil)
@@ -1277,6 +1282,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		ForkRunID:                         materialized.ForkRunID,
 		AllowSourceFreeze:                 true,
 		HistoricalReplayExecutionAdmitter: admitter,
+		OriginalLoopCarriage:              originalCarriageForRun(t, pg, sourceRunID),
 	})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
@@ -1413,7 +1419,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err := acknowledgePipelineEventFixture(ctx, pg, eventID); !errors.Is(err, runtimepipelineobligation.ErrIneligible) {
 		t.Fatalf("post-freeze source pipeline receipt error = %v, want ErrIneligible", err)
 	}
-	eb, err := newStoreTestEventBus(t, pg)
+	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok {
+		t.Fatal("replay fixture requires its admitted source fact")
+	}
+	eb, err := newStoreTestEventBus(t, pg, runtimebus.EventBusOptions{SourceArtifactFact: fact})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
