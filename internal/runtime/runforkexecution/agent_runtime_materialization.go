@@ -356,18 +356,12 @@ func prepareSelectedContractDeclarations(loaded LoadedSelectedContractSource, bl
 	if err != nil {
 		return runtimeagenttopology.SelectedDeclarationPlan{}, err
 	}
-	configured := make(map[agentidentity.Plan]runtimemanager.AgentMaterializationBlueprint, len(blueprints))
-	for _, blueprint := range blueprints {
-		if previous, exists := configured[blueprint.Identity]; exists {
-			left, err := runtimemanager.AgentConfigPlanRevision(previous.Config, previous.Identity)
-			if err != nil {
-				return runtimeagenttopology.SelectedDeclarationPlan{}, err
-			}
-			right, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, blueprint.Identity)
-			if err != nil || left != right {
-				return runtimeagenttopology.SelectedDeclarationPlan{}, errors.New("selected declaration repeats a conflicting configuration")
-			}
-		}
+	actors, err := runforkreadiness.PreparedActorCensus(blueprints)
+	if err != nil {
+		return runtimeagenttopology.SelectedDeclarationPlan{}, err
+	}
+	configured := make(map[agentidentity.Plan]runtimemanager.AgentMaterializationBlueprint, len(actors))
+	for _, blueprint := range actors {
 		configured[blueprint.Identity] = blueprint
 	}
 	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(static))
