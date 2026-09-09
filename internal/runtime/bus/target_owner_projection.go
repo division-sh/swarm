@@ -31,6 +31,9 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 	if err = p.resolveNodeTargetOwners(&plan); err != nil {
 		return RoutePlan{}, err
 	}
+	if err = p.bindReceiverMaterializations(&plan); err != nil {
+		return RoutePlan{}, err
+	}
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
 		if !intent.TargetOwnership.Empty() {
@@ -132,6 +135,9 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 		return RoutePlan{}, err
 	}
 	plan.ConnectEvaluation = ledger
+	if err := events.ValidateReceiverMaterializations(plan.Event, plan.DeliveryRoutes()); err != nil {
+		return RoutePlan{}, err
+	}
 	return plan.Normalized(), nil
 }
 

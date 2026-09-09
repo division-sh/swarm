@@ -1,6 +1,7 @@
 package events
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"reflect"
@@ -11,6 +12,129 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/google/uuid"
 )
+
+func TestReceiverMaterializationPlanDurableRouteRoundTrip(t *testing.T) {
+	event, node, agents := receiverMaterializationFixture(t)
+	publication := append([]DeliveryRoute{node}, agents...)
+	plan, err := AdmitReceiverMaterializationPlan(event, node, agents, publication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range agents {
+		baseID, err := agents[i].Identity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound, err := plan.BindDependent(agents[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		boundID, err := bound.Identity()
+		if err != nil || boundID == baseID {
+			t.Fatalf("dependency missing from durable identity: %v", err)
+		}
+		raw, err := json.Marshal(bound)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored DeliveryRoute
+		if err := json.Unmarshal(raw, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(restored, bound.Normalized()) {
+			t.Fatal("route codec lost or changed admitted dependency")
+		}
+		publication[i+1] = restored
+	}
+	if err := ValidateReceiverMaterializations(event, publication); err != nil {
+		t.Fatal(err)
+	}
+	for _, index := range []int{1, 2} {
+		corrupt := append([]DeliveryRoute(nil), publication...)
+		corrupt[index].Materialization = ReceiverMaterializationPlan{}
+		if err := ValidateReceiverMaterializations(event, corrupt); err == nil {
+			t.Fatal("aggregate accepted erased dependent plan")
+		}
+	}
+	corrupt := append([]DeliveryRoute(nil), publication[1:]...)
+	if err := ValidateReceiverMaterializations(event, corrupt); err == nil {
+		t.Fatal("aggregate accepted missing materializer")
+	}
+	otherEvent := event
+	otherEvent.id = uuid.NewString()
+	if err := ValidateReceiverMaterializations(otherEvent, publication); err == nil {
+		t.Fatal("aggregate accepted another publication")
+	}
+	if _, err := plan.BindDependent(node); err == nil {
+		t.Fatal("bound dependency to materializer")
+	}
+}
+
+func TestReceiverMaterializationPlanStrictDurableCodec(t *testing.T) {
+	event, node, agents := receiverMaterializationFixture(t)
+	plan, err := AdmitReceiverMaterializationPlan(event, node, agents, append([]DeliveryRoute{node}, agents...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, variant := range []string{"unknown", "missing", "null_field", "duplicate_key", "duplicate_escaped_key", "trailing", "empty_agents", "duplicate_agents", "unordered_agents", "foreign_run", "different_target"} {
+		t.Run(variant, func(t *testing.T) {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				t.Fatal(err)
+			}
+			switch variant {
+			case "unknown":
+				fields["legacy"] = json.RawMessage(`true`)
+			case "missing":
+				delete(fields, "routing_source")
+			case "null_field":
+				fields["routing_source"] = json.RawMessage(`null`)
+			case "empty_agents":
+				fields["dependent_route_identities"] = json.RawMessage(`[]`)
+			case "duplicate_agents", "unordered_agents":
+				var ids []string
+				if err := json.Unmarshal(fields["dependent_route_identities"], &ids); err != nil {
+					t.Fatal(err)
+				}
+				if variant == "duplicate_agents" {
+					ids[1] = ids[0]
+				} else {
+					ids[0], ids[1] = ids[1], ids[0]
+				}
+				fields["dependent_route_identities"], _ = json.Marshal(ids)
+			case "foreign_run":
+				fields["run_id"], _ = json.Marshal(uuid.NewString())
+			case "different_target":
+				target := node.Target.Route()
+				target.EntityID = uuid.NewString()
+				owner, err := NewMaterializingEntityTarget(target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fields["target"], _ = json.Marshal(owner)
+			}
+			bad, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch variant {
+			case "duplicate_key":
+				bad = append(bytes.TrimSuffix(bad, []byte("}")), append([]byte(`,"run_id":`), append(fields["run_id"], '}')...)...)
+			case "duplicate_escaped_key":
+				bad = append(bytes.TrimSuffix(bad, []byte("}")), append([]byte(`,"run_\u0069d":`), append(fields["run_id"], '}')...)...)
+			case "trailing":
+				bad = append(bad, []byte(` {}`)...)
+			}
+			if _, err := RestoreDeliveryMaterialization(agents[0], bad); err == nil {
+				t.Fatalf("accepted %s", variant)
+			}
+		})
+	}
+}
 
 func receiverMaterializationFixture(t *testing.T) (Event, DeliveryRoute, []DeliveryRoute) {
 	t.Helper()

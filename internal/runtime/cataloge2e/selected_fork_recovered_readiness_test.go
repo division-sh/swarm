@@ -214,7 +214,7 @@ func logSelectedForkRecoveryFailure(t *testing.T, ctx context.Context, h *runtim
 	logCause(failure)
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	for _, table := range []string{"flow_instances", "flow_instance_runtime_readiness", "agents", "agent_lifecycle_transition_facts", "events"} {
+	for _, table := range []string{"flow_instances", "flow_instance_runtime_readiness", "agents", "agent_lifecycle_transition_facts", "events", "event_deliveries"} {
 		rows, err := h.db.QueryContext(readCtx, "SELECT * FROM "+table+" WHERE run_id = $1", child)
 		if err != nil {
 			t.Logf("recovery diagnostic %s: %v", table, err)

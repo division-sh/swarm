@@ -523,6 +523,11 @@ func (arbitrary *unexpectedReader) mintReceiverPlan() {
     alias := mint
     _ = alias
 }
+func (arbitrary *unexpectedReader) restoreReceiverPlan() {
+    restore := events.RestoreDeliveryMaterialization
+    alias := restore
+    _ = alias
+}
 func (arbitrary *unexpectedReader) decode(raw []byte) error {
     var fact eventAlias
     unmarshal := codec.Unmarshal
@@ -577,6 +582,7 @@ func ordinaryBusiness(raw []byte) error {
 	got := historicalBoundaryProblems(findings, historicalBoundaryAllowances(), false)
 	want := []string{
 		historicalBoundaryOwner + "unexpectedReader.mintReceiverPlan/reference:events::AdmitReceiverMaterializationPlan",
+		historicalBoundaryOwner + "unexpectedReader.restoreReceiverPlan/reference:events::RestoreDeliveryMaterialization",
 		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:events::NewInheritedFanOutOrigin",
 		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:runtime/fanoutobligation::PrepareOrdinalEmission",
 		historicalBoundaryOwner + "unexpectedReader.admitOrigin/reference:runtime/bus::PublicationCommand.ValidateFanOut",

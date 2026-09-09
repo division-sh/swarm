@@ -22,6 +22,7 @@ func TestHistoricalDeliveryProjectionCoversEveryRouteField(t *testing.T) {
 		"Context":           {"delivery_context"},
 		"PayloadProjection": {"delivery_payload_projection"},
 		"ConnectClaim":      {"connect_execution_claim"},
+		"Materialization":   {"receiver_materialization_plan"},
 	}
 	routeType := reflect.TypeOf(events.DeliveryRoute{})
 	if routeType.NumField() != len(fields) {
@@ -46,7 +47,7 @@ func TestHistoricalDeliveryProjectionCoversEveryRouteField(t *testing.T) {
 			}
 		}
 	}
-	for _, key := range []string{"delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim"} {
+	for _, key := range []string{"delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan"} {
 		if kind, exists := kinds[key]; !exists || kind != valueJSON {
 			t.Errorf("%s must preserve JSON structure, got kind %d, exists %t", key, kind, exists)
 		}

@@ -46,6 +46,119 @@ func CopyForkReceiverBusinessMutationOwnership(t testing.TB, entitylessProducer 
 	return root
 }
 
+// CopyReceiverMaterializationWithAgent retains the ordinary connected seed
+// handler and adds an independent observer of the same receiving pin.
+func CopyReceiverMaterializationWithAgent(t testing.TB, agent string) string {
+	t.Helper()
+	if agent != "collector" && agent != "renamed-observer" {
+		t.Fatalf("unsupported closed receiver observer variant %q", agent)
+	}
+	root := CopyForkReceiverBusinessMutationOwnership(t, false)
+	writeClosedVariantFile(t, root, "consumer/prompts/observer.md", "Observe the admitted item.\n")
+	writeClosedVariantFile(t, root, "consumer/agents.yaml", fmt.Sprintf(`%s:
+  id: %s
+  role: observer
+  model: regular
+  intent: prompts/observer.md
+  subscriptions: [receiver.seeded]
+  emit_events: []
+`, agent, agent))
+	return root
+}
+
+func CopyReceiverMaterializationGeometry(t testing.TB, nested bool) string {
+	t.Helper()
+	receivers := []ForkReceiver{{Path: "consumer", Policy: ForkReceiverRequiredExisting}, {Path: "sibling", Policy: ForkReceiverRequiredExisting}}
+	root := CopyForkReceiverOwnership(t, receivers, false)
+	prefix := ""
+	if nested {
+		root, prefix = CopyForkReceiverNestedOwnership(t, receivers), "branch/"
+	}
+	for _, receiver := range receivers {
+		path := prefix + receiver.Path
+		writeClosedVariantFile(t, root, path+"/prompts/observer.md", "Observe the admitted item.\n")
+		writeClosedVariantFile(t, root, path+"/agents.yaml", `collector:
+  id: collector
+  role: observer
+  model: regular
+  intent: prompts/observer.md
+  subscriptions: [receiver.seeded]
+  emit_events: []
+`)
+	}
+	return root
+}
+
+func CopyReceiverMaterializationSourceLocalObserver(t testing.TB) string {
+	t.Helper()
+	root := CopyForkReceiverBusinessMutationOwnership(t, false)
+	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the source input without acquiring a receiver entity.\n")
+	writeClosedVariantFile(t, root, "agents.yaml", `observer:
+  id: observer
+  role: observer
+  model: regular
+  intent: prompts/observer.md
+  subscriptions: [start.seeded]
+  emit_events: []
+`)
+	return root
+}
+
+func CopyReceiverMaterializationIntoRoot(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	writeClosedVariantFile(t, root, "schema.yaml", `name: receiver-root-materialization
+stages:
+  waiting: {initial: true}
+  active: {}
+  done: {terminal: true}
+pins:
+  inputs:
+    events:
+      - {event: work.closed, source: external}
+      - child.ready
+connect:
+  - {event: child.ready, from: child, to: .}
+`)
+	writeClosedVariantFile(t, root, "events.yaml", "work.closed: {}\n")
+	writeClosedVariantFile(t, root, "entities.yaml", "receipt:\n  token: text\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", `collector:
+  id: collector
+  execution_type: system_node
+  subscribes_to: [child.ready, work.closed]
+  event_handlers:
+    work.closed:
+      advances_to: done
+    child.ready:
+      create_entity: true
+      advances_to: active
+      data_accumulation:
+        writes: [{target_field: token, expression: payload.token}]
+`)
+	writeClosedVariantFile(t, root, "agents.yaml", `collector:
+  id: collector
+  role: observer
+  model: regular
+  intent: prompts/observer.md
+  subscriptions: [child.ready]
+  emit_events: []
+`)
+	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the receiving root entity.\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  inputs:\n    events: [{event: work.requested, source: external}]\n  outputs:\n    events: [child.ready]\n")
+	writeClosedVariantFile(t, root, "child/events.yaml", "work.requested:\n  token: text\nchild.ready:\n  token: text\n")
+	writeClosedVariantFile(t, root, "child/nodes.yaml", `producer:
+  id: producer
+  execution_type: system_node
+  subscribes_to: [work.requested]
+  event_handlers:
+    work.requested:
+      emit:
+        event: child.ready
+        fields: {token: {expression: payload.token}}
+`)
+	return root
+}
+
 func CopyForkReceiverRepeatedOwnership(t testing.TB, receivers []ForkReceiver) string {
 	t.Helper()
 	root := CopyForkReceiverOwnership(t, receivers, false)

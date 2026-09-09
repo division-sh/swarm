@@ -64,12 +64,7 @@ func (s *PipelinePostgresOwner) LoadWorkflowTargetPersistence(ctx context.Contex
 	if s == nil || s.backend == nil {
 		return runtimepipeline.WorkflowTargetPersistenceRecord{}, fmt.Errorf("postgres workflow target persistence reader is required")
 	}
-	identity = identity.Normalize()
-	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
-	if err := identity.Validate(); err != nil || entityID.IsZero() {
-		return runtimepipeline.WorkflowTargetPersistenceRecord{}, fmt.Errorf("workflow target persistence lookup requires exact route and entity identity")
-	}
-	return scanPostgresWorkflowTargetPersistence(s.backend.QueryRowContext(ctx, postgresWorkflowTargetPersistenceSelect, identity.RunID, entityID.String(), identity.Route.InstancePath), identity.Route, entityID)
+	return loadWorkflowTargetPersistence(ctx, s.backend, identity, entityID, false)
 }
 
 func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner runtimepipeline.WorkflowEntityStateSelectionOwner, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
@@ -448,12 +443,21 @@ func (s *PipelineSQLiteOwner) LoadWorkflowTargetPersistence(ctx context.Context,
 	if s == nil || s.backend == nil {
 		return runtimepipeline.WorkflowTargetPersistenceRecord{}, fmt.Errorf("sqlite workflow target persistence reader is required")
 	}
+	return loadWorkflowTargetPersistence(ctx, s.backend, identity, entityID, true)
+}
+
+func loadWorkflowTargetPersistence(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID, sqlite bool) (runtimepipeline.WorkflowTargetPersistenceRecord, error) {
 	identity = identity.Normalize()
 	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
 	if err := identity.Validate(); err != nil || entityID.IsZero() {
 		return runtimepipeline.WorkflowTargetPersistenceRecord{}, fmt.Errorf("workflow target persistence lookup requires exact route and entity identity")
 	}
-	return scanSQLiteWorkflowTargetPersistence(s.backend.QueryRowContext(ctx, sqliteWorkflowTargetPersistenceSelect, identity.RunID, entityID.String(), identity.Route.InstancePath), identity.Route, entityID)
+	if sqlite {
+		return scanSQLiteWorkflowTargetPersistence(q.QueryRowContext(ctx, sqliteWorkflowTargetPersistenceSelect, identity.RunID, entityID.String(), identity.Route.InstancePath), identity.Route, entityID)
+	}
+	return scanPostgresWorkflowTargetPersistence(q.QueryRowContext(ctx, postgresWorkflowTargetPersistenceSelect, identity.RunID, entityID.String(), identity.Route.InstancePath), identity.Route, entityID)
 }
 
 func assembleWorkflowTargetPersistence(

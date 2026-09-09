@@ -210,7 +210,7 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if duplicate {
-		return runtimebus.EventAppendExactDuplicate, nil
+		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 	}
 	var recordExec eventrecordpostgres.Execer = s.backend
 	if tx != nil {
@@ -249,7 +249,7 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 				return runtimebus.EventAppendOutcomeUnknown, duplicateErr
 			}
 			if duplicate {
-				return runtimebus.EventAppendExactDuplicate, nil
+				return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 			}
 		}
 		return runtimebus.EventAppendOutcomeUnknown, ensureErr
@@ -273,7 +273,7 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 		if !duplicate {
 			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append event: event_id=%s was not inserted", wantIdentity.EventID)
 		}
-		return runtimebus.EventAppendExactDuplicate, nil
+		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 	}
 	if admitted.RunDisposition() != events.AdmittedRunless {
 		if err := s.RunLifecyclePostgresOwner.SyncCountersTx(ctx, tx, story, wantIdentity.RunID); err != nil {

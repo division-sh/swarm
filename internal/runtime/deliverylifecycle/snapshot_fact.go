@@ -28,6 +28,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		DeliveryContext           events.DeliveryContext           `json:"delivery_context"`
 		DeliveryPayloadProjection events.DeliveryPayloadProjection `json:"delivery_payload_projection"`
 		ConnectClaim              events.ConnectExecutionClaim     `json:"connect_execution_claim"`
+		ReceiverMaterialization   json.RawMessage                  `json:"receiver_materialization_plan"`
 		Status                    string                           `json:"status"`
 		RetryCount                int                              `json:"retry_count"`
 		MaxRetries                int                              `json:"max_retries"`
@@ -80,6 +81,13 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		PayloadProjection: fact.DeliveryPayloadProjection,
 		ConnectClaim:      fact.ConnectClaim,
 	}.Normalized()
+	route, err = events.RestoreDeliveryMaterialization(route, fact.ReceiverMaterialization)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !route.Materialization.Empty() && (route.Materialization.RunID() != fact.RunID || route.Materialization.EventID() != fact.EventID) {
+		return Snapshot{}, fmt.Errorf("historical receiver dependency publication identity mismatch")
+	}
 	derived, err := route.Identity()
 	if err != nil || derived != identity {
 		return Snapshot{}, fmt.Errorf("%w: historical delivery route identity mismatch", ErrConflict)

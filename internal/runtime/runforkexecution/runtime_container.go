@@ -408,6 +408,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		return nil, fmt.Errorf("selected-contract fork-local lifecycle manager was not materialized")
 	}
 	lifecycleManager = agentRuntime.manager
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(lifecycleManager.FinalizeCommittedAgentReadiness))
 	agentRuntimeStopped := false
 	if agentRuntime != nil {
 		defer func() {

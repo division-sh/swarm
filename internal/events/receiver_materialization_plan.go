@@ -1,11 +1,14 @@
 package events
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/google/uuid"
 )
 
@@ -58,7 +61,7 @@ func AdmitReceiverMaterializationPlan(event Event, materializer DeliveryRoute, d
 	}
 	available := make(map[DeliveryRouteIdentity]struct{}, len(publication))
 	for _, route := range publication {
-		id, err := route.Identity()
+		id, err := route.identity(false)
 		if err != nil {
 			return ReceiverMaterializationPlan{}, err
 		}
@@ -75,7 +78,7 @@ func AdmitReceiverMaterializationPlan(event Event, materializer DeliveryRoute, d
 	seen := make(map[DeliveryRouteIdentity]struct{}, len(dependents))
 	for _, dependent := range dependents {
 		dependent = dependent.Normalized()
-		id, err := dependent.Identity()
+		id, err := dependent.identity(false)
 		if err != nil {
 			return ReceiverMaterializationPlan{}, err
 		}
@@ -107,7 +110,7 @@ func AdmitReceiverMaterializationPlan(event Event, materializer DeliveryRoute, d
 		if !route.Recipient.IsAgent() || !SameDeliveryTargetOwnership(route.Target, materializer.Target) || !ok || otherPin != pin {
 			continue
 		}
-		id, err := route.Identity()
+		id, err := route.identity(false)
 		if err != nil {
 			return ReceiverMaterializationPlan{}, err
 		}
@@ -153,7 +156,7 @@ func (p ReceiverMaterializationPlan) ValidatePublication(event Event, publicatio
 		wanted[id] = struct{}{}
 	}
 	for _, route := range publication {
-		id, err := route.Identity()
+		id, err := route.identity(false)
 		if err != nil {
 			return err
 		}
@@ -175,6 +178,131 @@ func (p ReceiverMaterializationPlan) ValidatePublication(event Event, publicatio
 		return fmt.Errorf("receiver materialization plan disagrees with publication")
 	}
 	return nil
+}
+
+// BindDependent attaches only a previously admitted exact relation. It never
+// resolves an entity or chooses a materializer from current descriptors.
+func (p ReceiverMaterializationPlan) BindDependent(route DeliveryRoute) (DeliveryRoute, error) {
+	if err := p.validateDependent(route); err != nil {
+		return DeliveryRoute{}, err
+	}
+	if !route.Materialization.Empty() && !route.Materialization.Equal(p) {
+		return DeliveryRoute{}, fmt.Errorf("receiver dependency cannot replace an admitted plan")
+	}
+	route = route.Normalized()
+	route.Materialization = p
+	return route, nil
+}
+
+func (p ReceiverMaterializationPlan) validateDependent(route DeliveryRoute) error {
+	if p.Empty() || !route.Recipient.IsAgent() || route.AgentIdentity.RunID != p.runID || !SameDeliveryTargetOwnership(p.target, route.Target) {
+		return fmt.Errorf("receiver dependency contradicts its agent route")
+	}
+	id, err := route.identity(false)
+	if err != nil {
+		return err
+	}
+	for _, dependent := range p.dependents {
+		if dependent == id {
+			return nil
+		}
+	}
+	return fmt.Errorf("receiver dependency does not bind this exact agent execution")
+}
+
+func (p ReceiverMaterializationPlan) ValidateEvent(event Event) error {
+	if p.Empty() || event.ID() != p.eventID || event.RunID() != p.runID || event.RoutingSource() != p.source {
+		return fmt.Errorf("receiver dependency publication identity disagrees")
+	}
+	return nil
+}
+
+// ValidateReceiverMaterializations is the aggregate admission/readback owner.
+// Every dependent of a plan must retain it, not just the first matching agent.
+func ValidateReceiverMaterializations(event Event, routes []DeliveryRoute) error {
+	for _, route := range routes {
+		plan := route.Materialization
+		if plan.Empty() {
+			if route.Recipient.IsAgent() && route.Target.MaterializingEntity() {
+				pin, present := route.ConnectClaim.ReceiverIdentity()
+				for _, candidate := range routes {
+					otherPin, otherPresent := candidate.ConnectClaim.ReceiverIdentity()
+					if present && otherPresent && pin == otherPin && candidate.Recipient.IsNode() && SameDeliveryTargetOwnership(route.Target, candidate.Target) {
+						return fmt.Errorf("materializing agent omitted its publication dependency")
+					}
+				}
+			}
+			continue
+		}
+		if err := plan.ValidatePublication(event, routes); err != nil {
+			return err
+		}
+		for _, other := range routes {
+			id, err := other.identity(false)
+			if err != nil {
+				return err
+			}
+			for _, dependent := range plan.dependents {
+				if id == dependent && !other.Materialization.Equal(plan) {
+					return fmt.Errorf("publication omitted or contradicted a receiver dependency")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// RestoreDeliveryMaterialization is a strict record codec, not publication
+// admission. Complete aggregate validation and materializer/readiness checks
+// remain mandatory before a restored dependent can acquire execution.
+func RestoreDeliveryMaterialization(route DeliveryRoute, raw []byte) (DeliveryRoute, error) {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		if !route.Materialization.Empty() {
+			return DeliveryRoute{}, fmt.Errorf("cannot erase a receiver dependency")
+		}
+		return route, nil
+	}
+	var wire receiverMaterializationWire
+	if _, err := canonicaljson.Decode(raw); err != nil {
+		return DeliveryRoute{}, fmt.Errorf("receiver dependency JSON: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return DeliveryRoute{}, fmt.Errorf("decode receiver dependency: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return DeliveryRoute{}, fmt.Errorf("receiver dependency must be one object")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || len(fields) != 6 {
+		return DeliveryRoute{}, fmt.Errorf("receiver dependency requires every binding field")
+	}
+	for _, field := range []string{"run_id", "event_id", "routing_source", "target", "materializer_route_identity", "dependent_route_identities"} {
+		if value := fields[field]; len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return DeliveryRoute{}, fmt.Errorf("receiver dependency missing %s", field)
+		}
+	}
+	if canonicalMaterializationUUID(wire.RunID) != nil || canonicalMaterializationUUID(wire.EventID) != nil || !wire.Target.MaterializingEntity() || wire.Target.Validate() != nil {
+		return DeliveryRoute{}, fmt.Errorf("receiver dependency has invalid publication or future target")
+	}
+	node, err := ParseDeliveryRouteIdentity(wire.Materializer)
+	if err != nil || EncodeDeliveryRouteIdentity(node) != wire.Materializer {
+		return DeliveryRoute{}, fmt.Errorf("receiver dependency materializer identity is invalid")
+	}
+	if len(wire.Dependents) == 0 {
+		return DeliveryRoute{}, fmt.Errorf("receiver dependency has no agents")
+	}
+	ids := make([]DeliveryRouteIdentity, len(wire.Dependents))
+	for i, value := range wire.Dependents {
+		id, err := ParseDeliveryRouteIdentity(value)
+		if err != nil || EncodeDeliveryRouteIdentity(id) != value || id == node || (i > 0 && value <= wire.Dependents[i-1]) {
+			return DeliveryRoute{}, fmt.Errorf("receiver dependency agent bindings are invalid or noncanonical")
+		}
+		ids[i] = id
+	}
+	plan := ReceiverMaterializationPlan{runID: wire.RunID, eventID: wire.EventID, source: wire.Source, target: wire.Target, materializer: node, dependents: ids}
+	return plan.BindDependent(route)
 }
 
 func (p ReceiverMaterializationPlan) Equal(other ReceiverMaterializationPlan) bool {
@@ -200,14 +328,16 @@ func (p ReceiverMaterializationPlan) MarshalJSON() ([]byte, error) {
 	for i, id := range p.dependents {
 		dependents[i] = EncodeDeliveryRouteIdentity(id)
 	}
-	return json.Marshal(struct {
-		RunID        string                  `json:"run_id"`
-		EventID      string                  `json:"event_id"`
-		Source       RoutingSource           `json:"routing_source"`
-		Target       DeliveryTargetOwnership `json:"target"`
-		Materializer string                  `json:"materializer_route_identity"`
-		Dependents   []string                `json:"dependent_route_identities"`
-	}{p.runID, p.eventID, p.source, p.target, EncodeDeliveryRouteIdentity(p.materializer), dependents})
+	return json.Marshal(receiverMaterializationWire{p.runID, p.eventID, p.source, p.target, EncodeDeliveryRouteIdentity(p.materializer), dependents})
+}
+
+type receiverMaterializationWire struct {
+	RunID        string                  `json:"run_id"`
+	EventID      string                  `json:"event_id"`
+	Source       RoutingSource           `json:"routing_source"`
+	Target       DeliveryTargetOwnership `json:"target"`
+	Materializer string                  `json:"materializer_route_identity"`
+	Dependents   []string                `json:"dependent_route_identities"`
 }
 
 func canonicalMaterializationUUID(raw string) error {

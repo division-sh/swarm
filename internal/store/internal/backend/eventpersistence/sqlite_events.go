@@ -80,7 +80,7 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if duplicate {
-		return runtimebus.EventAppendExactDuplicate, nil
+		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 	}
 	var ensureErr error
 	switch admitted.RunDisposition() {
@@ -126,7 +126,7 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 		if !duplicate {
 			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append sqlite event: event_id=%s was not inserted", wantIdentity.EventID)
 		}
-		return runtimebus.EventAppendExactDuplicate, nil
+		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 	}
 	if admitted.RunDisposition() != events.AdmittedRunless {
 		if err := s.RunLifecycleSQLiteOwner.SyncCountersTx(ctx, tx, story, wantIdentity.RunID); err != nil {
