@@ -342,6 +342,9 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"ListFlowInstanceRoutes":                     operationPureRead,
 		"LookupAPIEventPublication":                  operationPureRead,
 		"LogRuntime":                                 operationMutation,
+		// This projects an exact already-admitted durable transition, including retained
+		// history. Current consumer source admission cannot retag its producer identity.
+		"ProjectLifecycleDiagnostic":                 operationAdmittedChild,
 		"MarkDeliveryInProgress":                     operationMutation,
 		"OutboxSweeperActive":                        operationPureRead,
 		"PinRoutingDescriptors":                      operationPureRead,

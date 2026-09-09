@@ -303,7 +303,6 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 		},
 	}
 	node := runtimecontracts.SystemNodeContract{
-		ID:            telegramConnectorSupportedSurfaceNodeID,
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"inbound.telegram": handler,

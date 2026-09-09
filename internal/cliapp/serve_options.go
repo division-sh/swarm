@@ -2,6 +2,7 @@ package cliapp
 
 import (
 	"io"
+	"net"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -36,6 +37,7 @@ type ServeOptions struct {
 	Expose                           bool
 	PublicWebhookBaseURL             string
 	PublicWebhookListen              string
+	PublicWebhookListener            *net.TCPListener // Run owns this handle; CLI invocations bind normally.
 	ShutdownGrace                    time.Duration
 	Dev                              bool
 	SelfCheck                        bool
@@ -54,6 +56,7 @@ type ServeOptions struct {
 	TestRuntimeReadyHook             func(*runtime.Runtime)
 	TestRuntimeContextsReadyHook     func(*runtime.RuntimeContextManager)
 	TestBeforeReadinessCommit        func() error
+	TestAPIListenerBound             func(net.Addr)
 	TestAfterAuthorActivityHead      func() error
 	TestChannelOnboardingNow         func() time.Time
 	TestChannelOnboardingBarrier     channelonboarding.TestLifecycleBarrier

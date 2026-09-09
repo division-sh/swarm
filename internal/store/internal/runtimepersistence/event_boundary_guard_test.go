@@ -22,6 +22,7 @@ type eventBoundaryCallsite struct {
 }
 
 var admittedEventCallsites = map[eventBoundaryCallsite]int{
+	{path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", scope: "persistLifecycleDiagnosticTx", name: "AdmitForPersistence"}:                        1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                                                    1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:                                                1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                                                 2,
@@ -69,6 +70,8 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 }
 
 var directEventSQLTestFixtures = map[string]int{
+	// Transparent driver observation of the real diagnostic INSERT, not a fixture writer.
+	"internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go": 1,
 	// Canonically reminted, never-executed requests must fail real fork activation.
 	"internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":                         1,
 	"internal/cliapp/raw_sql_boundary_test.go":                                                   1,

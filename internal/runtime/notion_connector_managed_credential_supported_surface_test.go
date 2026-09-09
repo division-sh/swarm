@@ -361,7 +361,6 @@ func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) se
 	}
 	const nodeID = "notion-responder"
 	node := runtimecontracts.SystemNodeContract{
-		ID:            nodeID,
 		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"inbound.telegram": handler,

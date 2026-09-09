@@ -283,7 +283,11 @@ func runReleaseCommand(t *testing.T, timeout time.Duration, dir string, env []st
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
+	started := time.Now()
 	output, err := cmd.CombinedOutput()
+	if cmd.ProcessState != nil {
+		t.Logf("release command %s: wall=%s user=%s system=%s", filepath.Base(command), time.Since(started), cmd.ProcessState.UserTime(), cmd.ProcessState.SystemTime())
+	}
 	if ctx.Err() != nil {
 		err = fmt.Errorf("%w after %s", ctx.Err(), timeout)
 	}
@@ -500,7 +504,11 @@ func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, record
 			}
 		case "container_remove":
 			if len(record.Args) == 3 && record.Args[0] == "rm" && record.Args[1] == "--force" {
-				removed[record.Args[2]]++
+				name, ok := state.ContainerIDs[record.Args[2]]
+				if !ok {
+					t.Fatalf("projection teardown did not select a created immutable Docker object: %v", record.Args)
+				}
+				removed[name]++
 			}
 		}
 	}

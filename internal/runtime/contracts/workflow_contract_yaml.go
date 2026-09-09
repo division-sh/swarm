@@ -154,7 +154,6 @@ func (n *SystemNodeContract) UnmarshalYAML(node *yaml.Node) error {
 }
 
 var systemNodeContractFields = map[string]struct{}{
-	"id":             {},
 	"description":    {},
 	"execution_type": {},
 	"subscribes_to":  {},
@@ -175,6 +174,9 @@ func validateSystemNodeContractFields(node *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "id" {
+			return fmt.Errorf("node.id is retired; the map key is the identity.")
+		}
 		if key == "" {
 			continue
 		}

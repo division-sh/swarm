@@ -76,7 +76,7 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 		TTL:            runtimeNukeIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
-		result, err := performRuntimeNuke(ctx, req, opts, operationID, dryRun, includeSourceArtifacts, now)
+		result, err := performRuntimeNuke(ctx, req, opts, operationID, idempotencyKey, dryRun, includeSourceArtifacts, now)
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
@@ -102,9 +102,10 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 	return stored, nil
 }
 
-func performRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandlerOptions, operationID string, dryRun, includeSourceArtifacts bool, now time.Time) (runtimeNukeResult, error) {
+func performRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandlerOptions, operationID, idempotencyKey string, dryRun, includeSourceArtifacts bool, now time.Time) (runtimeNukeResult, error) {
 	execution, err := opts.Coordinator.Execute(ctx, destructivereset.Request{
 		OperationID:               operationID,
+		IdempotencyKey:            idempotencyKey,
 		ActorTokenID:              req.ActorTokenID,
 		RequestHash:               req.RequestHash,
 		DryRun:                    dryRun,
@@ -148,6 +149,14 @@ func performRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 }
 
 func runtimeNukeError(err error) error {
+	var resetConflict *destructivereset.OperationConflictError
+	if errors.As(err, &resetConflict) {
+		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
+			"original_request_hash":    resetConflict.OriginalRequestHash,
+			"conflicting_request_hash": resetConflict.ConflictingRequestHash,
+			"original_response_ref":    map[string]any{"method": "runtime.nuke", "resource_id": destructivereset.DefaultOperationName},
+		})
+	}
 	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{

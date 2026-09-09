@@ -1,5 +1,4 @@
 review-orchestrator:
-  id: review-orchestrator
   execution_type: system_node
   subscribes_to: [review.requested, mailbox.card_decided]
   event_handlers:

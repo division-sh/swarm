@@ -561,7 +561,6 @@ downstream-agent:
   subscriptions: [task.finalized]
 `,
 		"nodes.yaml": `bridge-node:
-  id: bridge-node
   execution_type: system_node
   subscribes_to: [task.completed]
   produces: [task.finalized]

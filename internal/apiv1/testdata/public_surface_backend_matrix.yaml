@@ -40,9 +40,9 @@ store_parity:
   selected_purposes:
     - id: runtime
       constructor: OpenRuntime
-      consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go]
+      consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go, internal/serveapp/serve_runtime_execution.go]
       semantic_owner: internal/store/selected.Owner
-      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, served-selected-contract-fork, destructive-reset-postgres]
+      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, served-source-artifact, connected-channel-onboarding-surface, served-selected-contract-fork, destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-crash, destructive-reset-candidates]
       close_proof_ids: [runtime-close-postgres-ping, runtime-close-unactivated]
     - id: authority_inspection
       constructor: OpenAuthorityInspection
@@ -79,7 +79,7 @@ store_parity:
       backends: [default_sqlite]
       purpose_ids: [runtime]
       capabilities:
-        - {claim_id: destructive_reset, risk_dimensions: [fail_closed]}
+        - {claim_id: source_artifact, risk_dimensions: [selected_construction]}
     - id: runtime-open-postgres
       kind: go_test
       name: TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce
@@ -199,7 +199,17 @@ store_parity:
     - {id: scenario-execution-postgres, kind: go_test, name: TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically, path: internal/store/internal/runtimepersistence/scenario_setup_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: scenario_execution, risk_dimensions: [writer_ownership]}]}
     - {id: observability-sqlite, kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, profile: pr-common, backends: [default_sqlite], capabilities: [{claim_id: observability, risk_dimensions: [read_snapshot, writer_ownership]}]}
     - {id: observability-postgres, kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: observability, risk_dimensions: [read_snapshot, writer_ownership]}]}
+    - {id: source-startup-integrity, kind: go_test, name: TestSourceArtifactStartupIntegrityParityPreservesRunHistory, path: internal/store/internal/runtimepersistence/source_artifact_selected_store_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: source_artifact, risk_dimensions: [fail_closed]}]}
+    - {id: served-startup-integrity, kind: go_test, name: TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores, path: internal/serveapp/startup_integrity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: source_artifact, risk_dimensions: [fail_closed]}]}
     - {id: destructive-reset-postgres, kind: go_test, name: TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
+    - {id: destructive-reset-served, kind: go_test, name: TestServedResetRetainClearAndHistoricalReplayBothStores, path: internal/serveapp/reset_served_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
+    - {id: destructive-reset-cli, kind: go_test, name: TestServedResetCLIDryRunApplyAndReplayBothStores, path: internal/serveapp/reset_served_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
+    - {id: destructive-reset-final-receipt, kind: go_test, name: TestRunServeResetFinalReceiptFailureRetryPreservesLiveSuccessorBothStores, path: internal/serveapp/reset_convergence_receipt_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
+    - {id: destructive-reset-crash, kind: go_test, name: TestResetProcessDeathRecoversBeforeSourceAdmissionBothStores, path: internal/serveapp/reset_process_crash_test.go, profile: full, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [restart, forced_death]}]}
+    - {id: destructive-reset-candidates, kind: go_test, name: TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores, path: internal/serveapp/reset_candidate_fence_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
+    - {id: destructive-reset-provider-guard, kind: go_test, name: TestResetRetainedCleanupProviderAuthorityBothStores, path: internal/store/internal/runtimepersistence/reset_guard_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
+    - {id: destructive-reset-directive-guard, kind: go_test, name: TestResetRetainedCleanupDirectiveAuthorityBothStores, path: internal/store/internal/runtimepersistence/reset_guard_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
+    - {id: destructive-reset-scope-guard, kind: go_test, name: TestResetRetainedCleanupScopeAndRollbackBothStores, path: internal/store/internal/runtimepersistence/reset_guard_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: destructive_reset, risk_dimensions: [fail_closed, writer_ownership]}]}
     - {id: websocket-different-concept, kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes, path: internal/apiv1/openrpc_ws_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: non_store_transport, risk_dimensions: [structural_census, proof_schedule]}]}
     - id: golden-forced-restart
       kind: go_test
@@ -252,15 +262,18 @@ store_parity:
       platform_tables: [resource_bundle_declarations, resource_declarations, resource_head_history, resource_heads, resource_prune_invocations, resource_prune_pin_evidence, resource_run_creation_child_evaluations, resource_run_creation_child_reservations, resource_run_creation_operations, resource_source_invocations, resource_version_pins, resource_version_provenance, resource_versions, bundle_static_data]
       public_methods: [data.check, data.import, data.prune, data.show]
     - id: source_artifact
-      semantic_owners: [internal/sourceartifact.AdmittedSourceArtifact, internal/store/selected source artifact writer and reader]
+      semantic_owners: [internal/sourceartifact.AdmittedSourceArtifact, internal/store/selected source artifact writer and reader, internal/runtime/startuprecovery]
       selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [selected_construction, served_lifecycle, restart, writer_ownership]
+      risk_dimensions: [selected_construction, served_lifecycle, restart, writer_ownership, fail_closed]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [selected_construction, served_lifecycle, writer_ownership], proof_ids: [served-source-artifact]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [selected_construction, served_lifecycle, writer_ownership], proof_ids: [served-source-artifact, runtime-open-sqlite]}
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
+        - {role: risk_proof, risk_dimensions: [fail_closed], proof_ids: [source-startup-integrity, served-startup-integrity]}
       required_ports: [runBundleContext, runBundleAvailability, sourceArtifacts, sourceArtifactReader]
+      optional_products: [startupRecovery]
+      nested_roles: {product_startup_recovery: [availability]}
       runtime_deps: [RunBundleAvailability]
       platform_tables: [source_artifacts]
     - id: event_delivery
@@ -308,7 +321,7 @@ store_parity:
       required_ports: [operatorChannels]
       runtime_deps: [InboundPayloadValidationBinder, InboundStore]
       platform_tables: [operator_principals, operator_channel_operations, operator_channel_bindings, inbound_publications, inbound_publication_events, operator_channel_claim_receipts]
-      public_methods: [channel.connect, channel.reconnect, channel.rebind, channel.confirm, channel.unbind, channel.proof_revoke, channel.list]
+      public_methods: [channel.confirm, channel.unbind, channel.proof_revoke, channel.list]
     - id: connected_channel_onboarding
       semantic_owners: [internal/channelonboarding, internal/store selected channelOnboarding]
       selected_purposes: [runtime]
@@ -476,16 +489,17 @@ store_parity:
       runtime_deps: [RuntimeLogStore]
       public_methods: [run.trace, runtime.incidents, runtime.logs]
     - id: destructive_reset
-      semantic_owners: [internal/store/selected destructive reset and startup recovery]
+      semantic_owners: [internal/store/selected destructive reset, internal/runtime/destructivereset, internal/serveapp/process_runtime_reset.go, internal/runtime/context_manager_reset.go, internal/sourceartifact.RuntimeProjection]
       selected_purposes: [runtime]
-      backend_dispositions: {default_sqlite: unsupported_with_exact_spec_and_teaching_proof, explicit_postgres: supported_with_dual_backend_proof}
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke]
-      risk_dimensions: [fail_closed, writer_ownership]
+      risk_dimensions: [fail_closed, writer_ownership, restart, forced_death]
       evidence:
-        - {role: backend_support, backends: [explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [destructive-reset-postgres]}
-        - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_ids: [runtime-open-sqlite]}
-      optional_products: [destructiveReset, startupRecovery]
-      nested_roles: {product_destructive_reset: [inventory, locks, quiescence], product_startup_recovery: [availability]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [fail_closed, writer_ownership], proof_ids: [destructive-reset-postgres, destructive-reset-served, destructive-reset-cli, destructive-reset-final-receipt, destructive-reset-candidates, destructive-reset-provider-guard, destructive-reset-directive-guard, destructive-reset-scope-guard]}
+        - {role: risk_proof, risk_dimensions: [restart, forced_death], proof_ids: [destructive-reset-crash]}
+      optional_products: [destructiveReset]
+      nested_roles: {product_destructive_reset: [inventory, locks, quiescence]}
+      platform_tables: [runtime_reset_operations]
       public_methods: [runtime.nuke]
     - id: non_store_transport
       semantic_owners: [internal/apiv1 websocket runtime]
@@ -725,13 +739,19 @@ mutating_api_parity_ledger:
       Shared served harness proves real /v1/rpc generation replacement, prior
       run quiescence, fresh publication, and idempotent replay.
   - method: runtime.nuke
-    classification: postgres_only_with_spec_ref
-    backends: [postgres_only]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: destructive_reset_lifecycle
     spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke
     proof_refs:
       - {kind: artifact, path: platform-spec.yaml}
-      - {kind: go_test, name: TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners}
-      - {kind: go_test, name: TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce}
+      - {kind: go_test, name: TestServedResetRetainClearAndHistoricalReplayBothStores}
+    notes: >
+      Served retain/clear reset joins predecessor work, reconstructs retained
+      sources with fresh authority, fences cleared execution, and replays exact
+      durable outcomes without touching later work. The destructive_reset claim
+      additionally schedules both-backend CLI, final-receipt retry, multi-context
+      convergence fencing, and actual process-death/startup recovery proofs.
   - method: conversation.fork
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
@@ -785,27 +805,6 @@ mutating_api_parity_ledger:
     proof_refs:
       - {kind: go_test, name: TestChannelConnectTelegramFirstUserJourney}
     notes: Retry resumes the selected-store operation from settled evidence without rotating credentials or blindly resending uncertain effects.
-  - method: channel.connect
-    classification: dual_backend_served_proof
-    backends: [default_sqlite, explicit_postgres]
-    scenario: operator_channel_connect_lifecycle
-    proof_refs:
-      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
-    notes: Exact interface selection and the awaiting-claim operation are served through the selected-store owner.
-  - method: channel.reconnect
-    classification: dual_backend_served_proof
-    backends: [default_sqlite, explicit_postgres]
-    scenario: operator_channel_reconnect_lifecycle
-    proof_refs:
-      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
-    notes: Same-account re-verification remains revision-fenced on both selected stores.
-  - method: channel.rebind
-    classification: dual_backend_served_proof
-    backends: [default_sqlite, explicit_postgres]
-    scenario: operator_channel_rebind_lifecycle
-    proof_refs:
-      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
-    notes: Different-account replacement is claimant-confirmed and revision-fenced on both selected stores.
   - method: channel.confirm
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

@@ -515,17 +515,14 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 	)
 	nodes := map[string]runtimecontracts.SystemNodeContract{
 		commentNodeID: {
-			ID:            commentNodeID,
 			ExecutionType: runtimecontracts.SystemNodeExecutionType,
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issue_comment": commentHandler},
 		},
 		createNodeID: {
-			ID:            createNodeID,
 			ExecutionType: runtimecontracts.SystemNodeExecutionType,
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issues": createIssueHandler},
 		},
 		labelNodeID: {
-			ID:            labelNodeID,
 			ExecutionType: runtimecontracts.SystemNodeExecutionType,
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issues": addLabelsHandler},
 		},

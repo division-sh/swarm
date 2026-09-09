@@ -51,6 +51,7 @@ type Options struct {
 	Mode              string
 	PublicOrigin      string
 	ListenAddress     string
+	Listener          *net.TCPListener // Successful construction takes ownership of this bound socket.
 	CloudflaredBinary string
 	Handler           http.Handler
 	HTTPClient        *http.Client
@@ -68,6 +69,7 @@ type Controller struct {
 	generation  Generation
 	listener    net.Listener
 	server      *http.Server
+	serverDone  chan struct{}
 	process     Process
 	cancel      context.CancelFunc
 	done        chan struct{}
@@ -117,7 +119,14 @@ func NewController(opts Options) (*Controller, error) {
 	if err := ValidateConfiguration(opts.Mode, opts.PublicOrigin, opts.ListenAddress); err != nil {
 		return nil, err
 	}
-	return &Controller{opts: opts, done: make(chan struct{}), waitRetry: waitPublicRouteRetry}, nil
+	if opts.Listener != nil && (opts.Mode != ModeExternalOrigin || opts.Listener.Addr().String() != opts.ListenAddress) {
+		return nil, fmt.Errorf("bound public webhook listener must match the external-origin listen address")
+	}
+	controller := &Controller{opts: opts, done: make(chan struct{}), waitRetry: waitPublicRouteRetry}
+	if opts.Listener != nil {
+		controller.listener = opts.Listener
+	}
+	return controller, nil
 }
 
 func ValidateConfiguration(mode, publicOrigin, listenAddress string) error {
@@ -149,10 +158,14 @@ func (c *Controller) Start(ctx context.Context) error {
 	if c.opts.Mode == ModeManagedQuickTunnel {
 		listenAddress = "127.0.0.1:0"
 	}
-	listener, err := net.Listen("tcp", listenAddress)
-	if err != nil {
-		cancel()
-		return fmt.Errorf("bind dedicated public webhook listener: %w", err)
+	listener := c.listener
+	var err error
+	if listener == nil {
+		listener, err = net.Listen("tcp", listenAddress)
+		if err != nil {
+			cancel()
+			return fmt.Errorf("bind dedicated public webhook listener: %w", err)
+		}
 	}
 	if err := admitLoopbackListen(listener.Addr().String(), true); err != nil {
 		listener.Close()
@@ -170,7 +183,11 @@ func (c *Controller) Start(ctx context.Context) error {
 	mux.HandleFunc("/webhooks/_swarm_probe/", c.serveProbe)
 	mux.Handle("/webhooks/", c.opts.Handler)
 	c.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	go func() { _ = c.server.Serve(listener) }()
+	c.serverDone = make(chan struct{})
+	go func() {
+		defer close(c.serverDone)
+		_ = c.server.Serve(listener)
+	}()
 	if err := c.establish(ctx); err != nil {
 		_ = c.Stop(context.Background())
 		return err
@@ -338,8 +355,18 @@ func (c *Controller) Stop(ctx context.Context) error {
 	if process != nil {
 		_ = process.Stop()
 	}
+	var shutdownErr error
 	if c.server != nil {
-		_ = c.server.Shutdown(ctx)
+		shutdownErr = c.server.Shutdown(ctx)
+		// Shutdown can precede Serve registering its listener. Join that handoff
+		// before returning ownership to the caller, including failed startup.
+		select {
+		case <-c.serverDone:
+		case <-ctx.Done():
+			shutdownErr = ctx.Err()
+		}
+	} else if c.listener != nil {
+		_ = c.listener.Close()
 	}
 	if c.opts.Readiness != nil {
 		c.opts.Readiness.RevokeExposure("serve shutdown")
@@ -357,7 +384,7 @@ func (c *Controller) Stop(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-	return nil
+	return shutdownErr
 }
 
 func (c *Controller) serveProbe(w http.ResponseWriter, request *http.Request) {

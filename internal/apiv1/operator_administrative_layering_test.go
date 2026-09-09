@@ -23,13 +23,15 @@ func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	capability := acquireAdministrativeResetCapability(t, selected)
 
 	external := newBlockingAdministrativeExternalWork()
 	coordinator := &destructivereset.Coordinator{
+		Operations: capability, RuntimeContexts: emptyAdministrativeResetLifecycle{},
 		Planner:    destructivereset.InventoryPlanner{Reader: selected},
 		Locks:      selected,
 		Quiescer:   destructivereset.Quiescer{Store: selected},
-		Cleaner:    destructivereset.Cleaner{Store: selected},
+		Cleaner:    destructivereset.Cleaner{Store: administrativeResetCleanup{capability}},
 		Containers: external,
 	}
 	req := Request{
@@ -47,14 +49,16 @@ func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
 	if err := <-result; err != nil {
 		t.Fatalf("runtime.nuke layered execution: %v", err)
 	}
-	assertAdministrativeCapacityReleased(t, db)
-
 	if _, err := executeRuntimeNuke(ctx, req, RuntimeNukeHandlerOptions{Coordinator: coordinator, Idempotency: selected}, time.Now().UTC()); err != nil {
 		t.Fatalf("runtime.nuke replay: %v", err)
 	}
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("runtime.nuke idempotency rows = %d, want 1", count)
 	}
+	if err := capability.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertAdministrativeCapacityReleased(t, db)
 }
 
 type blockingAdministrativeExternalWork struct {
@@ -167,13 +171,15 @@ func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.
 		t.Cleanup(cleanup)
 		selected := storetest.AdmitPostgresRuntimeStore(t, db)
 		db.SetMaxOpenConns(1)
+		capability := acquireAdministrativeResetCapability(t, selected)
 
 		external := newBlockingAdministrativeExternalWork()
 		coordinator := &destructivereset.Coordinator{
+			Operations: capability, RuntimeContexts: emptyAdministrativeResetLifecycle{},
 			Planner:    destructivereset.InventoryPlanner{Reader: selected},
 			Locks:      selected,
 			Quiescer:   destructivereset.Quiescer{Store: selected},
-			Cleaner:    destructivereset.Cleaner{Store: selected},
+			Cleaner:    destructivereset.Cleaner{Store: administrativeResetCleanup{capability}},
 			Containers: external,
 		}
 		ctx, cancel := context.WithCancel(context.Background())
@@ -194,6 +200,9 @@ func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.
 		}
 		if count := countAPIIdempotencyRows(t, db); count != 0 {
 			t.Fatalf("runtime.nuke cancellation idempotency rows = %d, want 0", count)
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			t.Fatal(err)
 		}
 		assertAdministrativeCapacityReleased(t, db)
 		leaseCtx, leaseCancel := context.WithTimeout(context.Background(), 2*time.Second)

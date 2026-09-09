@@ -450,7 +450,7 @@ func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) 
 				handlers["send_support_reply.revision_requested"] = runtimecontracts.SystemNodeEventHandler{}
 			}
 			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-				"support": {ID: "support", EventHandlers: handlers},
+				"support": {EventHandlers: handlers},
 			}
 			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
 				ExecutionPosture:  executionposture.Live,

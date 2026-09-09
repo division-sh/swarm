@@ -3143,7 +3143,6 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
-				ID:           "scan-orchestrator",
 				SubscribesTo: []string{"scan.requested"},
 			},
 		},
@@ -3572,7 +3571,6 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-intake": {
-				ID:            "child-intake",
 				ExecutionType: "system_node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"route.start": handler,
@@ -3592,7 +3590,6 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"project-observer": {
-				ID:            "project-observer",
 				ExecutionType: "system_node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"route.start": handler,
@@ -4286,7 +4283,6 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		Path: "child/grandchild",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
-				ID:           "worker-{instance_id}",
 				SubscribesTo: []string{"micro.done"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"micro.done": {},

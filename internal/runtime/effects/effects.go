@@ -900,7 +900,7 @@ func BeginStartupProbe(ctx context.Context, adapter string, request []byte, line
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_missing", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
 	surface, ok := managedcapabilities.FromContext(ctx)
-	if !ok || !startupProbeSurfaceMatchesAuthority(surface, authority) {
+	if !ok || !StartupProbeSurfaceMatchesAuthority(surface, authority) {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_capability_surface_mismatch", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
 	ctx = WithLogicalOperationIdentitySegment(ctx, "startup-probe:"+surface.Authority.ID)
@@ -1230,7 +1230,7 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "target_kind": authority.Target.Kind})
 		}
 	} else if registration.Kind == KindProviderStartupProbe {
-		if req.AgentFrame != nil || req.CapabilitySurface == nil || !startupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, authority) {
+		if req.AgentFrame != nil || req.CapabilitySurface == nil || !StartupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, authority) {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 		}
 	} else if registration.Kind == KindServeRegistration {
@@ -1268,7 +1268,9 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	return c.store.AuthorizeExternalAttempt(ctx, authority, req)
 }
 
-func startupProbeSurfaceMatchesAuthority(surface managedcapabilities.Surface, authority Authority) bool {
+// StartupProbeSurfaceMatchesAuthority is shared by effect admission and the
+// pre-execution MCP transport. Transport admission still requires a live grant.
+func StartupProbeSurfaceMatchesAuthority(surface managedcapabilities.Surface, authority Authority) bool {
 	if surface.Validate() != nil || surface.Authority.Kind != managedcapabilities.AuthorityStartupProbe {
 		return false
 	}

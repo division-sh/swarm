@@ -1,5 +1,4 @@
 beta-node:
-  id: beta-node
   execution_type: system_node
   subscribes_to: [trigger.beta]
   produces: []

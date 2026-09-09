@@ -429,14 +429,25 @@ func TestPlatformSpecExecutableNodeIdentityIsExactAndCanonicalOnly(t *testing.T)
 	rule := mustYAMLPath(t, root, "contract_formats", "event_schema", "routing_derivation", "route_plan_authority", "executable_node_identity")
 	for _, fragment := range []string{
 		"exact flow_path",
-		"owning flow_id",
+		"family=node",
+		"semantic_path equal to the node map key",
+		"strict {flow_path, node_id} projection",
+		"There is no additional flow_id coordinate",
 		"local node_id",
-		"explicitly empty flow_id",
-		"Local node_id",
+		"A bare local node_id",
 		"strict canonical codecs",
 		"no fallback, migration, or dual string authority",
 	} {
 		assertScalarContains(t, rule, fragment)
+	}
+	nodeFields := mustYAMLPath(t, root, "handler_specification", "node_specification", "node_fields")
+	assertScalarContains(t, mustYAMLPath(t, nodeFields, "retired", "id"), "node.id is retired; the map key is the identity.")
+	assertScalarContains(t, mustYAMLPath(t, nodeFields, "effective_semantics", "id"), "YAML map key only")
+	optional := mustMappingValue(t, nodeFields, "optional")
+	for i := 0; i+1 < len(optional.Content); i += 2 {
+		if optional.Content[i].Value == "id" {
+			t.Fatal("spec restores retired optional node.id")
+		}
 	}
 }
 

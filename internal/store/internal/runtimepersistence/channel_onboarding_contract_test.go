@@ -33,6 +33,58 @@ func TestChannelOnboardingSelectedStoreContractParity(t *testing.T) {
 	}
 }
 
+func TestChannelOnboardingCredentialStaleParentResetSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
+			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
+			parent := rig.parent(t, begun.Operation.OperationID)
+			ctx := context.Background()
+			if _, err := rig.fixture.store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: parent.OperationID, ExpectedRevision: parent.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, Now: rig.now,
+			}); !errors.Is(err, channelonboarding.ErrConflict) {
+				t.Fatalf("generic reset bypass = %v", err)
+			}
+			if _, err := rig.fixture.store.ResetChannelOnboardingPendingIdentity(ctx, channelonboarding.PendingResetRequest{
+				OperationID: parent.OperationID, ExpectedRevision: parent.Revision, Commit: true, Now: rig.now,
+			}); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+				t.Fatalf("unsettled child authorized reset = %v", err)
+			}
+		})
+	}
+}
+
+func TestChannelOnboardingCredentialStaleRecoverySelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			rig := newBoundHandoffRig(t, openChannelOnboardingConfirmationFixture(t, backend))
+			ctx := context.Background()
+			begun := rig.start(t, channelonboarding.VerbConnect, "original-token", false)
+			claimed := rig.claim(t, begun, "account-a")
+			if err := rig.file.Set(ctx, claimed.ProviderCredential.Key, "rotated-token"); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := rig.identities.Confirm(ctx, claimed.OperationID, claimed.Revision, true, rig.now); !errors.Is(err, operatorchannel.ErrCredentialStale) {
+				t.Fatal(err)
+			}
+			if err := rig.service.Recover(ctx); err != nil {
+				t.Fatal(err)
+			}
+			reset := rig.parent(t, begun.Operation.OperationID)
+			if reset.Phase != channelonboarding.PhasePreparing || reset.IdentityOperationID != "" || reset.BindingRevision != 0 || len(reset.CredentialAdmissions) != 0 {
+				t.Fatalf("recovered stale parent = %#v", reset)
+			}
+			resumed, err := rig.service.Retry(ctx, channelonboarding.RetryInput{OperationID: reset.OperationID, ProviderCredential: "replacement-token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rig.confirm(t, resumed, "account-a")
+			rig.complete(t, reset.OperationID)
+		})
+	}
+}
+
 func TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -111,6 +163,63 @@ func TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStore
 	}
 }
 
+func TestFailedOnboardingFenceRejectsCredentialReadmissionSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected channelonboarding.Store
+			switch backend {
+			case "sqlite":
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			case "postgres":
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = admitTestPostgresStore(t, db)
+			}
+			ctx := context.Background()
+			now := time.Date(2026, 8, 30, 23, 0, 0, 0, time.UTC)
+			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := channelOnboardingStartRequest(principal.ID, now)
+			op, err := selected.ReserveChannelOnboarding(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			admissions := []channelonboarding.CredentialAdmission{
+				{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "provider-receipt", ValueSeal: operatorChannelProviderEvidence().Seal},
+				{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing." + op.OperationID, Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-receipt", ValueSeal: operatorChannelProviderEvidence().Seal},
+			}
+			op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
+				CredentialAdmissions: admissions, ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseFailed,
+				FailureCode: "provider_rejected", FailureMessage: "provider rejected credential", Now: now.Add(2 * time.Second),
+			})
+			if err != nil || failed.Phase != channelonboarding.PhaseFailed {
+				t.Fatalf("terminal fence = %#v err=%v", failed, err)
+			}
+			if _, err := selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: failed.OperationID, ExpectedRevision: failed.Revision, Phase: channelonboarding.PhasePreparing,
+				ReplaceCredentialAdmissions: true, Now: now.Add(3 * time.Second),
+			}); !errors.Is(err, channelonboarding.ErrConflict) {
+				t.Fatalf("terminal credential readmission error = %v, want conflict", err)
+			}
+			replay := request
+			replay.OperationID = uuid.NewString()
+			replayed, err := selected.ReserveChannelOnboarding(ctx, replay)
+			if err != nil || replayed.OperationID != failed.OperationID || replayed.Phase != channelonboarding.PhaseFailed || replayed.Revision != failed.Revision {
+				t.Fatalf("terminal request replay = %#v err=%v", replayed, err)
+			}
+		})
+	}
+}
+
 type retiredOnboardingIdentities struct {
 	principal operatorchannel.Principal
 }
@@ -118,8 +227,11 @@ type retiredOnboardingIdentities struct {
 func (i retiredOnboardingIdentities) Principal() (operatorchannel.Principal, error) {
 	return i.principal, nil
 }
-func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, bool, time.Time) (operatorchannel.Operation, error) {
+func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, string, runtimecredentials.ValueEvidence, bool, time.Time) (operatorchannel.Operation, error) {
 	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) Confirm(context.Context, string, int64, bool, time.Time) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return operatorchannel.Operation{}, operatorchannel.Binding{}, operatorchannel.ErrNotFound
 }
 func (retiredOnboardingIdentities) GetOperation(context.Context, string) (operatorchannel.Operation, error) {
 	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
@@ -129,6 +241,9 @@ func (retiredOnboardingIdentities) ExpireOperation(context.Context, string, int6
 }
 func (retiredOnboardingIdentities) CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
 	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) CurrentBindingReadiness(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {
+	return operatorchannel.Binding{}, false, operatorchannel.ErrNotFound
 }
 func (retiredOnboardingIdentities) Readback(context.Context) ([]operatorchannel.Readback, error) {
 	return nil, nil
@@ -228,7 +343,7 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 	for _, reservation := range request.CredentialReservations {
 		admissions = append(admissions, channelonboarding.CredentialAdmission{
 			Role: reservation.Role, StoreKey: reservation.StoreKey + "." + request.OperationID,
-			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, Epoch: "epoch-" + request.OperationID,
+			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, ValueSeal: operatorChannelProviderEvidence().Seal,
 		})
 	}
 	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
@@ -239,10 +354,14 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 		t.Fatal(err)
 	}
 	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
-		op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		req := channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
-			IdentityOperationID: uuid.NewString(), BindingRevision: bindingRevision, Now: now.Add(time.Duration(op.Revision) * time.Second),
-		})
+			IdentityOperationID: uuid.NewString(), Now: now.Add(time.Duration(op.Revision) * time.Second),
+		}
+		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+			req.BindingRevision = bindingRevision
+		}
+		op, err = selected.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -300,8 +419,8 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 		t.Fatalf("concurrent slot operation = %v", err)
 	}
 	admissions := []channelonboarding.CredentialAdmission{
-		{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-provider", Epoch: "epoch-provider"},
-		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", Epoch: "epoch-signing"},
+		{Role: "telegram_bot_token", StoreKey: "channel.telegram.provider", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-provider", ValueSeal: operatorChannelProviderEvidence().Seal},
+		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", ValueSeal: operatorChannelProviderEvidence().Seal},
 	}
 	op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseCredentialsAdmitted,
@@ -313,11 +432,21 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseAwaitingExternalIdentity, Now: now.Add(2 * time.Second)}); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
 		t.Fatalf("stale phase advance = %v", err)
 	}
+	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseActivatingProvider,
+		BindingRevision: 4, Now: now.Add(2 * time.Second),
+	}); !errors.Is(err, channelonboarding.ErrInvalidRequest) {
+		t.Fatalf("binding revision outside confirmation/publication phase = %v", err)
+	}
 	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
-		op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		req := channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
-			IdentityOperationID: uuid.NewString(), BindingRevision: 4, Now: now.Add(time.Duration(op.Revision) * time.Second),
-		})
+			IdentityOperationID: uuid.NewString(), Now: now.Add(time.Duration(op.Revision) * time.Second),
+		}
+		if phase == channelonboarding.PhaseAwaitingOperatorConfirmation || phase == channelonboarding.PhasePublishingActivation {
+			req.BindingRevision = 4
+		}
+		op, err = store.AdvanceChannelOnboarding(ctx, req)
 		if err != nil {
 			t.Fatalf("advance %s: %v", phase, err)
 		}

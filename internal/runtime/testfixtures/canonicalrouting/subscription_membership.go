@@ -24,7 +24,6 @@ terminal_states: [done]
 states: [idle, done]
 `)
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `listener:
-  id: listener
   execution_type: system_node
   event_handlers:
     root.started:

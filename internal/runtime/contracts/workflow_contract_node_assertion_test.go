@@ -13,9 +13,9 @@ func TestSystemNodeContractTracksProducesDeclarationPresence(t *testing.T) {
 		declared bool
 		count    int
 	}{
-		{name: "omitted", yaml: "id: worker\nevent_handlers: {}\n", declared: false},
-		{name: "explicit empty", yaml: "id: worker\nproduces: []\nevent_handlers: {}\n", declared: true},
-		{name: "explicit value", yaml: "id: worker\nproduces: [work.completed]\nevent_handlers: {}\n", declared: true, count: 1},
+		{name: "omitted", yaml: "event_handlers: {}\n", declared: false},
+		{name: "explicit empty", yaml: "produces: []\nevent_handlers: {}\n", declared: true},
+		{name: "explicit value", yaml: "produces: [work.completed]\nevent_handlers: {}\n", declared: true, count: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var node SystemNodeContract

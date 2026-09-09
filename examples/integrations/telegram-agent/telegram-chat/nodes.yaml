@@ -1,5 +1,4 @@
 telegram-responder:
-  id: telegram-responder
   execution_type: system_node
   subscribes_to: [telegram.reply_requested]
   event_handlers:

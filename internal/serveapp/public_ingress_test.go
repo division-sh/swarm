@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,14 +47,8 @@ func (f servePublicIngressRoundTripper) RoundTrip(request *http.Request) (*http.
 }
 
 func TestRetainedServeExternalOriginExposesOnlyWebhookRoutes(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	listener := reserveChannelOnboardingListener(t)
 	listenAddress := listener.Addr().String()
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
 	mode, enabled, err := resolveServePublicIngressMode(cliapp.ServeOptions{
 		PublicWebhookBaseURL: "https://hooks.example.test", PublicWebhookListen: listenAddress,
 	})
@@ -71,6 +64,7 @@ func TestRetainedServeExternalOriginExposesOnlyWebhookRoutes(t *testing.T) {
 	var admitted int
 	controller, err := publicingress.NewController(publicingress.Options{
 		Mode: mode, PublicOrigin: "https://hooks.example.test", ListenAddress: listenAddress, HTTPClient: client,
+		Listener: listener,
 		Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 			if !strings.HasPrefix(request.URL.Path, "/webhooks/") {
 				t.Fatalf("ingress handler received control-plane path %q", request.URL.Path)

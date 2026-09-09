@@ -1,5 +1,4 @@
 complete-node:
-  id: complete-node
   execution_type: system_node
   subscribes_to: [task.completed]
   produces: [task.finished]
@@ -10,7 +9,6 @@ complete-node:
         event: task.finished
 
 reopen-node:
-  id: reopen-node
   execution_type: system_node
   subscribes_to: [task.reopen_requested]
   produces: []

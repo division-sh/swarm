@@ -100,7 +100,6 @@ func computeModuleCheckSource(t *testing.T, consumed bool) semanticview.Source {
 		}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"render-node": {
-				ID: "render-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"render.requested": {Rules: rules},
 				},
@@ -168,7 +167,6 @@ func pythonComputeModuleCheckSource(t *testing.T) semanticview.Source {
 		}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"render-node": {
-				ID: "render-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"render.requested": {Rules: rules},
 				},

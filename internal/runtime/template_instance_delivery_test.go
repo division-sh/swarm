@@ -812,7 +812,6 @@ opco.ceo_ready:
   entity_id: string?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   produces: [opco.ceo_ready]
@@ -832,7 +831,6 @@ func templateInstanceEmpireStyleFixtureFiles() map[string]string {
   product_id: string?
 `,
 		"nodes.yaml": `portfolio-node:
-  id: portfolio-node
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
   event_handlers:
@@ -859,7 +857,6 @@ component_scaffold.spawn_requested:
   product_id: string?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   produces: [component_scaffold.spawn_requested]
@@ -883,7 +880,6 @@ func templateInstanceActivationConfigSubscriberFixtureFiles() map[string]string 
   product_id: string?
 `,
 		"nodes.yaml": `portfolio-node:
-  id: portfolio-node
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
   event_handlers:

@@ -72,10 +72,11 @@ func (o *Owner) BundleWriter() any { return nil }
 
 func selectedStoreBoundaryViolations(path, body string) []string {
 	allowedSelectedImports := map[string]bool{
-		"internal/serveapp/main.go":               true,
-		"internal/serveapp/store_capabilities.go": true,
-		"internal/serveapp/store_runtime.go":      true,
-		"internal/cliapp/store_authority.go":      true,
+		"internal/serveapp/main.go":                    true,
+		"internal/serveapp/store_capabilities.go":      true,
+		"internal/serveapp/serve_runtime_execution.go": true,
+		"internal/serveapp/store_runtime.go":           true,
+		"internal/cliapp/store_authority.go":           true,
 	}
 	insideSelected := strings.HasPrefix(path, "internal/store/selected/")
 	insideStore := strings.HasPrefix(path, "internal/store/")

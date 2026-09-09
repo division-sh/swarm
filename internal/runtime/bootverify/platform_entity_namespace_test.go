@@ -100,7 +100,6 @@ func TestEntityContractDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"node-1": {
-					ID: "node-1",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 						"item.received": {
 							Compute: &runtimecontracts.ComputeSpec{
@@ -131,7 +130,6 @@ func TestRun_RejectsSelectEntityByPlatformEntitySourceAuthority(t *testing.T) {
 		t.Run(acquisition, func(t *testing.T) {
 			root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:

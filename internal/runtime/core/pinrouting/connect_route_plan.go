@@ -1916,22 +1916,22 @@ func CompileConnectGraph(source semanticview.Source) CompiledConnectGraph {
 		plans = append(plans, externalPlans...)
 		issues = append(issues, externalIssues...)
 	}
-	receiverPlans := lowerPublicInputReceiverPlans(source)
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	receiverPlans := lowerPublicInputReceiverPlans(source, census)
 	sortConnectRoutePlans(plans)
 	sortConnectRoutePlans(receiverPlans)
 	return CompiledConnectGraph{
 		plans:                 plans,
 		receiverPlans:         receiverPlans,
 		issues:                issues,
-		receiverPinCollisions: compileStaticConnectReceiverPinCollisions(source, plans),
+		receiverPinCollisions: compileStaticConnectReceiverPinCollisions(source, plans, census),
 	}
 }
 
 // lowerPublicInputReceiverPlans supplies receiver-pin registration evidence
 // for public template inputs. These plans are intentionally excluded from the
 // executable graph: only the typed public-input admission path may select one.
-func lowerPublicInputReceiverPlans(source semanticview.Source) []ConnectRoutePlan {
-	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+func lowerPublicInputReceiverPlans(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus) []ConnectRoutePlan {
 	plans := make([]ConnectRoutePlan, 0)
 	seen := make(map[ConnectReceiverPinIdentity]struct{})
 	for _, endpoint := range census.InputPins() {
@@ -1939,7 +1939,7 @@ func lowerPublicInputReceiverPlans(source semanticview.Source) []ConnectRoutePla
 		if !ok || !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
 			continue
 		}
-		plan, issue := LowerPublicInputRoutePlan(source, endpoint)
+		plan, issue := lowerPublicInputRoutePlan(source, endpoint, &census)
 		if !issue.Failure.Empty() {
 			continue
 		}
@@ -1956,8 +1956,7 @@ func lowerPublicInputReceiverPlans(source semanticview.Source) []ConnectRoutePla
 	return plans
 }
 
-func compileStaticConnectReceiverPinCollisions(source semanticview.Source, plans []ConnectRoutePlan) []ConnectReceiverPinCollision {
-	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+func compileStaticConnectReceiverPinCollisions(source semanticview.Source, plans []ConnectRoutePlan, census semanticview.AuthoredEventEndpointCensus) []ConnectReceiverPinCollision {
 	var admission ConnectReceiverPinAdmission
 	for _, plan := range plans {
 		if plan.RequiresRuntimeResolution() {
@@ -2161,6 +2160,10 @@ func compileConnectPlans(source semanticview.Source) ([]ConnectRoutePlan, []Conn
 // The returned plan carries no provider authorization; EventBus owns the
 // distinct public-admission authority required to execute it.
 func LowerPublicInputRoutePlan(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint) (ConnectRoutePlan, ConnectRoutePlanIssue) {
+	return lowerPublicInputRoutePlan(source, endpoint, nil)
+}
+
+func lowerPublicInputRoutePlan(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint, census *semanticview.AuthoredEventEndpointCensus) (ConnectRoutePlan, ConnectRoutePlanIssue) {
 	flowID := strings.TrimSpace(endpoint.FlowID)
 	pinName := strings.TrimSpace(endpoint.PinName)
 	if source == nil {
@@ -2169,7 +2172,11 @@ func LowerPublicInputRoutePlan(source semanticview.Source, endpoint semanticview
 	if endpoint.Kind != semanticview.EventEndpointFlowInputPin || endpoint.Direction != semanticview.EventEndpointInputPin || flowID == "" || pinName == "" {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: "public input admission requires one exact flow input endpoint"}
 	}
-	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, pinName)
+	if census == nil {
+		fresh := semanticview.BuildAuthoredEventEndpointCensus(source)
+		census = &fresh
+	}
+	association := census.ResolveDeclaredInputEndpoint(flowID, pinName)
 	resolvedEndpoint, ok := association.Endpoint()
 	if !ok || strings.TrimSpace(resolvedEndpoint.ID) != strings.TrimSpace(endpoint.ID) {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: association.Err().Error()}

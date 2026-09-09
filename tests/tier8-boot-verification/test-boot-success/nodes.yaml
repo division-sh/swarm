@@ -1,5 +1,4 @@
 complete-task:
-  id: complete-task
   execution_type: system_node
   subscribes_to: [task.requested]
   produces: []

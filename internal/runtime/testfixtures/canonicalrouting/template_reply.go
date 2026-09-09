@@ -89,7 +89,6 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
   outputs:
 `)
 	writeClosedVariantFile(t, root, "provider/nodes.yaml", `provider-node:
-  id: provider-node
   execution_type: system_node
   subscribes_to: [provider.requested, human_task.deferred, human_task.approved]
   produces: [provider.replied]

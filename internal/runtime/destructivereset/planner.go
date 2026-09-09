@@ -61,7 +61,7 @@ func (p InventoryPlanner) BuildPlan(ctx context.Context, req Request) (Plan, err
 		ActiveDeliveries:       append([]DeliveryRef(nil), inventory.ActiveDeliveries...),
 		RunScopedTables:        resetInventoryRunScopedTables(inventory.RunScopedTables, includeSourceArtifacts),
 		ManagedContainers:      append([]ContainerRef(nil), inventory.ManagedContainers...),
-		Preserved:              copyPreservedResources(preserved),
+		Preserved:              preserved,
 		DownstreamContracts:    append([]DownstreamContract(nil), contracts...),
 		ResetSeams:             append([]ResetSeam(nil), seams...),
 	}, nil
@@ -90,21 +90,14 @@ func resetInventoryRunScopedTables(tables []TableRef, includeSourceArtifacts boo
 	})
 }
 
-func copyPreservedResources(p PreservedResources) PreservedResources {
-	p.SystemContainers = append([]string(nil), p.SystemContainers...)
-	return p
-}
-
 func mergePreservedResources(p PreservedResources) PreservedResources {
 	defaults := DefaultPreservedResources()
-	if len(p.SystemContainers) == 0 {
-		p.SystemContainers = defaults.SystemContainers
-	}
+	p.DurableWorkspaceBackings = defaults.DurableWorkspaceBackings
 	if p.OperatorManagedBoundary == "" {
 		p.OperatorManagedBoundary = defaults.OperatorManagedBoundary
 	}
 	p.SchemaMigrations = p.SchemaMigrations || defaults.SchemaMigrations
 	p.AuthTokens = p.AuthTokens || defaults.AuthTokens
 	p.SourceArtifacts = p.SourceArtifacts || defaults.SourceArtifacts
-	return copyPreservedResources(p)
+	return p
 }

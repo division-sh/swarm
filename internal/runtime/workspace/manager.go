@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -190,7 +191,7 @@ type DockerManager struct {
 	data                 runtimedataaccess.Provider
 	projectionMu         sync.Mutex
 	projectionOps        sync.WaitGroup
-	projectionContainers map[string]struct{}
+	projectionContainers map[string]runtimecontaineridentity.Identity
 	projectionReleased   bool
 	ownedProjection      *sourceartifact.RuntimeProjection
 	RunDockerFn          func(ctx context.Context, args ...string) (string, error) // test seam
@@ -239,7 +240,7 @@ func NewDockerManager() *DockerManager {
 	return &DockerManager{
 		cfg:                  cfg,
 		baseCfg:              cfg,
-		projectionContainers: map[string]struct{}{},
+		projectionContainers: map[string]runtimecontaineridentity.Identity{},
 	}
 }
 
@@ -478,19 +479,18 @@ func (m *DockerManager) ReleaseSourceProjection(ctx context.Context) error {
 	m.projectionOps.Wait()
 	m.projectionMu.Lock()
 	names := make([]string, 0, len(m.projectionContainers))
-	for name := range m.projectionContainers {
+	identities := make(map[string]runtimecontaineridentity.Identity, len(m.projectionContainers))
+	for name, identity := range m.projectionContainers {
 		names = append(names, name)
+		identities[name] = identity
 	}
 	m.projectionMu.Unlock()
 	sort.Strings(names)
 	var releaseErr error
 	for _, name := range names {
-		if _, err := m.RunDocker(ctx, "rm", "--force", name); err != nil && !dockerContainerAbsent(err) {
-			exists, _, inspectErr := m.InspectContainer(ctx, name)
-			if inspectErr != nil || exists {
-				releaseErr = errors.Join(releaseErr, fmt.Errorf("release source projection container %s: %w", name, errors.Join(err, inspectErr)))
-				continue
-			}
+		if err := m.removeProjectionContainer(ctx, identities[name]); err != nil {
+			releaseErr = errors.Join(releaseErr, fmt.Errorf("release source projection container %s: %w", name, err))
+			continue
 		}
 		m.projectionMu.Lock()
 		delete(m.projectionContainers, name)
@@ -498,14 +498,86 @@ func (m *DockerManager) ReleaseSourceProjection(ctx context.Context) error {
 	}
 	if releaseErr == nil {
 		m.projectionMu.Lock()
-		ownedProjection := m.ownedProjection
-		m.ownedProjection = nil
-		m.projectionMu.Unlock()
-		if ownedProjection != nil {
-			releaseErr = ownedProjection.Release()
+		if m.ownedProjection != nil {
+			intent, err := m.ownedProjection.CleanupIntent()
+			releaseErr = err
+			if releaseErr == nil {
+				releaseErr = m.DisposeProjectionContainers(ctx, intent)
+			}
+			if releaseErr == nil {
+				releaseErr = m.ownedProjection.Release()
+			}
+			if releaseErr == nil {
+				m.ownedProjection = nil
+			}
 		}
+		m.projectionMu.Unlock()
 	}
 	return releaseErr
+}
+
+func (m *DockerManager) removeProjectionContainer(ctx context.Context, expected runtimecontaineridentity.Identity) error {
+	inspection, err := m.InspectManagedContainer(ctx, expected.ContainerName)
+	if err != nil || !inspection.Exists {
+		return err
+	}
+	if !inspection.HasIdentity || !inspection.Identity.Equal(expected) {
+		return fmt.Errorf("container ownership no longer matches the admitted projection")
+	}
+	return m.removeInspectedProjectionContainer(ctx, inspection)
+}
+
+// DisposeProjectionContainers is full projection retirement, not the narrower
+// runtime.nuke stop selector. Retained process authority must have joined all
+// creators before calling it. It includes stopped and scaffold/system objects.
+func (m *DockerManager) DisposeProjectionContainers(ctx context.Context, intent sourceartifact.RuntimeProjectionCleanup) error {
+	if err := intent.Validate(); err != nil {
+		return err
+	}
+	out, err := m.RunDocker(ctx, "container", "ls", "--all",
+		"--filter", "label="+runtimecontaineridentity.LabelOwner+"="+runtimecontaineridentity.OwnerRuntime,
+		"--filter", "label="+runtimecontaineridentity.LabelBundleHash+"="+intent.BundleHash,
+		"--filter", "label="+runtimecontaineridentity.LabelSourceProjection+"="+intent.Identity,
+		"--format", "{{.ID}}", "--no-trunc")
+	if err != nil {
+		return fmt.Errorf("inventory exact projection disposal: %w", err)
+	}
+	for _, id := range strings.Fields(out) {
+		inspection, err := m.InspectManagedContainer(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !inspection.Exists {
+			continue
+		}
+		if !inspection.HasIdentity || inspection.RuntimeID != id || inspection.Identity.Validate() != nil ||
+			inspection.Identity.Owner != runtimecontaineridentity.OwnerRuntime ||
+			inspection.Identity.BundleHash != intent.BundleHash || inspection.Identity.SourceProjection != intent.Identity {
+			return errors.New("projection disposal inventory identity changed")
+		}
+		if err := m.removeInspectedProjectionContainer(ctx, inspection); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *DockerManager) removeInspectedProjectionContainer(ctx context.Context, inspection runtimedestructivereset.ManagedContainerInspection) error {
+	if inspection.RuntimeID == "" {
+		return fmt.Errorf("container has no immutable Docker ID")
+	}
+	// A name may be reassigned after inspection. Only the inspected object can
+	// be removed; an ambiguous acknowledgment requires readback of that ID.
+	if _, err := m.RunDocker(ctx, "rm", "--force", inspection.RuntimeID); err != nil {
+		readbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		settled, readErr := m.InspectManagedContainer(readbackCtx, inspection.RuntimeID)
+		if readErr == nil && !settled.Exists {
+			return nil
+		}
+		return errors.Join(err, readErr)
+	}
+	return nil
 }
 
 func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.Source) error {
@@ -1243,13 +1315,9 @@ func (m *DockerManager) recordProjectionContainer(name string, identity runtimec
 		return
 	}
 	m.projectionMu.Lock()
-	m.projectionContainers[strings.TrimSpace(name)] = struct{}{}
+	identity.ContainerName = strings.TrimSpace(name)
+	m.projectionContainers[identity.ContainerName] = identity.Normalized()
 	m.projectionMu.Unlock()
-}
-
-func dockerContainerAbsent(err error) bool {
-	message := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(message, "no such container") || strings.Contains(message, "not found")
 }
 
 func (m *DockerManager) inspectRuntimeContainerIdentity(ctx context.Context, name string) (runtimecontaineridentity.Identity, bool, error) {
@@ -1310,8 +1378,45 @@ func (m *DockerManager) StopContainer(ctx context.Context, name string) error {
 	return nil
 }
 
-func (m *DockerManager) StopManagedContainer(ctx context.Context, name string) error {
-	return m.StopContainer(ctx, name)
+func (m *DockerManager) StopManagedContainer(ctx context.Context, target runtimedestructivereset.ContainerRef) error {
+	expected := target.Identity()
+	if err := expected.Validate(); err != nil {
+		return fmt.Errorf("invalid reset container target: %w", err)
+	}
+	if !expected.ResetEligibleManaged() {
+		return fmt.Errorf("container %s is not reset eligible", target.Name)
+	}
+	if expected.BundleHash == "" {
+		return fmt.Errorf("reset container %s has no admitted source projection", target.Name)
+	}
+	if strings.TrimSpace(target.RuntimeID) == "" {
+		return fmt.Errorf("reset container %s has no planned immutable Docker ID", expected.ContainerName)
+	}
+	inspection, err := m.InspectManagedContainer(ctx, target.RuntimeID)
+	if err != nil {
+		return err
+	}
+	if !inspection.Exists {
+		return nil
+	}
+	if inspection.RuntimeID != target.RuntimeID || !inspection.HasIdentity || !inspection.Identity.Equal(expected) {
+		return fmt.Errorf("reset container %s ownership changed", expected.ContainerName)
+	}
+	if !inspection.Running {
+		return nil
+	}
+	// Names can be reused between inspect and stop. Dispatch only to the exact
+	// inspected object, and reconcile a lost acknowledgment against that object.
+	if _, err := m.RunDocker(ctx, "stop", inspection.RuntimeID); err != nil {
+		readbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		settled, readErr := m.InspectManagedContainer(readbackCtx, inspection.RuntimeID)
+		if readErr == nil && (!settled.Exists || (settled.RuntimeID == target.RuntimeID && settled.HasIdentity && settled.Identity.Equal(expected) && !settled.Running)) {
+			return nil
+		}
+		return errors.Join(err, readErr)
+	}
+	return nil
 }
 
 func (m *DockerManager) ManagedResetContainerInventory(ctx context.Context) ([]runtimedestructivereset.ContainerRef, error) {
@@ -1334,14 +1439,17 @@ func (m *DockerManager) ManagedResetContainerInventory(ctx context.Context) ([]r
 		if err != nil {
 			return nil, fmt.Errorf("inspect managed reset container %s: %w", name, err)
 		}
-		identity := containerIdentityFromResetInspection(inspection)
+		identity := inspection.Identity
 		if !inspection.Exists || !inspection.HasIdentity || !identity.ResetEligibleManaged() {
 			continue
 		}
 		if strings.TrimSpace(identity.ContainerName) != name {
 			continue
 		}
-		refs = append(refs, managedContainerRef(identity, runtimedestructivereset.ContainerActionStop))
+		if strings.TrimSpace(inspection.RuntimeID) == "" {
+			return nil, fmt.Errorf("managed reset container %s has no immutable Docker ID", name)
+		}
+		refs = append(refs, runtimedestructivereset.ContainerRefFromIdentity(identity, inspection.RuntimeID, runtimedestructivereset.ContainerActionStop))
 	}
 	sort.Slice(refs, func(i, j int) bool {
 		if refs[i].Kind != refs[j].Kind {
@@ -1362,6 +1470,7 @@ func (m *DockerManager) InspectManagedContainer(ctx context.Context, name string
 		return runtimedestructivereset.ManagedContainerInspection{}, err
 	}
 	var doc struct {
+		ID    string `json:"Id"`
 		State struct {
 			Running bool `json:"Running"`
 		} `json:"State"`
@@ -1382,69 +1491,12 @@ func (m *DockerManager) InspectManagedContainer(ctx context.Context, name string
 		}, nil
 	}
 	return runtimedestructivereset.ManagedContainerInspection{
+		RuntimeID:   doc.ID,
 		Exists:      true,
 		Running:     doc.State.Running,
 		HasIdentity: ok,
-		Identity:    resetContainerIdentity(identity),
+		Identity:    identity,
 	}, nil
-}
-
-func resetContainerIdentity(identity runtimecontaineridentity.Identity) runtimedestructivereset.ContainerIdentity {
-	identity = identity.Normalized()
-	return runtimedestructivereset.ContainerIdentity{
-		Owner:          identity.Owner,
-		Kind:           identity.Kind,
-		ResetEligible:  identity.ResetEligible,
-		CreationSource: identity.CreationSource,
-		ContainerName:  identity.ContainerName,
-		WorkspaceScope: identity.WorkspaceScope,
-		RunID:          identity.RunID,
-		AgentIdentity:  identity.AgentIdentity,
-		FlowInstance:   identity.FlowInstance,
-	}
-}
-
-func containerIdentityFromResetInspection(inspection runtimedestructivereset.ManagedContainerInspection) runtimecontaineridentity.Identity {
-	identity := inspection.Identity
-	return runtimecontaineridentity.Identity{
-		Owner:          identity.Owner,
-		Kind:           identity.Kind,
-		ResetEligible:  identity.ResetEligible,
-		CreationSource: identity.CreationSource,
-		ContainerName:  identity.ContainerName,
-		WorkspaceScope: identity.WorkspaceScope,
-		RunID:          identity.RunID,
-		AgentIdentity:  identity.AgentIdentity,
-		FlowInstance:   identity.FlowInstance,
-	}.Normalized()
-}
-
-func managedContainerRef(identity runtimecontaineridentity.Identity, action string) runtimedestructivereset.ContainerRef {
-	identity = identity.Normalized()
-	return runtimedestructivereset.ContainerRef{
-		Name:           identity.ContainerName,
-		Kind:           identity.Kind,
-		Action:         strings.TrimSpace(action),
-		ResetEligible:  identity.ResetEligible,
-		CreationSource: identity.CreationSource,
-		WorkspaceScope: identity.WorkspaceScope,
-		RunID:          identity.RunID,
-		AgentIdentity:  identity.AgentIdentity,
-		FlowInstance:   identity.FlowInstance,
-	}
-}
-
-func containerRefWithAction(ref runtimedestructivereset.ContainerRef, action string) runtimedestructivereset.ContainerRef {
-	ref.Action = strings.TrimSpace(action)
-	return ref
-}
-
-func preservedManagedContainerRef(fallback runtimedestructivereset.ContainerRef, identity runtimecontaineridentity.Identity) runtimedestructivereset.ContainerRef {
-	identity = identity.Normalized()
-	if strings.TrimSpace(identity.ContainerName) == "" {
-		return containerRefWithAction(fallback, runtimedestructivereset.ContainerActionPreserve)
-	}
-	return managedContainerRef(identity, runtimedestructivereset.ContainerActionPreserve)
 }
 
 func (m *DockerManager) InspectContainer(ctx context.Context, name string) (bool, bool, error) {

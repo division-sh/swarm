@@ -1,5 +1,4 @@
 intake-router:
-  id: intake-router
   execution_type: system_node
   state_table: intake_router_state
   subscribes_to:

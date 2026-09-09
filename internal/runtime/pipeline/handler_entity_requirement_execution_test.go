@@ -267,7 +267,7 @@ func handlerEntityRequirementExecutionSource() semanticview.Source {
 			States: []string{"active", "killed"}, TerminalStates: []string{"killed"},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: runtimecontracts.SystemNodeExecutionType},
+			"node-a": {ExecutionType: runtimecontracts.SystemNodeExecutionType},
 		},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{

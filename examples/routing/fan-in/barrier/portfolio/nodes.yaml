@@ -1,5 +1,4 @@
 portfolio-collector:
-  id: portfolio-collector
   execution_type: system_node
   subscribes_to: [portfolio.setup, operating.reported]
   event_handlers:

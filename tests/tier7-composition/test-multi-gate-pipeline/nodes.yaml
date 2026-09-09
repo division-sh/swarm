@@ -1,5 +1,4 @@
 gate-setter-1:
-  id: gate-setter-1
   execution_type: system_node
   subscribes_to: [gate.g1_set]
   produces: [gate.set]
@@ -12,7 +11,6 @@ gate-setter-1:
         event: gate.set
 
 gate-setter-2:
-  id: gate-setter-2
   execution_type: system_node
   subscribes_to: [gate.g2_set]
   produces: [gate.set]
@@ -25,7 +23,6 @@ gate-setter-2:
         event: gate.set
 
 gate-setter-3:
-  id: gate-setter-3
   execution_type: system_node
   subscribes_to: [gate.g3_set]
   produces: [gate.set]
@@ -38,7 +35,6 @@ gate-setter-3:
         event: gate.set
 
 approval-node:
-  id: approval-node
   execution_type: system_node
   subscribes_to: [approval.requested]
   produces: [approval.granted]

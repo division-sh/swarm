@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 )
 
@@ -424,16 +425,25 @@ func (k CredentialAdmissionKind) Valid() bool {
 }
 
 type CredentialAdmission struct {
-	Role     string                  `json:"role"`
-	StoreKey string                  `json:"store_key"`
-	Kind     CredentialAdmissionKind `json:"kind"`
-	Receipt  string                  `json:"receipt"`
-	Epoch    string                  `json:"epoch"`
+	Role      string                       `json:"role"`
+	StoreKey  string                       `json:"store_key"`
+	Kind      CredentialAdmissionKind      `json:"kind"`
+	Receipt   string                       `json:"receipt,omitempty"`
+	ValueSeal runtimecredentials.ValueSeal `json:"-"`
 }
 
 func (a CredentialAdmission) Validate() error {
-	if strings.TrimSpace(a.Role) == "" || strings.TrimSpace(a.StoreKey) == "" || !a.Kind.Valid() || strings.TrimSpace(a.Receipt) == "" || strings.TrimSpace(a.Epoch) == "" {
-		return fmt.Errorf("%w: credential admission requires role, key, kind, receipt, and epoch", ErrInvalidRequest)
+	if strings.TrimSpace(a.Role) == "" || strings.TrimSpace(a.StoreKey) == "" || !a.Kind.Valid() {
+		return fmt.Errorf("%w: credential admission requires role, key, and kind", ErrInvalidRequest)
+	}
+	if _, err := runtimecredentials.ParseValueSeal(a.ValueSeal.String()); err != nil {
+		return fmt.Errorf("%w: credential admission requires a valid value seal", ErrInvalidRequest)
+	}
+	if a.Kind == CredentialAdmissionWritten && strings.TrimSpace(a.Receipt) == "" {
+		return fmt.Errorf("%w: written credential admission requires a receipt", ErrInvalidRequest)
+	}
+	if a.Kind == CredentialAdmissionObserved && strings.TrimSpace(a.Receipt) != "" {
+		return fmt.Errorf("%w: observed credential admission cannot own a write receipt", ErrInvalidRequest)
 	}
 	return nil
 }
@@ -545,6 +555,25 @@ type AdvanceRequest struct {
 	Now                          time.Time
 }
 
+// ReconcileBindingRequest fences the committed identity handoff before either
+// checkpointing it or resetting its unpublished parent for a fresh ceremony.
+type ReconcileBindingRequest struct {
+	OperationID             string
+	ExpectedRevision        int64
+	ExpectedBindingRevision int64
+	ResetCredentials        bool
+	Now                     time.Time
+}
+
+// PendingResetRequest validates the exact stale-child responsibility before
+// cleanup, then revalidates it when Commit clears the completed responsibility.
+type PendingResetRequest struct {
+	OperationID      string
+	ExpectedRevision int64
+	Commit           bool
+	Now              time.Time
+}
+
 type ActivationStatus string
 
 const (
@@ -600,6 +629,8 @@ type Store interface {
 	GetChannelOnboarding(context.Context, string) (Operation, error)
 	ListChannelOnboardingOperations(context.Context) ([]Operation, error)
 	AdvanceChannelOnboarding(context.Context, AdvanceRequest) (Operation, error)
+	ReconcileChannelOnboardingBinding(context.Context, ReconcileBindingRequest) (Operation, error)
+	ResetChannelOnboardingPendingIdentity(context.Context, PendingResetRequest) (Operation, error)
 	PublishConnectedChannelActivation(context.Context, PublishActivationRequest) (Operation, ConnectedChannelActivation, error)
 	GetConnectedChannelActivation(context.Context, string) (ConnectedChannelActivation, error)
 	ListCurrentConnectedChannelActivations(context.Context) ([]ConnectedChannelActivation, error)

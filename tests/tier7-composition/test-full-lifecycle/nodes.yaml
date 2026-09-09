@@ -1,5 +1,4 @@
 validation-node:
-  id: validation-node
   execution_type: system_node
   subscribes_to: [order.submitted]
   produces: [order.validated]
@@ -15,7 +14,6 @@ validation-node:
       emit: order.validated
 
 completion-node:
-  id: completion-node
   execution_type: system_node
   subscribes_to: [order.validated]
   produces: [order.finalized]

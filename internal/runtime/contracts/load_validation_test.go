@@ -90,37 +90,18 @@ func TestValidateWorkflowContractBundleLoadConstraintsAllowsMissingExecutionType
 }
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *testing.T) {
-	bundle := loadCurrentWorkflowBundleForTest(t)
-
-	var expected string
-	for nodeID, node := range bundle.Nodes {
-		node.ID = nodeID + "-alias"
-		setLoadedWorkflowNode(t, bundle, nodeID, node)
-		expected = nodeID
-		break
-	}
-	if expected == "" {
-		t.Fatal("expected at least one node")
-	}
-
-	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil || !contractErrorContains(err, expected+"-alias") || !contractErrorContains(err, "must match map key") {
+	var nodes map[string]SystemNodeContract
+	err := yaml.Unmarshal([]byte("worker:\n  id: worker-alias\n"), &nodes)
+	if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
 
-func TestValidateWorkflowContractBundleLoadConstraintsAllowsRenderedNodeIDTemplate(t *testing.T) {
-	bundle := loadCurrentWorkflowBundleForTest(t)
-
-	for nodeID, node := range bundle.Nodes {
-		node.ID = nodeID + "-{instance_id}"
-		setLoadedWorkflowNode(t, bundle, nodeID, node)
-		break
-	}
-
-	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err != nil {
-		t.Fatalf("unexpected load validation error for rendered node id template: %v", err)
+func TestValidateWorkflowContractBundleLoadConstraintsRejectsRenderedNodeIDTemplate(t *testing.T) {
+	var nodes map[string]SystemNodeContract
+	err := yaml.Unmarshal([]byte("worker:\n  id: worker-{instance_id}\n"), &nodes)
+	if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+		t.Fatalf("unexpected node template admission: %v", err)
 	}
 }
 
@@ -282,7 +263,6 @@ func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapD
 		Paths: FlowContractPaths{FlowPath: "deploy"},
 		Nodes: map[string]SystemNodeContract{
 			"deploy_node": {
-				ID: "deploy_node",
 				EventHandlers: map[string]SystemNodeEventHandler{
 					"deploy.requested": {
 						Rules: []HandlerRuleEntry{{
@@ -375,7 +355,6 @@ func TestLoadWorkflowContractBundleRejectsRetiredPublicNodeAndSchemaFields(t *te
 			schemaExtra: "",
 			nodes: `
 worker:
-  id: worker
   idempotency_table: worker_idempotency
   event_handlers: {}
 `,
@@ -399,7 +378,6 @@ func TestLoadWorkflowContractBundleAllowsPublicNodeStateTable(t *testing.T) {
 	root := t.TempDir()
 	writeFieldReconciliationBundle(t, root, "", `
 worker:
-  id: worker
   state_table: worker_state
   state_schema:
     fields:
@@ -425,7 +403,6 @@ func TestLoadWorkflowContractBundleRejectsRetiredTimerDurationAlias(t *testing.T
 	root := t.TempDir()
 	writeFieldReconciliationBundle(t, root, "", `
 worker:
-  id: worker
   timers:
     - id: reminder
       event: timer.reminder
@@ -1024,7 +1001,6 @@ task.done:
 `)
 	writeFixtureFile(t, filepath.Join(root, "flow-a", "nodes.yaml"), `
 flow-a-wildcard:
-  id: flow-a-wildcard
   execution_type: system_node
   subscribes_to: [task.*]
   event_handlers:
@@ -1046,7 +1022,6 @@ task.done:
 `)
 	writeFixtureFile(t, filepath.Join(root, "flow-b", "nodes.yaml"), `
 flow-b-wildcard:
-  id: flow-b-wildcard
   execution_type: system_node
   subscribes_to: [task.*]
   event_handlers:

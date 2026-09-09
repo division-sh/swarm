@@ -1,5 +1,4 @@
 test-node:
-  id: test-node
   execution_type: system_node
   subscribes_to: [cycle.ping, cycle.pong]
   produces: [cycle.ping, cycle.pong]

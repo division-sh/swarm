@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -23,8 +24,6 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
-
-const managedTurnFixtureBundleHash = SemanticFixtureBundleHash
 
 type ManagedAgentTurnFixtureStore interface {
 	runtimeeffects.Store
@@ -75,14 +74,10 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	if fixture.Store == nil || fixture.Selected == nil {
 		t.Fatal("managed turn fixture requires selected store owners")
 	}
-	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(SemanticFixtureBundleHash)
+	ctx, bundleSource, err := managedTurnFixtureContext(ctx)
 	if err != nil {
 		t.Fatalf("build managed turn fixture bundle source: %v", err)
 	}
-	const runtimeInstanceID = "00000000-0000-4000-8000-000000000001"
-	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, bundleSource)
-	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, SemanticFixtureBundleHash))
 	identity := fixture.Identity.Normalize()
 	if err := identity.Validate(); err != nil {
 		t.Fatalf("managed turn fixture identity: %v", err)
@@ -146,7 +141,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	if err != nil {
 		t.Fatalf("claim managed turn fixture delivery: %v", err)
 	}
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ID, authority.FenceGeneration, "", "storetest-managed-turn", managedTurnFixtureBundleHash, []string{surface.ID})
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ID, authority.FenceGeneration, "", "storetest-managed-turn", bundleSource.BundleHash(), []string{surface.ID})
 	if err != nil {
 		t.Fatalf("build managed turn fixture admission: %v", err)
 	}
@@ -210,6 +205,27 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 		}
 	}
 	return ManagedAgentTurnFixtureResult{Attempt: handle.Attempt(), Frame: frame, Claim: claimed.Claim}
+}
+
+func managedTurnFixtureContext(ctx context.Context) (context.Context, runtimecorrelation.SourceArtifactFact, error) {
+	source, err := semanticFixtureSource(ctx, "")
+	if err != nil {
+		return ctx, source, err
+	}
+	runtimeID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
+	if scope, ok := runtimeauthoractivity.ScopeFromContext(ctx); ok {
+		if scope.Kind != runtimeauthoractivity.ScopeBundle || scope.BundleHash != source.BundleHash() || (runtimeID != "" && runtimeID != scope.RuntimeInstanceID) {
+			return ctx, source, fmt.Errorf("managed turn fixture scope conflicts with runtime/source identity")
+		}
+		runtimeID = scope.RuntimeInstanceID
+	}
+	if runtimeID == "" {
+		runtimeID = semanticFixtureRuntimeInstanceID
+	}
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, source.BundleHash()))
+	return ctx, source, nil
 }
 
 func managedTurnFixtureSurface(t testing.TB, authority runtimeeffects.Authority, adapter string) managedcapabilities.Surface {

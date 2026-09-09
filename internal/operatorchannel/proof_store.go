@@ -12,9 +12,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
 
-const proofDocumentVersion = 1
+const proofDocumentVersion = 2
 
 var ErrProofStoreLocked = errors.New("operator channel proof store is locked")
 
@@ -24,8 +26,31 @@ type FileProofStore struct {
 }
 
 type proofDocument struct {
-	Version int                      `json:"version"`
-	Entries map[string]VerifiedProof `json:"entries"`
+	Version     int                    `json:"version"`
+	Entries     map[string]proofRecord `json:"entries"`
+	Unsupported bool                   `json:"-"`
+}
+
+type proofRecord struct {
+	Format                      string            `json:"format"`
+	ProofID                     string            `json:"proof_id"`
+	Revision                    int64             `json:"revision"`
+	Status                      ProofStatus       `json:"status"`
+	Interface                   InterfaceIdentity `json:"interface"`
+	ExternalAccountRef          string            `json:"external_account_reference"`
+	ConversationRef             string            `json:"conversation_reference"`
+	ConversationScope           ConversationScope `json:"conversation_scope"`
+	AccountPresentation         string            `json:"account_presentation,omitempty"`
+	Method                      string            `json:"method"`
+	Challenge                   string            `json:"challenge"`
+	OriginalOperationID         string            `json:"original_operation_id"`
+	MintingStoreID              string            `json:"minting_store_id"`
+	MintingDeploymentID         string            `json:"minting_deployment_id"`
+	VerifiedAt                  time.Time         `json:"verified_at"`
+	OperatorConfirmed           bool              `json:"operator_confirmed"`
+	ConsentScopes               []ConsentScope    `json:"consent_scopes"`
+	ProviderCredentialKey       string            `json:"provider_credential_key"`
+	ProviderCredentialValueSeal string            `json:"provider_credential_value_seal"`
 }
 
 func NewFileProofStore(swarmDir string) (*FileProofStore, error) {
@@ -60,7 +85,11 @@ func (s *FileProofStore) List(ctx context.Context) ([]VerifiedProof, error) {
 	sort.Strings(keys)
 	out := make([]VerifiedProof, 0, len(keys))
 	for _, key := range keys {
-		out = append(out, cloneProof(doc.Entries[key]))
+		proof, err := doc.Entries[key].proof()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, proof)
 	}
 	return out, nil
 }
@@ -78,8 +107,12 @@ func (s *FileProofStore) Get(ctx context.Context, identity InterfaceIdentity) (V
 	if err != nil {
 		return VerifiedProof{}, false, err
 	}
-	proof, ok := doc.Entries[identity.Key()]
-	return cloneProof(proof), ok, nil
+	record, ok := doc.Entries[identity.Key()]
+	if !ok {
+		return VerifiedProof{}, false, nil
+	}
+	proof, err := record.proof()
+	return proof, err == nil, err
 }
 
 func (s *FileProofStore) Put(ctx context.Context, proof VerifiedProof) error {
@@ -99,8 +132,18 @@ func (s *FileProofStore) Put(ctx context.Context, proof VerifiedProof) error {
 		if err != nil {
 			return err
 		}
+		if doc.Unsupported {
+			if err := s.quarantineUnsupportedLocked(); err != nil {
+				return err
+			}
+			doc = proofDocument{Version: proofDocumentVersion, Entries: map[string]proofRecord{}}
+		}
 		key := proof.Interface.Key()
-		if existing, found := doc.Entries[key]; found {
+		if record, found := doc.Entries[key]; found {
+			existing, err := record.proof()
+			if err != nil {
+				return err
+			}
 			if reflect.DeepEqual(existing, proof) {
 				return nil
 			}
@@ -108,7 +151,7 @@ func (s *FileProofStore) Put(ctx context.Context, proof VerifiedProof) error {
 				return fmt.Errorf("%w: proof revision must advance exactly from %d", ErrRevisionConflict, existing.Revision)
 			}
 		}
-		doc.Entries[key] = cloneProof(proof)
+		doc.Entries[key] = recordFromProof(proof)
 		return s.saveLocked(doc)
 	})
 }
@@ -132,9 +175,13 @@ func (s *FileProofStore) Revoke(ctx context.Context, identity InterfaceIdentity,
 			return err
 		}
 		key := identity.Key()
-		proof, found := doc.Entries[key]
+		record, found := doc.Entries[key]
 		if !found {
 			return ErrNotFound
+		}
+		proof, err := record.proof()
+		if err != nil {
+			return err
 		}
 		if proof.Status == ProofRevoked && proof.Revision == expectedRevision+1 {
 			revoked = cloneProof(proof)
@@ -146,7 +193,7 @@ func (s *FileProofStore) Revoke(ctx context.Context, identity InterfaceIdentity,
 		proof.Revision++
 		proof.Status = ProofRevoked
 		proof.VerifiedAt = now.UTC().Truncate(time.Microsecond)
-		doc.Entries[key] = proof
+		doc.Entries[key] = recordFromProof(proof)
 		revoked = cloneProof(proof)
 		return s.saveLocked(doc)
 	})
@@ -154,7 +201,7 @@ func (s *FileProofStore) Revoke(ctx context.Context, identity InterfaceIdentity,
 }
 
 func (s *FileProofStore) loadLocked() (proofDocument, error) {
-	doc := proofDocument{Version: proofDocumentVersion, Entries: map[string]VerifiedProof{}}
+	doc := proofDocument{Version: proofDocumentVersion, Entries: map[string]proofRecord{}}
 	raw, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return doc, nil
@@ -165,6 +212,19 @@ func (s *FileProofStore) loadLocked() (proofDocument, error) {
 	if len(raw) == 0 {
 		return proofDocument{}, fmt.Errorf("operator channel proof store %s is empty and corrupt", s.path)
 	}
+	var header struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return proofDocument{}, fmt.Errorf("parse operator channel proof store %s: %w", s.path, err)
+	}
+	if header.Version == 1 {
+		doc.Unsupported = true
+		return doc, nil
+	}
+	if header.Version != proofDocumentVersion {
+		return proofDocument{}, fmt.Errorf("operator channel proof store %s has unsupported format version %d", s.path, header.Version)
+	}
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&doc); err != nil {
@@ -173,7 +233,11 @@ func (s *FileProofStore) loadLocked() (proofDocument, error) {
 	if doc.Version != proofDocumentVersion || doc.Entries == nil {
 		return proofDocument{}, fmt.Errorf("operator channel proof store %s has unsupported or incomplete format", s.path)
 	}
-	for key, proof := range doc.Entries {
+	for key, record := range doc.Entries {
+		proof, err := record.proof()
+		if err != nil {
+			return proofDocument{}, fmt.Errorf("operator channel proof store %s contains invalid entry %q: %w", s.path, key, err)
+		}
 		if key != proof.Interface.Key() || proof.Format != ProofFormat || proof.ProofID != ProofIDForInterface(proof.Interface) || proof.Revision < 1 {
 			return proofDocument{}, fmt.Errorf("operator channel proof store %s contains conflicting entry %q", s.path, key)
 		}
@@ -204,7 +268,7 @@ func (s *FileProofStore) withWriteLockLocked(fn func() error) error {
 func (s *FileProofStore) saveLocked(doc proofDocument) error {
 	doc.Version = proofDocumentVersion
 	if doc.Entries == nil {
-		doc.Entries = map[string]VerifiedProof{}
+		doc.Entries = map[string]proofRecord{}
 	}
 	raw, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -235,6 +299,50 @@ func (s *FileProofStore) saveLocked(doc proofDocument) error {
 		return fmt.Errorf("replace operator channel proof store: %w", err)
 	}
 	return nil
+}
+
+func (s *FileProofStore) quarantineUnsupportedLocked() error {
+	quarantinePath := s.path + ".unsupported-v1"
+	if _, err := os.Stat(quarantinePath); err == nil {
+		quarantinePath += "-" + time.Now().UTC().Format("20060102T150405.000000000Z")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect operator channel proof quarantine: %w", err)
+	}
+	if err := os.Rename(s.path, quarantinePath); err != nil {
+		return fmt.Errorf("quarantine unsupported operator channel proof store: %w", err)
+	}
+	return nil
+}
+
+func recordFromProof(proof VerifiedProof) proofRecord {
+	return proofRecord{
+		Format: proof.Format, ProofID: proof.ProofID, Revision: proof.Revision, Status: proof.Status,
+		Interface: proof.Interface, ExternalAccountRef: proof.ExternalAccountRef, ConversationRef: proof.ConversationRef,
+		ConversationScope: proof.ConversationScope, AccountPresentation: proof.AccountPresentation,
+		Method: proof.Method, Challenge: proof.Challenge, OriginalOperationID: proof.OriginalOperationID,
+		MintingStoreID: proof.MintingStoreID, MintingDeploymentID: proof.MintingDeploymentID,
+		VerifiedAt: proof.VerifiedAt, OperatorConfirmed: proof.OperatorConfirmed,
+		ConsentScopes:               append([]ConsentScope(nil), proof.ConsentScopes...),
+		ProviderCredentialKey:       proof.ProviderCredential.Key,
+		ProviderCredentialValueSeal: proof.ProviderCredential.Seal.String(),
+	}
+}
+
+func (r proofRecord) proof() (VerifiedProof, error) {
+	seal, err := runtimecredentials.ParseValueSeal(r.ProviderCredentialValueSeal)
+	if err != nil || strings.TrimSpace(r.ProviderCredentialKey) == "" {
+		return VerifiedProof{}, fmt.Errorf("provider credential evidence is invalid")
+	}
+	return VerifiedProof{
+		Format: r.Format, ProofID: r.ProofID, Revision: r.Revision, Status: r.Status,
+		Interface: r.Interface, ExternalAccountRef: r.ExternalAccountRef, ConversationRef: r.ConversationRef,
+		ConversationScope: r.ConversationScope, AccountPresentation: r.AccountPresentation,
+		Method: r.Method, Challenge: r.Challenge, OriginalOperationID: r.OriginalOperationID,
+		MintingStoreID: r.MintingStoreID, MintingDeploymentID: r.MintingDeploymentID,
+		VerifiedAt: r.VerifiedAt, OperatorConfirmed: r.OperatorConfirmed,
+		ConsentScopes:      append([]ConsentScope(nil), r.ConsentScopes...),
+		ProviderCredential: runtimecredentials.ValueEvidence{Key: r.ProviderCredentialKey, Seal: seal},
+	}, nil
 }
 
 func cloneProof(proof VerifiedProof) VerifiedProof {

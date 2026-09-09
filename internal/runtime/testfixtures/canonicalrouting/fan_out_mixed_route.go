@@ -32,7 +32,6 @@ pins:
 `,
 		"one/entities.yaml": "test_entity: {}\n",
 		"one/nodes.yaml": `one-node:
-  id: one-node
   execution_type: system_node
   subscribes_to: [mixed.one]
   event_handlers:
@@ -48,7 +47,6 @@ pins:
 `,
 		"multi-a/entities.yaml": "test_entity: {}\n",
 		"multi-a/nodes.yaml": `multi-a-node:
-  id: multi-a-node
   execution_type: system_node
   subscribes_to: [mixed.multi]
   event_handlers:
@@ -64,7 +62,6 @@ pins:
 `,
 		"multi-b/entities.yaml": "test_entity: {}\n",
 		"multi-b/nodes.yaml": `multi-b-node:
-  id: multi-b-node
   execution_type: system_node
   subscribes_to: [mixed.multi]
   event_handlers:
@@ -80,7 +77,6 @@ pins:
 `,
 		"child/entities.yaml": "test_entity: {}\n",
 		"child/nodes.yaml": `child-node:
-  id: child-node
   execution_type: system_node
   subscribes_to: [mixed.multi]
   event_handlers:

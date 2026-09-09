@@ -779,7 +779,7 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
 				h := newExactWorkflowJoinHarness(t, storeCase, flowID, "awaiting", []any{"a", "b"})
-				observer := runtimecontracts.SystemNodeContract{ID: "observer", ExecutionType: "system_node"}
+				observer := runtimecontracts.SystemNodeContract{ExecutionType: "system_node"}
 				h.bundle.Nodes["observer"] = observer
 				h.bundle.FlowTree.ByID["orders"].Nodes["observer"] = observer
 				declarationFlowID := pipelineDeclarationFlowPath(flowID)
@@ -955,7 +955,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		t.Run(storeCase.name, func(t *testing.T) {
 			h := newExactWorkflowJoinHarness(t, storeCase, "orders", "awaiting", []any{"a", "b"})
-			observer := runtimecontracts.SystemNodeContract{ID: "observer", ExecutionType: "system_node"}
+			observer := runtimecontracts.SystemNodeContract{ExecutionType: "system_node"}
 			h.bundle.Nodes["observer"] = observer
 			h.bundle.FlowTree.ByID["orders"].Nodes["observer"] = observer
 			h.bundle.Semantics.Loops = []runtimecontracts.WorkflowLoopPlan{{

@@ -1,5 +1,4 @@
 intake-handler:
-  id: intake-handler
   execution_type: system_node
   subscribes_to: [work.assigned]
   produces: [item.processed]

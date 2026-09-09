@@ -1381,7 +1381,6 @@ func testFlowRouteRevisionBundle(t *testing.T, nodeEvent string) *runtimecontrac
 	}
 	review.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"route-observer": {
-			ID:           "route-observer",
 			SubscribesTo: []string{nodeEvent},
 		},
 	}

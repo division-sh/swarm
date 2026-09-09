@@ -322,8 +322,8 @@ func TestCompileChannelActivationsRejectsDeclaredLearnedCollisionAndContradictio
 		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
 	}
 	admissions := []channelonboarding.CredentialAdmission{
-		{Role: "telegram_bot_token", StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "provider-receipt", Epoch: "provider-epoch"},
-		{Role: "webhook_signing_secret", StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "signing-receipt", Epoch: "signing-epoch"},
+		{Role: "telegram_bot_token", StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("a")},
+		{Role: "webhook_signing_secret", StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("b")},
 	}
 	for _, plans := range [][2]packs.OutboundBindingPlan{{declaredPlan, learnedPlan}, {learnedPlan, declaredPlan}} {
 		declared := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceDeclared, Coordinate: coordinate, Plan: plans[0], CredentialAdmissions: admissions}
@@ -361,8 +361,8 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 		},
 		Plan: newBinding("-100123"),
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{
-			{Role: "telegram_bot_token", StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "provider-receipt", Epoch: "provider-epoch"},
-			{Role: "webhook_signing_secret", StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "signing-receipt", Epoch: "signing-epoch"},
+			{Role: "telegram_bot_token", StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("a")},
+			{Role: "webhook_signing_secret", StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("b")},
 		},
 	}
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{base})
@@ -409,9 +409,9 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 			value.Plan = newBinding("-100456")
 			return value
 		},
-		"credential epoch": func(value channelonboarding.CompiledActivation) channelonboarding.CompiledActivation {
+		"credential value seal": func(value channelonboarding.CompiledActivation) channelonboarding.CompiledActivation {
 			value.CredentialAdmissions = append([]channelonboarding.CredentialAdmission(nil), value.CredentialAdmissions...)
-			value.CredentialAdmissions[0].Epoch = "provider-epoch-2"
+			value.CredentialAdmissions[0].ValueSeal = packTestCredentialSeal("c")
 			return value
 		},
 	}
@@ -663,8 +663,8 @@ func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testi
 		Coordinate: candidate.Coordinate, TargetSelector: target, Posture: candidate.Posture,
 		BindingRevision: 3, ConversationRef: "-100123",
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{
-			{Role: profile.ProviderCredential(), StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "provider-receipt", Epoch: "provider-epoch"},
-			{Role: profile.SigningCredential(), StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "signing-receipt", Epoch: "signing-epoch"},
+			{Role: profile.ProviderCredential(), StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("a")},
+			{Role: profile.SigningCredential(), StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, ValueSeal: packTestCredentialSeal("b")},
 		},
 		Revision: 1, Status: channelonboarding.ActivationCurrent,
 	}
@@ -681,6 +681,10 @@ func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testi
 	if _, err := channelonboarding.CompileLearnedActivation(candidate, activation); err == nil || !strings.Contains(err.Error(), "conversation") {
 		t.Fatalf("missing durable destination error = %v", err)
 	}
+}
+
+func packTestCredentialSeal(digit string) runtimecredentials.ValueSeal {
+	return runtimecredentials.ValueSeal("credential-value-seal-v1:" + strings.Repeat(digit, 64))
 }
 
 func TestChannelOnboardingProfileAxesAreProviderNeutral(t *testing.T) {

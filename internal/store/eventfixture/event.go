@@ -153,7 +153,7 @@ func fixtureSettlement(event events.Event) (events.RouteSettlement, error) {
 
 func ExistingRunRoot(
 	ctx context.Context,
-	db *sql.DB,
+	db Executor,
 	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,

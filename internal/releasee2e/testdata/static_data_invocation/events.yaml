@@ -1,0 +1,10 @@
+read.requested:
+  foreign_id: text
+  request_key: text
+read.work:
+  foreign_id: text
+read.completed:
+  static_id: text
+  content: text
+child.requested:
+  request_key: text

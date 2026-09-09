@@ -1396,7 +1396,6 @@ pins:
       - scoring.requested
 `,
 		"scoring/nodes.yaml": `scoring-node:
-  id: scoring-node
   execution_type: system_node
   event_handlers: {}
 `,
@@ -1447,7 +1446,6 @@ opco.ceo_ready:
   entity_id: string?
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   produces: [opco.ceo_ready]
@@ -1527,7 +1525,6 @@ states: [initializing, ready]
   summary: string
 `,
 		"operating/nodes.yaml": `build-orchestrator:
-  id: build-orchestrator
   execution_type: system_node
   subscribes_to: [build_progress]
   event_handlers:

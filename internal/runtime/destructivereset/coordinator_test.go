@@ -25,6 +25,9 @@ func TestPreservedResourcesJSONUsesOnlySourceArtifacts(t *testing.T) {
 	if _, exists := decoded["bundle_contracts"]; exists {
 		t.Fatalf("retired bundle_contracts key survived in %s", raw)
 	}
+	if _, exists := decoded["system_containers"]; exists {
+		t.Fatalf("retired name-only preservation promise survived in %s", raw)
+	}
 }
 
 func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testing.T) {
@@ -55,26 +58,26 @@ func TestInventoryPlannerCarriesImplementedContractsAndSplitResetSeams(t *testin
 	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || plan.Preserved.SourceArtifacts {
 		t.Fatalf("preserved resources = %#v, want schema/auth preserved and source artifacts not preserved when include_source_artifacts defaults true", plan.Preserved)
 	}
-	if !slices.Contains(plan.Preserved.SystemContainers, "swarm-scaffold") || !slices.Contains(plan.Preserved.SystemContainers, "swarm-system") {
-		t.Fatalf("system containers = %#v, want scaffold/system preserved", plan.Preserved.SystemContainers)
+	if !plan.Preserved.DurableWorkspaceBackings {
+		t.Fatalf("preserved = %#v, want durable workspace backings preserved", plan.Preserved)
 	}
 }
 
 func TestInventoryPlannerMergesPreservedResourceDefaultsByField(t *testing.T) {
 	reader := &recordingInventoryReader{inventory: Inventory{
 		Preserved: PreservedResources{
-			SystemContainers: []string{"custom-system"},
+			OperatorManagedBoundary: "operator-owned resources remain untouched",
 		},
 	}}
 	plan, err := (InventoryPlanner{Reader: reader}).BuildPlan(context.Background(), Request{IncludeSourceArtifacts: false, IncludeSourceArtifactsSet: true})
 	if err != nil {
 		t.Fatalf("BuildPlan error = %v", err)
 	}
-	if !slices.Equal(plan.Preserved.SystemContainers, []string{"custom-system"}) {
-		t.Fatalf("system containers = %#v, want caller-provided value", plan.Preserved.SystemContainers)
+	if !plan.Preserved.DurableWorkspaceBackings {
+		t.Fatalf("preserved = %#v, want durable workspace backings preserved", plan.Preserved)
 	}
-	if plan.Preserved.OperatorManagedBoundary == "" {
-		t.Fatalf("operator-managed boundary was not defaulted")
+	if plan.Preserved.OperatorManagedBoundary != "operator-owned resources remain untouched" {
+		t.Fatalf("operator-managed boundary was not retained")
 	}
 	if !plan.Preserved.SchemaMigrations || !plan.Preserved.AuthTokens || !plan.Preserved.SourceArtifacts {
 		t.Fatalf("preserved resources = %#v, want critical defaults merged", plan.Preserved)

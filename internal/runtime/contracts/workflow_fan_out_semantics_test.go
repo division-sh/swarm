@@ -75,7 +75,7 @@ func fanOutPlanRegistryTestBundle(t *testing.T, handler SystemNodeEventHandler) 
 	return &WorkflowContractBundle{
 		SourceArtifact: artifact,
 		Paths:          ContractPaths{PlatformSpecFile: platformFile},
-		Nodes:          map[string]SystemNodeContract{"dispatcher": {ID: "dispatcher", EventHandlers: map[string]SystemNodeEventHandler{"batch.ready": handler}}},
+		Nodes:          map[string]SystemNodeContract{"dispatcher": {EventHandlers: map[string]SystemNodeEventHandler{"batch.ready": handler}}},
 		Events:         map[string]EventCatalogEntry{"batch.ready": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[json]"}}}}},
 	}
 }

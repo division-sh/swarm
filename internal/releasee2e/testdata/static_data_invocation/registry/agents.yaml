@@ -1,0 +1,10 @@
+reader:
+  type: generic
+  role: reader
+  intent: {inline: "Use read_flow_data; emit_child_completed with static_id and content."}
+  model: regular
+  memory: false
+  flow_data_access: [resume.md]
+  subscriptions: [child.work]
+  emit_events: [child.completed]
+  mock: {kind: python, module: mocks/read.py}

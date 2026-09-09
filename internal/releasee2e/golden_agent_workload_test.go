@@ -107,7 +107,6 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 				Store:      store.name,
 				Dev:        test.dev,
 				APIPort:    freeReleaseTCPPort(t),
-				MCPPort:    freeReleaseTCPPort(t),
 				TokenFile:  tokenFile,
 				Token:      goldenAPIToken,
 				Env:        env,
@@ -159,7 +158,19 @@ func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 	})
 }
 
-func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends(t *testing.T) {
+func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1(t *testing.T) {
+	runGoldenAgentWorkloadBurstIteration(t, 1)
+}
+
+func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2(t *testing.T) {
+	runGoldenAgentWorkloadBurstIteration(t, 2)
+}
+
+func runGoldenAgentWorkloadBurstIteration(t *testing.T, iteration int) {
+	t.Helper()
+	if iteration < 1 || iteration > goldenBurstIterations {
+		t.Fatalf("invalid burst iteration %d", iteration)
+	}
 	profile, continuous := goldenContinuousProofProfile(t)
 	if !continuous {
 		t.Skipf("burst proof requires full/nightly profile, got %q", profile)
@@ -176,20 +187,16 @@ func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends(t *testing.T) {
 		processGOMAXPROCS: goldenBurstGOMAXPROCS,
 		runDeadline:       goldenBurstDeadline,
 	}
-	for iteration := 1; iteration <= goldenBurstIterations; iteration++ {
-		t.Run(fmt.Sprintf("iteration-%d", iteration), func(t *testing.T) {
-			t.Run("sqlite", func(t *testing.T) {
-				t.Parallel()
-				root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-sqlite", iteration))
-				runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
-			})
-			t.Run("postgres", func(t *testing.T) {
-				t.Parallel()
-				root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-postgres", iteration))
-				runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
-			})
-		})
-	}
+	t.Run("sqlite", func(t *testing.T) {
+		t.Parallel()
+		root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-sqlite", iteration))
+		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		t.Parallel()
+		root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-postgres", iteration))
+		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
+	})
 }
 
 func goldenBurstCandidateIDs() []string {
@@ -236,7 +243,6 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 
 	apiPort := freeReleaseTCPPort(t)
-	mcpPort := freeReleaseTCPPort(t)
 	start := func(dev bool) *releaseServeProcess {
 		return startReleaseServe(t, releaseProcessSpec{
 			BinaryPath:                  binaryPath,
@@ -247,7 +253,6 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 			Store:                       store.name,
 			Dev:                         dev,
 			APIPort:                     apiPort,
-			MCPPort:                     mcpPort,
 			TokenFile:                   tokenFile,
 			Token:                       goldenAPIToken,
 			Env:                         env,
@@ -327,7 +332,6 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 				Source:     contracts,
 				Dev:        true,
 				APIPort:    freeReleaseTCPPort(t),
-				MCPPort:    freeReleaseTCPPort(t),
 				TokenFile:  "api-token",
 				Token:      goldenAPIToken,
 				Env:        env,
@@ -387,7 +391,6 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			WorkingDir: invocationRoot,
 			Source:     contracts,
 			APIPort:    freeReleaseTCPPort(t),
-			MCPPort:    freeReleaseTCPPort(t),
 			TokenFile:  "api-token",
 			Token:      goldenAPIToken,
 			Env:        invocationEnv,
@@ -413,7 +416,6 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			Source:     contracts,
 			Dev:        true,
 			APIPort:    freeReleaseTCPPort(t),
-			MCPPort:    freeReleaseTCPPort(t),
 			TokenFile:  "api-token",
 			Token:      goldenAPIToken,
 			Env:        projectEnv,
@@ -580,7 +582,6 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		t.Fatalf("golden release verify result is not canonical success: err=%v output=%s", err, verify.output)
 	}
 	apiPort := freeReleaseTCPPort(t)
-	mcpPort := freeReleaseTCPPort(t)
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath:                  binaryPath,
@@ -590,7 +591,6 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 			Source:                      contractsOperand,
 			Store:                       store.name,
 			APIPort:                     apiPort,
-			MCPPort:                     mcpPort,
 			TokenFile:                   tokenOperand,
 			Token:                       goldenAPIToken,
 			Env:                         env,
@@ -916,6 +916,12 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 			logCounts[fmt.Sprintf("%v/%v", log["component"], log["action"])]++
 		}
 		completion, completionErr := readGoldenCompletionCandidate(diagnosticCtx, store.diagnosticDB, runID)
+		// Preserve exact public facts before the disposable store is removed.
+		if evidence, encodeErr := json.Marshal(map[string]any{"events": events, "runtime_logs": logs.Logs}); encodeErr == nil {
+			t.Logf("golden completion failure public evidence: %s", evidence)
+		} else {
+			t.Logf("encode golden completion failure evidence: %v", encodeErr)
+		}
 		t.Fatalf("wait for golden run completion: %v; last run=%#v; completion=%#v completion_err=%v; diagnosis=%#v diagnosis_err=%v; event_counts=%#v delivery_counts=%#v events_err=%v; entities=%#v; runtime_log_counts=%#v logs_err=%v\nserve output:\n%s", err, last, completion, completionErr, diagnosis, diagnosisErr, eventCounts, deliveryCounts, eventsErr, entities, logCounts, logsErr, process.output.String())
 	}
 }

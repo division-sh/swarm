@@ -11,10 +11,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -1600,6 +1602,21 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, forkEventID,
 		[]byte(`{"log_level":"warn","message":"selected-fork diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}`), at.Add(3*time.Second))
+	identity := testAgentIdentity(t, "selected-diagnostic-worker", "")
+	identity.RunID = materialized.ForkRunID
+	producer := runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+		Owner: runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner,
+		RunID: materialized.ForkRunID, ParentEventID: forkEventID,
+		SelectedForkContext: true, Classification: runtimecorrelation.RuntimeLineageClassificationForkLocal,
+	})
+	item := createLifecycleDiagnosticWithIdentity(t, producer, pg, identity)
+	if err := runtimepkg.NewRuntimeLogger(pg, executionposture.Live).ProjectLifecycleDiagnostic(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	run, parent, disposition := diagnosticProjectionLineage(t, db, false, item)
+	if run != materialized.ForkRunID || parent != forkEventID || disposition != "causal_explicit" {
+		t.Fatalf("selected-fork lifecycle lineage=%s/%s/%s", run, parent, disposition)
+	}
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,

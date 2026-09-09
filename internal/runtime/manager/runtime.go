@@ -973,12 +973,20 @@ func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) (err er
 	if store == nil {
 		return nil
 	}
+	if am.bus == nil || am.lifecycle == nil {
+		return fmt.Errorf("lifecycle diagnostic projector is not configured")
+	}
 	for {
-		count, err := store.ProjectAgentLifecycleDiagnostics(ctx, 100)
+		items, err := store.ListPendingAgentLifecycleDiagnostics(ctx, 100)
 		if err != nil {
 			return err
 		}
-		if count < 100 {
+		for _, item := range items {
+			if err := am.bus.ProjectLifecycleDiagnostic(ctx, item); err != nil {
+				return err
+			}
+		}
+		if len(items) < 100 {
 			return nil
 		}
 	}

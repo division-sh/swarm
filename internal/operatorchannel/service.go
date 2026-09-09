@@ -8,11 +8,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
+
+type CredentialCurrentness interface {
+	CurrentValueMatchesSeal(context.Context, runtimecredentials.ValueEvidence) (bool, error)
+}
 
 type Service struct {
 	store        Store
 	proofs       ProofStore
+	credentials  CredentialCurrentness
 	deploymentID string
 	interfaces   []InterfaceIdentity
 
@@ -20,15 +27,15 @@ type Service struct {
 	principal Principal
 }
 
-func NewService(store Store, proofs ProofStore, admittedInterfaces []InterfaceIdentity, deploymentID string) (*Service, error) {
-	if store == nil || proofs == nil || strings.TrimSpace(deploymentID) == "" {
-		return nil, fmt.Errorf("operator channel service requires selected store, proof store, and deployment identity")
+func NewService(store Store, proofs ProofStore, credentials CredentialCurrentness, admittedInterfaces []InterfaceIdentity, deploymentID string) (*Service, error) {
+	if store == nil || proofs == nil || credentials == nil || strings.TrimSpace(deploymentID) == "" {
+		return nil, fmt.Errorf("operator channel service requires selected store, proof store, credential currentness owner, and deployment identity")
 	}
 	interfaces, err := normalizeInterfaces(admittedInterfaces)
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, proofs: proofs, deploymentID: strings.TrimSpace(deploymentID), interfaces: interfaces}, nil
+	return &Service{store: store, proofs: proofs, credentials: credentials, deploymentID: strings.TrimSpace(deploymentID), interfaces: interfaces}, nil
 }
 
 func normalizeInterfaces(admittedInterfaces []InterfaceIdentity) ([]InterfaceIdentity, error) {
@@ -100,6 +107,13 @@ func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Bi
 		if !ok {
 			continue
 		}
+		current, err := s.credentials.CurrentValueMatchesSeal(ctx, proof.ProviderCredential)
+		if err != nil {
+			return Principal{}, nil, fmt.Errorf("observe provider credential for retained proof: %w", err)
+		}
+		if !current {
+			continue
+		}
 		binding, err := s.store.BindOperatorChannelFromProof(ctx, BootBindRequest{PrincipalID: principal.ID, Interface: identity, Proof: proof, RequestedAt: now})
 		if err != nil {
 			if errors.Is(err, ErrConflict) {
@@ -148,10 +162,30 @@ func (s *Service) ResolveInterface(selector string) (InterfaceIdentity, error) {
 	return matches[0], nil
 }
 
-func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind, expectedRevision int64, requestKey, requestHash string, saveProof bool, now time.Time) (Operation, error) {
+func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind, expectedRevision int64, requestKey, requestHash, onboardingOperationID string, providerCredential runtimecredentials.ValueEvidence, saveProof bool, now time.Time) (Operation, error) {
+	if err := providerCredential.Validate(); err != nil {
+		return Operation{}, fmt.Errorf("%w: provider credential evidence is required", ErrInvalidRequest)
+	}
 	principal, err := s.Principal()
 	if err != nil {
 		return Operation{}, err
+	}
+	replayRequest := BeginReplayRequest{
+		PrincipalID: principal.ID, RequestKeyHash: strings.TrimSpace(requestKey), RequestHash: strings.TrimSpace(requestHash),
+	}
+	if replayed, found, err := s.store.FindChannelBindingBeginReplay(ctx, replayRequest); err != nil {
+		return Operation{}, err
+	} else if found {
+		return replayed, nil
+	}
+	current, err := s.credentials.CurrentValueMatchesSeal(ctx, providerCredential)
+	if err != nil {
+		gateErr := fmt.Errorf("observe provider credential before identity ceremony mutation: %w", err)
+		return s.beginReplayAfterCurrentnessGate(ctx, replayRequest, gateErr)
+	}
+	if !current {
+		gateErr := fmt.Errorf("%w: provider credential must be current before identity ceremony mutation", ErrCredentialStale)
+		return s.beginReplayAfterCurrentnessGate(ctx, replayRequest, gateErr)
 	}
 	identity, err := s.ResolveInterface(selector)
 	if err != nil {
@@ -176,9 +210,22 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 	return s.store.BeginChannelBinding(ctx, BeginRequest{
 		OperationID: NewOperationID(), Kind: kind, PrincipalID: principal.ID, Interface: identity,
 		ExpectedRevision: expectedRevision, RequestKeyHash: requestKey, RequestHash: requestHash,
-		SaveProof: saveProof, PlannedProofID: plannedProofID, PlannedProofRevision: plannedProofRevision,
-		RequestedAt: now, ExpiresAt: now.Add(DefaultChallengeTTL),
+		OnboardingOperationID: strings.TrimSpace(onboardingOperationID),
+		SaveProof:             saveProof, PlannedProofID: plannedProofID, PlannedProofRevision: plannedProofRevision,
+		ProviderCredential: providerCredential,
+		RequestedAt:        now, ExpiresAt: now.Add(DefaultChallengeTTL),
 	})
+}
+
+func (s *Service) beginReplayAfterCurrentnessGate(ctx context.Context, req BeginReplayRequest, gateErr error) (Operation, error) {
+	replayed, found, err := s.store.FindChannelBindingBeginReplay(ctx, req)
+	if err != nil {
+		return Operation{}, errors.Join(gateErr, err)
+	}
+	if found {
+		return replayed, nil
+	}
+	return Operation{}, gateErr
 }
 
 func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevision int64, approve bool, now time.Time) (Operation, Binding, error) {
@@ -186,8 +233,27 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 	if err != nil {
 		return Operation{}, Binding{}, err
 	}
-	op, binding, err := s.store.ConfirmChannelBinding(ctx, ConfirmRequest{OperationID: strings.TrimSpace(operationID), PrincipalID: principal.ID, ExpectedRevision: expectedRevision, Approve: approve, ConfirmedAt: now})
+	operation, err := s.GetOperation(ctx, operationID)
 	if err != nil {
+		return Operation{}, Binding{}, err
+	}
+	providerCredentialCurrent := false
+	if approve && !operation.State.Terminal() {
+		current, err := s.credentials.CurrentValueMatchesSeal(ctx, operation.ProviderCredential)
+		if err != nil {
+			return operation, Binding{}, fmt.Errorf("observe provider credential before identity confirmation: %w", err)
+		}
+		providerCredentialCurrent = current
+	}
+	op, binding, err := s.store.ConfirmChannelBinding(ctx, ConfirmRequest{
+		OperationID: strings.TrimSpace(operationID), PrincipalID: principal.ID,
+		ExpectedRevision: expectedRevision, Approve: approve,
+		ProviderCredentialCurrent: providerCredentialCurrent, ConfirmedAt: now,
+	})
+	if err != nil {
+		if operation.Kind == OperationReconnect && errors.Is(err, ErrConflict) && strings.Contains(err.Error(), "reconnect claimant differs") {
+			return op, binding, fmt.Errorf("%w; run swarm channel rebind <provider> --credential-stdin to bind a different claimant", err)
+		}
 		return op, binding, err
 	}
 	if op.State == StateBound && (op.ProofStatus == ProofPending || op.ProofStatus == ProofFailed) {
@@ -250,11 +316,15 @@ func (s *Service) RevokeProof(ctx context.Context, selector string, expectedRevi
 	return revoked, nil
 }
 
-func (s *Service) CurrentProof(ctx context.Context, selector string) (VerifiedProof, error) {
+func (s *Service) ActiveProof(ctx context.Context, selector string) (VerifiedProof, error) {
 	identity, err := s.ResolveRetainedInterface(ctx, selector)
 	if err != nil {
 		return VerifiedProof{}, err
 	}
+	return s.loadActiveProof(ctx, identity)
+}
+
+func (s *Service) loadActiveProof(ctx context.Context, identity InterfaceIdentity) (VerifiedProof, error) {
 	proof, found, err := s.proofs.Get(ctx, identity)
 	if err != nil {
 		return VerifiedProof{}, err
@@ -285,19 +355,34 @@ func (s *Service) materializeProof(ctx context.Context, responsibility ProofResp
 		return fmt.Errorf("materialize verified account proof: %w", err)
 	}
 	existing, found, err := s.proofs.Get(ctx, proof.Interface)
-	if err == nil && found && existing.ProofID == proof.ProofID && existing.Revision == proof.Revision {
+	if err != nil {
+		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, proof.ProofID, proof.Revision, ProofFailed, err.Error(), now)
+		return fmt.Errorf("materialize verified account proof: %w", err)
+	}
+	if found && existing.ProofID == proof.ProofID && existing.Revision == proof.Revision {
 		if !proofMatchesResponsibility(existing, proof) {
 			err = fmt.Errorf("%w: existing proof %q revision %d contradicts its durable responsibility", ErrRevisionConflict, proof.ProofID, proof.Revision)
 		} else {
 			// The file write is already durable. Its deployment occurrence is
 			// immutable even when a later serve completes the database handoff.
-			proof = existing
+			return s.store.CompleteProofResponsibility(ctx, responsibility.Operation.OperationID, existing.ProofID, existing.Revision, ProofActive, "", now)
 		}
-	} else if err == nil {
-		proof.MintingDeploymentID = s.deploymentID
-		err = s.proofs.Put(ctx, proof)
 	}
 	if err != nil {
+		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, proof.ProofID, proof.Revision, ProofFailed, err.Error(), now)
+		return fmt.Errorf("materialize verified account proof: %w", err)
+	}
+	current, currentErr := s.credentials.CurrentValueMatchesSeal(ctx, proof.ProviderCredential)
+	if currentErr != nil {
+		return fmt.Errorf("observe provider credential before proof materialization: %w", currentErr)
+	}
+	if !current {
+		err := fmt.Errorf("%w: provider credential changed before proof materialization", ErrCredentialStale)
+		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, responsibility.Operation.ProofID, responsibility.Operation.ProofRevision, ProofFailed, err.Error(), now)
+		return fmt.Errorf("materialize verified account proof: %w", err)
+	}
+	proof.MintingDeploymentID = s.deploymentID
+	if err := s.proofs.Put(ctx, proof); err != nil {
 		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, proof.ProofID, proof.Revision, ProofFailed, err.Error(), now)
 		return fmt.Errorf("materialize verified account proof: %w", err)
 	}
@@ -313,6 +398,7 @@ func validatedResponsibilityProof(responsibility ProofResponsibility) (VerifiedP
 		binding.PrincipalID != operation.PrincipalID || binding.Interface.Normalized() != operation.Interface.Normalized() ||
 		binding.ExternalAccountRef != operation.ExternalAccountRef || binding.ConversationRef != operation.ConversationRef ||
 		binding.ConversationScope != operation.ConversationScope || binding.AccountPresentation != operation.AccountPresentation ||
+		binding.ProviderCredential != operation.ProviderCredential ||
 		binding.Revision != operation.BindingRevision || binding.OperationID != operation.OperationID ||
 		binding.ProofID != operation.ProofID || binding.ProofRevision != operation.ProofRevision ||
 		!binding.UpdatedAt.Equal(operation.CompletedAt) {
@@ -346,6 +432,7 @@ func immutableProofFactsMatch(existing, responsibility VerifiedProof) bool {
 		existing.Challenge == responsibility.Challenge &&
 		existing.OriginalOperationID == responsibility.OriginalOperationID &&
 		existing.MintingStoreID == responsibility.MintingStoreID &&
+		existing.ProviderCredential == responsibility.ProviderCredential &&
 		existing.VerifiedAt.Equal(responsibility.VerifiedAt) &&
 		existing.OperatorConfirmed == responsibility.OperatorConfirmed &&
 		equalConsentScopes(existing.ConsentScopes, responsibility.ConsentScopes)
@@ -370,7 +457,8 @@ func proofFromOperation(op Operation, binding Binding) VerifiedProof {
 		ConversationScope: op.ConversationScope, AccountPresentation: op.AccountPresentation,
 		Method: string(op.Kind), Challenge: op.Challenge, OriginalOperationID: op.OperationID,
 		MintingStoreID: op.PrincipalID, VerifiedAt: op.CompletedAt, OperatorConfirmed: true,
-		ConsentScopes: []ConsentScope{ConsentNotify, ConsentDecide},
+		ConsentScopes:      []ConsentScope{ConsentNotify, ConsentDecide},
+		ProviderCredential: op.ProviderCredential,
 	}
 }
 
@@ -540,6 +628,13 @@ func (s *Service) CurrentBinding(ctx context.Context, identity InterfaceIdentity
 		if binding.Interface.Normalized().Key() != identity.Key() || binding.Status != BindingCurrent {
 			continue
 		}
+		current, currentErr := s.credentials.CurrentValueMatchesSeal(ctx, binding.ProviderCredential)
+		if currentErr != nil {
+			return binding, errors.Join(ErrBindingUnavailable, currentErr)
+		}
+		if !current {
+			return binding, errors.Join(ErrBindingUnavailable, ErrCredentialStale)
+		}
 		return binding, nil
 	}
 	return Binding{}, fmt.Errorf("%w: current operator channel binding %q was not found", ErrNotFound, identity.Selector)
@@ -551,7 +646,7 @@ func (s *Service) CurrentBinding(ctx context.Context, identity InterfaceIdentity
 func (s *Service) CurrentBindingReadiness(ctx context.Context, identity InterfaceIdentity) (Binding, bool, error) {
 	binding, err := s.CurrentBinding(ctx, identity)
 	if err != nil {
-		return Binding{}, false, err
+		return binding, false, err
 	}
 	if strings.TrimSpace(binding.ProofID) == "" {
 		return binding, true, nil
@@ -560,7 +655,8 @@ func (s *Service) CurrentBindingReadiness(ctx context.Context, identity Interfac
 	if err != nil {
 		return Binding{}, false, err
 	}
-	current := found && proof.Status == ProofActive && proof.ProofID == binding.ProofID && proof.Revision == binding.ProofRevision
+	current := found && proof.Status == ProofActive && proof.ProofID == binding.ProofID && proof.Revision == binding.ProofRevision &&
+		proof.Interface.Normalized() == binding.Interface.Normalized() && proof.ProviderCredential == binding.ProviderCredential
 	return binding, current, nil
 }
 
@@ -608,6 +704,15 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 			out = append(out, read)
 			continue
 		}
+		credentialCurrent, credentialErr := s.credentials.CurrentValueMatchesSeal(ctx, binding.ProviderCredential)
+		if credentialErr != nil {
+			return nil, fmt.Errorf("observe provider credential for channel readback: %w", credentialErr)
+		}
+		if !credentialCurrent {
+			read.Status, read.Reason = BindingStale, "provider credential changed; reconnect with fresh credentials"
+			out = append(out, read)
+			continue
+		}
 		active, activeFound := projection.active[key]
 		if !activeFound || active.SemanticGeneration != binding.Interface.SemanticGeneration {
 			read.Status, read.Reason = BindingStale, "channel semantic generation changed; reconnect required"
@@ -615,7 +720,7 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 			continue
 		}
 		if binding.ProofID != "" {
-			if !proofFound || proof.Status != ProofActive || proof.ProofID != binding.ProofID || proof.Revision != binding.ProofRevision {
+			if !proofFound || proof.Status != ProofActive || proof.ProofID != binding.ProofID || proof.Revision != binding.ProofRevision || proof.ProviderCredential != binding.ProviderCredential {
 				read.Status, read.Reason, read.ProofStatus = BindingRevoked, "machine-local verified account proof is missing, revoked, or superseded", ProofRevoked
 				out = append(out, read)
 				continue

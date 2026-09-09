@@ -26,7 +26,6 @@ import (
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
-		ID:           "reviewer-{instance_id}",
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
@@ -53,7 +52,6 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 
 func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *testing.T) {
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
-		ID: "reviewer-{instance_id}",
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"task.started": {Emit: runtimecontracts.EmitSpec{Event: "task.started"}},
 		},
@@ -268,7 +266,6 @@ pins:
 	write(filepath.Join(root, "orders", "events.yaml"), "root.start: {}\naddon_a.start: {}\naddon_b.start: {}\n")
 	write(filepath.Join(root, "orders", "nodes.yaml"), `
 shared:
-  id: shared
   execution_type: system_node
   event_handlers:
     root.start:
@@ -281,7 +278,6 @@ shared:
 		write(filepath.Join(dir, "events.yaml"), eventName+".start: {}\n")
 		write(filepath.Join(dir, "nodes.yaml"), `
 shared:
-  id: shared
   execution_type: system_node
   event_handlers:
     `+eventName+`.start:
@@ -340,7 +336,6 @@ func TestEventBusTemplateAgentSameScopeExactAdmissionRendersConcreteInstanceRout
 
 func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []string) semanticview.Source {
 	node := runtimecontracts.SystemNodeContract{
-		ID:            "listener",
 		SubscribesTo:  []string{nodeSubscription},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{nodeSubscription: {}},
 	}
@@ -486,7 +481,6 @@ func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Contex
 func TestEventBusPublishPersistedFlowInstanceRouteDoesNotRewritePersistence(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
-		ID:           "reviewer-{instance_id}",
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
@@ -588,7 +582,7 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 }
 
 func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBeforeReplacement(t *testing.T) {
-	source := routeMaterializationNodeSource("producer", runtimecontracts.SystemNodeContract{ID: "producer-{instance_id}"})
+	source := routeMaterializationNodeSource("producer", runtimecontracts.SystemNodeContract{})
 	current := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "current"))
 	foreign := runtimeflowidentity.DeriveRoute("producer", "foreign")
 	store := &routePersistenceTestStore{
@@ -625,7 +619,7 @@ func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBe
 
 func TestEventBusStageFlowInstanceRouteAcceptsExactEmptyRouteSet(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	source := routeMaterializationNodeSource("observer", runtimecontracts.SystemNodeContract{ID: "observer-{instance_id}"})
+	source := routeMaterializationNodeSource("observer", runtimecontracts.SystemNodeContract{})
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -655,7 +649,6 @@ func TestEventBusStageFlowInstanceRouteAcceptsExactEmptyRouteSet(t *testing.T) {
 func TestEventBusFlowInstanceRouteRejectsUnknownCanonicalTemplateWithoutMutation(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	source := routeMaterializationNodeSource("known", runtimecontracts.SystemNodeContract{
-		ID:           "known-{instance_id}",
 		SubscribesTo: []string{"task.started"},
 	})
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
@@ -690,7 +683,6 @@ func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, i
 func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
-		ID:           "reviewer-{instance_id}",
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
@@ -767,7 +759,6 @@ func (s *routePersistenceTestStore) ListFlowInstanceRoutes(context.Context) ([]r
 func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
-		ID:           "reviewer-{instance_id}",
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
@@ -798,7 +789,6 @@ func TestEventBusAddFlowInstanceRouteDoesNotPublishWhenTopologyCommitFails(t *te
 		deleteErr:        context.Canceled,
 	}
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{
-		ID:           "reviewer-{instance_id}",
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
@@ -886,7 +876,6 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 
 func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	source := routeMaterializationNodeSource("child/grandchild", runtimecontracts.SystemNodeContract{
-		ID:           "worker-{instance_id}",
 		Produces:     []string{"micro.started"},
 		SubscribesTo: []string{"micro.started"},
 	})
@@ -925,7 +914,6 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"lifecycle-orchestrator": {
-				ID:            "lifecycle-orchestrator",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"opco.product_initialization_requested"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -1250,7 +1238,6 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
-				ID:           "scan-orchestrator",
 				SubscribesTo: []string{"scan.requested"},
 			},
 		},
@@ -1301,7 +1288,6 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
-				ID: "consumer-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.requested": {},
 				},
@@ -1475,7 +1461,6 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 		Events: map[string]runtimecontracts.EventCatalogEntry{"ticket.ready": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
-				ID: "consumer-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"ticket.ready": {},
 				},
@@ -1526,7 +1511,6 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scoring-node": {
-				ID:           "scoring-node",
 				SubscribesTo: []string{"score.dimension_complete"},
 			},
 		},
@@ -1602,7 +1586,6 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 		Path: "child/grandchild",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
-				ID:           "worker-{instance_id}",
 				SubscribesTo: []string{"micro.started"},
 				Produces:     []string{"micro.started"},
 			},

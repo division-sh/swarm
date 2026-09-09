@@ -355,7 +355,6 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 			"scan.other_requested": {},
 		}
 		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
-			ID:           "scan-orchestrator",
 			SubscribesTo: []string{"scan.other_requested"},
 		}
 		bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
@@ -870,7 +869,6 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
-				ID:           "scan-orchestrator",
 				SubscribesTo: []string{eventName},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					eventName: {},
