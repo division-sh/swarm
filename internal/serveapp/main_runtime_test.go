@@ -2183,7 +2183,6 @@ func waitServedConversationForkSourceAgentReady(t *testing.T, rt servedConversat
 
 func seedServedConversationForkSource(t *testing.T, rt servedConversationForkProofRuntime, runID string) servedConversationForkSource {
 	t.Helper()
-	db := rt.DB
 	backend := rt.Backend
 	now := time.Now().UTC().Truncate(time.Second)
 	fixture := servedConversationForkSource{
@@ -2191,11 +2190,20 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(),
 		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
 	}
-	ctx := context.Background()
+	ctx := servedControlProofAuthorActivityContext(t, rt.servedControlProofRuntime)
+	lease, err := rt.Runtime.WorkOccurrence().Begin(ctx)
+	if err != nil {
+		t.Fatalf("admit conversation fixture work: %v", err)
+	}
+	defer func() {
+		if err := lease.Done(); err != nil {
+			t.Errorf("settle conversation fixture work: %v", err)
+		}
+	}()
+	ctx = lease.Context()
 	var agentStore storetest.AgentFixtureStore
 	var selected any
 	var selectedStore storetest.ManagedAgentTurnFixtureStore
-	var dialect authoractivityfixture.Dialect
 	switch backend {
 	case "postgres":
 		if rt.Postgres == nil {
@@ -2204,7 +2212,6 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		agentStore = rt.Postgres
 		selected = rt.Postgres
 		selectedStore = rt.Postgres
-		dialect = authoractivityfixture.DialectPostgres
 	case "sqlite":
 		if rt.SQLite == nil {
 			t.Fatal("accepted SQLite store owner is required")
@@ -2212,7 +2219,6 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		agentStore = rt.SQLite
 		selected = rt.SQLite
 		selectedStore = rt.SQLite
-		dialect = authoractivityfixture.DialectSQLite
 	default:
 		t.Fatalf("unknown conversation fork proof backend %q", backend)
 	}
@@ -2234,66 +2240,21 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	if actorIdentity.IsZero() {
 		t.Fatalf("%s conversation fork source agent was not admitted by startup topology", backend)
 	}
-	identity, err := actorIdentity.StorageFields()
-	if err != nil {
-		t.Fatalf("project %s conversation fork source identity: %v", backend, err)
-	}
-	var statements []struct {
-		query string
-		args  []any
-	}
-	switch backend {
-	case "postgres":
-		statements = []struct {
-			query string
-			args  []any
-		}{
-			{`INSERT INTO agent_sessions (
-				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance,
-				memory_enabled, memory_source, status, created_at, updated_at
-			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active',$10,$10)`,
-				[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute)}},
-			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
-			{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'lifecycle_state','',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'authored_field','name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'lifecycle_state','','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
-		}
-	case "sqlite":
-		statements = []struct {
-			query string
-			args  []any
-		}{
-			{`INSERT INTO agent_sessions (
-				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance,
-				memory_enabled, memory_source, status, created_at, updated_at
-			) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','active',?,?)`,
-				[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
-			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
-			{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'lifecycle_state','',NULL,'"draft"','platform','test',?),(?,?,'authored_field','name',NULL,'"Before"','platform','test',?),(?,?,'lifecycle_state','','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
-		}
-	}
-	for _, statement := range statements {
-		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
-			t.Fatalf("seed %s conversation fork source: %v\n%s", backend, err, statement.query)
-		}
-	}
-	for _, turn := range []struct {
-		id        string
-		eventID   string
-		eventType events.EventType
-		at        time.Time
+	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{
+		Identity: actorIdentity, RunID: fixture.RunID, SessionID: fixture.SessionID, EntityID: fixture.EntityID,
+		Event1ID: fixture.Event1ID, Event2ID: fixture.Event2ID,
+		CreatedAt: now, Turn1At: fixture.Turn1At, Turn2At: fixture.Turn2At,
+	})
+	for i, turn := range []struct {
+		id string
+		at time.Time
 	}{
-		{id: fixture.Turn1ID, eventID: fixture.Event1ID, eventType: "task.ready", at: fixture.Turn1At},
-		{id: fixture.Turn2ID, eventID: fixture.Event2ID, eventType: "task.done", at: fixture.Turn2At},
+		{fixture.Turn1ID, fixture.Turn1At}, {fixture.Turn2ID, fixture.Turn2At},
 	} {
-		event := storetest.InsertExistingRunRootEventRecord(
-			t, ctx, db, dialect, turn.eventID, fixture.RunID, turn.eventType,
-			eventtest.Producer(events.EventProducerExternal, "served-fork-source"), []byte(`{}`), events.EventEnvelope{}, turn.at,
-		)
 		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 			Store: selectedStore, Selected: selected, Identity: actorIdentity,
 			RunID: fixture.RunID, SessionID: fixture.SessionID, TurnID: turn.id,
-			Memory: runtimeagentmemory.Authored(true), Event: event, ParseOK: true, CreatedAt: turn.at,
+			Memory: runtimeagentmemory.Authored(true), Event: history[i], ParseOK: true, CreatedAt: turn.at,
 		})
 	}
 	return fixture
