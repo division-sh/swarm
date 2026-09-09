@@ -45,11 +45,9 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			activityRoot := filepath.Join(base, "activity-control")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/node_identity_activity"), activityRoot)
-			// This control only verifies authored activity identity; it never serves
-			// or dispatches the fixture's HTTP tool. The runtime proof stays mock-only.
-			writeReleaseFile(t, config, strings.Replace(goldenRuntimeConfig(store), "execution_posture: mock_only", "execution_posture: live", 1))
+			// This structural control never dispatches the authored HTTP activity.
+			// The public served proof below uses only system nodes.
 			activity := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", activityRoot, "--config", config, "--json")
-			writeReleaseFile(t, config, goldenRuntimeConfig(store))
 			if activity.err != nil {
 				t.Fatalf("legitimate activity ID rejected: %v\n%s", activity.err, activity.output)
 			}

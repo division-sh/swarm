@@ -62,6 +62,15 @@ These are local working-tree checkpoints. Final exact-head accounting remains du
 
 ## Remaining Acceptance
 
+The first integrated full run exposed two test-only cross-branch contract debts:
+SourceInvocationCommandsShareSelectedRoot still authored runtime.execution_posture,
+and CopyScenarioSetup restored a node.id deleted upstream. Removed the retired
+fixture fields, retained singleton setup/selection semantics and all assertions,
+and removed the now-no-op posture rewrite in the pure-system-node release proof.
+The three failing CLI tests pass together (15.720s), recorded in
+/tmp/agent-g-rebase-cli-fixtures.log. The first full run remains failed, not a green
+receipt; its remaining packages are being allowed to finish to collect all failures.
+
 Final full-profile and managed race results, current-head live/restart proof credit,
 and final PR proof audits are still required. No extra Claude/Telegram calls or
 settled-delivery replay occurred during rebase. The old PostgreSQL burst failure's

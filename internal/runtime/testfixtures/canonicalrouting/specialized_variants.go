@@ -504,7 +504,6 @@ func CopyScenarioSetup(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-setup-fixture\n")
 	writeLegacyInstanceFlow(t, root, "operating", "name: operating\nmode: singleton\ninitial_state: waiting\nterminal_states: [ready]\nstates: [waiting, ready]\npins:\n  inputs:\n    events:\n      - event: opco.product_review_requested\n        source: harness\n", "opco.product_review_requested:\n  swarm:\n    source: external\n  product_id: text\n  note: text\n", "product:\n  product_id:\n    type: text\n    _unused_reason: scenario setup identity\n  note: text\n", `reviewer:
-  id: reviewer
   execution_type: system_node
   subscribes_to: [opco.product_review_requested]
   gate_state:
