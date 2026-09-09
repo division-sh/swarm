@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -44,7 +45,7 @@ func (m forkFanOutConsumerModule) ActionRegistry() pipeline.ActionRegistry {
 	return pipeline.NewContractActionRegistry(m.source)
 }
 
-func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixture, backend string, source semanticview.Source, ctx context.Context, intent fanoutobligation.Intent, claim fanoutobligation.Claim, emissions []engine.EmitIntent, expectedFailure string) {
+func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixture, backend string, source semanticview.Source, ctx context.Context, intent fanoutobligation.Intent, claim fanoutobligation.Claim, emissions []engine.EmitIntent, expectedFailure string, completeBarrier bool) {
 	t.Helper()
 	selected := fixture.store.(storeTestDurableEventBusStore)
 	workflow := fixture.store.(workflowTestSelectedStore)
@@ -178,6 +179,9 @@ func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixtu
 		}
 		requireFanOutOriginReadback(t, fixture, backend, childCtx, emit.Event)
 	}
+	if completeBarrier {
+		consumeForkFanOutBarrierCompletion(t, fixture, backend, eventBus, childCtx, intent)
+	}
 	// Read the committed origin through the fixed-revision owner, not live event
 	// SQL, before using this run as a further fork source.
 	checkpoint := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "fork.checkpoint", "operator", "", []byte(`{}`), 0, intent.Request.Key.RunID, events.EventEnvelope{}, eventtest.RootRoutingSource(intent.Request.Key.RunID), time.Now().UTC())
@@ -188,5 +192,15 @@ func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixtu
 	plan, err := fixture.store.(selectedActivityProjectionStore).PlanRunFork(childCtx, runfork.RunForkPlanRequest{SourceRunID: intent.Request.Key.RunID, At: checkpoint.ID()})
 	if err != nil || len(plan.FanOutObligations) != 1 || len(plan.FanOutObligations[0].Outcomes) != len(emissions) {
 		t.Fatalf("fixed-revision origin/outcome readback: %+v %v", plan.FanOutObligations, err)
+	}
+	if completeBarrier {
+		barrier := plan.FanOutObligations[0].Barrier
+		if barrier == nil || barrier.Status != fanoutbarrier.StatusFired || barrier.Summary == nil || barrier.Summary.Total != len(emissions) || barrier.Summary.Succeeded != len(emissions) {
+			t.Fatalf("fixed revision lost actual completion disposition: %+v", barrier)
+		}
+		ref, ok := barrier.Registration.Handle.JoinRef()
+		if !ok || ref.Generation() != readForkBarrierLoop(t, ctx, fixture.db, intent.Request.Key.RunID).Generation() {
+			t.Fatal("fixed revision lost completed child generation")
+		}
 	}
 }
