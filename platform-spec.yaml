@@ -1393,7 +1393,12 @@ contract_formats:
             persisted target state admitted by the workflow target owner, the exact
             admitted agent lifecycle cell, and the matching live normal or selected generation grant. An agent descriptor
             with an explicit entity must agree; lawful descriptor absence does not erase the materializer's exact ownership.
-            The claim transaction consumes the retained execution-grant fence. Awaiting materialization or readiness
+            The claim transaction consumes the retained execution-grant fence. A completed materializer remains valid
+            when normal startup rebinds an unfinished agent delivery to
+            a successor runtime generation. Its immutable completed evidence remains bound to the same run, publication,
+            compiled route and source artifact; the agent still requires its own current admitted grant. Pending
+            materializers must retain exact execution-authority agreement, and no normal/selected crossing is admitted.
+            Awaiting materialization or readiness
             creates no agent attempt, timer or polling loop; canonical commit and readiness signals wake the existing
             continuation owner. Retryable materialization retains its existing retry policy. Terminal materializer failure
             atomically terminalizes its dependent obligations through the delivery owner, with exact failure/outcome and

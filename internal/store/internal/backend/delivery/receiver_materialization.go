@@ -99,8 +99,8 @@ func (a *Adapter) materializationReady(ctx context.Context, q queryer, record de
 	if err := events.ValidateReceiverMaterializations(event, routes); err != nil {
 		return false, err
 	}
-	if materializer.RunID != record.RunID || !materializer.Authority.Equal(record.Authority) {
-		return false, fmt.Errorf("receiver materializer run or execution generation contradicts dependent delivery")
+	if err := validateMaterializerAuthority(materializer.Snapshot, record.Snapshot); err != nil {
+		return false, err
 	}
 	if materializer.Status == deliverylifecycle.StatusDeadLetter {
 		return false, fmt.Errorf("receiver dependency survived terminal materializer settlement")
@@ -109,6 +109,25 @@ func (a *Adapter) materializationReady(ctx context.Context, q queryer, record de
 		return false, nil
 	}
 	return a.materializedReceiverExecutionReady(ctx, q, record, claimTx)
+}
+
+func validateMaterializerAuthority(materializer, dependent deliverylifecycle.Snapshot) error {
+	if materializer.RunID != dependent.RunID {
+		return fmt.Errorf("receiver materializer run contradicts dependent delivery")
+	}
+	if materializer.Authority.Equal(dependent.Authority) {
+		return nil
+	}
+	// Normal startup rebinds unfinished deliveries, not completed history. A
+	// committed materialization remains valid; the dependent's own current grant
+	// is still independently admitted and fenced before it can acquire a claim.
+	if materializer.Status == deliverylifecycle.StatusDelivered &&
+		materializer.Authority.Kind() == deliverylifecycle.ExecutionAuthorityNormalRuntime &&
+		dependent.Authority.Kind() == deliverylifecycle.ExecutionAuthorityNormalRuntime &&
+		materializer.Authority.SourceArtifact() == dependent.Authority.SourceArtifact() {
+		return nil
+	}
+	return fmt.Errorf("receiver materializer execution authority contradicts dependent delivery")
 }
 
 func (a *Adapter) materializedReceiverExecutionReady(ctx context.Context, q queryer, record deliveryRecord, claimTx *sql.Tx) (bool, error) {
@@ -170,8 +189,8 @@ func (a *Adapter) TerminalizeMaterializationDependents(ctx context.Context, tx *
 		if plan.Empty() || plan.Materializer() != materializer.RouteIdentity {
 			continue
 		}
-		if record.RunID != materializer.RunID || !record.Authority.Equal(materializer.Authority) {
-			return nil, fmt.Errorf("terminal receiver dependency contradicts materializer authority")
+		if err := validateMaterializerAuthority(materializer, record.Snapshot); err != nil {
+			return nil, err
 		}
 		if materializer.Status == deliverylifecycle.StatusDelivered {
 			materialized, err := a.receiverMaterialized(ctx, tx, record.Route)
