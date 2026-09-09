@@ -970,6 +970,7 @@ type fakeSelectedContractBindingReader struct {
 }
 
 type fakeSelectedContractSourceLoader struct {
+	original           *LoadedSelectedContractSource
 	loaded             LoadedSelectedContractSource
 	err                error
 	requestedSelection runfork.RunForkContractSelection
@@ -1015,6 +1016,9 @@ func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSource(_ c
 }
 
 func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	if l.original != nil && req.Selection.Mode == runfork.RunForkContractSelectionModeSelectedContracts && req.SourceArtifactFact.BundleHash() == "" {
+		return *l.original, l.err
+	}
 	return l.LoadRunForkSelectedContractSource(ctx, req.Selection)
 }
 

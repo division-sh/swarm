@@ -485,7 +485,7 @@ func loadSQLiteRunForkSelectedContractEvents(ctx context.Context, q eventrecords
 	return out, nil
 }
 
-func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
@@ -539,6 +539,14 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 	if stateAdmission.snapshot.RunID != sourceRunID {
 		return nil, fmt.Errorf("source event preparation run disagrees with selected fork binding")
 	}
+	fact, err := s.RunLifecyclePostgresOwner.RequirePresentSourceTx(ctx, tx, sourceRunID)
+	if err != nil {
+		return nil, err
+	}
+	if err := original.RequireSource(fact.BundleHash()); err != nil {
+		return nil, err
+	}
+	stateAdmission.carriage = original
 	records, err := eventrecordpostgres.LoadMany(ctx, tx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("load selected-contract source events: %w", err)

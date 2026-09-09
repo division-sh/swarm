@@ -47,6 +47,7 @@ import (
 	runforkreadiness "github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	semanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 	sessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	timerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
@@ -799,8 +800,12 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEventModes(ctx context.
 	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs)
+func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original)
+}
+
+func (s *PostgresStore) LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error) {
+	return s.runForkPostgresOwner.LoadRunForkSourceRunID(ctx, forkRunID)
 }
 
 func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
@@ -1987,8 +1992,12 @@ func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs)
+func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original)
+}
+
+func (s *SQLiteRuntimeStore) LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error) {
+	return s.runForkSQLiteOwner.LoadRunForkSourceRunID(ctx, forkRunID)
 }
 
 func (s *SQLiteRuntimeStore) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {

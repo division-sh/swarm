@@ -151,7 +151,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 		ForkRunID:   lineage.ForkRunID,
 	}
 	if historicalReplayExecution.DeliveryEventReplayReady {
-		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, now)
+		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, req.OriginalLoopCarriage, now)
 		if err != nil {
 			return result, err
 		}
@@ -286,7 +286,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 		effects := privaterunforkrevision.NewEffects()
 		replayResult = runfork.RunForkDeliveryEventReplayResult{Owner: runfork.RunForkDeliveryEventReplayOwner, SourceRunID: lineage.SourceRunID, ForkRunID: lineage.ForkRunID}
 		if historicalReplayExecution.DeliveryEventReplayReady {
-			replayResult, err = applyRunForkDeliveryEventReplay(txctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, now)
+			replayResult, err = applyRunForkDeliveryEventReplay(txctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, req.OriginalLoopCarriage, now)
 			if err != nil {
 				return err
 			}

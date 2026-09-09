@@ -11,9 +11,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -28,21 +35,43 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db := fanOutTimestampReaderDatabase(t, backend)
 			at := time.Date(2026, 9, 8, 10, 11, 12, 123456000, time.UTC)
-			childID, triggerID, eventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-			ref := runtimecontracts.FanOutPlanRef{
-				BundleHash: "timestamp-reader-bundle", SemanticDigest: "timestamp-reader-digest",
-				ElementRef: runtimecontracts.FanOutElementRef{FlowPath: ".", Family: "fan_out", SemanticPath: `nodes["worker"].handlers["items.ready"].fan_out`},
+			childID, triggerID, eventID, sourceRun := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutCarrier(t, false, false), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatal(err)
+			}
+			declarations := semanticview.Wrap(bundle)
+			original, err := semanticview.CompileOriginalLoopCarriage(declarations)
+			if err != nil {
+				t.Fatal(err)
+			}
+			node, err := identity.AdmitExecutableNodeDeclaration(".", "fan-out-source")
+			if err != nil {
+				t.Fatal(err)
+			}
+			plans := declarations.FanOutPlansForHandler(node, "items.ready")
+			if len(plans) != 1 {
+				t.Fatalf("fixture requires one real fan-out declaration: %d", len(plans))
+			}
+			ref := plans[0].Ref
+			producer, err := events.NewRootRoutingSource(sourceRun)
+			if err != nil {
+				t.Fatal(err)
 			}
 			source := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: eventID, Field: "items"}
 			intent := fanoutobligation.Intent{
 				Request: fanoutobligation.IntentRequest{
-					Key:     fanoutobligation.IntentKey{RunID: uuid.NewString(), TriggeringDeliveryID: triggerID, ElementRef: ref.ElementRef},
+					Key:     fanoutobligation.IntentKey{RunID: sourceRun, TriggeringDeliveryID: triggerID, ElementRef: ref.ElementRef},
 					PlanRef: ref, Source: source, Cardinality: 2,
+					Capsule: fanoutobligation.Capsule{NodeKey: node.Key(), ExecutionFlowID: ".", HandlerEventKey: "items.ready",
+						Route: flowidentity.StoredRoute(".", sourceRun, sourceRun), ProducerSource: producer,
+						Lineage: events.EventLineage{RunID: sourceRun, ParentEventID: eventID, ExecutionMode: executionmode.Live}},
 				},
 				Source: source, Cursor: 1, Status: fanoutobligation.StatusOpen,
 			}
 			outcome := fanoutobligation.Outcome{Ordinal: 0, Kind: fanoutobligation.OutcomeCommitted, SourceEventID: uuid.NewString(), InheritedDisposition: "no_route"}
-			plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{{Intent: intent, Outcomes: []fanoutobligation.Outcome{outcome}}}}
+			plan := runfork.RunForkPlan{SourceRunID: sourceRun, FanOutObligations: []runfork.RunForkFanOutObligation{{Intent: intent, Outcomes: []fanoutobligation.Outcome{outcome}}}}
 			refs := map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef{ref.ElementRef: ref}
 			capsule, err := json.Marshal(intent.Request.Capsule)
 			if err != nil {
@@ -97,7 +126,7 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 							if err != nil {
 								t.Fatal(err)
 							}
-							readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", childID, plan, refs)
+							readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", childID, plan, refs, original)
 							if err := tx.Rollback(); err != nil {
 								t.Fatal(err)
 							}

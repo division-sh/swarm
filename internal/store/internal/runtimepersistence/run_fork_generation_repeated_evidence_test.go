@@ -28,7 +28,7 @@ func TestForkGenerationRepeatedActivityEvidenceBothStores(t *testing.T) {
 						ctx := testAuthorActivityContext()
 						child, event, source := seedActivityTimestampReuse(t, fixture, backend.name == "postgres", false, status)
 						store := fixture.store.(selectedActivityProjectionStore)
-						first, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()})
+						first, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()))
 						if err != nil || len(first) != 1 {
 							t.Fatalf("initial copy: events=%d err=%v", len(first), err)
 						}
@@ -99,7 +99,7 @@ func TestForkGenerationRepeatedActivityEvidenceBothStores(t *testing.T) {
 							}
 						}
 						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()})
+						again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()))
 						if field == "unchanged" || field == "equivalent_json" {
 							if err != nil || !reflect.DeepEqual(first, again) {
 								t.Fatalf("exact repeated evidence: err=%v", err)

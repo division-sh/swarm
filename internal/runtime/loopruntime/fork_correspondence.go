@@ -1,6 +1,8 @@
 package loopruntime
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -121,6 +123,89 @@ func (c *ForkCorrespondence) AdmitSource(g attemptgeneration.Generation) (ForkSo
 		return ForkSourceReference{}, fmt.Errorf("source fork generation is not owned at the admitted revision")
 	}
 	return ForkSourceReference{owner: c.state, generation: g}, nil
+}
+
+// AdmitSourceContext reads only the exact projection produced by Context. Frozen
+// business maps are not contexts and must never be searched for matching values.
+func (c *ForkCorrespondence) AdmitSourceContext(context map[string]any) (ForkSourceReference, error) {
+	if len(context) != 7 {
+		return ForkSourceReference{}, fmt.Errorf("loop context must contain its complete seven-field projection")
+	}
+	var evidence struct {
+		FlowID        string `json:"flow_id"`
+		LoopID        string `json:"id"`
+		ActivationID  string `json:"activation_id"`
+		RevisionField string `json:"revision_field"`
+		RevisionID    string `json:"revision_id"`
+		Attempt       int    `json:"attempt"`
+		MaxAttempts   int    `json:"max_attempts"`
+	}
+	raw, err := json.Marshal(context)
+	if err != nil {
+		return ForkSourceReference{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&evidence); err != nil {
+		return ForkSourceReference{}, fmt.Errorf("decode original loop context: %w", err)
+	}
+	reference, err := c.AdmitSource(attemptgeneration.Generation{FlowID: evidence.FlowID, LoopID: evidence.LoopID,
+		ActivationID: evidence.ActivationID, RevisionField: evidence.RevisionField, RevisionID: evidence.RevisionID, Attempt: evidence.Attempt})
+	if err != nil {
+		return ForkSourceReference{}, err
+	}
+	if c.state.pairs[forkLoopScope{evidence.FlowID, evidence.LoopID}].source.MaxAttempts != evidence.MaxAttempts {
+		return ForkSourceReference{}, fmt.Errorf("original loop context disagrees with its activation cap")
+	}
+	return reference, nil
+}
+
+func (r ForkChildReference) Context() (map[string]any, error) {
+	if r.source.owner == nil {
+		return nil, fmt.Errorf("child loop context requires admitted correspondence")
+	}
+	c := &ForkCorrespondence{state: r.source.owner}
+	want, err := c.Bind(r.source)
+	if err != nil || want.generation != r.generation {
+		return nil, fmt.Errorf("child loop context disagrees with its correspondence")
+	}
+	context := c.state.pairs[forkLoopScope{r.generation.FlowID, r.generation.LoopID}].child.Context()
+	context["attempt"], context["revision_id"] = r.generation.Attempt, r.generation.RevisionID
+	return context, nil
+}
+
+func (r ForkChildReference) RequireDestination(runID, entityID string) error {
+	c := &ForkCorrespondence{state: r.source.owner}
+	if err := c.RequireDestination(runID, entityID); err != nil {
+		return err
+	}
+	want, err := c.Bind(r.source)
+	if err != nil || want.generation != r.generation {
+		return fmt.Errorf("child reference contradicts its destination correspondence")
+	}
+	return nil
+}
+
+// AdmitSourceRevision is for a declared revision-field reference. Its caller
+// must establish the original declaration role before supplying the exact scope.
+// Lookup is confined to that activation's owned history, never other loops or
+// the child's current revision.
+func (c *ForkCorrespondence) AdmitSourceRevision(flowID, loopID, field, revision string) (ForkSourceReference, error) {
+	if c == nil || c.state == nil || revision == "" || revision != strings.TrimSpace(revision) {
+		return ForkSourceReference{}, fmt.Errorf("source revision reference is not canonical")
+	}
+	pair, ok := c.state.pairs[forkLoopScope{flowID, loopID}]
+	if !ok || field != pair.source.RevisionField {
+		return ForkSourceReference{}, fmt.Errorf("source revision declaration has no exact activation")
+	}
+	g := pair.source.Generation()
+	for attempt := 1; attempt <= pair.source.Attempt; attempt++ {
+		if revisionID(pair.source.ActivationID, attempt) == revision {
+			g.Attempt, g.RevisionID = attempt, revision
+			return c.AdmitSource(g)
+		}
+	}
+	return ForkSourceReference{}, fmt.Errorf("source revision is not owned at the admitted revision")
 }
 
 // AdmitSourceKey completes only the field omitted by the canonical key codec.

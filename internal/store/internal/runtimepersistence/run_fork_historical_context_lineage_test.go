@@ -30,11 +30,10 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 		t.Run(backend, func(t *testing.T) {
 			for _, sourceKind := range []string{"event_payload_field", "entity_field_revision"} {
 				t.Run(sourceKind, func(t *testing.T) {
-					ctx := testAuthorActivityContext()
 					owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 					store := owner.(runForkSelectedLifecycleStore)
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-					source := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, at)
+					ctx, source := seedDeclaredForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 1, at)
 					if sourceKind == "entity_field_revision" {
 						entityID, mutationID := seedFanOutEntityRevision(t, ctx, db, postgres, source.runID, `["source-item"]`, at)
 						// The reusable field-only seed does not supply lifecycle history.
@@ -72,7 +71,7 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 					rootRows := historicalLineageOwnedRows(t, db, postgres, source.runID)
 					parentRun := source.runID
 					for generation := 1; generation <= 2; generation++ {
-						request := runfork.RunForkMaterializeRequest{SourceRunID: parentRun, At: point}
+						request := runfork.RunForkMaterializeRequest{SourceRunID: parentRun, At: point, OriginalLoopCarriage: originalCarriageForRun(t, owner, parentRun)}
 						child, err := store.MaterializeRunFork(ctx, request)
 						if err != nil || child.MaterializedFanOutCount != 1 || child.ForkRunID == parentRun || child.ForkRunID == source.runID {
 							t.Fatalf("generation %d materialization: %#v err=%v", generation, child, err)

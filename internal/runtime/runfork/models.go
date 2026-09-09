@@ -57,6 +57,7 @@ const (
 )
 
 type RunForkActivateRequest struct {
+	OriginalLoopCarriage              semanticview.OriginalLoopCarriage `json:"-"`
 	ForkRunID                         string
 	ConfirmSourceFreeze               bool
 	HistoricalReplayExecutionAdmitter RunForkHistoricalReplayExecutionAdmitter
@@ -200,6 +201,7 @@ const (
 )
 
 type RunForkMaterializeRequest struct {
+	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`
 	SourceRunID             string
 	At                      string
 	ContractSelection       *RunForkContractSelection

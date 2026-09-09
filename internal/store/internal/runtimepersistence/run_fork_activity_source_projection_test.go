@@ -41,7 +41,7 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 						ctx := testAuthorActivityContext()
 						sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, json.RawMessage(`{"value":"unchanged"}`))
 						store := fixture.store.(selectedActivityProjectionStore)
-						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()})
+						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, sourceRun))
 						if err != nil || len(loaded) != 1 {
 							t.Fatalf("valid materialized child: count=%d err=%v", len(loaded), err)
 						}
@@ -63,7 +63,7 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 							t.Fatalf("corrupt exact child row: rows=%d err=%v", rows, err)
 						}
 						before := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID())
-						loaded, err = store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()})
+						loaded, err = store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, sourceRun))
 						if err == nil || !strings.Contains(err.Error(), "exact child route/type") {
 							t.Fatalf("rehomed child supplied source generations: events=%#v err=%v", loaded, err)
 						}
@@ -100,7 +100,7 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 						}
 					}
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID())
-					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()})
+					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, sourceRun))
 					if after := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID()); !reflect.DeepEqual(before, after) {
 						t.Fatal("ordinary preparation changed source evidence")
 					}
@@ -124,6 +124,27 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 						t.Fatalf("root source was not projected: %#v", got.RoutingSource)
 					}
 					if state == "loop" {
+						var sourceHash, childHash string
+						if err := fixture.db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, sourceRun).Scan(&sourceHash); err != nil {
+							t.Fatal(err)
+						}
+						if err := fixture.db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, child.ForkRunID).Scan(&childHash); err != nil || sourceHash == childHash {
+							t.Fatalf("original/selected declaration distinction not exercised: source=%q child=%q %v", sourceHash, childHash, err)
+						}
+						selected, err := semanticview.CompileOriginalLoopCarriage(selectedActivityProducerSource(t))
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := selected.RequireSource(childHash); err != nil {
+							t.Fatalf("replacement fixture is not actual selected S: %v", err)
+						}
+						beforeWrongSource := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+						if _, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, selected); err == nil {
+							t.Fatal("selected S reinterpreted original event lineage")
+						}
+						if !reflect.DeepEqual(beforeWrongSource, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+							t.Fatal("rejected selected-S interpretation changed persistence")
+						}
 						var accumulator []byte
 						if err := fixture.db.QueryRowContext(ctx, `SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID).Scan(&accumulator); err != nil {
 							t.Fatal(err)
@@ -169,10 +190,10 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 
 func seedSelectedOrdinaryRootProjectionFixture(t *testing.T, fixture authorActivityReceiptFixture, postgres bool, state string) (string, runfork.RunForkMaterialization, events.Event) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
 	runID, parentID, eventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	declarations := selectedActivityProducerSourceWithLoops(t, state == "loop", false)
+	ctx := seedSelectedActivitySourceRun(t, fixture, runID, declarations)
 	parent := eventtest.ExistingRunRootIngress(parentID, "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
 	if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
 		t.Fatal(err)
@@ -246,7 +267,7 @@ func TestSelectedContractActivitySourceProjectionBothStores(t *testing.T) {
 					sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", cell.root, cell.independentTarget, cell.wrongFlow, json.RawMessage(`{"value":"unchanged"}`))
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
 					store := fixture.store.(selectedActivityProjectionStore)
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()})
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()}, originalCarriageForRun(t, store, sourceRun))
 					if after := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID()); !reflect.DeepEqual(before, after) {
 						t.Fatal("activity preparation mutated persisted source routing/payload evidence")
 					}
@@ -303,7 +324,7 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 					input := json.RawMessage(`{"large":9007199254740993,"decimal":1.2300e+09,"negative_zero":-0,"nested":[18446744073709551615]}`)
 					sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, input)
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
-					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()})
+					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()}, originalCarriageForRun(t, fixture.store, sourceRun))
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("load numeric activity: events=%#v err=%v", loaded, err)
 					}
@@ -338,18 +359,18 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 
 func seedSelectedActivityProjectionFixture(t *testing.T, fixture authorActivityReceiptFixture, postgres, root, independentTarget, wrongFlow bool, input json.RawMessage) (string, runfork.RunForkMaterialization, events.Event) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
-	runID, parentID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	runID, parentID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	declarations := selectedActivityProducerSource(t)
+	ctx := seedSelectedActivitySourceRun(t, fixture, runID, declarations)
 	flowID, flowInstance := "flow-a", "flow-a"
 	if root {
 		flowID, flowInstance, entityID = ".", runID, runID
 	}
 	node := mustPersistenceNode(flowID, "reader")
-	source, err := pinrouting.AdmitNodeExecutionRoutingSource(selectedActivityProducerSource(t), node, flowID, events.RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID})
+	source, err := pinrouting.AdmitNodeExecutionRoutingSource(declarations, node, flowID, events.RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
 	parent := eventtest.ExistingRunRootIngress(parentID, "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
 	if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
@@ -366,11 +387,16 @@ func seedSelectedActivityProjectionFixture(t *testing.T, fixture authorActivityR
 	if wrongFlow {
 		activityFlow = "unrelated/receiver"
 	}
+	fact := activityidentity.Fact{RunID: runID, SourceEventID: parentID, EntityID: entityID,
+		Owner: activityidentity.MustNodeOwner(node), ExecutionFlowID: flowID, HandlerEventKey: "review.inspect",
+		ActivityID: "inspect", Tool: "provider.read", Attempt: 1}
+	eventID := activityidentity.RequestEventID(fact)
+	results := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{Node: node, HandlerEventKey: "review.inspect", Spec: runtimecontracts.ActivitySpec{ID: "inspect", Tool: "provider.read"}})
 	payload, err := json.Marshal(map[string]any{
 		"activity_id": "inspect", "tool": "provider.read", "input": input,
 		"effect_class": string(runtimecontracts.ActivityEffectClassReadOnly), "fork_policy": string(runtimecontracts.ActivityForkReexecuteRead),
-		"success_event": "read.succeeded", "failure_event": "read.failed", "attempt": 1,
-		"entity_id": entityID, "node_id": node.Key(), "flow_id": flowID, "flow_instance": activityFlow,
+		"success_event": results.SuccessEvent, "failure_event": results.FailureEvent, "attempt": 1,
+		"entity_id": entityID, "node_id": fact.Owner.Key(), "flow_id": flowID, "flow_instance": activityFlow,
 		"handler_event_key": "review.inspect", "source_run_id": runID, "source_event_id": parentID,
 	})
 	if err != nil {
@@ -411,18 +437,36 @@ func selectedActivityPersistedSourceEvidence(t *testing.T, db *sql.DB, eventID s
 type selectedActivityProjectionStore interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
 }
 
 func selectedActivityProducerSource(t *testing.T) semanticview.Source {
+	return selectedActivityProducerSourceWithLoops(t, false, false)
+}
+
+func selectedActivityProducerSourceWithLoops(t *testing.T, ordinaryRootLoop, activityLoop bool) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	for path, content := range map[string]string{
-		"schema.yaml":          "name: activity-projection\nstages:\n  pending: {initial: true}\n",
-		"entities.yaml":        "default:\n  name: text\n",
-		"events.yaml":          "ordinary.ready: {}\n",
-		"nodes.yaml":           "reader:\n  id: reader\n  execution_type: system_node\n",
+	files := map[string]string{
+		"schema.yaml":   "name: activity-projection\nstages:\n  pending: {initial: true}\n",
+		"entities.yaml": "default:\n  name: text\n",
+		"events.yaml":   "ordinary.ready: {}\nreview.inspect: {}\nsupport.drafted: {}\n",
+		"nodes.yaml": `reader:
+  id: reader
+  execution_type: system_node
+  subscribes_to: [review.inspect]
+  event_handlers:
+    review.inspect:
+      activity: {id: inspect, tool: provider.read}
+support:
+  id: support
+  execution_type: system_node
+  subscribes_to: [support.drafted]
+  event_handlers:
+    support.drafted:
+      activity: {id: send_support_reply, tool: telegram.send_message}
+`,
 		"flow-a/schema.yaml":   "name: flow-a\nmode: static\nstages:\n  pending: {initial: true}\n",
 		"flow-a/entities.yaml": "default:\n  name: text\n",
 		"flow-a/events.yaml":   "review.accepted: {}\nreview.inspect: {}\n",
@@ -431,15 +475,91 @@ func selectedActivityProducerSource(t *testing.T) semanticview.Source {
   execution_type: system_node
   subscribes_to: [review.accepted]
   event_handlers:
-    review.accepted: {}
+    review.accepted:
+      activity: {id: commit, tool: provider.write}
 reader:
   id: reader
   execution_type: system_node
   subscribes_to: [review.inspect]
   event_handlers:
-    review.inspect: {}
+    review.inspect:
+      activity: {id: inspect, tool: provider.read}
 `,
-	} {
+		"tools.yaml": `provider.read:
+  handler_type: http
+  effect_class: read_only
+  input_schema: {type: object}
+  output_schema: {type: object}
+  http: {method: GET, url: "http://127.0.0.1:1/read"}
+provider.write:
+  handler_type: http
+  effect_class: non_idempotent_write
+  input_schema: {type: object}
+  output_schema: {type: object}
+  http: {method: POST, url: "http://127.0.0.1:1/write"}
+telegram.send_message:
+  handler_type: http
+  effect_class: non_idempotent_write
+  input_schema: {type: object}
+  output_schema: {type: object}
+  http: {method: POST, url: "http://127.0.0.1:1/send"}
+`,
+	}
+	if ordinaryRootLoop {
+		files["schema.yaml"] += "  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
+		files["events.yaml"] = "ordinary.ready:\n  opaque_revision: text\nordinary.start: {}\nordinary.retry:\n  opaque_revision: text\nordinary.close:\n  opaque_revision: text\n"
+		files["nodes.yaml"] = `reader:
+  id: reader
+  execution_type: system_node
+  subscribes_to: [ordinary.start, ordinary.ready, ordinary.retry, ordinary.close]
+  event_handlers:
+    ordinary.start:
+      loop: {start: revision, from: pending}
+      advances_to: pending
+    ordinary.ready:
+      loop: {admit: revision, from: pending}
+      advances_to: pending
+    ordinary.retry:
+      loop: {repeat: revision, from: pending}
+      advances_to: pending
+    ordinary.close:
+      loop: {close: revision, from: pending}
+      advances_to: closed
+`
+	}
+	if activityLoop {
+		files["flow-a/schema.yaml"] += "  review: {}\n  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
+		files["flow-a/events.yaml"] = "review.accepted:\n  revision_id: text\nreview.inspect:\n  revision_id: text\nreview.start: {}\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n"
+		files["flow-a/nodes.yaml"] = `writer:
+  id: writer
+  execution_type: system_node
+  subscribes_to: [review.start, review.accepted, review.retry, review.close]
+  event_handlers:
+    review.start:
+      loop: {start: revision, from: pending}
+      advances_to: review
+    review.accepted:
+      loop: {admit: revision, from: review}
+      advances_to: review
+      activity: {id: commit, tool: provider.write}
+    review.retry:
+      loop: {repeat: revision, from: review}
+      advances_to: review
+    review.close:
+      loop: {close: revision, from: review}
+      advances_to: closed
+reader:
+  id: reader
+  execution_type: system_node
+  subscribes_to: [review.inspect]
+  event_handlers:
+    review.inspect:
+      loop: {admit: revision, from: review}
+      advances_to: review
+      activity: {id: inspect, tool: provider.read}
+`
+	}
+	for path, content := range files {
 		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path), content)
 	}
 	repo := canonicalrouting.RepoRoot(t)
@@ -448,6 +568,48 @@ reader:
 		t.Fatal(err)
 	}
 	return semanticview.Wrap(bundle)
+}
+
+func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFixture, runID string, source semanticview.Source) context.Context {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.SourceArtifact == nil {
+		t.Fatal("activity source run requires its actual admitted declarations")
+	}
+	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact,
+		StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
+	})
+	return ctx
+}
+
+func originalCarriageForRun(t testing.TB, selected any, runID string) semanticview.OriginalLoopCarriage {
+	t.Helper()
+	store, ok := selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)
+	if !ok {
+		t.Fatal("fixture requires the actual source artifact reader")
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	loaded, err := (runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
+		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: store}).LoadRunForkSelectedContractSourceForRequest(context.Background(), runforkexecution.SelectedContractSourceLoadRequest{
+		SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Cleanup != nil {
+		t.Cleanup(func() {
+			if err := loaded.Cleanup(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	owner, err := semanticview.CompileOriginalLoopCarriage(loaded.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return owner
 }
 
 // Only these activity fixtures replace the legacy platform-control seed. The
@@ -475,6 +637,16 @@ func stampSelectedActivityProducerFixture(t *testing.T, db *sql.DB, runID, entit
 func materializeSelectedActivityFixture(t *testing.T, ctx context.Context, store selectedActivityProjectionStore, sourceRunID, eventID string) runfork.RunForkMaterialization {
 	t.Helper()
 	source := selectedActivityProducerSource(t)
+	request := selectedSourceMaterializationRequest(t, ctx, store, sourceRunID, eventID, source)
+	materialized, err := store.MaterializeRunForkForSelectedContractExecution(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return materialized
+}
+
+func selectedSourceMaterializationRequest(t *testing.T, ctx context.Context, store selectedActivityProjectionStore, sourceRunID, eventID string, source semanticview.Source) runforkreadiness.MaterializeRequest {
+	t.Helper()
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("activity fixture has no admitted source artifact")
@@ -529,13 +701,9 @@ func materializeSelectedActivityFixture(t *testing.T, ctx context.Context, store
 	if err != nil {
 		t.Fatal(err)
 	}
-	materialized, err := store.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
+	return runforkreadiness.MaterializeRequest{
 		SourceRunID: sourceRunID, At: eventID, ContractSelection: frontier.ContractSelection,
 		SourceArtifactFact: sourceFact, EffectiveSourceIdentity: effective.Identity(), Readiness: readiness,
 		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: planning,
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	return materialized
 }

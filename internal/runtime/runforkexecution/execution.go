@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type SelectedContractExecutionRequest struct {
@@ -90,6 +91,10 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{}, fmt.Errorf("load selected semantic source for execution: %w", err)
 	}
 	defer cleanupLoadedSelectedContractSource(loadedSource)
+	original, err := loadOriginalLoopCarriage(ctx, req.SourceLoader, req.SourceRunID)
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
+	}
 	selection = loadedSource.Selection
 	if loadedSource.Module == nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires executable selected workflow module")
@@ -180,6 +185,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	}
 	defer func() { _ = agentRuntime.releaseWorkspaceProjection() }()
 	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
+		OriginalLoopCarriage:    original,
 		SourceRunID:             plan.SourceRunID,
 		At:                      plan.ForkPoint.EventID,
 		ContractSelection:       selection,
@@ -228,6 +234,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
+		OriginalLoopCarriage:  original,
 		Owner:                 req.Owner,
 		Admission:             admission,
 		LoadedSource:          loadedSource,
@@ -344,6 +351,7 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store Selected
 }
 
 type publishSelectedContractForkEventsRequest struct {
+	OriginalLoopCarriage  semanticview.OriginalLoopCarriage
 	Owner                 SelectedContractExecutionOwner
 	Admission             runfork.RunForkSelectedContractExecutionAdmission
 	LoadedSource          LoadedSelectedContractSource

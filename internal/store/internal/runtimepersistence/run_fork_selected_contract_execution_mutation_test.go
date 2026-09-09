@@ -249,7 +249,7 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 
-	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{earlierEventID, laterEventID})
+	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{earlierEventID, laterEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSourceEvents: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *te
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
-	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{eventID})
+	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{eventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSourceEvents: %v", err)
 	}
@@ -1903,9 +1903,23 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 }
 
 func seedSelectedContractExecutionStoreSourceRawWithPayload(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
+	seedSelectedContractExecutionSourceWithRun(t, db, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash}, entityID, eventID, at, routes, payload)
+}
+
+func seedDeclaredActivityExecutionSource(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, source semanticview.Source) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.SourceArtifact == nil {
+		t.Fatal("declared activity source requires its actual artifact")
+	}
+	seedSelectedContractExecutionSourceWithRun(t, db, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash()}, entityID, eventID, at, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")}, []byte(`{}`))
+}
+
+func seedSelectedContractExecutionSourceWithRun(t *testing.T, db *sql.DB, run semanticRunFixture, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
+	t.Helper()
+	sourceRunID := run.RunID
+	ctx := testAuthorActivityContextForBundle(run.BundleHash)
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), run)
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	selected.acceptCurrentSchemaForTest()
 	event := semanticEventRecordFixture(

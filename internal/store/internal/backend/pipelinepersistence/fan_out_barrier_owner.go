@@ -12,13 +12,16 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
@@ -839,9 +842,10 @@ func (s *PipelinePostgresOwner) MaterializeRunForkFanOutBarrierTx(
 	forkRunID string,
 	source fanoutbarrier.Barrier,
 	selectedRef runtimecontracts.FanOutPlanRef,
+	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
-	return materializeRunForkFanOutBarrierTx(ctx, tx, true, effects, s.genericSchedules, forkRunID, source, selectedRef, at)
+	return materializeRunForkFanOutBarrierTx(ctx, tx, true, effects, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
 }
 
 func (s *PipelineSQLiteOwner) MaterializeRunForkFanOutBarrierTx(
@@ -851,9 +855,10 @@ func (s *PipelineSQLiteOwner) MaterializeRunForkFanOutBarrierTx(
 	forkRunID string,
 	source fanoutbarrier.Barrier,
 	selectedRef runtimecontracts.FanOutPlanRef,
+	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
-	return materializeRunForkFanOutBarrierTx(ctx, tx, false, effects, s.genericSchedules, forkRunID, source, selectedRef, at)
+	return materializeRunForkFanOutBarrierTx(ctx, tx, false, effects, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
 }
 
 func materializeRunForkFanOutBarrierTx(
@@ -865,6 +870,7 @@ func materializeRunForkFanOutBarrierTx(
 	forkRunID string,
 	source fanoutbarrier.Barrier,
 	selectedRef runtimecontracts.FanOutPlanRef,
+	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
 	if err := source.Validate(); err != nil {
@@ -874,6 +880,22 @@ func materializeRunForkFanOutBarrierTx(
 		return fmt.Errorf("fork fan-out barrier materialization requires run, time, and revision owner")
 	}
 	sourceJoin, _ := source.Registration.Handle.JoinRef()
+	var childGeneration attemptgeneration.Generation
+	if generation != nil {
+		if generation.Source().Generation() != sourceJoin.Generation() {
+			return fmt.Errorf("fork barrier source generation contradicts admitted correspondence")
+		}
+		projection, err := runfork.ProjectEntityOwnership(source.Registration.IntentKey.RunID, forkRunID, source.Registration.EntityID, source.Registration.Route.InstancePath)
+		if err != nil {
+			return err
+		}
+		if err := generation.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
+			return err
+		}
+		childGeneration = generation.Generation()
+	} else if sourceJoin.Generation() != (attemptgeneration.Generation{}) {
+		return fmt.Errorf("fork barrier requires its admitted child generation")
+	}
 	fanOutDeclaration, identityErr := selectedRef.ElementRef.DeclarationIdentity()
 	if identityErr != nil {
 		return fmt.Errorf("selected fan-out declaration: %w", identityErr)
@@ -886,7 +908,7 @@ func materializeRunForkFanOutBarrierTx(
 	if err != nil {
 		return err
 	}
-	selectedJoin, err = selectedJoin.BindFanOutIntent(source.Registration.IntentKey.TriggeringDeliveryID, sourceJoin.Generation())
+	selectedJoin, err = selectedJoin.BindFanOutIntent(source.Registration.IntentKey.TriggeringDeliveryID, childGeneration)
 	if err != nil {
 		return err
 	}

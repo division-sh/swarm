@@ -34,7 +34,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003100, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
+	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
 	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
@@ -87,7 +87,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
-	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID})
+	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003200, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
+	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
 	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "reader")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
@@ -179,7 +179,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID})
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003300, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
+	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
 	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
@@ -288,7 +288,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID})
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}

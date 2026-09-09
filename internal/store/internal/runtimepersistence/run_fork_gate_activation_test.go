@@ -832,15 +832,13 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			}
 			forkRunID := child.ForkRunID
 			var prepared runfork.RunForkSelectedContractSourceEvent
-			err = cards.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-				var inner error
-				prepared, inner = prepareRunForkSelectedContractSourceEvent(txctx, tx, story, forkRunID, runfork.RunForkSelectedContractSourceEvent{
-					SourceEventID: continuation.RequestEventID, EventName: runForkActivityRequestEvent,
-					ExecutionMode: request.ExecutionMode(), Scope: string(request.Scope()),
-					RoutingSource: request.RoutingSource(), Payload: request.Payload(),
-				})
-				return inner
-			})
+			loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, originalCarriageForRun(t, cards, sourceRunID))
+			if err == nil {
+				if len(loaded) != 1 {
+					t.Fatalf("prepared count=%d", len(loaded))
+				}
+				prepared = loaded[0]
+			}
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("prepare error = %v, want %q", err, tc.wantErr)
