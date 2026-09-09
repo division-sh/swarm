@@ -9,7 +9,9 @@ That failing probe remains historical evidence, not the current runtime contract
 Agent-g; one combined #2321/#2432/#2439 PR, separate repair commits/proof tables.
 The branch was carefully rebased with merge resolutions reapplied; B's single
 eventpersistence settlement owner replaces G's agentpersistence projector. Final
-integrated suite, residual disposition and final head binding remain outstanding.
+integrated suite and final head binding remain outstanding. Lead disposition
+issuecomment-5607051620 records LSF-028/029 as explicit #2353 residual risks,
+not an indefinite historical-evidence blocker or a claim that they were fixed.
 Current-head live/restart has passed on both stores with distinct failed-attempt
 accounting in issue-2321-postimplementation.md; no old delivery was replayed.
 Approved original/amended gate:

@@ -1,9 +1,12 @@
 # Post-Implementation Proof Audit: #2321
 
 Agent-g. **Candidate, not review-ready.** Code/test head:
-`ae8bbb782434a17fd170ed508a06868fa81588f4`, based on merged B #2440 at
+`be9e98fe3fb2504b68dcefa487eaec66a222a519`, based on merged B #2440 at
 `47c0e70d8ef89a2c99f0be4af632f24692121b83`. Final integrated full-profile
-swarm-test and residual disposition remain outstanding. Current-head provisioned
+swarm-test remains outstanding. The lead accepted explicit residual tracking for
+LSF-028/029 under #2353 in issuecomment-5607051620; missing historical evidence
+does not block opening the PR after current-head defects and qualification are
+resolved. Provisioned
 live proof has now executed successfully on both stores, with failed attempts
 retained below. This is the consolidated current claim;
 dated progress artifacts retain historical failures and receipts, not competing
@@ -197,9 +200,25 @@ The failed whole-run receipt remains /tmp/agent-g-rebase-integrated-full-v2.log,
 SHA256 2687831d127e20ac981ec67a25f9358915f9b3c6b5eadd188ebad7e548ec3497.
 That run passed releasee2e (841.922s), catalog/fork (494.842s), runtimepersistence
 (558.061s), serveapp (501.481s) and cliapp (216.734s); these do not turn the whole
-command green. A fresh full-profile swarm-test is queued at ae8bbb782, with
-30-minute package timeout and unchanged full workload, in
-/tmp/agent-g-rebase-integrated-full-v3.log.
+command green. The stale ae8bbb782 queue request was cancelled before execution
+(exit 143) after the lead reproduced T7 and requested failure-capture repairs.
+Only G's exact queue process was signalled. A fresh full-profile swarm-test is
+queued at be9e98fe3, with 30-minute package timeout and unchanged full workload,
+in /tmp/agent-g-final-bounded-repairs-full.log.
+
+Bounded final corrections authorized in
+https://github.com/division-sh/swarm/issues/2321#issuecomment-5607051620:
+
+| Row | Classification | Exact proof |
+| --- | --- | --- |
+| E1 health/RPC failure evidence | reproduced and fixed | TestReleaseRPCFailureEvidence: absent/null result, wrong/missing response ID, error envelope, secret redaction, non-JSON/malformed body, bounded output. HTTP status, endpoint without credentials/query, expected process PID, request/response IDs and body length/hash survive. Arbitrary result/error-data payloads are omitted; supplied secrets are redacted before truncation. One request only, no retry. |
+| E2 golden collector failure | reproduced and fixed | TestGoldenFailureEvidenceSurvivesCollectorFailure: entity error/timeout, partial event/entity page failure, total-budget cancellation. Exact earlier public facts flush before the failing entity collector; later collectors run or record their own cancellation/error. Normal success assertions remain strict; one-second part budgets and five-second total capture budget do not extend the workload completion deadline. |
+| #2439 T7 automatic rollback | split / escalated as separate class | Separate SQLite commit 74461cda7 and #2439 proof table; read cancellation/deadline joins existing errors rather than returning only ErrTxDone. |
+
+Offline E1/E2 plus effect-approval mode controls pass race count=3 (4.128s),
+log /tmp/agent-g-failure-evidence-final.log, SHA256
+676da0bffa343b7cdd0fba598d5c97616ab9324f291a41fdcf33d00b64207574.
+No additional live message or speculative PostgreSQL runtime patch was made.
 
 L proof at runtime head 5426deb7b is complete by named
 surface: SQLite and both untouched scaffold readiness cases passed within the
@@ -210,9 +229,11 @@ Logs: /tmp/agent-g-rebase-live-host-final.log and
 graceful restart, forced restart with pending work, later ingress with old-delivery
 snapshot unchanged, two fresh SQLite dev epochs and unchanged retained history.
 Exactly twelve successful fresh Telegram replies total; no additional live
-business tests are scheduled. T, L and H credit remain separate. ae8bbb782 changes
-only the unrelated native web-search rate-limit test; the exercised live runtime
-and release tests remain byte-identical to 5426deb7b.
+business tests are scheduled. T, L and H credit remain separate. These are genuine
+historical live receipts at 5426deb7b, not another live run at be9e98fe3. Later
+changes are the rate-limit test, #2439 cancellation/error preservation, and the
+failure-only harness capture/response-identity checks. Lead explicitly requested
+offline proofs and integrated qualification, not another live journey/replay.
 
 Live receipt SHA256s: host combined
 449be10ff06dab66b84e8ad2f0ffc31b6ead44654c26677201c2f399bbdb2b17;
@@ -243,11 +264,17 @@ hypothesis, not an established runtime defect or fixed cause. A fresh PostgreSQL
 only run passed (124.420s); the failed pre-ingress attempt stays in the record.
 Neither a provider reply nor a PostgreSQL restart pass is credited from that
 failed attempt. No SQLite message was repeated to obtain PostgreSQL evidence.
+This is LSF-029, observed/unclassified in #2353, under the lead's explicit
+nonblocking historical-evidence disposition. Any recurrence still fails proof
+and requires investigation, not retry-to-green.
 
 The earlier PostgreSQL N=10 burst timeout remains unclassified: all ten analyzed,
 nine completed, all 43 deliveries delivered, zero unsettled/fanout owed, one due
 timer. Exact payload evidence was lost with the disposable store. Failure-only
 event/log retention is now present; neither subsequent green repetitions nor the
-SQLite cleanup prove its cause. Lead residual disposition was requested in
-issuecomment-5603368828 and remains required. No deadline/workload relaxation or
-production golden-path workaround is included.
+SQLite cleanup prove its cause. This is LSF-028, observed/unclassified in #2353;
+lead disposition issuecomment-5607051620 permits opening after bounded repairs
+and required current-head proof without endless historical reruns. This is not
+a fix or merge approval. No deadline/workload relaxation or production golden-path
+workaround is included. Watchlist refinement 07a5d05 records these distinctions;
+no further node, issue or architecture framework is required.

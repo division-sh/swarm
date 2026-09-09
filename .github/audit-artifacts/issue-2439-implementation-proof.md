@@ -16,6 +16,14 @@ ae8bbb782 checks admission rather than downstream server-arrival spacing and
 adds a delayed-transport control. A fresh full-profile swarm-test is queued;
 no final PR closure is claimed yet. Full accounting is in the #2321 proof audit.
 
+The lead then reproduced a genuine T7 read cancellation defect at 65b09065f:
+automatic rollback before Commit lost context.Canceled/DeadlineExceeded behind
+ErrTxDone. The existing early-green checkpoints did not close T7. Commit
+74461cda7 repairs the read boundary with errors.Join(ctx.Err(), result), retaining
+callback/cleanup causes and no new retry or transaction owner. This implements
+the authorized correction in issuecomment-5607060442; spec now explicitly binds
+both caller cancellation identities at both transaction boundaries.
+
 ## Class And Owners
 
 Working class: selected SQLite transaction termination and exact-connection
@@ -76,7 +84,8 @@ no new blanket allowlist or public raw authority.
 | T4 later successful autocommit | reproduced and fixed | TestReviewerCommitFailureCapturesLaterAutocommitWrite count=3 under race; independent durability asserted. |
 | T5 failed rollback | reproduced and fixed | TestTransactionExitFaultDisposition/{rollback_failure,panic_rollback_failure}{1,3}; actual SQLite wrapper faults Rollback, exact close, retained primary/cleanup, no retry. |
 | T6 callback panic | reproduced and fixed | TestReviewerTransactionPanicCleanup/{read,write} count=3 under race; original context alive, panic identity and next progress. |
-| T7 cancellation | execution-proven through the same corrected path | TestTransactionCancellationCuts read/write pool_wait, before_begin, callback_error, before_commit; existing callback cancellation races, no leaked connection/token. Newly exposed canceled-Begin callback entry fixed. |
+| T7 cancellation | reproduced and fixed | TestTransactionCancellationCuts read/write pool_wait, before_begin, callback_error, before_commit; TestTransactionCancellationRollbackOrders read/write, caller cancel/deadline, rollback in progress/finished before callback return, nil/callback error. Original read boundary fails the deterministic finished-rollback control 3/3 with both ErrTxDone and callback-only results. Repair preserves both causes; race count=50 passes. |
+| T7 pool observation | execution-proven through the same corrected path | Same real-driver barrier holds return from physical Close: runner has returned cancellation, exact driver closes=1 while database/sql InUse=1. The connection is already physically disposed, not reusable. Releasing the barrier and executing subsequent single-connection read/write proves opens=2, closes=1, InUse=0 with no sleep or retry. Existing immediate Stats assertion moves after that subsequent-operation boundary. |
 | T8 busy recovery | reproduced and fixed | TestReviewerBusyAtCommitRecovery count=3 under race (rollback-journal control, not served WAL contention); existing first-attempt/read/admission budget tests retained. |
 | T9 uncertain committed result | execution-proven through the same corrected path | TestTransactionExitFaultDisposition/committed_error{1,3}: real commit then busy-looking error, one callback, durable one, exact disposal. |
 | T10 six snapshots | execution-proven through the same corrected path | TestSQLiteStandaloneSelectedReadsBypassMutationAdmission explicitly executes all six, cancellation and unchanged side effects; TestStandaloneSelectedReadAccessModeGuard forbids local Begin/Commit/Rollback; existing consistent-snapshot and positive semantic read tests retained. |
@@ -98,14 +107,32 @@ and leaves the existing full-schema test intact. Neither change alters an oracle
 
 ## Integration And Tracking
 
+Final T7 evidence: before-control /tmp/agent-g-cancellation-before-control.log
+FAIL 3/3, SHA256 fe08f57d3efcdf7493f861976028761739cd202ca5d5eb6454f1b8acd4ddc396.
+Repaired cancellation matrix race count=50 PASS 30.660s,
+/tmp/agent-g-cancellation-repeat50-final.log, SHA256
+43e2cb2fc0c04b91bfe4b2873613464c821ba5a7970874f2d0d58bda2cf0929a.
+Complete cancellation plus physical exit/commit/reviewer controls race count=3
+PASS 3.684s, SHA256 6a2dd3b05f2477f47a0d41cf8b172ae5f3db030f2ee48790f6fa6d8df7f6b13c.
+The first new count=50 run FAILED a test notification race: callback-return and
+runner-done were both ready and select could incorrectly report no callback
+entry. Removed that competing receive, preserving the independent barrier and
+all production/cancellation/retirement assertions. This failed run is not hidden
+or counted green. The corrected repeated matrix above is the actual receipt.
+Final unchanged full-profile swarm-test is queued at be9e98fe3; the old stale
+queue request was cancelled before execution, never claimed as qualification.
+
 Unchanged golden burst now passes (`/tmp/agent-g-2439-golden-burst.log`, 246.405s),
 but this is not causal classification of the earlier PostgreSQL timeout. Original
 evidence remains `/tmp/agent-g-2432-integrated-full.log`: one active candidate with
 analyzed but no completed event, one due timer, zero active deliveries and zero
 unsettled pipeline events. The SQLite repair does not explain that PG occurrence.
-Final integrated reproduction/diagnosis remains required; do not claim retry-to-green
-as elimination. Historical genuine live proof at 97a9ea04a remains separately
-labelled; this repair made no provider calls or Telegram sends/replays.
+The lead recorded this as LSF-028 and the later pre-ingress health-no-result as
+LSF-029 in #2353, both observed/unclassified. Ruling issuecomment-5607051620
+permits PR opening after bounded capture repair and current-head qualification;
+it is not causal closure or merge approval. Any recurrence must be investigated.
+Genuine live proof at 5426deb7b remains separately labelled in #2321; this T7
+repair made no provider calls or Telegram sends/replays.
 
 Watchlist decision: reviewer refinement swarm-docs@823590f is sufficient; same
 existing node and #2439 mapping, no new issue or POTENTIAL_ISSUES entry. Architecture
