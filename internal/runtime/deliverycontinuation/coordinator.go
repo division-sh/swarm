@@ -17,6 +17,8 @@ const (
 	scanPageSize = 200
 )
 
+var errCoordinatorRetired = errors.New("delivery continuation coordinator is retired")
+
 // Dispatcher re-enters the existing exact EventBus route. The selected store,
 // not the coordinator, still decides whether the delivery can be claimed.
 type Dispatcher interface {
@@ -109,37 +111,52 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	if c == nil {
 		return errors.New("delivery continuation coordinator is required")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c.mu.Lock()
 	if c.started || c.retired {
 		c.mu.Unlock()
 		return errors.New("delivery continuation coordinator cannot be started")
 	}
-	c.started = true
+	// Retirement owns cancellation even while the standing lease is being acquired.
+	startCtx, cancel := context.WithCancel(ctx)
+	c.started, c.cancel = true, cancel
 	c.mu.Unlock()
 
-	lease, err := c.workOwner.BeginStanding(ctx)
+	lease, err := c.workOwner.BeginStanding(startCtx)
 	if err != nil {
-		close(c.done)
-		return fmt.Errorf("admit delivery continuation coordinator: %w", err)
+		return c.finish(startCtx, cancel, nil, fmt.Errorf("admit delivery continuation coordinator: %w", err), false)
 	}
-	runCtx, cancel := context.WithCancel(lease.Context())
+	runCtx := lease.Context()
 	c.mu.Lock()
-	c.cancel = cancel
+	retired := c.retired
 	c.mu.Unlock()
+	if retired {
+		return c.finish(runCtx, cancel, lease, errCoordinatorRetired, false)
+	}
+	if err := runCtx.Err(); err != nil {
+		return c.finish(runCtx, cancel, lease, err, false)
+	}
 	next, wake, err := c.scan(runCtx)
 	if err != nil {
-		cancel()
-		c.recordFailure(err)
-		close(c.done)
-		return errors.Join(
-			fmt.Errorf("enumerate delivery continuations before readiness: %w", err),
-			lease.Done(),
-		)
+		return c.finish(runCtx, cancel, lease, fmt.Errorf("enumerate delivery continuations before readiness: %w", err), false)
+	}
+	c.mu.Lock()
+	retired = c.retired
+	if !retired {
+		err = runCtx.Err()
+	} else {
+		err = errCoordinatorRetired
+	}
+	c.mu.Unlock()
+	if err != nil {
+		return c.finish(runCtx, cancel, lease, err, false)
 	}
 	go func() {
-		defer close(c.done)
-		defer func() { _ = lease.Done() }()
-		c.run(runCtx, next, wake)
+		var runErr error
+		defer func() { c.finish(runCtx, cancel, lease, runErr, true) }()
+		runErr = c.run(runCtx, next, wake)
 	}()
 	c.Signal()
 	return nil
@@ -167,7 +184,7 @@ func (c *Coordinator) Synchronize(ctx context.Context) error {
 		return failure
 	}
 	if retired {
-		return errors.New("delivery continuation coordinator is retired")
+		return errCoordinatorRetired
 	}
 	request := synchronizationRequest{result: make(chan error, 1)}
 	select {
@@ -214,7 +231,9 @@ func (c *Coordinator) Retire(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.done:
-		return nil
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.failure
 	}
 }
 
@@ -237,7 +256,7 @@ func (c *Coordinator) AcceptCommitted(proofs []runtimedelivery.DurableHandoffPro
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.retired {
-		return errors.New("delivery continuation coordinator is retired")
+		return errCoordinatorRetired
 	}
 	seen := make(map[string]struct{}, len(proofs))
 	for _, proof := range proofs {
@@ -274,7 +293,7 @@ func (c *Coordinator) Retain(snapshot runtimedelivery.Snapshot) error {
 	c.mu.Lock()
 	if c.retired {
 		c.mu.Unlock()
-		return errors.New("delivery continuation coordinator is retired")
+		return errCoordinatorRetired
 	}
 	current, exists := c.entries[snapshot.DeliveryID]
 	if exists && current.state != ownershipAttempt {
@@ -326,7 +345,7 @@ func (c *Coordinator) Acquire(deliveryID string) (worklifetime.DeliveryContinuat
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.retired {
-		return nil, errors.New("delivery continuation coordinator is retired")
+		return nil, errCoordinatorRetired
 	}
 	current, exists := c.entries[deliveryID]
 	if !exists || current.state != ownershipCoordinator {
@@ -336,7 +355,7 @@ func (c *Coordinator) Acquire(deliveryID string) (worklifetime.DeliveryContinuat
 	return &capability{coordinator: c, deliveryID: deliveryID}, nil
 }
 
-func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) {
+func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) error {
 	var timer *time.Timer
 	var err error
 	if wake {
@@ -353,7 +372,7 @@ func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) {
 			if timer != nil {
 				timer.Stop()
 			}
-			return
+			return ctx.Err()
 		case <-c.wake:
 		case <-timerC:
 		case request := <-c.sync:
@@ -364,19 +383,21 @@ func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) {
 			timer = nil
 		}
 		next, wake, err = c.scan(ctx)
+		if err == nil {
+			c.mu.Lock()
+			if c.retired {
+				err = errCoordinatorRetired
+			} else {
+				err = ctx.Err()
+			}
+			c.mu.Unlock()
+		}
 		if synchronized != nil {
 			synchronized <- err
 			close(synchronized)
 		}
 		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			c.recordFailure(err)
-			if c.report != nil {
-				c.report(ctx, err)
-			}
-			return
+			return err
 		}
 		if wake {
 			timer = time.NewTimer(next)
@@ -384,16 +405,58 @@ func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) {
 	}
 }
 
-func (c *Coordinator) recordFailure(err error) {
-	if c == nil || err == nil {
-		return
-	}
+// finish is called exactly once by Start (abort) or the worker (successful start).
+// Classify before cancellation, and settle the lease before publishing completion.
+func (c *Coordinator) finish(ctx context.Context, cancel context.CancelFunc, lease *worklifetime.Lease, err error, report bool) error {
 	c.mu.Lock()
-	if c.failure == nil {
-		c.failure = err
-	}
+	retired := c.retired
 	c.retired = true
 	c.mu.Unlock()
+	failure := err
+	if ordinaryCoordinatorStop(ctx, err, retired) {
+		failure = nil
+	}
+	cancel()
+	var cleanupErr error
+	if lease != nil {
+		cleanupErr = lease.Done()
+		if cleanupErr != nil {
+			failure = errors.Join(failure, cleanupErr)
+		}
+	}
+	c.mu.Lock()
+	c.failure = failure
+	c.mu.Unlock()
+	if report && failure != nil && c.report != nil {
+		c.report(ctx, failure)
+	}
+	close(c.done)
+	if cleanupErr != nil {
+		return errors.Join(err, cleanupErr)
+	}
+	return err
+}
+
+func ordinaryCoordinatorStop(ctx context.Context, err error, retired bool) bool {
+	if err == nil {
+		return true
+	}
+	// Every branch must be owned cancellation. A joined independent failure is
+	// still fatal even when it also contains context.Canceled or retirement.
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, cause := range joined.Unwrap() {
+			if !ordinaryCoordinatorStop(ctx, cause, retired) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		if cause := wrapped.Unwrap(); cause != nil {
+			return ordinaryCoordinatorStop(ctx, cause, retired)
+		}
+	}
+	return (retired && err == errCoordinatorRetired) || (ctx.Err() != nil && (err == ctx.Err() || err == context.Cause(ctx)))
 }
 
 func (c *Coordinator) stoppedError() error {
@@ -406,7 +469,7 @@ func (c *Coordinator) stoppedError() error {
 		return c.failure
 	}
 	if c.retired {
-		return errors.New("delivery continuation coordinator is retired")
+		return errCoordinatorRetired
 	}
 	return errors.New("delivery continuation coordinator stopped without a result")
 }
@@ -452,9 +515,6 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 						// The named owner signals this coordinator after its
 						// transition commits. A deferral never invents a timer.
 					case DispatchFatal:
-						if ctx.Err() != nil {
-							return 0, false, ctx.Err()
-						}
 						return 0, false, fmt.Errorf("dispatch delivery continuation %s: %w", item.DeliveryID, result.Failure())
 					default:
 						return 0, false, fmt.Errorf("dispatch delivery continuation %s returned unknown disposition", item.DeliveryID)
@@ -502,7 +562,7 @@ func (c *Coordinator) observe(deliveryID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.retired {
-		return errors.New("delivery continuation coordinator is retired")
+		return errCoordinatorRetired
 	}
 	if _, exists := c.entries[deliveryID]; !exists {
 		c.entries[deliveryID] = entry{state: ownershipCoordinator}
