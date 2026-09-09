@@ -2,6 +2,7 @@ package testcatalog
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -278,7 +279,10 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if !regexp.MustCompile(policy.Units["catalog-required-inventory"].Run).MatchString("TestCatalogExternalProofPartitionsThroughInventory") {
 		t.Fatal("required inventory unit omits the partition mutation proof")
 	}
-	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-burst-1", "hitl-releasee2e-burst-2", "hitl-releasee2e-golden", "hitl-releasee2e-journeys", "hitl-releasee2e-invocation"}
+	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-burst-1", "hitl-releasee2e-burst-2", "hitl-releasee2e-golden", "hitl-releasee2e-journeys"}
+	for shard := 1; shard <= 6; shard++ {
+		releaseUnits = append(releaseUnits, fmt.Sprintf("hitl-releasee2e-invocation-%d", shard))
+	}
 	var runs []string
 	for _, id := range releaseUnits {
 		unit, ok := policy.Units[id]
