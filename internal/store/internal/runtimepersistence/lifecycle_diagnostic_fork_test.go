@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +12,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -141,15 +142,15 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 					}
 					if scenario == "discard_race" {
 						sink := selected.(interface {
-							SetEventPayloadValidator(func(context.Context, string, []byte) error)
+							SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
 						})
 						entered, release := make(chan struct{}), make(chan struct{})
 						var once sync.Once
-						sink.SetEventPayloadValidator(func(ctx context.Context, name string, _ []byte) error {
-							if name == "platform.runtime_log" {
+						sink.SetEventPayloadAdmitter(func(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+							if event.Type() == events.EventTypePlatformRuntimeLog {
 								once.Do(func() { close(entered); <-release })
 							}
-							return nil
+							return storeTestPayloadAdmitter(ctx, event, flowID)
 						})
 						projected, discarded := make(chan error, 1), make(chan error, 1)
 						go func() { _, err := projectDiagnosticTestBatch(ctx, projector, 100); projected <- err }()
@@ -180,7 +181,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 								t.Fatal("projector/discard did not join")
 							}
 						}
-						sink.SetEventPayloadValidator(nil)
+						sink.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 					} else {
 						if err := selected.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
 							t.Fatal(err)

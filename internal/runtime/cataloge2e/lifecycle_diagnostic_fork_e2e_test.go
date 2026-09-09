@@ -77,13 +77,7 @@ func (p *diagnosticForkActivationProbe) ActivateRunForkForSelectedContractExecut
 			if err != nil {
 				p.t.Fatal(err)
 			}
-			admissionEvent, err := events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{
-				Type: events.EventTypePlatformRuntimeLog, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-				Payload: payload, ExecutionMode: executionmode.Live,
-			}})
-			if err != nil {
-				p.t.Fatal(err)
-			}
+			admissionEvent := eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			admit := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(p.h.bundle), catalogSourceArtifactFact(p.t, p.h.bundle))
 			admission, err := admit(ctx, admissionEvent, "")
 			if err != nil {
