@@ -28,9 +28,12 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 	if err := events.ValidateDeliveryRoutes([]events.DeliveryRoute{route}); err != nil {
 		return false, err
 	}
-	scope, instance, path, present := route.AgentIdentity.Route.Fields()
-	if !present {
-		return false, fmt.Errorf("receiver materialization requires exact agent flow coordinates")
+	scope, instance, path, err := route.AgentIdentity.ExecutionCoordinates()
+	if err != nil {
+		return false, fmt.Errorf("receiver materialization agent coordinates: %w", err)
+	}
+	if path != route.Target.Route().FlowInstance {
+		return false, fmt.Errorf("receiver materialization target contradicts exact agent coordinates")
 	}
 	flow, err := flowidentity.NewRunScopedFlowInstance(route.AgentIdentity.RunID, flowidentity.StoredRoute(scope, instance, path))
 	if err != nil {

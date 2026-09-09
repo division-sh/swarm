@@ -1348,8 +1348,12 @@ contract_formats:
             materializing_entity, and entityless_receiver), stamped-target validation, target application, state-only decode,
             and engine mutation without a delivery application consumes that exact coordinate before persistence access or
             mutation. Root EventBus delivery planning, root connect materialization, declared-agent projection, and root gate,
-            loop, and timer declaration matching consume the same authored root owner. Zero-match root select_or_create
-            materializes the exact current run route and derives its future entity from that route. Any flow or run mismatch
+            loop, and timer declaration matching consume the same authored root owner. Root connect planning projects the
+            exact authored-root/current-run blueprint without requiring pre-existing state or inheriting source entity data.
+            The canonical handler classifier then admits existing state, initialization of that route's canonical entity,
+            or entityless execution. A root agent's declaration route remains root; its execution coordinates project to the
+            exact run for dependency admission and state readback. Planned agents are never fabricated active descriptors.
+            Any flow or run mismatch
             fails before event, delivery, settlement, entity-state, or lifecycle mutation.
             Reads of the exact receiver persistence aggregate MUST observe entity state and its lifecycle companion from one
             database statement snapshot (or one explicitly consistent transaction snapshot). Consumers MUST NOT assemble a

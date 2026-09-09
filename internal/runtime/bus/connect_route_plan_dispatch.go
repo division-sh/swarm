@@ -500,30 +500,11 @@ func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Contex
 		if eventRunID := strings.TrimSpace(evt.RunID()); eventRunID != coordinate.RunID() {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, errors.New("root connect receiver event and context run identities disagree")
 		}
-		rootFlowID := coordinate.FlowID()
-		rootInstance = coordinate.RunID()
-		if projection, ok := selectedRunTargetOwnerProjectionFromContext(ctx); ok && projection.required {
-			owner, err := projection.resolveSelectedRoute(events.RouteIdentity{
-				FlowID: rootFlowID, FlowInstance: rootInstance,
-			})
-			if err != nil {
-				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, fmt.Errorf("resolve exact root connect receiver owner: %w", err)
-			}
-			if !owner.ExistingEntity() {
-				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, fmt.Errorf("root connect receiver requires exact existing selected-run owner, got %s", owner.Code())
-			}
-			return runtimepinrouting.ConnectRoutePlanMaterialization{Target: owner.Route()}, TemplateInstanceLifecycleDecision{}, nil
-		}
-		target := evt.TargetRoute().Normalized()
-		if target.FlowID != "" && target.FlowID != rootFlowID {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
-		}
-		if target.FlowInstance != "" && target.FlowInstance != rootInstance {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
-		}
-		target.FlowID = rootFlowID
-		target.FlowInstance = rootInstance
-		return runtimepinrouting.ConnectRoutePlanMaterialization{Target: target}, TemplateInstanceLifecycleDecision{}, nil
+		// Composition selects the root instance, not its state owner. The shared
+		// receiver classifier admits existing, initializing or entityless state.
+		return runtimepinrouting.ConnectRoutePlanMaterialization{Target: events.RouteIdentity{
+			FlowID: coordinate.FlowID(), FlowInstance: coordinate.RunID(),
+		}}, TemplateInstanceLifecycleDecision{}, nil
 	}
 	if materialized, decision, handled, err := r.lifecycle.Materialize(ctx, evt, plan, values, descriptors); handled || err != nil {
 		return materialized, decision, err
@@ -781,8 +762,19 @@ func plannedCreateAgentCarrierIdentity(
 			)
 		}
 	}
-	if !target.Empty() && !routeMatchesAgentDescriptor(target, ActiveAgentDescriptor{Identity: identity, EntityID: target.EntityID}, root) {
-		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q identity does not match target %#v", subscriber.Recipient.ID(), target.Normalized())
+	if !target.Empty() {
+		target = target.Normalized()
+		_, _, instance, err := identity.ExecutionCoordinates()
+		if err != nil {
+			return agentidentity.Identity{}, true, err
+		}
+		matches := instance == target.FlowInstance
+		if identity.Route.Presence == agentidentity.RouteRoot {
+			matches = identity.RunID == root.RunID() && root.Matches(target.FlowID, target.FlowInstance)
+		}
+		if !matches {
+			return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q identity does not match target %#v", subscriber.Recipient.ID(), target)
+		}
 	}
 	return identity, true, nil
 }
