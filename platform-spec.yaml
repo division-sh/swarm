@@ -9853,6 +9853,13 @@ tool_model:
         A dedicated loopback listener fronts only `/webhooks/*`. API, JSON-RPC, WebSocket, MCP, tools, health, and
         readiness routes are absent. `/webhooks/_swarm_probe/*` is reserved for one unguessable reachability nonce and
         cannot be selected by an ingress alias.
+      bound_listener_ownership: >
+        Programmatic external-origin serve may transfer an already-bound TCP listener matching the configured
+        explicit loopback address. Successful controller construction takes ownership; the serve root closes the
+        transferred handle if startup fails before construction. The controller closes it on startup failure or
+        shutdown, including shutdown before Start. Descriptor handoff must preserve socket ownership without a
+        close-and-rebind gap. Ordinary CLI invocations still bind through the controller; external-origin port zero
+        remains unsupported. Handoff never skips nonce reachability, generation admission, or webhook-only routing.
       lifecycle: >
         Exposure is explicit and process-local. Managed quick tunnels remain development-only, while an operator-supplied
         external origin is an independent ingress capability available to retained plain serve without dev scratch,

@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"sync"
 	"testing"
@@ -241,13 +242,14 @@ func restartChannelOnboardingAtProcessPublicationBoundary(t *testing.T, backend 
 	publicationBarrier.ContinueAfterRelease()
 	defer publicationBarrier.Release()
 	harness.opts.TestChannelOnboardingBarrier = publicationBarrier.Reach
-	apiListen := reserveChannelOnboardingListenAddress(t)
-	harness.opts.APIListenAddr = apiListen
+	apiBound := make(chan net.Addr, 1)
+	harness.opts.APIListenAddr = "127.0.0.1:0"
+	harness.opts.TestAPIListenerBound = func(address net.Addr) { apiBound <- address }
 	harness.process = startServeRuntimeTestProcess(t, harness.opts)
-	harness.endpoint = "http://" + apiListen
 	if recoveredID := publicationBarrier.Wait(t); recoveredID != operationID {
 		t.Fatalf("%s E2E-14 recovery publication responsibility=%s, want %s", backend, recoveredID, operationID)
 	}
+	harness.endpoint = "http://" + (<-apiBound).String()
 	assertChannelOnboardingServeNotReady(t, harness.endpoint)
 	publication := channelOnboardingPersistedHandoffAtPublication(t, harness, operationID)
 	if committed.Operation == nil || committed.Activation == nil ||
@@ -268,6 +270,7 @@ func restartChannelOnboardingAtProcessPublicationBoundary(t *testing.T, backend 
 	publicationBarrier.Release()
 	harness.process.waitForReadyLine()
 	harness.opts.TestChannelOnboardingBarrier = nil
+	harness.opts.TestAPIListenerBound = nil
 	return publication
 }
 

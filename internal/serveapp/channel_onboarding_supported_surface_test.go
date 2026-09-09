@@ -52,7 +52,8 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	t.Cleanup(telegram.Close)
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	disableChannelOnboardingBusinessConsumers(t, sourceRoot)
-	publicListen := reserveChannelOnboardingListenAddress(t)
+	publicListener := reserveChannelOnboardingListener(t)
+	publicListen := publicListener.Addr().String()
 	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
 
 	var db *sql.DB
@@ -62,7 +63,8 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
-		SelfCheck: true, AbandonActiveRuns: true, Verbose: true,
+		PublicWebhookListener: publicListener,
+		SelfCheck:             true, AbandonActiveRuns: true, Verbose: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 	}
 	switch backend {
@@ -401,6 +403,14 @@ type channelOnboardingCrashServeProcess struct {
 
 func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOptions, telegramBaseURL string) *channelOnboardingCrashServeProcess {
 	t.Helper()
+	if opts.PublicWebhookListener == nil {
+		t.Fatal("channel crash fixture requires an owned public listener")
+	}
+	listenerFile, err := opts.PublicWebhookListener.File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listenerFile.Close()
 	return startServedCrashProcess(t, "TestChannelOnboardingCrashServeProcessHelper", []string{
 		channelOnboardingCrashServeHelperEnv + "=1",
 		"TEST_CHANNEL_ONBOARDING_CONFIG=" + opts.ConfigPath,
@@ -410,17 +420,17 @@ func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOpti
 		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN=" + opts.PublicWebhookBaseURL,
 		"TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN=" + opts.PublicWebhookListen,
 		"TEST_CHANNEL_ONBOARDING_TELEGRAM_BASE=" + telegramBaseURL,
-	})
+	}, listenerFile)
 }
 
-func startServedCrashProcess(t *testing.T, helper string, environment []string) *channelOnboardingCrashServeProcess {
+func startServedCrashProcess(t *testing.T, helper string, environment []string, files ...*os.File) *channelOnboardingCrashServeProcess {
 	t.Helper()
-	process := startServedCrashProcessBeforeReadiness(t, helper, environment)
+	process := startServedCrashProcessBeforeReadiness(t, helper, environment, files...)
 	process.endpoint(t)
 	return process
 }
 
-func startServedCrashProcessBeforeReadiness(t *testing.T, helper string, environment []string) *channelOnboardingCrashServeProcess {
+func startServedCrashProcessBeforeReadiness(t *testing.T, helper string, environment []string, files ...*os.File) *channelOnboardingCrashServeProcess {
 	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
@@ -430,6 +440,7 @@ func startServedCrashProcessBeforeReadiness(t *testing.T, helper string, environ
 	cmd := exec.Command(executable, "-test.run=^"+helper+"$", "-test.v")
 	cmd.Dir = repoRootForTest()
 	cmd.Env = append(os.Environ(), environment...)
+	cmd.ExtraFiles = files
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Start(); err != nil {
@@ -539,6 +550,8 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	opts.MCPListenAddr = "127.0.0.1:0"
 	opts.PublicWebhookBaseURL = os.Getenv("TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN")
 	opts.PublicWebhookListen = os.Getenv("TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN")
+	listenerFile := os.NewFile(3, "channel-public-listener")
+	opts.PublicWebhookListener = channelOnboardingListenerFromFile(t, listenerFile)
 	opts.WorkspaceBackend = "host"
 	opts.WorkspaceBackendSet = true
 	opts.SelfCheck = true
@@ -1008,17 +1021,29 @@ func waitChannelOnboardingDelivery(t *testing.T, provider *channelOnboardingTele
 	return nil
 }
 
-func reserveChannelOnboardingListenAddress(t *testing.T) string {
+func reserveChannelOnboardingListener(t *testing.T) *net.TCPListener {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	address := listener.Addr().String()
-	if err := listener.Close(); err != nil {
+	t.Cleanup(func() { _ = listener.Close() })
+	return listener
+}
+
+func channelOnboardingListenerFromFile(t *testing.T, file *os.File) *net.TCPListener {
+	t.Helper()
+	defer file.Close()
+	listener, err := net.FileListener(file)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return address
+	tcp, ok := listener.(*net.TCPListener)
+	if !ok {
+		_ = listener.Close()
+		t.Fatalf("channel listener is %T, want TCP", listener)
+	}
+	return tcp
 }
 
 func channelOnboardingHostWorkspaceFields() []string {

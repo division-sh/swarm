@@ -687,6 +687,12 @@ func serveOperatorChannelInterfaces(contexts []serveRuntimeBundleContext) ([]ope
 }
 
 func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.ServeOptions) int {
+	publicListener := opts.PublicWebhookListener
+	defer func() {
+		if publicListener != nil {
+			_ = publicListener.Close()
+		}
+	}()
 	repo := invocationRoot.Path()
 	ctx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
@@ -717,6 +723,10 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			presenter.fail(1, "serve_admission", err)
 			return 2
 		}
+	}
+	if publicListener != nil && publicIngressMode != runtimepublicingress.ModeExternalOrigin {
+		presenter.fail(1, "serve_admission", fmt.Errorf("a bound public webhook listener requires external-origin mode"))
+		return 2
 	}
 	if publicIngressMode == runtimepublicingress.ModeManagedQuickTunnel {
 		if err := runtimepublicingress.PreflightCloudflared(ctx, ""); err != nil {
@@ -1112,6 +1122,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(20, "http_listener_bind", err)
 		return 3
 	}
+	if opts.TestAPIListenerBound != nil {
+		opts.TestAPIListenerBound(apiListener.Addr())
+	}
 	mcpListener, err = cliapp.ListenServeHTTPListener("mcp", opts.MCPListenAddr)
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", err)
@@ -1473,7 +1486,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 		publicExposure, controllerErr = runtimepublicingress.NewController(runtimepublicingress.Options{
 			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,
-			Handler: publicHandler, Readiness: ready,
+			Listener: publicListener,
+			Handler:  publicHandler, Readiness: ready,
 			StartupAuthority: func() string {
 				current, _ := supervisor.PublicIngressState()
 				if current == nil {
@@ -1492,6 +1506,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			presenter.fail(20, "public_ingress", controllerErr)
 			return 1
 		}
+		publicListener = nil // The controller now owns shutdown, including pre-Start failures.
 		channelActivationRefresher.preflight = func(preflightCtx context.Context, intent servePrebindingActivation) error {
 			generation := publicExposure.Generation()
 			if generation.ID == "" {
