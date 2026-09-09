@@ -8883,6 +8883,13 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 
 func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
 	t.Helper()
+	if opts.PublicWebhookListener != nil {
+		file, err := opts.PublicWebhookListener.File()
+		if err != nil {
+			t.Fatal(err)
+		}
+		opts.PublicWebhookListener = channelOnboardingListenerFromFile(t, file)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &lockedBuffer{}
 	opts.Output = out

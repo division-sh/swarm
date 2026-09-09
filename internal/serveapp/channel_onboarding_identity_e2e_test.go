@@ -441,10 +441,12 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 	}
 	if publicIngress {
-		publicListen := reserveChannelOnboardingListenAddress(t)
+		publicListener := reserveChannelOnboardingListener(t)
+		publicListen := publicListener.Addr().String()
 		redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
 		opts.PublicWebhookBaseURL = "https://hooks.channel-onboarding.test"
 		opts.PublicWebhookListen = publicListen
+		opts.PublicWebhookListener = publicListener
 	}
 	storeDSN := ""
 	switch backend {

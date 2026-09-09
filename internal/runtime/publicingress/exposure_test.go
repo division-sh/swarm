@@ -19,21 +19,18 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 	return f(request)
 }
 
-func reserveTestListenAddress(t *testing.T) string {
+func reserveTestListener(t *testing.T) *net.TCPListener {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatalf("reserve listener: %v", err)
 	}
-	address := listener.Addr().String()
-	if err := listener.Close(); err != nil {
-		t.Fatalf("release listener: %v", err)
-	}
-	return address
+	t.Cleanup(func() { _ = listener.Close() })
+	return listener
 }
 
 func TestPublicIngressListenerProvesNonceAndExposesOnlyWebhookRoutes(t *testing.T) {
-	listen := reserveTestListenAddress(t)
+	listener := reserveTestListener(t)
 	var controller *Controller
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		clone := request.Clone(request.Context())
@@ -44,7 +41,7 @@ func TestPublicIngressListenerProvesNonceAndExposesOnlyWebhookRoutes(t *testing.
 	var admitted atomic.Int64
 	var err error
 	controller, err = NewController(Options{
-		Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: listen,
+		Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: listener.Addr().String(), Listener: listener,
 		HTTPClient: client,
 		Handler: http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 			admitted.Add(1)
