@@ -187,11 +187,19 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			}
 			runtimeTopologyBefore := selectedContractDynamicRuntimeGlobalSnapshot(t, ctx, db)
 
+			owner := selectedContractExecutionOwnerForTest(t, pg)
+			catalog := &observedSelectedJoinCatalog{SelectedContractForkLifecycle: owner.ports.fork, t: t, resolve: pg.ResolveAuthorActivityEventDescriptor}
+			if test.fanOutBarrier {
+				catalog.want = []string{"platform.join_complete"}
+			} else if test.wantCapability == selectedContractDeferredWorkWorkflowJoinTimeout {
+				catalog.want = []string{"platform.join_complete", "platform.join_timeout"}
+			}
+			owner.ports.fork = catalog
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID:       sourceRunID,
 				At:                sourceEventID,
 				AllowSourceFreeze: true,
-				Owner:             selectedContractExecutionOwnerForTest(t, pg),
+				Owner:             owner,
 				SourceLoader:      loader,
 				ContractSelection: runfork.RunForkContractSelection{
 					Mode: runfork.RunForkContractSelectionModeSelectedContracts,
@@ -208,6 +216,14 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			}
 			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.Materialization.ForkRunID != "" {
 				t.Fatalf("rejected result = %#v, want owner and no materialization", result)
+			}
+			if len(catalog.scopes) != 1 {
+				t.Fatalf("selected preparation catalog registrations=%d, want one", len(catalog.scopes))
+			}
+			for _, scope := range catalog.scopes {
+				if pg.AuthorActivityEventCatalogRegistered(scope) {
+					t.Fatal("refused selected preparation leaked its catalog lease")
+				}
 			}
 
 			assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, db, sourceRunID)

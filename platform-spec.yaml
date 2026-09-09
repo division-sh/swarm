@@ -12891,6 +12891,11 @@ platform_tables:
         Every descriptor carries event_type, authored|different disposition, and optional author_summary_field from the
         resolved semantic source. Identical same-key registration is reference-safe; conflicts fail closed. Names-only,
         process-global, last-writer-wins, fallback, and current-bundle classifiers are forbidden.
+        Compiled arrival and fanout-delivery joins contribute platform.join_complete; a declared join timeout additionally
+        contributes platform.join_timeout. These internal occurrence descriptors have different disposition and no authored
+        summary, deduplicate exactly across declarations, and reject conflicting authored classification. No join descriptor
+        is installed without compiled demand. Normal and selected catalog preparation use this same projection; registration
+        supplies neither execution authority nor permission to run selected deferred work.
       event_descriptor_lifecycle: >-
         Static descriptors register before a bundle runtime starts or recovery can mutate and remain leased until that
         exact runtime/bundle context is quiescent. Boot registers an exact incoming scope before activation; bundle deletion
