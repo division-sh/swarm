@@ -17254,6 +17254,13 @@ run_model:
       Every row carries exactly one closed domain (`lifecycle_state`, `authored_field`, `bookkeeping`, `gate`, or
       `accumulator`) plus an uninterpreted path. lifecycle_state alone requires an empty path; every other domain requires
       a nonempty path. The runtime enforces this — there is no code path that mutates entity_state without logging the mutation.'
+    reconstruction_path_meaning: >
+      The closed mutation domain determines path meaning at the shared reconstruction owner. lifecycle_state
+      applies its scalar value at the empty path. authored_field applies a genuine nested authored-field path.
+      accumulator, gate and bookkeeping apply the exact producer-owned top-level map key, including embedded dots;
+      they never interpret that key as a nested path or infer its meaning from spelling. Replacement and null-valued
+      removal use that same domain law. Run-fork and conversation-fork reconstruction consume this owner in chronological
+      mutation order for the exact source run and revision; neither installs its own key parser or compatibility behavior.
     drift_detection: 'swarm verify --run <run_id> reconstructs entity state from the mutation log and compares
       it to current entity_state rows for that same run_id. Any mismatch indicates a write that bypassed the mutation log. This is a
       correctness check, not a normal operation — run it when debugging unexpected state.'
