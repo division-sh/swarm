@@ -144,7 +144,7 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	opts.Durable = runtimebus.DurableDependencies{
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, WorkflowInstances: selected, PreparedEvents: selected,
+		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(selected, opts)

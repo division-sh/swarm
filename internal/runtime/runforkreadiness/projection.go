@@ -342,7 +342,7 @@ func selectedContractNodeWorkflowState(
 		return runfork.RunForkSelectedContractWorkflowState{}, false, err
 	}
 	if !found {
-		if policy.Dependency == runtimepipeline.DeliveryTargetExistingEntityRequired && policy.Acquisition == runtimepipeline.DeliveryTargetAcquisitionNone {
+		if policy.Dependency == runtimepipeline.DeliveryTargetExistingEntityRequired {
 			return runfork.RunForkSelectedContractWorkflowState{}, false, fmt.Errorf("receiver target owner is missing for flow instance %q", path)
 		}
 		// Optional absence needs no companion. Fresh acquisition stays with the

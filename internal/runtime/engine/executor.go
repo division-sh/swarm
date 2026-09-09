@@ -201,15 +201,6 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if err := validateHandlerLoopRuntime(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	if req.Handler.CreateEntity && req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() {
-		return fmt.Errorf("%w: handler declares both create_entity and select_entity", ErrInvalidConfig)
-	}
-	if req.Handler.CreateEntity && req.Handler.SelectOrCreateEntity != nil && !req.Handler.SelectOrCreateEntity.Empty() {
-		return fmt.Errorf("%w: handler declares both create_entity and select_or_create_entity", ErrInvalidConfig)
-	}
-	if req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() && req.Handler.SelectOrCreateEntity != nil && !req.Handler.SelectOrCreateEntity.Empty() {
-		return fmt.Errorf("%w: handler declares both select_entity and select_or_create_entity", ErrInvalidConfig)
-	}
 	if err := validateHandlerComputeSpecs(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}

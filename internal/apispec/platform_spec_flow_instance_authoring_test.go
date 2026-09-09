@@ -212,10 +212,9 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, staticMulti, "status"), "retired_unsupported")
 	assertScalarValue(t, mustMappingValue(t, staticMulti, "implementation_tracker"), "#1554")
 	assertScalarContains(t, mustMappingValue(t, staticMulti, "rule"), "Static multi-row ownership is retired")
-	selectEntity := mustMappingValue(t, escapeHatches, "select_entity")
-	assertScalarValue(t, mustMappingValue(t, selectEntity, "implementation_tracker"), "#1547")
-	assertScalarContains(t, mustMappingValue(t, selectEntity, "rule"), "separately owned non-static/runtime surfaces")
-	assertScalarContains(t, mustMappingValue(t, selectEntity, "rule"), "Normal in-topology composition")
+	if hasMappingKey(escapeHatches, "select_entity") {
+		t.Fatal("retired receiver election cannot remain an escape hatch")
+	}
 	producerRouting := mustMappingValue(t, escapeHatches, "producer_emit_routing")
 	assertScalarValue(t, mustMappingValue(t, producerRouting, "status"), "retired_unsupported")
 	assertScalarValue(t, mustMappingValue(t, producerRouting, "implementation_tracker"), "#2086")

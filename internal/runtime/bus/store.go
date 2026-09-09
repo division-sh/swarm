@@ -588,6 +588,7 @@ type ActiveFlowInstanceDescriptorLister interface {
 }
 
 type ActiveTargetDescriptor struct {
+	Availability  runtimepipeline.DeliveryTargetAvailability
 	ID            string
 	EntityID      string
 	FlowInstance  string
@@ -598,6 +599,7 @@ type ActiveTargetDescriptor struct {
 func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 	flowInstance := strings.Trim(strings.TrimSpace(d.FlowInstance), "/")
 	return ActiveTargetDescriptor{
+		Availability:  d.Availability,
 		ID:            strings.TrimSpace(d.ID),
 		EntityID:      strings.TrimSpace(d.EntityID),
 		FlowInstance:  flowInstance,

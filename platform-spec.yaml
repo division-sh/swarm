@@ -2936,7 +2936,7 @@ handler_specification:
   dependency_graph:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
-    graph: "\nentity acquisition (optional — create_entity materializes the canonical receiving-flow primary entity; select_entity resolves exactly one target-flow-owned existing entity; select_or_create_entity resolves or creates one target-flow-owned entity by declared key)\n  └→ query (optional — pre-fetch cross-entity\
+    graph: "\nreceiver state initialization (optional; canonical receiving-flow primary entity at the admitted composition-selected instance, never another receiver election)\n  └→ query (optional — pre-fetch cross-entity\
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate (optional open/windowed stream admission; never waits or closes)\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
@@ -3015,119 +3015,6 @@ handler_specification:
         demands contained coordinator state, or a
         child flow. Historical rows are not silently rewritten by this retirement; actual persisted-row migration is
         separately gated.'
-    select_entity:
-      field: select_entity
-      type: object
-      purpose: Resolve exactly one existing entity owned by the receiving flow before any other handler processing. This is
-        the service-owned acquisition primitive for stateful typed input-pin handlers where the incoming cross-flow request
-        addresses an existing target-flow resource by declared business key, not by source-provided entity identity.
-      default: absent — handler consumes its admitted receiver ownership under the dependency/acquisition policy
-      when_to_use: When an event arriving from outside the flow represents a request against an already-existing service
-        entity owned by the receiving flow. Example — OpCo emits a typed spend event with vertical_id, and Treasury selects
-        its own budget entity whose vertical_id matches the payload. The source flow must not provide the target entity_id,
-        entity_type, or flow_instance.
-      schema:
-        by: map of target entity field name to explicit payload reference. Each key MUST be a declared field on the receiving
-          flow's entity contract. Each value MUST be a payload.* reference from the triggering event schema.
-      execution_position: First step in the dependency graph. Runs before query, guard, accumulate, data_accumulation,
-        advances_to, emit, and action. Establishes the entity context for the entire handler.
-      entity_selection:
-        ownership_scope: Only entities owned by the receiving flow are candidates. Source-flow entities, source event envelope
-          identity, arbitrary parent/child path inference, and caller-provided target entity identity are not authoritative.
-        matching: Every select_entity.by binding must match exactly one receiving-flow entity field value. Zero matches fail
-          closed. More than one match fails closed. Missing payload refs fail closed.
-        selected_context: The selected entity_id and flow_instance become the handler entity context for state, guard,
-          data_accumulation, emit.fields, and state transition processing.
-      pin_routing_interaction:
-        receiver_context_order: 'For admitted external or mixed-provenance no-target events, select_entity resolves exactly one
-          receiving-flow row by declared key before publication and stamps that exact delivery target. Other admitted routes
-          consume their exact target evidence. Handler execution never late-binds or falls back to event.source.'
-        canonical_uses: External webhook ingress, events declared with swarm.source beginning with external, and rare mixed-provenance
-          event types where in-topology producers set event.target but external producers arrive without target.
-        non_canonical_use: In-topology receivers for pin-declared events whose producers are also in the pin topology. Pin routing
-          already supplies event.target; select_entity is a hard invalidity under the normal composition model and should
-          be replaced with receiver scalar instance/source/resolution plus parent connect routing.
-        boot_verify: Redundant normal in-topology select_entity is a hard invalidity. Stateful static/default-static authored
-          handlers using select_entity fail closed because static multi-row ownership is retired. Missing select_entity on
-          external/no-target static handlers is not repaired by requiring the retired acquisition field; authors must use
-          a supported template, singleton, contained-state, or child-flow model.
-      restrictions:
-        lifecycle_scope: Not valid for authored stateful static/default-static input-pin multi-row ownership. Stateless flows
-          do not have stateful entity acquisition. Template flows acquire entities through create_flow_instance.
-        with_create_entity: PROHIBITED. A handler must either materialize the canonical receiving-flow primary entity with
-          create_entity or select an existing target-flow-owned entity with select_entity, never both.
-        source_authority: PROHIBITED. select_entity keys must not target platform envelope/control fields such as entity_id,
-          entity_type, flow_instance, current_state, workflow_name, or workflow_version. Payload refs must not be
-          payload.entity_id, payload.entity_type, or payload.flow_instance. `_entity.*` and `event.*` refs are readable
-          elsewhere only where explicitly supported; they are not selector source authority.
-        compatibility: PROHIBITED. select_entity does not restore generic existing-entity cross-flow continuation and does
-          not allow a source flow to directly name or mutate another flow's entity row.
-      interactions:
-        with_accumulate: ALLOWED. Accumulate operates on the selected target-flow-owned entity after acquisition.
-        with_guard: ALLOWED. Guards evaluate against the selected entity state before same-handler writes.
-        with_data_accumulation: ALLOWED. Writes are validated against the selected entity's receiving-flow contract and remain
-          subject to same-flow ownership enforcement.
-        with_advances_to: ALLOWED. State transitions advance only the selected receiving-flow entity.
-        with_query: ALLOWED. Query runs after acquisition and cannot replace select_entity ownership checks.
-    select_or_create_entity:
-      field: select_or_create_entity
-      type: object
-      purpose: Resolve one existing entity owned by the receiving flow by declared business key, or deterministically mint
-        that receiving-flow entity when no active match exists. This is the replay-safe service-owned acquisition primitive
-        for typed input-pin handlers whose target service must own the entity identity.
-      default: absent — handler operates on the resolved inbound event entity context unless create_entity or select_entity is declared
-      when_to_use: When an event arriving from outside the flow represents a request against a receiving-flow service entity
-        that may not exist yet, and the receiving service can define the entity by stable payload keys. Example — a spec-repo
-        service receives a typed repo request keyed by source validation case and artifact type, then resolves or creates
-        the service-owned repo entity. The source flow must not provide the target entity_id, entity_type, or flow_instance.
-      schema:
-        by: map of target entity field name to explicit payload reference. Each key MUST be a declared field on the receiving
-          flow's entity contract. Each value MUST be a payload.* reference from the triggering event schema.
-      execution_position: First step in the dependency graph. Runs before query, guard, accumulate, data_accumulation,
-        advances_to, emit, and action. Establishes the entity context for the entire handler.
-      entity_acquisition:
-        ownership_scope: Only entities owned by the receiving flow are candidates. Source-flow entities, source event envelope
-          identity, arbitrary parent/child path inference, caller-provided target entity identity, and product-authored UUID
-          derivation are not authoritative.
-        matching: Every select_or_create_entity.by binding must match receiving-flow entity fields. One active match selects
-          that entity. Zero active matches deterministically creates one receiving-flow entity from the declared key. More
-          than one match fails closed. Missing payload refs fail closed.
-        deterministic_identity: The runtime derives the minted entity identity from the receiving flow ownership scope and
-          the canonical declared key. Contracts do not call a generic UUID helper and source flows do not provide target IDs.
-        selected_context: The selected or created entity_id and flow_instance become the handler entity context for state,
-          guard, data_accumulation, emit.fields, action, and state transition processing.
-      pin_routing_interaction:
-        receiver_context_order: 'For admitted external or mixed-provenance no-target events, select_or_create_entity resolves one
-          existing receiving-flow row or stamps one deterministic future row before publication. Other admitted routes consume
-          their exact delivery target. Execution accepts only that committed route and never late-binds or falls back to
-          event.source.'
-        canonical_uses: External or mixed-provenance events where the receiving service owns the entity identity and may need
-          to mint the entity on zero-match.
-        non_canonical_use: In-topology pin routing where lowered parent connect, structural fallback, or target_set delivery
-          already supplies the receiver route context.
-        boot_verify: Redundant normal in-topology select_or_create_entity is a hard invalidity. Stateful static/default-static
-          authored handlers using select_or_create_entity fail closed because static multi-row ownership is retired.
-      restrictions:
-        lifecycle_scope: Not valid for authored stateful static/default-static input-pin multi-row ownership. Stateless flows
-          do not have stateful entity acquisition. Template flows acquire entities through create_flow_instance.
-        with_create_entity: 'PROHIBITED. A handler must choose exactly one acquisition mode: create_entity, select_entity,
-          or select_or_create_entity.'
-        with_select_entity: PROHIBITED. select_entity and select_or_create_entity cannot appear on the same handler.
-        source_authority: PROHIBITED. select_or_create_entity keys must not target platform envelope/control fields such as
-          entity_id, entity_type, flow_instance, current_state, workflow_name, or workflow_version. Payload refs must not be
-          payload.entity_id, payload.entity_type, or payload.flow_instance. `_entity.*` and `event.*` refs are readable
-          elsewhere only where explicitly supported; they are not selector source authority.
-        compatibility: PROHIBITED. select_or_create_entity does not restore generic existing-entity cross-flow continuation
-          and does not allow a source flow to directly name or mutate another flow's entity row.
-      interactions:
-        with_accumulate: ALLOWED. Accumulate operates on the acquired target-flow-owned entity after acquisition.
-        with_guard: ALLOWED. Guards evaluate against the acquired entity state before same-handler writes.
-        with_data_accumulation: ALLOWED. Writes are validated against the acquired entity's receiving-flow contract and remain
-          subject to same-flow ownership enforcement.
-        with_advances_to: ALLOWED. State transitions advance only the acquired receiving-flow entity.
-        with_action: ALLOWED. Actions execute with the acquired entity context. Built-ins such as artifact_repo_commit may
-          use _entity.id as a service-owned opaque repo_id without exposing product-specific target identity to Swarm.
-        with_query: ALLOWED. Query runs after acquisition and cannot replace select_or_create_entity ownership checks.
     guard:
       field: guard
       type: object — single check OR list of checks
@@ -4249,7 +4136,7 @@ handler_specification:
           flow_instance: Current flow-instance path for the entity context.
           gates: Read-only map of platform gate booleans; dot access is supported for simple gate names and bracket access is used for gate names containing separators.
           unsupported_fields: '_entity.entity_id, _entity.entity_type, _entity.workflow_name, _entity.workflow_version, _entity.run_id, _entity.fields, _entity.accumulator, _entity.entered_state_at, _entity.revision, _entity.created_at, _entity.updated_at, and _entity.name are not exposed. revision, created_at, and updated_at must not remain readable through undeclared entity.* platform fallback.'
-        write_model: Read-only. Handler writes and entity tools may not target _entity. Emit payload construction may read _entity; select_entity/select_or_create_entity keys may not use _entity as a source-authority bypass.
+        write_model: Read-only. Handler writes and entity tools may not target _entity. Emit payload construction may read _entity; these values cannot authorize another receiver.
       accumulated:
         resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
           representing one admitted event payload in the current open/windowed stream bucket. Available to supported
@@ -4300,7 +4187,7 @@ handler_specification:
           supported_top_level_fields: 'event.id, event.type, event.trigger_event_type, event.source_agent, event.task_id, event.source, event.target, event.target_set, event.source_event_id, event.emitted_at, event.current_state, event.run_id, and event.scope.'
           route_identity_fields: 'event.source.entity_id, event.source.flow_instance, event.source.flow_id, event.target.entity_id, event.target.flow_instance, and event.target.flow_id are supported route identity reads. event.target_set is a list of route identities; it is not a selector and is not a top-level receiver projection.'
           unsupported_fields: 'Top-level event.entity_id and event.flow_instance are unsupported legacy receiver-context projection shorthands. Use _entity.id / _entity.flow_instance for current receiver context, event.source.* for emitter route identity, event.target.* for singular receiver route identity, and event.target_set for fan-out recipient route identities.'
-          source_authority: 'select_entity and select_or_create_entity keys may not use event.*, _entity.*, or payload-owned envelope fields as a source-authority bypass.'
+          source_authority: Event, _entity, and payload fields cannot override admitted receiving-instance ownership.
       policy:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
           (or root policy.yaml if not overridden at flow level), excluding typed policy sections such
@@ -4610,8 +4497,8 @@ engine:
       - lowered parent connect route plan
       - typed same-flow consumer topology
       - structural ParentRoute for child-to-parent pin outputs
-      - receiver-side select_entity/select_or_create_entity late binding for external or mixed-provenance no-target events
-      - external ingress source fallback only after receiver-owned acquisition
+      - exact input/composition receiver resolution for external and mixed-provenance ingress
+      ownership: Source identity is context only. No handler or ingress fallback may replace the composition-selected receiver.
       fail_closed: A pin-declared production output that has no canonical typed consumer, lowered parent connect,
         structural ParentRoute, eligible static child delivery-entity route, or accepted external boundary is invalid.
       no_silent_broadcast_fallback: Missing, malformed, ambiguous, or unreachable routes fail with a typed reason; producer broadcast is retired.
@@ -4705,17 +4592,20 @@ engine:
       v2_non_blockers:
       - entity-field unique indexes for boot-provable match cardinality
       - dedicated route-inspection CLI
-    select_entity_coexistence:
-      canonical: External webhook ingress, events declared with swarm.source beginning with external, and mixed-provenance no-target events.
-      non_canonical: In-topology parent-connect pin routing. Receivers should declare scalar instance/source resolution rather
-        than depend on select_entity to repair broadcast or connected delivery to the right entity.
-      receiver_context_order:
-      - prepublication_declared_key_acquisition_for_admitted_no_target_input
-      - exact_admitted_delivery_target
-      - explicit_entityless_receiver_absence
-      boot_verify: Redundant normal in-topology select_entity/select_or_create_entity is hard invalidity. Stateful
-        static/default-static handlers using receiver-side acquisition fail
-        closed because static multi-row ownership is retired.
+    receiver_ownership:
+      canonical: The flow declares one scalar instance key. Input resolution and compiled composition select or create
+        the receiving instance before handler execution, including external and mixed-provenance ingress.
+      state: The exact admitted receiver has existing_entity, materializing_entity, or entityless_receiver ownership.
+        Handler requirements determine whether state is needed and whether canonical initialization is permitted; they
+        never select another receiver. Initialization preserves existing state and uses only canonical instance/run identity.
+      availability: Exact receiver state and its optional lifecycle companion are projected together by the selected-store
+        owner. A missing companion permits state-only ownership; an existing draining or terminated companion does not.
+        Declared terminal state or inactive lifecycle evidence rejects admission and execution without publication or
+        receiver mutation. Contradictory duplicate evidence cannot be discarded by descriptor deduplication. An unavailable
+        exact receiver is not an absent receiver and cannot be recreated or replaced by a business-key match.
+      forbidden: Handler-side receiver election, business-field searches, source-entity fallback, and alternate receiver IDs.
+        Retired select_entity and select_or_create_entity fields fail strict loading on presence, including null or empty values.
+      teaching: Declare the receiver key with flow instance and select resolution at the input/composition boundary.
     auth_boundary:
       v1_rule: Existing emit authorization plus pin topology are the v1 authorization boundary.
       no_separate_acl: No separate per-target ACL layer exists in v1.
@@ -8080,8 +7970,6 @@ engine:
       trigger: A handler uses on_complete as a map instead of an ordered list. Or a rules mapping is structurally ambiguous
         between one singleton rule and keyed rule rows. Or a handler uses both on_complete and rules on the same handler. Or
         uses both accumulate and handler-level on_complete. Or uses both create_entity and accumulate on the same handler.
-        Or combines more than one entity acquisition mode on the same handler (create_entity, select_entity,
-        select_or_create_entity).
       when: boot-only
     - id: single_node_per_event
       severity: error
@@ -8236,20 +8124,6 @@ engine:
         accepted real external boundary. A structured output pin with sink:harness is validation-only and is rejected by
         production admission before this check can authorize runtime construction. Authored emit.target and emit.broadcast
         fail strict loading on presence and never reach this verifier.
-      when: boot-only
-    - id: redundant_in_topology_select_entity
-      severity: hard_invalidity
-      scope: per-handler
-      trigger: A handler declares select_entity or select_or_create_entity for an event whose only producers are in-topology
-        connected/pin-routed producers that set event.target through parent connect or structural routing. The receiver-side
-        acquisition is invalid normal composition authority and must be replaced with receiver
-        scalar instance/source/resolution plus parent connect routing unless the event is external or mixed-provenance.
-      when: boot-only
-    - id: missing_external_select_entity
-      severity: error
-      scope: per-handler
-      trigger: A stateful handler consumes an external/no-target event and declares no select_entity or select_or_create_entity,
-        so it would run against event.source instead of a receiving-flow-owned entity.
       when: boot-only
     - id: semantic_drift_dead_event_schema
       severity: warning
@@ -11447,25 +11321,13 @@ flow_model:
         status: retired_unsupported
         implementation_tracker: '#1554'
         rule: >
-          Stateful static/default-static authored flows MUST NOT create, select,
-          or own multiple runtime entity rows through `create_entity`,
-          `select_entity`, or `select_or_create_entity`. Static multi-row
+          Stateful static/default-static authored flows MUST NOT create or own
+          multiple runtime entity rows through `create_entity`. Handler receiver
+          selection fields are retired in every flow mode. Static multi-row
           ownership is retired. Authors must model the state as one primary
           entity with contained state, a `mode: template` flow instance, a
           `mode: singleton` flow with exact contained-state demand, or a child flow. Existing historical
-          rows are not silently rewritten; actual persisted-row migration
-          requires a separately gated migration.
-      select_entity:
-        status: retained_escape_hatch_pending_child
-        implementation_tracker: '#1547'
-        rule: >
-          `select_entity` and `select_or_create_entity` remain acquisition
-          primitives only for separately owned non-static/runtime surfaces.
-          They are not an escape hatch for authored static multi-row ownership.
-          Normal in-topology composition should route to the receiving flow
-          instance through parent `connect` and instance keys instead; normal
-          in-topology receiver acquisition fails boot verification rather than
-          remaining a warning.
+          rows are unsupported; this retirement provides no persisted-row migration.
       producer_emit_routing:
         status: retired_unsupported
         implementation_tracker: '#2086'
@@ -11803,11 +11665,11 @@ flow_model:
       - '3. Parent connect / route-plan authority supplies the target flow-instance context, not source-state ownership.
         Supported ordinary primary acquisition remains receiver-owned; retired static multi-row acquisition is not a repair path.'
       - '4. Handler writes and transitions remain same-flow owned under the supported receiver ownership model.'
-      enforcement: 'Input pin events into a stateful static flow (mode: static) MUST NOT declare create_entity,
-        select_entity, or select_or_create_entity as static multi-row ownership. Boot verification fails closed with
-        migration diagnostics. Exemptions: (1) stateless flows (initial_state: null) — no entity state machine. (2)
-        Template flows (mode: template) — entity creation happens via create_flow_instance, not create_entity,
-        select_entity, or select_or_create_entity.'
+      enforcement: 'Input pin events into a stateful static flow (mode: static) MUST NOT use create_entity as
+        static multi-row ownership. Boot verification fails closed with canonical authoring diagnostics. Handler
+        receiver-selection fields are rejected during strict loading in every flow mode, including stateless and
+        template flows. Composition selects the receiving instance; canonical activation or permitted handler
+        initialization supplies that instance''s own state, never an independently elected entity.'
     cross_flow_writes:
       description: 'Cross-flow entity writes are prohibited by the platform.'
       rule: 'save_entity_field checks that the target entity''s stored flow_instance resolves to the same
@@ -19997,37 +19859,6 @@ static_analyzer:
         silence missing producer, missing consumer, or dead-schema diagnostics.
       no_runtime_reconstruction: Accepted verify-time facts must not require EventBus/RouteTable or workflow-node materialization
         to reconstruct missing connect topology.
-  slice_3b_select_entity_pin_coexistence:
-    id: select_entity_pin_coexistence
-    domain: semantic_drift
-    authority: hard_invalidity
-    severity: error
-    canonical_owner: internal/runtime/bootverify
-    supported_surface: cmd/swarm verify
-    spec_basis:
-    - engine.cross_flow_routing.select_entity_coexistence
-    - handler_specification.handler_fields.select_entity
-    - handler_specification.handler_fields.select_or_create_entity
-    scope:
-      description: Classify receiver-side entity acquisition on pin-routed events so select_entity remains a fallback for
-        external or mixed provenance, not a second in-topology routing owner.
-      applies_to:
-      - select_entity handlers
-      - select_or_create_entity handlers
-      excludes:
-      - in-tree contract migration edits
-      - runtime target resolution
-    verdicts:
-      redundant_in_topology:
-        severity: error
-        rule: select_entity/select_or_create_entity on an event whose only producers are normal in-topology connected/pin-routed
-          producers is hard invalidity; use receiver scalar instance/source/resolution plus parent connect routing instead.
-      external_or_mixed_provenance:
-        severity: ok
-        rule: External or mixed-provenance events may use receiver-side acquisition as late binding when event.target is absent.
-      missing_external_binding:
-        severity: error
-        rule: A stateful external/no-target handler with no acquisition mechanism is invalid because it would run against source fallback.
   slice_4_state_machine_reachability:
     id: semantic_drift_unreachable_state
     domain: semantic_drift
@@ -20066,12 +19897,6 @@ static_analyzer:
     source_state_derivation:
       create_entity_handlers:
         rule: create_entity handlers source from initial_state only.
-      select_entity_handlers:
-        rule: select_entity handlers source from all non-terminal declared states because they operate on an existing
-          receiving-flow-owned entity selected at runtime.
-      select_or_create_entity_handlers:
-        rule: select_or_create_entity handlers source from initial_state for the zero-match creation path and from all
-          non-terminal declared states for the one-match selection path. Multiple matches remain hard-invalid at runtime.
       non_create_entity_handlers:
         rule: non-create_entity handlers source from all non-terminal declared states.
       terminal_states:
@@ -32874,7 +32699,7 @@ api_specification:
         \ leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity\
         \ is the only authority that materializes the canonical receiving-flow entity identity. Caller-supplied payload.entity_id on an event whose selected\
         \ handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence.\
-        \ select_entity/select_or_create_entity use their declared payload-key bindings only; payload.entity_id is not target\
+        \ Composition owns the receiver key and resolution; payload.entity_id is not target\
         \ or stateful-context authority.\n"
       scope:
         required:

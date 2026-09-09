@@ -4,9 +4,6 @@ portfolio-collector:
   subscribes_to: [portfolio.setup, operating.reported]
   event_handlers:
     portfolio.setup:
-      select_entity:
-        by:
-          portfolio_id: payload.portfolio_id
       data_accumulation:
         writes:
           - source_field: portfolio_id

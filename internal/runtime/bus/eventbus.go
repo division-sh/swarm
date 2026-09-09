@@ -114,7 +114,6 @@ type DurableDependencies struct {
 	ActiveAgents          ActiveAgentDescriptorLister
 	ActiveFlows           ActiveFlowInstanceDescriptorLister
 	TargetOwners          SelectedRunTargetOwnerLister
-	WorkflowInstances     runtimepipeline.WorkflowInstancePersistenceReader
 	PreparedEvents        PreparedPublishEventReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
 	RunOrigins            RunOriginReader
@@ -136,7 +135,6 @@ func (d DurableDependencies) validate() error {
 		{"active agent descriptor reader", d.ActiveAgents},
 		{"active flow descriptor reader", d.ActiveFlows},
 		{"selected-run target owner reader", d.TargetOwners},
-		{"workflow instance/state reader", d.WorkflowInstances},
 		{"prepared event settlement reader", d.PreparedEvents},
 		{"target failure recorder", d.TargetFailureRecorder},
 		{"run origin reader", d.RunOrigins},

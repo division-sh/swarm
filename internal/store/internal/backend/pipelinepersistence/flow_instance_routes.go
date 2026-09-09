@@ -787,8 +787,10 @@ func (s *PipelinePostgresOwner) ListSelectedRunTargetOwners(ctx context.Context,
 		return nil, fmt.Errorf("selected-run target owners require exact run_id")
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT es.entity_id::text, es.flow_instance
+		SELECT es.entity_id::text, es.flow_instance, es.current_state,
+ CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
 		FROM entity_state es
+ LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
 		JOIN runs run ON run.run_id = es.run_id
 		WHERE es.run_id = $1::uuid
 		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
@@ -809,8 +811,10 @@ func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwners(ctx context.Context, r
 		return nil, fmt.Errorf("selected-run target owners require exact run_id")
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT es.entity_id, es.flow_instance
+		SELECT es.entity_id, es.flow_instance, es.current_state,
+ CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
 		FROM entity_state es
+ LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
 		JOIN runs run ON run.run_id = es.run_id
 		WHERE es.run_id = ?
 		  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
@@ -826,12 +830,14 @@ func scanSelectedRunTargetOwners(rows *sql.Rows, label string) ([]runtimebus.Act
 	defer rows.Close()
 	out := []runtimebus.ActiveTargetDescriptor{}
 	for rows.Next() {
-		var entityID, flowInstance string
-		if err := rows.Scan(&entityID, &flowInstance); err != nil {
+		var entityID, flowInstance, stage, status string
+		var terminated bool
+		if err := rows.Scan(&entityID, &flowInstance, &stage, &status, &terminated); err != nil {
 			return nil, fmt.Errorf("scan %s: %w", label, err)
 		}
 		descriptor := (runtimebus.ActiveTargetDescriptor{
 			ID: flowInstance, EntityID: entityID, FlowInstance: flowInstance,
+			Availability: runtimepipeline.NewDeliveryTargetAvailability(stage, status, terminated),
 		}).Normalized()
 		if descriptor.EntityID == "" || descriptor.FlowInstance == "" {
 			return nil, fmt.Errorf("%s is missing exact entity and flow-instance identity", label)

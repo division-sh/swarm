@@ -100,8 +100,8 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 		{
 			name:        "normal connected receiver select_entity is illegal",
 			opts:        finalflowinstanceauthoring.Options{UnsupportedReceiverSelector: true},
-			checkID:     "redundant_in_topology_select_entity",
-			wantMessage: "scalar receiver instance",
+			loadError:   true,
+			wantMessage: "RETIRED: handler field",
 		},
 		{
 			name:        "producer target cannot rescue common composition",
@@ -124,14 +124,14 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 		{
 			name:        "retired static select_entity",
 			opts:        finalflowinstanceauthoring.Options{StaticSelectEntity: true},
-			checkID:     "select_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
+			loadError:   true,
+			wantMessage: "RETIRED: handler field",
 		},
 		{
 			name:        "retired static select_or_create_entity",
 			opts:        finalflowinstanceauthoring.Options{StaticSelectOrCreate: true},
-			checkID:     "select_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
+			loadError:   true,
+			wantMessage: "RETIRED: handler field",
 		},
 		{
 			name:        "retired static missing acquisition",

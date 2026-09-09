@@ -102,8 +102,8 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 		{
 			name:        "unsupported receiver select_entity on connected normal path",
 			opts:        templateflowpilot.Options{UnsupportedReceiverSelection: true},
-			checkID:     "redundant_in_topology_select_entity",
-			wantMessage: "scalar receiver instance",
+			loadError:   true,
+			wantMessage: "RETIRED: handler field",
 		},
 		{
 			name:        "producer target cannot rescue common composition",

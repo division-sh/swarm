@@ -284,10 +284,6 @@ var artifactRepoLimitsFieldOptions = map[string]struct{}{
 	"max_repo_bytes":     {},
 }
 
-var entitySelectionFieldOptions = map[string]struct{}{
-	"by": {},
-}
-
 func (s *HandlerOnSuccessSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -743,38 +739,36 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	var aux struct {
-		Action               yaml.Node                `yaml:"action"`
-		Activity             ActivitySpec             `yaml:"activity"`
-		CreateEntity         bool                     `yaml:"create_entity"`
-		SelectEntity         yaml.Node                `yaml:"select_entity"`
-		SelectOrCreateEntity yaml.Node                `yaml:"select_or_create_entity"`
-		Template             string                   `yaml:"template"`
-		InstanceIDFrom       string                   `yaml:"instance_id_from"`
-		ConfigFrom           yaml.Node                `yaml:"config_from"`
-		EvidenceTarget       string                   `yaml:"evidence_target"`
-		Description          string                   `yaml:"description"`
-		Emit                 EmitSpec                 `yaml:"emit"`
-		OnSuccess            HandlerOnSuccessSpec     `yaml:"on_success"`
-		Guard                yaml.Node                `yaml:"guard"`
-		AdvancesTo           yaml.Node                `yaml:"advances_to"`
-		SetsGate             yaml.Node                `yaml:"sets_gate"`
-		ClearGates           yaml.Node                `yaml:"clear_gates"`
-		DataAccumulation     WorkflowDataAccumulation `yaml:"data_accumulation"`
-		Condition            string                   `yaml:"condition"`
-		Logic                string                   `yaml:"logic"`
-		Loop                 *LoopOperationSpec       `yaml:"loop"`
-		OnComplete           yaml.Node                `yaml:"on_complete"`
-		Rules                yaml.Node                `yaml:"rules"`
-		Accumulate           *AccumulateSpec          `yaml:"accumulate"`
-		Join                 *JoinSpec                `yaml:"join"`
-		Compute              *ComputeSpec             `yaml:"compute"`
-		Query                yaml.Node                `yaml:"query"`
-		FanOut               *FanOutSpec              `yaml:"fan_out"`
-		GroupBy              *GroupBySpec             `yaml:"group_by"`
-		Filter               *FilterSpec              `yaml:"filter"`
-		Reduce               *ReduceSpec              `yaml:"reduce"`
-		Count                *CountSpec               `yaml:"count"`
-		Clear                yaml.Node                `yaml:"clear"`
+		Action           yaml.Node                `yaml:"action"`
+		Activity         ActivitySpec             `yaml:"activity"`
+		CreateEntity     bool                     `yaml:"create_entity"`
+		Template         string                   `yaml:"template"`
+		InstanceIDFrom   string                   `yaml:"instance_id_from"`
+		ConfigFrom       yaml.Node                `yaml:"config_from"`
+		EvidenceTarget   string                   `yaml:"evidence_target"`
+		Description      string                   `yaml:"description"`
+		Emit             EmitSpec                 `yaml:"emit"`
+		OnSuccess        HandlerOnSuccessSpec     `yaml:"on_success"`
+		Guard            yaml.Node                `yaml:"guard"`
+		AdvancesTo       yaml.Node                `yaml:"advances_to"`
+		SetsGate         yaml.Node                `yaml:"sets_gate"`
+		ClearGates       yaml.Node                `yaml:"clear_gates"`
+		DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
+		Condition        string                   `yaml:"condition"`
+		Logic            string                   `yaml:"logic"`
+		Loop             *LoopOperationSpec       `yaml:"loop"`
+		OnComplete       yaml.Node                `yaml:"on_complete"`
+		Rules            yaml.Node                `yaml:"rules"`
+		Accumulate       *AccumulateSpec          `yaml:"accumulate"`
+		Join             *JoinSpec                `yaml:"join"`
+		Compute          *ComputeSpec             `yaml:"compute"`
+		Query            yaml.Node                `yaml:"query"`
+		FanOut           *FanOutSpec              `yaml:"fan_out"`
+		GroupBy          *GroupBySpec             `yaml:"group_by"`
+		Filter           *FilterSpec              `yaml:"filter"`
+		Reduce           *ReduceSpec              `yaml:"reduce"`
+		Count            *CountSpec               `yaml:"count"`
+		Clear            yaml.Node                `yaml:"clear"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -800,12 +794,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Count:            aux.Count,
 	}
 	var err error
-	if h.SelectEntity, err = decodeSelectEntitySpecNode(&aux.SelectEntity); err != nil {
-		return err
-	}
-	if h.SelectOrCreateEntity, err = decodeSelectOrCreateEntitySpecNode(&aux.SelectOrCreateEntity); err != nil {
-		return err
-	}
 	if h.Action, err = decodeActionSpecNode(&aux.Action); err != nil {
 		return err
 	}
@@ -933,41 +921,39 @@ func decodeAdvancesToNode(node *yaml.Node) (string, error) {
 }
 
 var handlerFieldOptions = map[string]struct{}{
-	"action":                  {},
-	"activity":                {},
-	"description":             {},
-	"_note":                   {},
-	"evidence_target":         {},
-	"create_entity":           {},
-	"select_entity":           {},
-	"select_or_create_entity": {},
-	"emit":                    {},
-	"on_success":              {},
-	"guard":                   {},
-	"advances_to":             {},
-	"sets_gate":               {},
-	"clear_gates":             {},
-	"data_accumulation":       {},
-	"condition":               {},
-	"logic":                   {},
-	"loop":                    {},
-	"on_complete":             {},
-	"rules":                   {},
-	"accumulate":              {},
-	"join":                    {},
-	"compute":                 {},
-	"query":                   {},
-	"fan_out":                 {},
-	"group_by":                {},
-	"filter":                  {},
-	"reduce":                  {},
-	"count":                   {},
-	"clear":                   {},
-	"template":                {},
-	"instance_id_from":        {},
-	"config_from":             {},
-	"from":                    {},
-	"dedup_by":                {},
+	"action":            {},
+	"activity":          {},
+	"description":       {},
+	"_note":             {},
+	"evidence_target":   {},
+	"create_entity":     {},
+	"emit":              {},
+	"on_success":        {},
+	"guard":             {},
+	"advances_to":       {},
+	"sets_gate":         {},
+	"clear_gates":       {},
+	"data_accumulation": {},
+	"condition":         {},
+	"logic":             {},
+	"loop":              {},
+	"on_complete":       {},
+	"rules":             {},
+	"accumulate":        {},
+	"join":              {},
+	"compute":           {},
+	"query":             {},
+	"fan_out":           {},
+	"group_by":          {},
+	"filter":            {},
+	"reduce":            {},
+	"count":             {},
+	"clear":             {},
+	"template":          {},
+	"instance_id_from":  {},
+	"config_from":       {},
+	"from":              {},
+	"dedup_by":          {},
 }
 
 func validateHandlerFieldNodes(node *yaml.Node) error {
@@ -990,6 +976,8 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 			return fmt.Errorf("DEPRECATED: handler uses deprecated field %q", key)
 		}
 		switch key {
+		case "select_entity", "select_or_create_entity":
+			return fmt.Errorf("RETIRED: handler field %q is retired; declare the receiver key once with flow instance and select resolution at the input/composition boundary; handlers operate on that admitted instance", key)
 		case "branch":
 			return fmt.Errorf("RETIRED: handler field %q is retired; use rules for branch selection", key)
 		case "emits":
@@ -1294,76 +1282,6 @@ func decodeQuerySpecNode(node *yaml.Node) (*QuerySpec, error) {
 	default:
 		return nil, fmt.Errorf("unsupported query yaml node kind %d", node.Kind)
 	}
-}
-
-func decodeSelectEntitySpecNode(node *yaml.Node) (*SelectEntitySpec, error) {
-	spec, err := decodeEntitySelectionSpecNode(node, "select_entity")
-	if err != nil || spec == nil {
-		return nil, err
-	}
-	return &SelectEntitySpec{
-		By:       spec.By,
-		Bindings: spec.Bindings,
-	}, nil
-}
-
-func decodeSelectOrCreateEntitySpecNode(node *yaml.Node) (*SelectOrCreateEntitySpec, error) {
-	spec, err := decodeEntitySelectionSpecNode(node, "select_or_create_entity")
-	if err != nil || spec == nil {
-		return nil, err
-	}
-	return &SelectOrCreateEntitySpec{
-		By:       spec.By,
-		Bindings: spec.Bindings,
-	}, nil
-}
-
-func decodeEntitySelectionSpecNode(node *yaml.Node, label string) (*SelectEntitySpec, error) {
-	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		return nil, nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s must be a mapping", label)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := entitySelectionFieldOptions[key]; !ok {
-			return nil, NewUndefinedFieldDiagnostic(label, key, entitySelectionFieldOptions)
-		}
-	}
-	var aux struct {
-		By map[string]string `yaml:"by"`
-	}
-	if err := node.Decode(&aux); err != nil {
-		return nil, err
-	}
-	if len(aux.By) == 0 {
-		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s.by must declare at least one binding", label)
-	}
-	spec := &SelectEntitySpec{
-		By:       cloneStringMap(aux.By),
-		Bindings: make([]SelectEntityKeyBinding, 0, len(aux.By)),
-	}
-	for field, ref := range aux.By {
-		field = strings.TrimSpace(field)
-		ref = strings.TrimSpace(ref)
-		if field == "" {
-			return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s.by contains an empty entity field", label)
-		}
-		if ref == "" {
-			return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s.by.%s requires a payload ref", label, field)
-		}
-		parsed := paths.Parse(ref)
-		spec.Bindings = append(spec.Bindings, SelectEntityKeyBinding{
-			Field:   field,
-			Ref:     ref,
-			RefPath: parsed,
-		})
-	}
-	return spec, nil
 }
 
 func (a *ActionSpec) UnmarshalYAML(node *yaml.Node) error {

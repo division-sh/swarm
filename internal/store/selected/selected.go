@@ -281,7 +281,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 				FlowRouteTopology: selected, FlowRouteRollback: selected,
 				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
-				WorkflowInstances: selected, PreparedEvents: selected,
+				PreparedEvents:        selected,
 				TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			},
 			EventPayloadValidationBinder: selected, InboundPayloadValidationBinder: selected,
@@ -335,7 +335,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 				FlowRouteTopology: selected, FlowRouteRollback: selected,
 				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
-				WorkflowInstances: selected, PreparedEvents: selected,
+				PreparedEvents:        selected,
 				TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			},
 			EventPayloadValidationBinder: selected, InboundPayloadValidationBinder: selected,
@@ -393,7 +393,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,
-		ActiveFlows: selected, TargetOwners: selected, WorkflowInstances: selected,
+		ActiveFlows: selected, TargetOwners: selected,
 		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
@@ -412,7 +412,7 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,
-		ActiveFlows: selected, TargetOwners: selected, WorkflowInstances: selected,
+		ActiveFlows: selected, TargetOwners: selected,
 		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(

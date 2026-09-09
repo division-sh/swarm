@@ -161,14 +161,8 @@ func (managedNativeDurableRoles) LoadWorkflowInstance(context.Context, runtimefl
 func (managedNativeDurableRoles) ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) SelectActiveWorkflowInstances(context.Context, string, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowInstance, error) {
-	return nil, nil
-}
 func (managedNativeDurableRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
 	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
-}
-func (managedNativeDurableRoles) SelectActiveWorkflowEntityStates(context.Context, string, runtimepipeline.WorkflowEntityStateSelectionOwner, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return nil, nil
 }
 func (managedNativeDurableRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {
 	return nil, nil
@@ -192,7 +186,6 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 		RunLifecycle: roles, DeliveryLifecycle: delivery,
 		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
 		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
-		WorkflowInstances:     roles,
 		PreparedEvents:        roles,
 		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles,
 	}

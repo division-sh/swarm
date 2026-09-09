@@ -464,7 +464,7 @@ func appendActiveTargetDescriptor(out []ActiveTargetDescriptor, descriptor Activ
 	}
 	for _, existing := range out {
 		existing = existing.Normalized()
-		if existing.ID == descriptor.ID && existing.EntityID == descriptor.EntityID && existing.FlowInstance == descriptor.FlowInstance {
+		if existing.ID == descriptor.ID && existing.EntityID == descriptor.EntityID && existing.FlowInstance == descriptor.FlowInstance && existing.Materializing == descriptor.Materializing && existing.Availability == descriptor.Availability {
 			return out
 		}
 	}

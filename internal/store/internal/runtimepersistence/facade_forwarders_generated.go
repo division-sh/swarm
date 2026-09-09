@@ -1176,14 +1176,6 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 	return s.deliveryPostgresOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
-func (s *PostgresStore) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelinePostgresOwner.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
-}
-
-func (s *PostgresStore) SelectActiveWorkflowInstances(ctx context.Context, runID string, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
-	return s.pipelinePostgresOwner.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
-}
-
 func (s *PostgresStore) SetEventPayloadValidator(validator func(context.Context, string, []byte) error) {
 	s.eventPostgresOwner.SetEventPayloadValidator(validator)
 }
@@ -2374,14 +2366,6 @@ func (s *SQLiteRuntimeStore) SaveManagedCapabilitySurface(ctx context.Context, s
 
 func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, cursor deliverylifecycle.ContinuationCursor, limit int) (deliverylifecycle.ContinuationPage, error) {
 	return s.deliverySQLiteOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
-}
-
-func (s *SQLiteRuntimeStore) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelineSQLiteOwner.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
-}
-
-func (s *SQLiteRuntimeStore) SelectActiveWorkflowInstances(ctx context.Context, runID string, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
-	return s.pipelineSQLiteOwner.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
 func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventID string, subscriberType string, subscriberID string) (bool, error) {
