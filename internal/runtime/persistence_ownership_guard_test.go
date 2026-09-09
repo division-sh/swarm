@@ -217,8 +217,10 @@ func TestSelectedContractExecutionUsesSemanticPorts(t *testing.T) {
 	execution := readOwnershipSource(t, root, "internal/runtime/runforkexecution/execution.go")
 	assertOwnershipSourceContains(t, execution,
 		"Owner             SelectedContractExecutionOwner",
-		"ports, err := req.Owner.require()",
+		"prepared, err := req.Owner.Prepare(ctx, req)",
 	)
+	preparation := readOwnershipSource(t, root, "internal/runtime/runforkexecution/preparation.go")
+	assertOwnershipSourceContains(t, preparation, "ports, err := o.require()", "operation, err := o.beginPreparation(ctx)")
 	assertOwnershipSourceExcludes(t, execution,
 		"Store               SelectedContractExecutionStore",
 		"Store SelectedContractExecutionStore",
