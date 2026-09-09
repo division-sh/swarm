@@ -56,9 +56,9 @@ func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, forkRunID stri
 		}
 	}
 	capsule.StateGates = maps.Clone(capsule.StateGates)
-	if capsule.DeliveryRoute != nil {
-		route := *capsule.DeliveryRoute
-		capsule.DeliveryRoute = &route
+	if capsule.Receiver != nil {
+		receiver := *capsule.Receiver
+		capsule.Receiver = &receiver
 	}
 	var barrierGeneration attemptgeneration.Generation
 	if obligation.Barrier != nil {
@@ -166,7 +166,7 @@ func projectRunForkFanOutExecutionOwnership(plan runfork.RunForkPlan, forkRunID 
 			owner = entity.MaterializationMetadata
 		}
 		if owner == nil {
-			if capsule.DeliveryRoute == nil || !capsule.DeliveryRoute.Target.MaterializingEntity() {
+			if capsule.Receiver == nil || !capsule.Receiver.Target.MaterializingEntity() {
 				return capsule, fmt.Errorf("fan-out existing entity is absent at the fixed revision")
 			}
 		} else if owner.FlowInstance != capsule.Route.InstancePath {
@@ -178,10 +178,10 @@ func projectRunForkFanOutExecutionOwnership(plan runfork.RunForkPlan, forkRunID 
 		}
 		projected.EntityID = entity.Fork.EntityID
 	}
-	if capsule.DeliveryRoute != nil {
-		delivery := *capsule.DeliveryRoute
+	if capsule.Receiver != nil {
+		delivery := *capsule.Receiver
 		receiver := delivery.Target.Route()
-		if delivery.Recipient != events.MustNodeDeliveryRecipient(node) || receiver.FlowID != capsule.ExecutionFlowID || receiver.FlowInstance != capsule.Route.InstancePath || receiver.EntityID != capsule.EntityID {
+		if delivery.Node != node || receiver.FlowID != capsule.ExecutionFlowID || receiver.FlowInstance != capsule.Route.InstancePath || receiver.EntityID != capsule.EntityID {
 			return capsule, fmt.Errorf("fan-out delivery target contradicts its execution owner")
 		}
 		receiver.FlowInstance, receiver.EntityID = projected.Route.InstancePath, projected.EntityID
@@ -198,7 +198,7 @@ func projectRunForkFanOutExecutionOwnership(plan runfork.RunForkPlan, forkRunID 
 		if err != nil {
 			return capsule, err
 		}
-		projected.DeliveryRoute = &delivery
+		projected.Receiver = &delivery
 	}
 	return projected, projected.Validate()
 }

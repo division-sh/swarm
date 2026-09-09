@@ -9,8 +9,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -71,11 +71,13 @@ func (e *Executor) EvaluateFanOutOrdinal(ctx context.Context, intent fanoutoblig
 	base.Metadata = values.Wrap(cloneStringAnyMap(capsule.StateFields))
 	base.Gates = values.Wrap(boolMapToAnyMap(capsule.StateGates))
 
-	if capsule.DeliveryRoute != nil {
-		ctx = runtimedelivery.WithRoute(ctx, *capsule.DeliveryRoute)
+	var target events.DeliveryTargetOwnership
+	if capsule.Receiver != nil {
+		target = capsule.Receiver.Target
 	}
 	frame := &executionFrame{
-		ctx: ctx,
+		ctx:            ctx,
+		deliveryTarget: runtimepinrouting.ClassifyExecutionReceiverTarget(target, capsule.Receiver != nil),
 		req: ExecutionRequest{
 			ExecutionID: intent.Request.Key.String(), EntityID: identity.NormalizeEntityID(capsule.EntityID), Node: node,
 			ExecutionFlowID: identity.NormalizeFlowID(capsule.ExecutionFlowID), Route: capsule.Route,

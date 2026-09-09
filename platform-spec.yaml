@@ -3598,6 +3598,11 @@ handler_specification:
           Carries the exact bundle-qualified compiled plan reference, trigger/run/delivery/route lineage, and only mutable
           or turn-local expression values needed after the handler returns. The retained bundle and semantic digest must
           still prove the same element before any ordinal is evaluated.
+          Its receiver projection carries only the exact executable node and typed target ownership, validated against
+          the capsule execution coordinates. It is not a delivery route or publication obligation: initialization
+          suppliers and dependency plans remain with their original publication and are never copied into a capsule.
+          Normal and resumed emission consume the same target classifier. A child projection retains historical
+          trigger lineage without minting a child trigger or treating source initialization as child authority.
         progress: >-
           Cardinality plus one contiguous cursor represents the unissued suffix. Each visited ordinal receives exactly
           one immutable committed-publication or deterministic semantic-rejection outcome. Cancellation terminalizes the

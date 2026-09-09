@@ -100,15 +100,15 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 							t.Fatalf("generation %d remapped ancestor provenance into owning child: %#v; original=%#v", generation, got.Intent, original.Intent)
 						}
 						wantCapsule := original.Intent.Request.Capsule
-						if reflect.TypeOf(wantCapsule).NumField() != 19 || wantCapsule.DeliveryRoute == nil || !wantCapsule.DeliveryRoute.Target.ExistingEntity() {
+						if reflect.TypeOf(wantCapsule).NumField() != 19 || wantCapsule.Receiver == nil || !wantCapsule.Receiver.Target.ExistingEntity() {
 							t.Fatal("capsule census or declared root receiver changed; reclassify every field")
 						}
 						wantCapsule.Route = flowidentity.StoredRoute(".", child.ForkRunID, child.ForkRunID)
 						wantCapsule.EntityID = child.ForkRunID
 						wantCapsule.ProducerSource = eventtest.RootRoutingSource(child.ForkRunID)
-						wantDelivery := *wantCapsule.DeliveryRoute
+						wantDelivery := *wantCapsule.Receiver
 						wantDelivery.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: child.ForkRunID, EntityID: child.ForkRunID})
-						wantCapsule.DeliveryRoute = &wantDelivery
+						wantCapsule.Receiver = &wantDelivery
 						if !reflect.DeepEqual(got.Intent.Request.Capsule, wantCapsule) {
 							t.Fatalf("generation %d changed frozen capsule fields or lost child execution ownership: got=%#v want=%#v", generation, got.Intent.Request.Capsule, wantCapsule)
 						}
