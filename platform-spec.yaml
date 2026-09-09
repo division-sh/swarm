@@ -1407,8 +1407,13 @@ contract_formats:
             A node-supplied agent cannot drop its dependency, including when every dependent plan is erased. A flow-lifecycle
             supplier has no fictitious node dependency: its exact activation commits initialization, and claim/readiness
             admission still requires the exact persisted state and admitted lifecycle. Ordinary and historical hydration
-            consume the same supplier/dependency record and validate its publication identity. Fork publication reprojects
-            supplier evidence for the child rather than copying source publication coordinates. Agent claims and continuation
+            consume the same supplier/dependency record and validate its publication identity. Ordinary agent-only fork
+            replay validates the complete source publication at the selected revision. A node supplier requires the exact
+            initializer's successful settlement at that revision; flow and node suppliers both require exact reconstructed
+            receiver state. Replay projects that state through the canonical entity ownership owner and rechecks the child
+            row in the activation transaction, admitting existing_entity without a copied source initialization dependency.
+            Existing root receivers use the same projection. An unfinished initializer cannot be omitted or fabricated as
+            child work. Untargeted agent receivers retain their explicit absence of entity ownership. Agent claims and continuation
             eligibility for node-supplied state require the exact materializer's successful settlement and actual
             persisted target state admitted by the workflow target owner, the exact
             admitted agent lifecycle cell, and the matching live normal or selected generation grant. An agent descriptor
