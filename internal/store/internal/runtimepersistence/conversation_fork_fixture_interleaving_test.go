@@ -54,6 +54,7 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 	if err := store.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
 		t.Fatal(err)
 	}
+	store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
 	item := createLifecycleDiagnostic(t, ctx, store)
 	identity, err := item.Identity.StorageFields()
 	if err != nil {

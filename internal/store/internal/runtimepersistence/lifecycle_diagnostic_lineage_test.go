@@ -24,7 +24,7 @@ func lifecycleCausalFixture(t *testing.T, sqlite bool, kind string) (lifecycleDi
 	ctx := testAuthorActivityContext()
 	seed := createNamedLifecycleDiagnostic(t, ctx, store, "lineage-seed")
 	ctx = runtimecorrelation.WithRunID(ctx, seed.Identity.RunID)
-	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, storeTestPayloadAdmitter)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{Level: diaglog.LevelInfo, Component: "lineage", Action: "parent"}); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestLifecycleDiagnosticPersistsProducerCausalLineage(t *testing.T) {
 		for _, kind := range []string{"explicit", "subject", "parentless", "missing", "malformed", "missing_subject", "foreign"} {
 			t.Run(fmt.Sprintf("sqlite=%t/%s", sqlite, kind), func(t *testing.T) {
 				store, db, ctx, item, parent := lifecycleCausalFixture(t, sqlite, kind)
-				logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil)
+				logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live, storeTestPayloadAdmitter)
 				if kind == "explicit" || kind == "subject" {
 					lineage, err := item.ProducerLineage()
 					if err != nil {
