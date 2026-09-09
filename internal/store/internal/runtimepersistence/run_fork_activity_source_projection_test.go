@@ -643,5 +643,5 @@ func selectedSourceMaterializationRequest(t *testing.T, ctx context.Context, sto
 		t.Fatal(err)
 	}
 	return prepareSelectedStoreMaterializationForTest(t, ctx, store, sourceRunID, eventID,
-		runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}, bundle.SourceArtifact.BundleHash())
+		runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundle.SourceArtifact.BundleHash()}, bundle.SourceArtifact.BundleHash())
 }
