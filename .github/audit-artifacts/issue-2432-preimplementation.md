@@ -326,4 +326,3 @@ this census. Report and repair the gate rather than adding a framework or compat
 required mode snapshot, transaction-local named log writer, unparented observational
 semantics, and auxiliary failure disposition. No production implementation starts
 until the independent outcome is explicitly posted on #2432.
-

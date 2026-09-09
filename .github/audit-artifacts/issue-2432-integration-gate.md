@@ -84,5 +84,3 @@ On aa3e73b20 in a detached review worktree:
 Existing #2432 is the implementation/proof owner; integration vehicle is #2321's upcoming PR. Both issue bodies are updated to remove the obsolete freeze/separate-PR requirement. #2250 remains OPEN for broader phase decomposition, not a blocker for this bounded repair; #2319 remains F-owned/nonblocking. No new issue or POTENTIAL_ISSUES entry is needed.
 
 Watchlist: preserve 12e94ca/7a23362 lifecycle/fork mappings, refine the nodes with this gate and the discard manifestation, and retain the separate #2321 activation entries. YAML/diff validation is recorded in the checklist. **No closure level beyond a coding-ready pre-audit is claimed for #2432.** High-risk merge review remains required; minimizing churn means doing the full named class once, not waiving its proof.
-
-

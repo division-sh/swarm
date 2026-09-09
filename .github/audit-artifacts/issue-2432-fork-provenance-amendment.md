@@ -235,4 +235,3 @@ the unchanged atomic/F1-F11 audit. Production diagnostic work remains frozen unt
 the gate is explicitly recorded. If another supported producer requires separate
 noncausal authority, stop and name the concrete class/tracker decision rather than
 silently retaining the old tag exception or expanding the logging model.
-

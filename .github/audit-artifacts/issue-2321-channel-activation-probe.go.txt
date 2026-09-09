@@ -37,4 +37,3 @@ func TestAgentGChannelPresentationNestedAcquireProbe(t *testing.T) {
     }
     nested.Release()
 }
-

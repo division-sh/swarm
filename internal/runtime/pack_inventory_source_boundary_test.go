@@ -173,13 +173,25 @@ func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testin
 		t.Fatalf("platform pack body embed owners = %v, want [packs/embed.go]", bodyEmbeds)
 	}
 
-	for _, root := range []string{".github/fixtures", "examples"} {
+	for _, root := range []string{".github", "examples"} {
 		err := filepath.WalkDir(filepath.Join(repoRoot, root), func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
 			if entry.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml" && filepath.Ext(path) != ".md") {
 				return nil
+			}
+			if root == ".github" {
+				// Git omits empty fixture directories; walk their retained parent
+				// and include workflow consumers, but not historical audit prose.
+				relative, err := filepath.Rel(filepath.Join(repoRoot, root), path)
+				if err != nil {
+					return err
+				}
+				relative = filepath.ToSlash(relative)
+				if !strings.HasPrefix(relative, "fixtures/") && !strings.HasPrefix(relative, "workflows/") {
+					return nil
+				}
 			}
 			body, err := os.ReadFile(path)
 			if err != nil {
