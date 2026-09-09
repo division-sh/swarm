@@ -616,7 +616,13 @@ contract_formats:
         `loop.id`, `loop.activation_id`, `loop.revision_id`, `loop.attempt`, and
         `loop.max_attempts` are available after loop admission. The CEL
         implementation may lower this root internally, but `loop.*` is the only
-        authored spelling.
+        authored spelling. These are the complete authored members; internal
+        carriage coordinates are not additional expression fields. Join outcome
+        expressions bind them to the join's captured generation, including an
+        owned historical attempt, never a current replacement iteration. The
+        same captured identity survives pending outcomes, owner reconstruction,
+        restart, and supported fork correspondence. Historical ownership does
+        not override cancellation, terminality, or execution-policy refusals.
       projection: >
         Reserved persisted loop buckets are not readable or writable through
         authored accumulator/data/clear paths. Supported entity/tool readbacks
@@ -3676,7 +3682,10 @@ handler_specification:
           until a durable contributor-lifecycle/cancellation owner is promoted.
         on_complete: >-
           Required non-empty outcome using only existing data_accumulation, emit, and advances_to fields. Expressions may
-          read declared entity.* and typed join.* only.
+          read declared entity.*, typed join.*, and the five defined loop.* members only.
+          loop.* uses the join's captured generation and owning activation cap, never the current replacement
+          attempt. Authors use loop.revision_id explicitly; no join.revision_id alias, implicit payload injection,
+          or inference from equal business fields is supported. A non-loop join has no loop context.
         timeout: >-
           Required `{after: <positive literal or policy-scalar duration>, ...outcome}`. Bare joins are invalid. The outcome
           supports the same fields and expression roots as on_complete.
@@ -7379,6 +7388,9 @@ engine:
         while evaluating fan_out.emit.fields for one item.
       join: Available only while evaluating join complete_when and selected on_complete/timeout outcomes. The typed fields
         are expected, completed, missing, results, and timed_out; join is read-only and never persisted as entity state.
+      loop: Only id, activation_id, revision_id, attempt, and max_attempts are authored members. Join on_complete/timeout
+        reads the captured generation through its owning activation, including after restart or supported fork remapping;
+        it never borrows the current replacement attempt. loop is unavailable in join complete_when.
       accumulated: Available to supported per-arrival filter/reduce/count/compute/rules processing after stream admission
     ambient_time: >
       CEL guard/rule/filter/on_complete conditions must not call ambient time functions such as `now()` or

@@ -138,6 +138,17 @@ func (a Activation) OwnsGeneration(g attemptgeneration.Generation) bool {
 		g.RevisionID == revisionID(a.ActivationID, g.Attempt)
 }
 
+// CapturedContext projects an owned reference, not the owner's current attempt.
+// Historical ownership does not grant permission to execute or mutate the loop.
+func (a Activation) CapturedContext(g attemptgeneration.Generation) (map[string]any, error) {
+	if !a.OwnsGeneration(g) || !a.OwnsGeneration(a.Generation()) {
+		return nil, fmt.Errorf("captured loop generation is not owned by the activation")
+	}
+	context := a.Context()
+	context["attempt"], context["revision_id"] = g.Attempt, g.RevisionID
+	return context, nil
+}
+
 func (a Activation) Admit(revisionID, fromStage string) AdmissionDisposition {
 	revisionID = strings.TrimSpace(revisionID)
 	if revisionID == "" {

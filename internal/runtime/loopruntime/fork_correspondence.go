@@ -169,9 +169,7 @@ func (r ForkChildReference) Context() (map[string]any, error) {
 	if err != nil || want.generation != r.generation {
 		return nil, fmt.Errorf("child loop context disagrees with its correspondence")
 	}
-	context := c.state.pairs[forkLoopScope{r.generation.FlowID, r.generation.LoopID}].child.Context()
-	context["attempt"], context["revision_id"] = r.generation.Attempt, r.generation.RevisionID
-	return context, nil
+	return c.state.pairs[forkLoopScope{r.generation.FlowID, r.generation.LoopID}].child.CapturedContext(r.generation)
 }
 
 func (r ForkChildReference) RequireDestination(runID, entityID string) error {

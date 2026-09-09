@@ -122,6 +122,7 @@ type executionFrame struct {
 	joinResultType            runtimecontracts.CatalogTypeReference
 	loopPlan                  *runtimecontracts.WorkflowLoopPlan
 	loopActivation            *loopruntime.Activation
+	joinLoopGeneration        attemptgeneration.Generation
 }
 
 type handlerRuleSource string
@@ -789,6 +790,15 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 			"row_id": spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
+	if internal && generation.Valid() && activation.CloseReason == joinruntime.CloseReasonStageExit {
+		current, err := loopruntime.GenerationCurrent(frame.state.State.StateCarrier.StateBuckets, generation, "")
+		if err != nil {
+			return false, err
+		}
+		if !current {
+			return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_generation_superseded", spec, window, "")
+		}
+	}
 	if internal && timerKind == timeridentity.TimerHandleJoinComplete {
 		if activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete || !activation.OutcomePending || activation.OutcomeFired {
 			frame.result.Status = OutcomeDiscarded
@@ -913,6 +923,9 @@ func (e *Executor) stepFanOutDeliveryJoin(frame *executionFrame, plan runtimecon
 		return false, err
 	}
 	frame.state.Join = summary.Context()
+	if err := e.bindJoinLoopContext(frame, joinRef); err != nil {
+		return false, err
+	}
 	frame.rule = &plan.Spec.OnComplete
 	frame.ruleSource = handlerRuleSourceJoinOnComplete
 	frame.ruleIndex = 0
@@ -944,6 +957,9 @@ func (e *Executor) storeJoinActivation(frame *executionFrame, activation joinrun
 }
 
 func (e *Executor) selectJoinOutcome(frame *executionFrame, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource, activation joinruntime.Activation) error {
+	if err := e.bindJoinLoopContext(frame, activation.JoinRef()); err != nil {
+		return err
+	}
 	frame.state.Join = activation.Context()
 	frame.rule = rule
 	frame.ruleSource = source
@@ -3072,6 +3088,16 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 		}
 		if write.Value.HasLiteralValue() {
 			if err := e.writeStepValue(frame, target, write.Value.Literal); err != nil {
+				return fmt.Errorf("data_accumulation target %s: %w", target, err)
+			}
+			continue
+		}
+		if write.Value.HasRefValue() {
+			value, ok, err := evalExpressionValue(current, frame.state, write.Value, joinExpressionOptions(frame))
+			if err != nil || !ok {
+				return fmt.Errorf("data_accumulation target %s: reference %s unavailable: %v", target, write.Value.Ref, err)
+			}
+			if err := e.writeStepValue(frame, target, value); err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
 			}
 			continue

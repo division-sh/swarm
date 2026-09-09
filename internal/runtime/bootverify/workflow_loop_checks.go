@@ -68,15 +68,17 @@ func checkLoopValidation(c *checkerContext) []Finding {
 			if _, ok := states[operation.From]; !ok {
 				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s from references unknown stage %s", owner, operation.HandlerEvent, operation.From)))
 			}
-			if operation.AdvancesTo == "" && operation.Kind != runtimecontracts.LoopOperationAdmit {
-				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s %s requires advances_to", owner, operation.HandlerEvent, operation.Kind)))
-			} else if _, ok := states[operation.AdvancesTo]; !ok {
-				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s advances_to references unknown stage %s", owner, operation.HandlerEvent, operation.AdvancesTo)))
-			}
 			handler, ok := c.source.ExecutableNodeEventHandlers(operation.Node)[operation.HandlerEvent]
 			if !ok {
 				findings = append(findings, loopFinding(location, fmt.Sprintf("lowered operation %s:%s has no handler owner", owner, operation.HandlerEvent)))
 				continue
+			}
+			if operation.AdvancesTo == "" {
+				if operation.Kind != runtimecontracts.LoopOperationAdmit || handler.Join == nil {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s %s requires advances_to unless admit delegates to join outcomes", owner, operation.HandlerEvent, operation.Kind)))
+				}
+			} else if _, ok := states[operation.AdvancesTo]; !ok {
+				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s advances_to references unknown stage %s", owner, operation.HandlerEvent, operation.AdvancesTo)))
 			}
 			if err := runtimecontracts.ValidateLoopHandlerCombination(handler); err != nil {
 				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s %v", owner, operation.HandlerEvent, err)))

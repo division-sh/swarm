@@ -47,6 +47,23 @@ func testServedJoinWriterForkRetainedGenerations(t *testing.T, separateCheckpoin
 				"payload": map[string]any{"token": "member-one"}, "idempotency_key": "retained-join-start",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+			rows, err := rt.DB.Query(`SELECT CAST(d.failure AS TEXT) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE e.run_id=$1`, started.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var failure string
+				if err := rows.Scan(&failure); err != nil {
+					t.Fatal(err)
+				}
+				t.Errorf("ordinary join writer dead-lettered before fork: %s", failure)
+			}
+			if err := rows.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if t.Failed() {
+				t.FailNow()
+			}
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
 			first, joins := readRetainedRootJoins(t, rt, started.RunID)
 			if len(joins) != 1 || first.Attempt != 1 {

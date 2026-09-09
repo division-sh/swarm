@@ -138,6 +138,11 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 	case runtimecontracts.ExpressionKindLiteral:
 		return expr.Literal, true, nil
 	case runtimecontracts.ExpressionKindRef:
+		if expr.RefPath.Root == paths.RootLoop || opts.AllowJoin {
+			if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Ref, opts); err != nil {
+				return nil, false, err
+			}
+		}
 		if expr.RefPath.Root == paths.RootEvent {
 			if err := events.ValidateEventContextReference(strings.Join(expr.RefPath.Segments, ".")); err != nil {
 				return nil, false, err
