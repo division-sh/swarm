@@ -151,6 +151,9 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 		if value, ok := resolveParsedRef(base, state, expr.RefPath); ok {
 			return value, true, nil
 		}
+		if expr.RefPath.Root == paths.RootLoop {
+			return nil, false, fmt.Errorf("captured loop reference %s is unavailable", expr.Ref)
+		}
 		return nil, false, nil
 	case runtimecontracts.ExpressionKindCEL:
 		value, err := evalWorkflowValueExpression(base, state, expr.CEL, opts)

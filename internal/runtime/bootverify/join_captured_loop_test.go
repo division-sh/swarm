@@ -1,10 +1,31 @@
 package bootverify
 
 import (
+	"context"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
+
+func TestJoinCapturedLoopRequiresDeclaredLoopOwner(t *testing.T) {
+	for _, timeout := range []bool{false, true} {
+		bundle := joinValidationBundle()
+		handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
+		write := runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "captured", Value: runtimecontracts.RefExpression("loop.revision_id")}}}
+		if timeout {
+			handler.Join.Timeout.Outcome.DataAccumulation = write
+		} else {
+			handler.Join.OnComplete.DataAccumulation = write
+		}
+		bundle.Nodes["join-node"].EventHandlers["item.completed"] = handler
+		rebuildJoinValidationTopology(bundle)
+		report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
+		if !reportContains(report.HardInvalidities(), joinValidationCheckID, "requires a loop-owned join") {
+			t.Fatalf("non-loop outcome accepted captured loop access: %#v", report.HardInvalidities())
+		}
+	}
+}
 
 func TestJoinCapturedLoopOutcomeValidation(t *testing.T) {
 	for _, outcome := range []string{"on_complete", "timeout"} {

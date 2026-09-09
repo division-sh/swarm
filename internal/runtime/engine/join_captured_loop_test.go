@@ -18,7 +18,43 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
+
+func TestJoinCapturedLoopMissingReferenceFailsClosed(t *testing.T) {
+	for _, expression := range []runtimecontracts.ExpressionValue{runtimecontracts.RefExpression("loop.revision_id"), runtimecontracts.CELExpression("loop.revision_id")} {
+		if _, _, err := evalExpressionValue(BaseContext{}, ExecutionState{}, expression, workflowexpr.ValueExpressionOptions{AllowJoin: true}); err == nil {
+			t.Fatal("missing captured reference was silently omitted")
+		}
+	}
+}
+
+func TestJoinCapturedLoopCannotAdvanceReplacement(t *testing.T) {
+	now := time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)
+	owner, err := loopruntime.New("run", "entity", "orders", "revision", "revision_id", "start", "working", 3, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured := owner.Generation()
+	if _, err := owner.Repeat("working", "repeat", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := loopruntime.Store(buckets, owner); err != nil {
+		t.Fatal(err)
+	}
+	frame := executionFrame{joinLoopGeneration: captured, loopActivation: &owner, loopPlan: &runtimecontracts.WorkflowLoopPlan{FlowID: "orders", ID: "revision"},
+		req:   ExecutionRequest{Handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "working"}}},
+		state: ExecutionState{State: testStateSnapshot("working", nil, nil, buckets)},
+	}
+	if err := (&Executor{}).advanceAdmittedLoop(&frame, "reviewing"); err == nil {
+		t.Fatal("old outcome advanced the replacement activation")
+	}
+	after, found, err := loopruntime.Load(buckets, "orders", "revision")
+	if err != nil || !found || after != owner {
+		t.Fatalf("rejected old outcome mutated replacement: %+v %v", after, err)
+	}
+}
 
 // Retained evidence exercises evaluation ownership, not scheduler permission.
 // Real loop supersession cancels pending outcomes in the pipeline integration
