@@ -9774,12 +9774,14 @@ tool_model:
         publication must succeed before recovered or new business work, delivery continuations, autonomous producers,
         or ingress readiness are released. Full Runtime.Start is not preparation. Declared-only plans cannot replace this
         executable barrier; partial preparation or publication failure unwinds prepared resources and preserves errors.
-        Runtime.PrepareStart performs existing lifecycle admission, managed preflight, and source-scoped topology
+        Runtime.PrepareStart performs existing lifecycle preparation, managed preflight, and source-scoped topology
         canonicalization without Manager.Run or replay. Standing preparation uses the existing activation transaction
         and exact standing publication writer to establish target facts, including publication sequence, and reconstructs
         process-only topology. It defers initial-entry finalization, timers, and creation-event publication. After the
-        executable catalog is installed, the single-use prepared start release admits Manager.Run, completes prepared
-        standing topology through the existing finalizer, and then releases the existing recovery and producer phases.
+        executable catalog is installed, PreparedStartup.Start is the sole single-use release owner: it admits the
+        generation grant and Manager.Run, completes prepared standing topology through the existing finalizer, and
+        then releases recovery and producer phases. Reset uses this same owner after complete-set consumer convergence;
+        no second prepared-start interpreter or early grant admission is permitted.
       registration_handoff_rule: >
         A pre-binding webhook intent carries only exact registration plan, target, validated credential observation, and generation facts.
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external
@@ -36224,6 +36226,37 @@ agent_lifecycle_authority:
       fallback and no synthesized run. An acknowledged outbox replays its retained receipt without requiring the
       event to remain present, so later cleanup cannot cause log resurrection. Only newly committed projection
       publishes a process-local recorder notification; recorder notification is not durable acknowledgment authority.
+  diagnostic_projection:
+    owner: eventpersistence.PersistLifecycleDiagnostic is the sole atomic event and receipt owner, reached through RuntimeLogger
+    enqueue: >-
+      Lifecycle transition persistence snapshots required typed provenance alongside operation and transition facts:
+      exact agent identity, process/source binding, actor mode, normal or selected-fork ownership, and accepted-event
+      or observation origin. Accepted-event origin requires the persisted same-run parent and records its mode as
+      provenance; this mode does not override the diagnostic logger posture defined by recovery.diagnostic_settlement.
+      Producer diagnostic lineage is immutable enqueue-time evidence, never projection caller context. An explicit
+      accepted-event origin must agree with the producer parent and supplies it when no producer parent was present.
+      Selected origin is validated through the existing selected-fork execution/binding owner with exact source/fork
+      IDs, generation and fingerprints. Requested origin participates in operation replay identity. Missing or
+      conflicting provenance rolls back the transition. Fresh schemas have no defaults or legacy backfills.
+    projection: >-
+      The manager lists at most 100 pending occurrences and delegates each to RuntimeLogger and the existing
+      eventpersistence settlement transaction, retaining an independently committed prefix. No agentpersistence
+      projector or separate acknowledgment writer exists. First live-run settlement validates the immutable
+      operation, transition, identity, timestamp and historical selected-fork relation before canonical append.
+      The deterministic event ID is derived from swarm:lifecycle-diagnostic: plus outbox_id using UUID SHA1/OID.
+      Event append and complete projection receipt commit together. Recovery.diagnostic_history governs admitted
+      reset: absent live owners do not invalidate retained historical receipts or authorize event resurrection.
+    fork_validation: >-
+      Both selected-fork activation validators consume the event owner's read-only acknowledged observation
+      relation. Within the run transaction verify immutable provenance, the complete receipt, canonical event bytes,
+      timestamp, run, execution mode, producer, scope, no-delivery settlement and absent deliveries. Only exact
+      selected-fork observations with no persisted parent may be excluded from the final stray-event count; they
+      never become recursive roots or authorize descendants, deliveries, effects or source freeze. Receipt JSON
+      formatting is not event-byte authority: use the canonical encoder for exact event comparison on both stores.
+    lifecycle_failure: >-
+      Completed retirement is independent of auxiliary projection failure. Preserve original lifecycle, provider
+      and cleanup failures and report projection failure through the nonrecursive process diagnostic sink.
+      Startup and joined shutdown retain diagnostic-error attribution without reversing committed lifecycle work.
   destructive_cleanup_quiescence:
     runtime_nuke: Apply-mode runtime.nuke withdraws the complete affected context set and fences every runtime and standing occurrence before waiting for any predecessor to drain. It awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
     reset_reconstruction: The existing process lifecycle supervisor owns reset reconstruction and final shutdown; RuntimeContextManager owns complete-set withdrawal, staged installation, and publication. When include_source_artifacts is false, retain the identical admitted source set and allocate fresh runtime occurrences, generation grants, source projections, and workspace lifecycles. Rebind all execution handlers, fork consumers, MCP, standing and channel publication, monitoring, and final-close records before reopening admission. Original directories are not reread, and already retired runtime or workspace lifecycles cannot be reopened. Reconstruction failure leaves the entire set unavailable rather than publishing a partial set.
@@ -36245,7 +36278,8 @@ agent_lifecycle_authority:
       selected-fork discard removes pending and projected diagnostic outbox rows in the same run-locked transaction
       that deletes the fork events, after quiescence. Retain the existing operation/transition, execution/binding,
       turn and completion evidence according to their aggregate policy. Rollback retains the whole prior relation.
-      Reset, nuke and whole-parent deletion align queue/event lifetime under their existing aggregate owner.
+      Reset and nuke retain historical diagnostic snapshots and receipts under recovery.diagnostic_history;
+      unlike explicit selected-fork discard they do not require historical runs or events to remain present.
       Deletion is not successful projection and cannot authorize a zero-row acknowledgement or event resurrection.
   forbidden:
     - direct lifecycle map writes outside the coordinator

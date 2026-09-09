@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ import (
 type revisionEffects = privaterunforkrevision.Effects
 
 type selectedForkLineageOwner interface {
+	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool) (string, error)
 	InsertSelectedForkExecutionLineageTx(context.Context, *sql.Tx, runtimerunfork.RunForkSelectedContractExecutionLineage) error
 }
 

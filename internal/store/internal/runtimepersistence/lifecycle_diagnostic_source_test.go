@@ -54,7 +54,7 @@ func TestLifecycleDiagnosticDisjointSourcesIgnoreAmbientAuthority(t *testing.T) 
 			}
 			// Caller facts name neither subject, and must not choose attribution or mode.
 			foreign := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(authorActivityTestBundleHash), uuid.NewString())
-			if _, err := selected.ProjectAgentLifecycleDiagnostics(foreign, 100); err != nil {
+			if _, err := projectDiagnosticTestBatch(foreign, selected, 100); err != nil {
 				t.Fatal(err)
 			}
 			seen := map[string]bool{}
@@ -62,7 +62,7 @@ func TestLifecycleDiagnosticDisjointSourcesIgnoreAmbientAuthority(t *testing.T) 
 				var runID, mode string
 				var parent sql.NullString
 				var payload []byte
-				if err := db.QueryRow(`SELECT run_id,execution_mode,source_event_id,payload FROM events WHERE event_id=$1`, item.OutboxID).Scan(&runID, &mode, &parent, &payload); err != nil {
+				if err := db.QueryRow(`SELECT run_id,execution_mode,source_event_id,payload FROM events WHERE event_id=$1`, diagnosticEventID(item.OutboxID)).Scan(&runID, &mode, &parent, &payload); err != nil {
 					t.Fatal(err)
 				}
 				var log struct {

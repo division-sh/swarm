@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"strings"
 	"sync"
 	"testing"
@@ -75,24 +76,24 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						if _, err := db.Exec(`UPDATE run_fork_selected_contract_runtime_executions SET actor_census_fingerprint='foreign' WHERE execution_id=$1`, authority.ID); err != nil {
 							t.Fatal(err)
 						}
-						if _, err := projector.ProjectAgentLifecycleDiagnostics(ctx, 100); err == nil {
+						if _, err := projectDiagnosticTestBatch(ctx, projector, 100); err == nil {
 							t.Fatal("projected foreign historical execution")
 						}
 						assertDiagnosticCounts(t, db, item.OutboxID, 0, 1)
 						return
 					}
 					if scenario == "delayed_close" || scenario == "causal_delayed_close" || scenario == "discard_projected" || strings.HasPrefix(scenario, "ack_") {
-						if n, err := projector.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err != nil || n != 1 {
+						if n, err := projectDiagnosticTestBatch(context.Background(), projector, 100); err != nil || n != 1 {
 							t.Fatalf("delayed projection n=%d err=%v", n, err)
 						}
 						assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
 						if scenario == "ack_event_conflict" {
-							if _, err := db.Exec(`UPDATE events SET payload='{}',payload_bytes=$2 WHERE event_id=$1`, item.OutboxID, []byte(`{}`)); err != nil {
+							if _, err := db.Exec(`UPDATE events SET payload='{}',payload_bytes=$2 WHERE event_id=$1`, diagnosticEventID(item.OutboxID), []byte(`{}`)); err != nil {
 								t.Fatal(err)
 							}
 						}
 						if scenario == "ack_without_event" {
-							if _, err := db.Exec(`DELETE FROM events WHERE event_id=$1`, item.OutboxID); err != nil {
+							if _, err := db.Exec(`DELETE FROM events WHERE event_id=$1`, diagnosticEventID(item.OutboxID)); err != nil {
 								t.Fatal(err)
 							}
 						}
@@ -100,7 +101,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						if sqlite {
 							s := selected.(*SQLiteRuntimeStore)
 							validationErr = s.backend.RunTransaction(ctx, "validate diagnostic proof", func(ctx context.Context, tx *sql.Tx) error {
-								_, err := s.agentSQLiteOwner.LifecycleObservationIDsTx(ctx, tx, fixture.forkRun)
+								_, err := s.eventSQLiteOwner.LifecycleObservationIDsTx(ctx, tx, fixture.forkRun)
 								return err
 							})
 						} else {
@@ -109,7 +110,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 								if err := s.eventPostgresOwner.RequirePresentTx(ctx, tx, fixture.forkRun); err != nil {
 									return err
 								}
-								_, err := s.agentPostgresOwner.LifecycleObservationIDsTx(ctx, tx, fixture.forkRun)
+								_, err := s.eventPostgresOwner.LifecycleObservationIDsTx(ctx, tx, fixture.forkRun)
 								return err
 							})
 						}
@@ -127,7 +128,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						}
 					}
 					if scenario == "discard_rollback" {
-						if _, err := projector.ProjectAgentLifecycleDiagnostics(ctx, 100); err != nil {
+						if _, err := projectDiagnosticTestBatch(ctx, projector, 100); err != nil {
 							t.Fatal(err)
 						}
 						remove := installDiagnosticFailureTrigger(t, db, sqlite, "events", "DELETE", "")
@@ -151,7 +152,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 							return nil
 						})
 						projected, discarded := make(chan error, 1), make(chan error, 1)
-						go func() { _, err := projector.ProjectAgentLifecycleDiagnostics(ctx, 100); projected <- err }()
+						go func() { _, err := projectDiagnosticTestBatch(ctx, projector, 100); projected <- err }()
 						select {
 						case <-entered:
 						case <-time.After(5 * time.Second):
@@ -189,7 +190,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 					if err := db.QueryRow(`SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1`, fixture.forkRun).Scan(&rows); err != nil || rows != 0 {
 						t.Fatalf("discard retained queue=%d err=%v", rows, err)
 					}
-					if n, err := projector.ProjectAgentLifecycleDiagnostics(ctx, 100); err != nil || n != 0 {
+					if n, err := projectDiagnosticTestBatch(ctx, projector, 100); err != nil || n != 0 {
 						t.Fatalf("discard resurrection n=%d err=%v", n, err)
 					}
 					assertDiagnosticCounts(t, db, item.OutboxID, 0, 0)
@@ -199,7 +200,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 	}
 }
 
-func proveMalformedDiagnosticProvenance(t *testing.T, db *sql.DB, projector diagnosticProjectionTestStore, item runtimemanager.AgentLifecycleDiagnostic) {
+func proveMalformedDiagnosticProvenance(t *testing.T, db *sql.DB, projector diagnosticProjectionTestStore, item diaglog.LifecycleDiagnostic) {
 	t.Helper()
 	var raw []byte
 	if err := db.QueryRow(`SELECT payload FROM agent_lifecycle_diagnostic_outbox WHERE outbox_id=$1`, item.OutboxID).Scan(&raw); err != nil {
@@ -268,13 +269,13 @@ func proveMalformedDiagnosticProvenance(t *testing.T, db *sql.DB, projector diag
 			// lifecycle/fork owners must still reject altered historical authority.
 			write(changed)
 			defer write(original)
-			if n, err := projector.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err == nil || n != 0 {
+			if n, err := projectDiagnosticTestBatch(context.Background(), projector, 100); err == nil || n != 0 {
 				t.Fatalf("forged %s projected n=%d error=%v", field, n, err)
 			}
 			assertDiagnosticCounts(t, db, item.OutboxID, 0, 1)
 		})
 	}
-	if n, err := projector.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err != nil || n != 1 {
+	if n, err := projectDiagnosticTestBatch(context.Background(), projector, 100); err != nil || n != 1 {
 		t.Fatalf("restored authority failed n=%d error=%v", n, err)
 	}
 	assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)

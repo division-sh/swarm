@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -24,10 +23,7 @@ type DirectiveEventCommitter interface {
 }
 
 type LifecycleDiagnosticEventOwner interface {
-	CommitRuntimeLogRecordTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimepkg.RuntimeLogPersistenceRecord) (runtimebus.EventAppendOutcome, error)
 	LoadLifecycleDiagnosticEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
-	ValidateRuntimeLogRecordTx(context.Context, *sql.Tx, runtimepkg.RuntimeLogPersistenceRecord) error
-	RequirePresentTx(context.Context, *sql.Tx, string) error
 }
 
 type LifecycleDiagnosticOriginValidator interface {

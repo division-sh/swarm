@@ -919,10 +919,6 @@ func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context,
 	return s.runForkPostgresOwner.PrepareOperatorConversationForkChat(ctx, req)
 }
 
-func (s *PostgresStore) ProjectAgentLifecycleDiagnostics(ctx context.Context, limit int) (int, error) {
-	return s.agentPostgresOwner.ProjectAgentLifecycleDiagnostics(ctx, limit)
-}
-
 func (s *PostgresStore) ProjectCompletionConversation(ctx context.Context, attempt effects.Attempt, projection effects.CompletionConversationProjection) error {
 	return s.effectPostgresOwner.ProjectCompletionConversation(ctx, attempt, projection)
 }
@@ -2133,10 +2129,6 @@ func (s *SQLiteRuntimeStore) PlanRunFork(ctx context.Context, req runfork.RunFor
 
 func (s *SQLiteRuntimeStore) PrepareOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error) {
 	return s.runForkSQLiteOwner.PrepareOperatorConversationForkChat(ctx, req)
-}
-
-func (s *SQLiteRuntimeStore) ProjectAgentLifecycleDiagnostics(ctx context.Context, limit int) (int, error) {
-	return s.agentSQLiteOwner.ProjectAgentLifecycleDiagnostics(ctx, limit)
 }
 
 func (s *SQLiteRuntimeStore) ProjectCompletionConversation(ctx context.Context, attempt effects.Attempt, projection effects.CompletionConversationProjection) error {

@@ -37,14 +37,13 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 		Store      string
 		Dev        bool
 		APIPort    int
-		MCPPort    int
 		Token      string
 	}
 	if err := json.Unmarshal([]byte(raw), &request); err != nil {
 		t.Fatal(err)
 	}
-	if request.Token == "" || request.Source == "" || request.APIPort == 0 || request.MCPPort == 0 {
-		t.Fatal("internal lifecycle child requires exact parent source, transport and auth facts")
+	if request.Token == "" || request.APIPort == 0 {
+		t.Fatal("internal lifecycle child requires exact parent transport and auth facts")
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -56,7 +55,7 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	opts.SourceRoot, opts.ConfigPath, opts.StoreMode = request.Source, request.ConfigPath, request.Store
 	opts.StoreModeSet = request.Store != ""
 	opts.Dev, opts.NoFeed = request.Dev, request.Dev
-	opts.APIListenAddr, opts.MCPListenAddr = fmt.Sprintf("127.0.0.1:%d", request.APIPort), fmt.Sprintf("127.0.0.1:%d", request.MCPPort)
+	opts.APIListenAddr, opts.MCPListenAddr = fmt.Sprintf("127.0.0.1:%d", request.APIPort), "127.0.0.1:0"
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	opts.NoColor, opts.SelfCheck = true, true
 	opts.ShutdownGrace = 2 * time.Second

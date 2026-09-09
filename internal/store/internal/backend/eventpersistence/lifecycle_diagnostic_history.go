@@ -1,4 +1,4 @@
-package agentpersistence
+package eventpersistence
 
 import (
 	"context"
@@ -9,14 +9,23 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	revision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/google/uuid"
 )
 
+type lifecycleDiagnosticEvidenceReader interface {
+	LoadLifecycleDiagnosticEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
+	ValidateRuntimeLogRecordTx(context.Context, *sql.Tx, runtimepkg.RuntimeLogPersistenceRecord) error
+	RequirePresentTx(context.Context, *sql.Tx, string) error
+}
+
 type lifecycleDiagnosticOccurrence struct {
+	item                              diaglog.LifecycleDiagnostic
+	projection                        []byte
 	id, runID, operationID, eventName string
 	result                            runtimemanager.AgentLifecycleTransitionResult
 	createdAt                         time.Time
@@ -29,9 +38,9 @@ func loadLifecycleDiagnosticOccurrence(ctx context.Context, tx *sql.Tx, id strin
 	var mode, agentID, nameOwner, nameSource, presence, scope, instanceID, path string
 	var created, projected any
 	err := tx.QueryRowContext(ctx, `SELECT run_id,operation_id,event_name,payload,provenance,execution_mode,created_at,projected_at,
-		agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance
+		agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,projection
 		FROM agent_lifecycle_diagnostic_outbox WHERE outbox_id=$1`, id).Scan(&o.runID, &o.operationID, &o.eventName, &raw, &provenance, &mode, &created, &projected,
-		&agentID, &nameOwner, &nameSource, &presence, &scope, &instanceID, &path)
+		&agentID, &nameOwner, &nameSource, &presence, &scope, &instanceID, &path, &o.projection)
 	if err != nil {
 		return o, fmt.Errorf("load diagnostic occurrence %s: %w", id, err)
 	}
@@ -45,22 +54,31 @@ func loadLifecycleDiagnosticOccurrence(ctx context.Context, tx *sql.Tx, id strin
 	if err := p.Validate(); err != nil {
 		return o, err
 	}
-	identity, err := IdentityFromColumns(o.runID, agentID, nameOwner, nameSource, presence, scope, instanceID, path)
+	identity, err := agentidentity.FromStorageFields(agentidentity.StorageFields{RunID: o.runID, AgentID: agentID, NameOwner: nameOwner, NameSource: nameSource, RoutePresence: presence, FlowScopeKey: scope, FlowInstanceID: instanceID, FlowInstancePath: path})
 	if err != nil {
 		return o, err
 	}
 	if o.eventName != "platform.agent_lifecycle_transition" || o.result.OperationID != o.operationID || o.result.Identity != identity || o.result.AgentID != agentID || o.result.DiagnosticProvenance != p || string(p.EventMode) != mode || o.result.Replayed {
 		return o, errors.New("lifecycle diagnostic occurrence facts conflict")
 	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return o, err
+	}
+	o.item = diaglog.LifecycleDiagnostic{OutboxID: id, OperationID: o.operationID, Identity: identity, AgentID: agentID, EventName: o.eventName, Payload: payload}
 	o.createdAt, _, err = sqliteTimeValue(created)
 	if err != nil || o.createdAt.IsZero() {
 		return o, fmt.Errorf("lifecycle diagnostic timestamp invalid: %v", err)
 	}
+	o.item.CreatedAt = o.createdAt
 	_, o.projected, err = sqliteTimeValue(projected)
 	return o, err
 }
 
-func validateLifecycleDiagnosticHistory(ctx context.Context, tx *sql.Tx, o lifecycleDiagnosticOccurrence, origins LifecycleDiagnosticOriginValidator, eventOwner LifecycleDiagnosticEventOwner) error {
+func validateLifecycleDiagnosticHistory(ctx context.Context, tx *sql.Tx, o lifecycleDiagnosticOccurrence, origins selectedForkLineageOwner, eventOwner lifecycleDiagnosticEvidenceReader) error {
+	if origins == nil || eventOwner == nil {
+		return errors.New("lifecycle diagnostic evidence owners are required")
+	}
 	if err := o.result.ProcessBinding.Validate(); err != nil {
 		return err
 	}
@@ -77,7 +95,7 @@ func validateLifecycleDiagnosticHistory(ctx context.Context, tx *sql.Tx, o lifec
 	if state != "succeeded" || runID != o.runID || !reflect.DeepEqual(result, o.result) {
 		return errors.New("diagnostic operation result conflicts with occurrence")
 	}
-	f, err := IdentityFields(result.Identity)
+	f, err := result.Identity.StorageFields()
 	if err != nil {
 		return err
 	}
@@ -119,132 +137,35 @@ func validateLifecycleDiagnosticHistory(ctx context.Context, tx *sql.Tx, o lifec
 }
 
 func lifecycleDiagnosticLogRecord(o lifecycleDiagnosticOccurrence) (runtimepkg.RuntimeLogPersistenceRecord, error) {
-	raw, err := json.Marshal(o.result)
+	raw, err := runtimepkg.EncodeLifecycleDiagnosticLog(o.item)
 	if err != nil {
 		return runtimepkg.RuntimeLogPersistenceRecord{}, err
 	}
-	var detail map[string]any
-	if err := json.Unmarshal(raw, &detail); err != nil {
+	var receipt lifecycleDiagnosticProjection
+	if json.Unmarshal(o.projection, &receipt) != nil || receipt.EventID != uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:lifecycle-diagnostic:"+o.id)).String() ||
+		receipt.RunID != o.runID || !receipt.CreatedAt.Equal(o.createdAt) || !receipt.ExecutionMode.Valid() || !sameDiagnosticJSON(receipt.Payload, raw) {
+		return runtimepkg.RuntimeLogPersistenceRecord{}, errors.New("lifecycle diagnostic projection receipt conflict")
+	}
+	lineage, err := o.item.ProducerLineage()
+	if err != nil {
 		return runtimepkg.RuntimeLogPersistenceRecord{}, err
 	}
-	detail["outbox_id"], detail["operation_id"], detail["event_name"] = o.id, o.operationID, o.eventName
-	p := o.result.DiagnosticProvenance
-	record, _, err := runtimepkg.EncodeRuntimeLogRecord(runtimepkg.RuntimeLogFacts{
-		EventID: o.id, CreatedAt: o.createdAt, RunID: o.runID, ParentEventID: p.Origin.ParentEventID, ExecutionMode: p.EventMode,
-	}, runtimepkg.RuntimeLogEntry{Level: "info", Component: "agent-lifecycle", Action: o.eventName, AgentID: o.result.AgentID, Detail: detail})
-	return record, err
-}
-
-func projectLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revision.Effects, events LifecycleDiagnosticEventOwner, origins LifecycleDiagnosticOriginValidator, postgres bool) (bool, error) {
-	if events == nil || origins == nil {
-		return false, errors.New("lifecycle diagnostic owners are required")
+	parent, disposition := lineage.ParentEventID, "causal_explicit"
+	if parent == "" {
+		parent, disposition = lineage.SubjectEventID, "causal_subject"
 	}
-	// Select and lock the run before selecting an occurrence. A queue hint is not
-	// projection authority: discard may remove its rows while we wait for this lock.
-	query := `SELECT r.run_id,o.outbox_id FROM runs r JOIN agent_lifecycle_diagnostic_outbox o ON o.run_id=r.run_id WHERE o.projected_at IS NULL ORDER BY o.created_at,o.outbox_id LIMIT 1`
-	if postgres {
-		query += ` FOR UPDATE OF r`
+	if parent == "" {
+		disposition = "parentless"
 	}
-	var runID, id string
-	if err := tx.QueryRowContext(ctx, query).Scan(&runID, &id); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			return false, err
-		}
-		var orphan bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_lifecycle_diagnostic_outbox o WHERE NOT EXISTS(SELECT 1 FROM runs r WHERE r.run_id=o.run_id))`).Scan(&orphan); err != nil {
-			return false, err
-		}
-		if orphan {
-			return false, errors.New("lifecycle diagnostic run is missing")
-		}
-		return false, nil
+	if receipt.ParentEventID != parent || receipt.LineageDisposition != disposition {
+		return runtimepkg.RuntimeLogPersistenceRecord{}, errors.New("lifecycle diagnostic projection lineage conflict")
 	}
-	if err := events.RequirePresentTx(ctx, tx, runID); err != nil {
-		return false, err
-	}
-	query = `SELECT outbox_id FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND outbox_id=$2`
-	if postgres {
-		query += ` FOR UPDATE`
-	}
-	if err := tx.QueryRowContext(ctx, query, runID, id).Scan(&id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		return false, err
-	}
-	o, err := loadLifecycleDiagnosticOccurrence(ctx, tx, id)
-	if err != nil {
-		return false, err
-	}
-	if err := validateLifecycleDiagnosticHistory(ctx, tx, o, origins, events); err != nil {
-		return false, err
-	}
-	record, err := lifecycleDiagnosticLogRecord(o)
-	if err != nil {
-		return false, err
-	}
-	if o.projected {
-		return false, events.ValidateRuntimeLogRecordTx(ctx, tx, record)
-	}
-	if _, found, err := events.LoadLifecycleDiagnosticEventTx(ctx, tx, id); err != nil {
-		return false, err
-	} else if found {
-		return false, errors.New("pending lifecycle diagnostic already has an event without acknowledgement")
-	}
-	if _, err := events.CommitRuntimeLogRecordTx(ctx, tx, story, effects, record); err != nil {
-		return false, err
-	}
-	if err := events.ValidateRuntimeLogRecordTx(ctx, tx, record); err != nil {
-		return false, err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at=$2 WHERE outbox_id=$1 AND projected_at IS NULL`, id, time.Now().UTC())
-	if err := requireSingleLifecycleDiagnosticProjection(res, err); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (s *AgentPostgresOwner) ProjectAgentLifecycleDiagnostics(ctx context.Context, limit int) (int, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	for n := 0; n < limit; n++ {
-		effects := revision.NewEffects()
-		var projected bool
-		err := s.runPrivateAuthorActivityMutation(ctx, effects, func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			var err error
-			projected, err = projectLifecycleDiagnosticTx(ctx, tx, story, effects, s.diagnosticEvents, s.diagnosticOrigins, true)
-			return err
-		})
-		if err != nil || !projected {
-			return n, err
-		}
-	}
-	return limit, nil
-}
-
-func (s *AgentSQLiteOwner) ProjectAgentLifecycleDiagnostics(ctx context.Context, limit int) (int, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	for n := 0; n < limit; n++ {
-		effects := revision.NewEffects()
-		var projected bool
-		err := s.runPrivateAuthorActivityMutation(ctx, "sqlite project lifecycle diagnostic", effects, func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			var err error
-			projected, err = projectLifecycleDiagnosticTx(ctx, tx, story, effects, s.diagnosticEvents, s.diagnosticOrigins, false)
-			return err
-		})
-		if err != nil || !projected {
-			return n, err
-		}
-	}
-	return limit, nil
+	return runtimepkg.RuntimeLogPersistenceRecord{EventID: receipt.EventID, RunID: receipt.RunID, ParentEventID: receipt.ParentEventID, CreatedAt: receipt.CreatedAt, ExecutionMode: receipt.ExecutionMode, Payload: raw}, nil
 }
 
 // Only acknowledged exact observations are harmless in a selected tree. The
 // returned IDs must be excluded from the stray count, never added as tree roots.
-func lifecycleObservationIDsTx(ctx context.Context, tx *sql.Tx, runID string, eventOwner LifecycleDiagnosticEventOwner, origins LifecycleDiagnosticOriginValidator) ([]string, error) {
+func lifecycleObservationIDsTx(ctx context.Context, tx *sql.Tx, runID string, eventOwner lifecycleDiagnosticEvidenceReader, origins selectedForkLineageOwner) ([]string, error) {
 	if eventOwner == nil || origins == nil {
 		return nil, errors.New("lifecycle diagnostic owners are required")
 	}
@@ -286,15 +207,17 @@ func lifecycleObservationIDsTx(ctx context.Context, tx *sql.Tx, runID string, ev
 			return nil, err
 		}
 		if o.result.DiagnosticProvenance.Origin.Owner == runtimemanager.LifecycleDiagnosticSelectedFork && o.result.DiagnosticProvenance.Origin.Causality == runtimemanager.LifecycleDiagnosticObservation {
-			observations = append(observations, id)
+			if record.ParentEventID == "" {
+				observations = append(observations, record.EventID)
+			}
 		}
 	}
 	return observations, nil
 }
 
-func (s *AgentPostgresOwner) LifecycleObservationIDsTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, error) {
-	return lifecycleObservationIDsTx(ctx, tx, runID, s.diagnosticEvents, s.diagnosticOrigins)
+func (s *EventPostgresOwner) LifecycleObservationIDsTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, error) {
+	return lifecycleObservationIDsTx(ctx, tx, runID, s, s.runFork)
 }
-func (s *AgentSQLiteOwner) LifecycleObservationIDsTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, error) {
-	return lifecycleObservationIDsTx(ctx, tx, runID, s.diagnosticEvents, s.diagnosticOrigins)
+func (s *EventSQLiteOwner) LifecycleObservationIDsTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, error) {
+	return lifecycleObservationIDsTx(ctx, tx, runID, s, s.runFork)
 }

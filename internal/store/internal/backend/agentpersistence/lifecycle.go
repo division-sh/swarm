@@ -1389,7 +1389,7 @@ func insertPostgresLifecycleEvidence(ctx context.Context, tx *sql.Tx, req runtim
 		)
 	`, uuid.NewString(), req.OperationID, fields.AgentID, fields.NameOwner,
 		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC(), fields.RunID, string(result.DiagnosticProvenance.EventMode), string(provenance))
+		fields.FlowInstanceID, fields.FlowInstancePath, string(diagnostic), req.Now.UTC(), fields.RunID, string(result.DiagnosticProvenance.EventMode), string(provenance))
 	return err
 }
 
@@ -1404,6 +1404,20 @@ func lifecycleDiagnosticProducerPayload(ctx context.Context, runID string, resul
 			return nil, fmt.Errorf("lifecycle diagnostic producer lineage differs from exact run")
 		}
 		payload.ProducerLineage = &lineage
+	}
+	if origin := result.DiagnosticProvenance.Origin; origin.Causality == runtimemanager.LifecycleDiagnosticAcceptedEvent {
+		if payload.ProducerLineage == nil {
+			payload.ProducerLineage = &runtimecorrelation.RuntimeLineage{RunID: runID, ParentEventID: origin.ParentEventID}
+		} else {
+			parent := payload.ProducerLineage.ParentEventID
+			if parent == "" {
+				parent = payload.ProducerLineage.SubjectEventID
+			}
+			if parent != "" && parent != origin.ParentEventID {
+				return nil, fmt.Errorf("lifecycle diagnostic producer and accepted-event origins conflict")
+			}
+			payload.ProducerLineage.ParentEventID = origin.ParentEventID
+		}
 	}
 	return json.Marshal(payload)
 }
@@ -1475,6 +1489,6 @@ func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtim
 		) VALUES (?,?,?,?,?,?,?,?,?,'platform.agent_lifecycle_transition',?,?,?,?,?)
 	`, uuid.NewString(), req.OperationID, fields.AgentID, fields.NameOwner,
 		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC(), fields.RunID, string(result.DiagnosticProvenance.EventMode), string(provenance))
+		fields.FlowInstanceID, fields.FlowInstancePath, string(diagnostic), req.Now.UTC(), fields.RunID, string(result.DiagnosticProvenance.EventMode), string(provenance))
 	return err
 }

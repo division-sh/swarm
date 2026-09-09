@@ -257,7 +257,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := agentOwner.BindLifecycleDiagnostics(eventOwner, runForkOwner); err != nil {
 		return nil, err
 	}
-	if err := runForkOwner.BindLifecycleDiagnostics(agentOwner); err != nil {
+	if err := runForkOwner.BindLifecycleDiagnostics(eventOwner); err != nil {
 		return nil, err
 	}
 	if err := eventOwner.BindRunFork(runForkOwner); err != nil {
@@ -509,7 +509,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := agentOwner.BindLifecycleDiagnostics(eventOwner, runForkOwner); err != nil {
 		return nil, err
 	}
-	if err := runForkOwner.BindLifecycleDiagnostics(agentOwner); err != nil {
+	if err := runForkOwner.BindLifecycleDiagnostics(eventOwner); err != nil {
 		return nil, err
 	}
 	if err := eventOwner.BindRunFork(runForkOwner); err != nil {
