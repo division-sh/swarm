@@ -184,20 +184,12 @@ func validateJoinOutcome(location, flowID, nodeID, eventType, label string, rule
 }
 
 func validateJoinExpression(location, flowID, nodeID, eventType, label, expression string, joinOnly bool, resultType runtimecontracts.CatalogTypeReference, fanOutDelivery ...bool) []Finding {
-	options := workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: joinOnly, JoinResultType: resultType}
+	options := workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinOnly: joinOnly, RequireBool: joinOnly, JoinResultType: resultType}
 	if len(fanOutDelivery) > 0 && fanOutDelivery[0] {
 		options.JoinContext = workflowexpr.JoinContextFanOutDelivery
 	}
 	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, options); err != nil {
 		return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s expression %q is invalid: %v", label, expression, err))}
-	}
-	for _, root := range []string{"payload", "event", "policy", "computed", "fan_out", "accumulated", "_entity"} {
-		if workflowexpr.ExpressionReferencesRoot(expression, root) {
-			return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s may not reference %s.*", label, root))}
-		}
-	}
-	if joinOnly && workflowexpr.ExpressionReferencesRoot(expression, "entity") {
-		return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s may reference only join.*", label))}
 	}
 	return nil
 }
@@ -205,7 +197,7 @@ func validateJoinExpression(location, flowID, nodeID, eventType, label, expressi
 func joinFinding(location, flowID, nodeID, eventType, detail string) Finding {
 	return NewHardInvalidityFinding(joinValidationCheckID, location,
 		fmt.Sprintf("flow %s node %s handler %s: %s", defaultFlowLabel(flowID), nodeID, eventType, detail),
-		"Use the canonical staged handler.join contract with typed membership, mandatory timeout, and supported entity/join outcome expressions.")
+		"Use the canonical staged handler.join contract with typed membership, mandatory timeout, and supported entity/join/captured-loop outcome expressions.")
 }
 
 func joinRuleEmpty(rule runtimecontracts.HandlerRuleEntry) bool {

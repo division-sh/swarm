@@ -56,6 +56,7 @@ type ValueExpressionOptions struct {
 	AllowBareItem  bool
 	ItemAlias      string
 	AllowJoin      bool
+	JoinOnly       bool
 	RequireBool    bool
 	JoinResultType runtimecontracts.CatalogTypeReference
 	JoinContext    JoinContext
@@ -80,6 +81,9 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	expression = strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
 	if expression == "" {
 		return fmt.Errorf("workflow data expression is empty")
+	}
+	if err := validateAuthoredContextRoots(expression, opts); err != nil {
+		return err
 	}
 	if expressionReferencesFanOutField(expression, "target") {
 		return fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
@@ -107,6 +111,9 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 	compiled, issues := env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
+	}
+	if err := validateLoopAccesses(compiled, opts); err != nil {
+		return nil, err
 	}
 	typeChecked := compiled
 	if opts.AllowJoin {
@@ -209,10 +216,18 @@ func (joinFieldTypeOptimizer) Optimize(ctx *cel.OptimizerContext, expression *ce
 }
 
 func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, opts ValueExpressionOptions) (*cel.Ast, error) {
-	var typedEnv *cel.Env
-	var err error
+	typedEnv, err := env.Extend(
+		cel.Variable("__swarm_loop_id", cel.StringType),
+		cel.Variable("__swarm_loop_activation_id", cel.StringType),
+		cel.Variable("__swarm_loop_revision_id", cel.StringType),
+		cel.Variable("__swarm_loop_attempt", cel.IntType),
+		cel.Variable("__swarm_loop_max_attempts", cel.IntType),
+	)
+	if err != nil {
+		return nil, err
+	}
 	if opts.JoinContext == JoinContextFanOutDelivery {
-		typedEnv, err = env.Extend(
+		typedEnv, err = typedEnv.Extend(
 			cel.Variable(joinTypedVariable("total"), cel.IntType),
 			cel.Variable(joinTypedVariable("dispositions"), cel.MapType(cel.StringType, cel.IntType)),
 		)
@@ -222,7 +237,7 @@ func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, opts ValueExpressi
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
-		typedEnv, err = env.Extend(
+		typedEnv, err = typedEnv.Extend(
 			cel.CustomTypeProvider(provider),
 			cel.Variable(joinTypedVariable("expected"), cel.IntType),
 			cel.Variable(joinTypedVariable("completed"), cel.IntType),
@@ -234,7 +249,7 @@ func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, opts ValueExpressi
 	if err != nil {
 		return nil, err
 	}
-	optimizer, err := cel.NewStaticOptimizer(joinFieldTypeOptimizer{})
+	optimizer, err := cel.NewStaticOptimizer(joinFieldTypeOptimizer{}, loopFieldTypeOptimizer{})
 	if err != nil {
 		return nil, err
 	}
@@ -370,6 +385,7 @@ func EvalJoinBool(expression string, join map[string]any, resultType runtimecont
 		AllowJoin:      true,
 		RequireBool:    true,
 		JoinResultType: resultType,
+		JoinOnly:       true,
 	})
 	if err != nil {
 		return false, err
@@ -389,6 +405,9 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	normalized := strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
 	if normalized == "" {
 		return nil, fmt.Errorf("workflow data expression is empty")
+	}
+	if err := validateAuthoredContextRoots(normalized, opts); err != nil {
+		return nil, err
 	}
 	if expressionReferencesFanOutField(normalized, "target") {
 		return nil, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")

@@ -83,15 +83,16 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 	if normalized == "" {
 		return false, fmt.Errorf("workflow expression is empty")
 	}
-	if workflowexpr.ExpressionReferencesRoot(normalized, "join") {
-		if err := workflowexpr.ValidateValueExpressionWithOptions(normalized, workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: true}); err != nil {
-			return false, fmt.Errorf("join expression: %w", err)
+	joinExpression := workflowexpr.ExpressionReferencesRoot(normalized, "join") || len(normalizedCtx.Join) != 0
+	if joinExpression || workflowexpr.ExpressionReferencesRoot(normalized, "loop") || workflowexpr.ExpressionReferencesRoot(normalized, "_loop") {
+		if err := workflowexpr.ValidateValueExpressionWithOptions(normalized, workflowexpr.ValueExpressionOptions{AllowJoin: joinExpression, RequireBool: true}); err != nil {
+			return false, fmt.Errorf("workflow context expression: %w", err)
 		}
 	}
 	if missing := missingEntityReferences(normalized, normalizedCtx.Entity); len(missing) > 0 {
 		return false, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
-	program, err := e.program(normalized)
+	program, err := e.program(workflowexpr.RewriteLoopRoot(normalized))
 	if err != nil {
 		return false, err
 	}
@@ -241,7 +242,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	if err != nil {
 		return "", workflowExpressionContext{}, err
 	}
-	return workflowexpr.RewriteLoopRoot(normalized), normalizedCtx, nil
+	return normalized, normalizedCtx, nil
 }
 
 func rewriteWorkflowExpressionEntityNullPresenceChecks(expression string) string {
