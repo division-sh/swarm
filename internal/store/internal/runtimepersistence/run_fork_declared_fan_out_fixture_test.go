@@ -10,9 +10,12 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -24,8 +27,14 @@ import (
 // fixtures. The capsule is explicit; claim, intent and settlement use real owners.
 func seedDeclaredForkFanOutFixture(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time) (context.Context, fanOutOwnerFixture) {
 	t.Helper()
+	ctx, source, _ := seedDeclaredForkFanOutFixtureWithBarrier(t, backend, fixture, cardinality, at, false)
+	return ctx, source
+}
+
+func seedDeclaredForkFanOutFixtureWithBarrier(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time, withBarrier bool) (context.Context, fanOutOwnerFixture, timeridentity.TimerHandle) {
+	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
-	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutCarrier(t, false, false), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutCarrier(t, false, withBarrier), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,12 +73,38 @@ func seedDeclaredForkFanOutFixture(t *testing.T, backend string, fixture authorA
 	record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "pending", 1, at)
 	record.CurrentState, record.EntityType, record.Mode = "review", "root", "static"
 	record.EnteredStageAt, record.UpdatedAt = at, at
+	var barrier *fanoutbarrier.Registration
+	var handle timeridentity.TimerHandle
+	if withBarrier {
+		joinPlan, ok := semanticview.WorkflowJoinPlanForHandler(source, node, "items.ready")
+		if !ok {
+			t.Fatal("fixture requires the compiled fan-out join")
+		}
+		declaration, err := request.PlanRef.ElementRef.DeclarationIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		join, err := timeridentity.NewFanOutDeliveryJoinRef(node, "items.ready", joinPlan.Spec.ID, declaration, request.PlanRef.BundleHash, request.PlanRef.SemanticDigest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		join, err = join.BindFanOutIntent(claim.Claim.DeliveryID(), attemptgeneration.Generation{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		handle, err = timeridentity.JoinCompleteHandle(join)
+		if err != nil {
+			t.Fatal(err)
+		}
+		barrier = &fanoutbarrier.Registration{IntentKey: request.Key, PlanRef: request.PlanRef, Handle: handle,
+			Route: request.Capsule.Route, EntityID: runID, RoutingSource: trigger.RoutingSource(), ExecutionMode: trigger.ExecutionMode(), CreatedAt: at}
+	}
 	if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
-		State: record, FanOutIntent: &request,
+		State: record, FanOutIntent: &request, FanOutBarrier: barrier,
 		DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claim.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	return ctx, fanOutOwnerFixture{runID: runID, eventID: trigger.ID(), deliveryID: claim.Claim.DeliveryID(), flowPath: plans[0].Ref.ElementRef.FlowPath,
-		semanticPath: plans[0].Ref.ElementRef.SemanticPath, createdAt: at, bundleHash: bundle.SourceArtifact.BundleHash(), artifact: bundle.SourceArtifact}
+		semanticPath: plans[0].Ref.ElementRef.SemanticPath, createdAt: at, bundleHash: bundle.SourceArtifact.BundleHash(), artifact: bundle.SourceArtifact}, handle
 }
