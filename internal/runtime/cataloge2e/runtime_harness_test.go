@@ -227,15 +227,15 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	return newRuntimeHarnessForBackend(t, fixtureRoot, catalogBackendPostgres, start)
 }
 
-func newRuntimeHarnessForBackend(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool) *runtimeHarness {
-	return newRuntimeHarnessFromTranscript(t, fixtureRoot, backend, start, nil)
+func newRuntimeHarnessForBackend(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, additionalRunIDs ...string) *runtimeHarness {
+	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, nil, nil, additionalRunIDs...)
 }
 
 func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript) *runtimeHarness {
 	return newRuntimeHarnessWithTerminalProvider(t, fixtureRoot, backend, start, transcript, nil)
 }
 
-func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe) *runtimeHarness {
+func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript, provider *terminalProviderProbe, additionalRunIDs ...string) *runtimeHarness {
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
@@ -289,14 +289,23 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID,
 		Source: sourceArtifactFact, Artifact: bundle.SourceArtifact,
 	}
+	// Scenario fixtures are setup, not live runtime mutations. Admit every
+	// requested run before constructing a runtime that can start store writers.
+	for _, runID := range append([]string{catalogRuntimeRunID}, additionalRunIDs...) {
+		fixture.RunID = runID
+		fixtureCtx := runtimecorrelation.WithRunID(ctx, runID)
+		if pg != nil {
+			runlifecyclefixture.RequirePostgres(t, fixtureCtx, db, fixture)
+		} else {
+			runlifecyclefixture.RequireSQLite(t, fixtureCtx, db, fixture)
+		}
+	}
 	var workflowPersistence runtimepipeline.WorkflowPersistence
 	var deps runtime.RuntimeDeps
 	if pg != nil {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(pg)
 		deps = catalogPostgresRuntimeDeps(cfg, pg, workflowPersistence, module, llmRuntime, processOwner, sourceArtifactFact)
 	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqlite)
 		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner, sourceArtifactFact)
 	}
