@@ -711,162 +711,176 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 }
 
 func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		status     string
-		wantErr    string
-		wantCopied bool
-	}{
-		{name: "succeeded", status: "succeeded", wantCopied: true},
-		{name: "uncertain", status: "uncertain", wantErr: "ambiguous dispatch evidence"},
-		{name: "started", status: "started", wantErr: "recorded evidence is not terminal"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			sourceRunID := uuid.NewString()
-			now := time.Date(2026, 7, 14, 19, 0, 0, 0, time.UTC)
-			cards := admitTestPostgresStore(t, db)
-			source := selectedActivityProducerSourceWithLoops(t, false, false)
-			ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: cards}, sourceRunID, source)
-			card, continuation := newDeclaredRootActivityCard(t, sourceRunID, now, source)
-			if err := commitSemanticParentFixture(ctx, cards, sourceRunID, continuation.SourceEventID, now); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.ExecContext(ctx, `
+	for _, backend := range eventRecordContractBackends() {
+		for _, tc := range []struct {
+			name       string
+			status     string
+			wantErr    string
+			wantCopied bool
+		}{
+			{name: "succeeded", status: "succeeded", wantCopied: true},
+			{name: "uncertain", status: "uncertain", wantErr: "ambiguous dispatch evidence"},
+			{name: "started", status: "started", wantErr: "recorded evidence is not terminal"},
+			{name: "missing", status: "missing", wantErr: "cannot authorize a fork-local call"},
+		} {
+			t.Run(backend.name+"/"+tc.name, func(t *testing.T) {
+				fixture := backend.open(t)
+				db := fixture.db
+				sourceRunID := uuid.NewString()
+				now := time.Date(2026, 7, 14, 19, 0, 0, 0, time.UTC)
+				cards := fixture.store.(interface {
+					selectedActivityProjectionStore
+					storeTestDurableEventBusStore
+					decisioncard.Store
+					decisioncard.ProposedEffectStore
+				})
+				source := selectedActivityProducerSourceWithLoops(t, false, false)
+				ctx := seedSelectedActivitySourceRun(t, fixture, sourceRunID, source)
+				card, continuation := newDeclaredRootActivityCard(t, sourceRunID, now, source)
+				if err := commitSemanticParentFixture(ctx, cards, sourceRunID, continuation.SourceEventID, now); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(ctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, current_state,
 					gates, fields, accumulator, entered_state_at, created_at, updated_at
-				) VALUES ($1::uuid, $1::uuid, $1::text, 'default', 'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, $2, $2, $2)
-			`, sourceRunID, now); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at) VALUES ($1,$1,'lifecycle_state','','null','"pending"',$2,'platform','proposed-effect-fixture','seed',$3)`, sourceRunID, continuation.SourceEventID, now); err != nil {
-				t.Fatal(err)
-			}
-			captureFanOutBarrierForkRevision(t, ctx, db, sourceRunID, true)
-			if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {
-				t.Fatal(err)
-			}
-			decisionEventID := uuid.NewString()
-			if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
-				ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
-			}); err != nil {
-				t.Fatal(err)
-			}
-			owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			resultEventID := activityidentity.ResultEventID(activityidentity.Fact{
-				RunID: sourceRunID, SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID,
-				Owner: owner, ExecutionFlowID: continuation.FlowID,
-				HandlerEventKey: continuation.HandlerEventKey,
-				ActivityID:      continuation.ActivityID, Tool: continuation.Tool, Attempt: 1,
-			}, continuation.SuccessEvent)
-			var storedResultEventID any = resultEventID
-			var resultEventType any = continuation.SuccessEvent
-			var resultPayload any = `{"activity_id":"send_support_reply","result":{"ok":true}}`
-			var failure any
-			var completedAt any = now.Add(3 * time.Minute)
-			switch tc.status {
-			case "uncertain":
-				resultEventType = continuation.FailureEvent
-				resultPayload = `{"activity_id":"send_support_reply","failure":{"code":"provider_outcome_uncertain"}}`
-				failure = `{"schema_version":"platform.failure/v1","class":"platform.outcome_uncertain","detail":{"code":"provider_outcome_uncertain"},"retryable":false,"deterministic":false,"message":"Provider outcome is uncertain.","remediation":"Inspect provider state.","component":"activity-runtime","operation":"execute"}`
-			case "started":
-				storedResultEventID, resultEventType, resultPayload, failure, completedAt = nil, nil, nil, nil, nil
-			}
-			if _, err := db.ExecContext(ctx, `
+					) VALUES ($1, $1, $2, 'default', 'pending', '{}', '{}', '{}', $3, $3, $3)
+				`, sourceRunID, sourceRunID, now); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(ctx, `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at) VALUES ($1,$1,'lifecycle_state','','null','"pending"',$2,'platform','proposed-effect-fixture','seed',$3)`, sourceRunID, continuation.SourceEventID, now); err != nil {
+					t.Fatal(err)
+				}
+				captureFanOutBarrierForkRevision(t, ctx, db, sourceRunID, backend.name == "postgres")
+				if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {
+					t.Fatal(err)
+				}
+				decisionEventID := uuid.NewString()
+				if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+					CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+					ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
+				}); err != nil {
+					t.Fatal(err)
+				}
+				owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				resultEventID := activityidentity.ResultEventID(activityidentity.Fact{
+					RunID: sourceRunID, SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID,
+					Owner: owner, ExecutionFlowID: continuation.FlowID,
+					HandlerEventKey: continuation.HandlerEventKey,
+					ActivityID:      continuation.ActivityID, Tool: continuation.Tool, Attempt: 1,
+				}, continuation.SuccessEvent)
+				var storedResultEventID any = resultEventID
+				var resultEventType any = continuation.SuccessEvent
+				var resultPayload any = `{"activity_id":"send_support_reply","result":{"ok":true}}`
+				var failure any
+				var completedAt any = now.Add(3 * time.Minute)
+				switch tc.status {
+				case "uncertain":
+					resultEventType = continuation.FailureEvent
+					resultPayload = `{"activity_id":"send_support_reply","failure":{"code":"provider_outcome_uncertain"}}`
+					failure = `{"schema_version":"platform.failure/v1","class":"platform.outcome_uncertain","detail":{"code":"provider_outcome_uncertain"},"retryable":false,"deterministic":false,"message":"Provider outcome is uncertain.","remediation":"Inspect provider state.","component":"activity-runtime","operation":"execute"}`
+				case "started":
+					storedResultEventID, resultEventType, resultPayload, failure, completedAt = nil, nil, nil, nil, nil
+				}
+				if tc.status != "missing" {
+					if _, err := db.ExecContext(ctx, `
 				INSERT INTO activity_attempts (
 					request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
 					activity_id, tool, effect_class, attempt, status, success_event, failure_event,
 					result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 					started_at, completed_at, updated_at
 				) VALUES (
-					$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, $2::text, $5, $6,
-					$7, $8, 'non_idempotent_write', 1, $9, $10, $11,
-					$12::uuid, $13, $14::jsonb, $15::jsonb, 'input-hash', $18::jsonb, '', $16, $17, $16
+							$1, $2, 'live', $3, $4, $5, $6, $7,
+							$8, $9, 'non_idempotent_write', 1, $10, $11, $12,
+							$13, $14, $15, $16, 'input-hash', $17, '', $18, $19, $18
 				)
-			`, continuation.RequestEventID, sourceRunID, continuation.SourceEventID, continuation.EntityID,
-				continuation.NodeID, continuation.HandlerEventKey, continuation.ActivityID, continuation.Tool, tc.status,
-				continuation.SuccessEvent, continuation.FailureEvent, storedResultEventID, resultEventType,
-				resultPayload, failure, now.Add(3*time.Minute), completedAt, forkTestJSON(t, continuation.Generation)); err != nil {
-				t.Fatal(err)
-			}
-			payload, err := json.Marshal(map[string]any{
-				"activity_id": continuation.ActivityID, "tool": continuation.Tool, "input": continuation.Input.Interface(),
-				"effect_class": string(continuation.EffectClass), "success_event": continuation.SuccessEvent,
-				"failure_event": continuation.FailureEvent, "fork_policy": string(continuation.ForkPolicy),
-				"entity_id": continuation.EntityID, "node_id": continuation.NodeID, "flow_id": continuation.FlowID,
-				"flow_instance":     continuation.FlowInstance,
-				"handler_event_key": continuation.HandlerEventKey, "source_event_id": continuation.SourceEventID,
-				"source_run_id": sourceRunID, "attempt": 1,
+					`, continuation.RequestEventID, sourceRunID, continuation.SourceEventID, continuation.EntityID, continuation.FlowInstance,
+						continuation.NodeID, continuation.HandlerEventKey, continuation.ActivityID, continuation.Tool, tc.status,
+						continuation.SuccessEvent, continuation.FailureEvent, storedResultEventID, resultEventType,
+						resultPayload, failure, forkTestJSON(t, continuation.Generation), now.Add(3*time.Minute), completedAt); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				payload, err := json.Marshal(map[string]any{
+					"activity_id": continuation.ActivityID, "tool": continuation.Tool, "input": continuation.Input.Interface(),
+					"effect_class": string(continuation.EffectClass), "success_event": continuation.SuccessEvent,
+					"failure_event": continuation.FailureEvent, "fork_policy": string(continuation.ForkPolicy),
+					"entity_id": continuation.EntityID, "node_id": continuation.NodeID, "flow_id": continuation.FlowID,
+					"flow_instance":     continuation.FlowInstance,
+					"handler_event_key": continuation.HandlerEventKey, "source_event_id": continuation.SourceEventID,
+					"source_run_id": sourceRunID, "attempt": 1,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				anchor, err := card.Anchor.ProposedEffect()
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := eventtest.ChildForProducerWithRoutingSource(continuation.RequestEventID, runForkActivityRequestEvent, eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
+					events.EventLineage{RunID: sourceRunID, ParentEventID: continuation.SourceEventID, ExecutionMode: continuation.ExecutionMode}, events.EventEnvelope{}, anchor.Source, now.Add(2*time.Minute))
+				if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, request); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := cards.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err != nil {
+					t.Fatal(err)
+				}
+				child := materializeSelectedActivityFixture(t, ctx, cards, sourceRunID, request.ID())
+				if child.MaterializedEntityCount != 1 || child.SelectedContractBinding == nil {
+					t.Fatalf("approved-effect fixture requires its bound source state: %#v", child)
+				}
+				forkRunID := child.ForkRunID
+				var prepared runfork.RunForkSelectedContractSourceEvent
+				beforePrepare := historicalContextDatabaseRows(t, db, backend.name == "postgres")
+				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, originalCarriageForRun(t, cards, sourceRunID))
+				if err == nil {
+					if len(loaded) != 1 {
+						t.Fatalf("prepared count=%d", len(loaded))
+					}
+					prepared = loaded[0]
+				}
+				if tc.wantErr != "" {
+					historicalContextRequireUnchanged(t, beforePrepare, historicalContextDatabaseRows(t, db, backend.name == "postgres"))
+					if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+						t.Fatalf("prepare error = %v, want %q", err, tc.wantErr)
+					}
+					var copied int
+					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`, forkRunID).Scan(&copied); err != nil || copied != 0 {
+						t.Fatalf("rejected evidence copied child attempts: count=%d err=%v", copied, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				var forkPayload runForkActivityRequestPayload
+				if err := json.Unmarshal(prepared.Payload, &forkPayload); err != nil {
+					t.Fatal(err)
+				}
+				if prepared.RoutingSource != eventtest.RootRoutingSource(forkRunID) || forkPayload.EntityID != forkRunID || forkPayload.SourceRunID != forkRunID || forkPayload.ForkPolicy != string(runtimecontracts.ActivityForkRequireConfirmation) {
+					t.Fatalf("approved effect lost root identity or confirmation policy: source=%#v payload=%#v", prepared.RoutingSource, forkPayload)
+				}
+				forkOwner, err := activityidentity.ParseOwnerKey(forkPayload.NodeID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				forkRequestID := activityidentity.RequestEventID(activityidentity.Fact{
+					RunID: forkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
+					EntityID: forkPayload.EntityID, Owner: forkOwner, ExecutionFlowID: forkPayload.FlowID,
+					HandlerEventKey: forkPayload.HandlerEventKey, ActivityID: forkPayload.ActivityID, Tool: forkPayload.Tool, Attempt: 1,
+				})
+				var copiedStatus, copiedEntity, copiedFlow string
+				if err := db.QueryRowContext(ctx, `SELECT status, entity_id, flow_instance FROM activity_attempts WHERE request_event_id = $1`, forkRequestID).Scan(&copiedStatus, &copiedEntity, &copiedFlow); err != nil {
+					t.Fatal(err)
+				}
+				if !tc.wantCopied || copiedStatus != tc.status || copiedEntity != forkRunID || copiedFlow != forkRunID {
+					t.Fatalf("copied status=%q entity=%q flow=%q", copiedStatus, copiedEntity, copiedFlow)
+				}
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			anchor, err := card.Anchor.ProposedEffect()
-			if err != nil {
-				t.Fatal(err)
-			}
-			request := eventtest.ChildForProducerWithRoutingSource(continuation.RequestEventID, runForkActivityRequestEvent, eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
-				events.EventLineage{RunID: sourceRunID, ParentEventID: continuation.SourceEventID, ExecutionMode: continuation.ExecutionMode}, events.EventEnvelope{}, anchor.Source, now.Add(2*time.Minute))
-			if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, request); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := cards.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err != nil {
-				t.Fatal(err)
-			}
-			child := materializeSelectedActivityFixture(t, ctx, cards, sourceRunID, request.ID())
-			if child.MaterializedEntityCount != 1 || child.SelectedContractBinding == nil {
-				t.Fatalf("approved-effect fixture requires its bound source state: %#v", child)
-			}
-			forkRunID := child.ForkRunID
-			var prepared runfork.RunForkSelectedContractSourceEvent
-			loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, originalCarriageForRun(t, cards, sourceRunID))
-			if err == nil {
-				if len(loaded) != 1 {
-					t.Fatalf("prepared count=%d", len(loaded))
-				}
-				prepared = loaded[0]
-			}
-			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("prepare error = %v, want %q", err, tc.wantErr)
-				}
-				var copied int
-				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`, forkRunID).Scan(&copied); err != nil || copied != 0 {
-					t.Fatalf("rejected evidence copied child attempts: count=%d err=%v", copied, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			var forkPayload runForkActivityRequestPayload
-			if err := json.Unmarshal(prepared.Payload, &forkPayload); err != nil {
-				t.Fatal(err)
-			}
-			if prepared.RoutingSource != eventtest.RootRoutingSource(forkRunID) || forkPayload.EntityID != forkRunID || forkPayload.SourceRunID != forkRunID || forkPayload.ForkPolicy != string(runtimecontracts.ActivityForkRequireConfirmation) {
-				t.Fatalf("approved effect lost root identity or confirmation policy: source=%#v payload=%#v", prepared.RoutingSource, forkPayload)
-			}
-			forkOwner, err := activityidentity.ParseOwnerKey(forkPayload.NodeID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			forkRequestID := activityidentity.RequestEventID(activityidentity.Fact{
-				RunID: forkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
-				EntityID: forkPayload.EntityID, Owner: forkOwner, ExecutionFlowID: forkPayload.FlowID,
-				HandlerEventKey: forkPayload.HandlerEventKey, ActivityID: forkPayload.ActivityID, Tool: forkPayload.Tool, Attempt: 1,
-			})
-			var copiedStatus, copiedEntity, copiedFlow string
-			if err := db.QueryRowContext(ctx, `SELECT status, entity_id::text, flow_instance FROM activity_attempts WHERE request_event_id = $1::uuid`, forkRequestID).Scan(&copiedStatus, &copiedEntity, &copiedFlow); err != nil {
-				t.Fatal(err)
-			}
-			if !tc.wantCopied || copiedStatus != tc.status || copiedEntity != forkRunID || copiedFlow != forkRunID {
-				t.Fatalf("copied status=%q entity=%q flow=%q", copiedStatus, copiedEntity, copiedFlow)
-			}
-		})
+		}
 	}
 }
