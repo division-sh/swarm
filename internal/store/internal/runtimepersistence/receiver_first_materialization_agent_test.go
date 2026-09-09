@@ -65,10 +65,8 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 					if err != nil {
 						t.Fatal(err)
 					}
-					emitted, err := events.NewChildEvent(events.ChildEventInput{Facts: events.EventFacts{ID: uuid.NewString(), Type: "receiver.seeded", Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: node.Key()}, Payload: []byte(`{"token":"first"}`), RoutingSource: eventtest.RootRoutingSource(runID), CreatedAt: at.Add(time.Second)}, Lineage: events.LineageFromEvent(trigger)})
-					if err != nil {
-						t.Fatal(err)
-					}
+					emitted := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "receiver.seeded", eventtest.Producer(events.EventProducerNode, node.Key()), "", []byte(`{"token":"first"}`), 0,
+						events.LineageFromEvent(trigger), events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at.Add(time.Second))
 					eventBus, err := newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
 					if err != nil {
 						t.Fatal(err)
