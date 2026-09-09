@@ -10,8 +10,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	deliveryowner "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -43,6 +52,15 @@ func (b *receiverGrantClaimBarrier) ReceiverExecutionReadyTx(ctx context.Context
 }
 
 func TestReceiverOrdinaryGrantRetirementFencesClaimBothStores(t *testing.T) {
+	proveReceiverGrantRetirementFencesClaimBothStores(t, false)
+}
+
+func TestReceiverSelectedGrantRetirementFencesClaimBothStores(t *testing.T) {
+	proveReceiverGrantRetirementFencesClaimBothStores(t, true)
+}
+
+func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFork bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, ordering := range []string{"claim_wins", "retirement_wins", "claim_rollback"} {
 			t.Run(backend+"/"+ordering, func(t *testing.T) {
@@ -52,27 +70,38 @@ func TestReceiverOrdinaryGrantRetirementFencesClaimBothStores(t *testing.T) {
 				runID, entityID := uuid.NewString(), uuid.NewString()
 				ctx = correlation.WithRunID(ctx, runID)
 				identity := mustTestAgentIdentityForRun(runID, "grant-receiver", "global")
-				if err := agentfixture.UpsertStatic(t, ctx, selected, agentFixtureStaticRecord(t, identity)); err != nil {
-					t.Fatal(err)
+				var grant startupownership.GenerationGrant
+				if selectedFork {
+					identity, grant = selectedReceiverClaimGrant(t, ctx, selected)
+					runID = identity.RunID
+					ctx = correlation.WithRunID(ctx, runID)
+				} else {
+					if err := agentfixture.UpsertStatic(t, ctx, selected, agentFixtureStaticRecord(t, identity)); err != nil {
+						t.Fatal(err)
+					}
+					plan := currentAgentFixtureSourceSet(t, ctx, selected)
+					if len(plan.Sources) != 1 {
+						t.Fatalf("fixture source census: %+v", plan.Sources)
+					}
+					var err error
+					grant, err = agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := grant.AdmitExecution(ctx); err != nil {
+						t.Fatal(err)
+					}
 				}
-				plan := currentAgentFixtureSourceSet(t, ctx, selected)
-				if len(plan.Sources) != 1 {
-					t.Fatalf("fixture source census: %+v", plan.Sources)
-				}
-				grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
-					t.Fatal(err)
-				}
-				evidence, err := grant.AdmitExecution(ctx)
+				evidence, err := grant.Evidence()
 				if err != nil {
 					t.Fatal(err)
 				}
 				state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
-				if err != nil || !found || state.ProcessBinding.GenerationGrantID != evidence.GrantID || evidence.SelectedFork != nil {
-					t.Fatalf("exact ordinary lifecycle/grant: state=%+v grant=%+v found=%v err=%v", state, evidence, found, err)
+				if err != nil || !found || state.ProcessBinding.GenerationGrantID != evidence.GrantID || (evidence.SelectedFork != nil) != selectedFork {
+					t.Fatalf("exact lifecycle/grant: state=%+v grant=%+v found=%v err=%v", state, evidence, found, err)
 				}
 				writer := selected.(interface {
 					CreateEntity(context.Context, tools.EntityCreateRecord) error
@@ -89,15 +118,25 @@ func TestReceiverOrdinaryGrantRetirementFencesClaimBothStores(t *testing.T) {
 					Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "global", FlowInstance: identity.FlowInstance(), EntityID: entityID}),
 				}
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
-					t.Fatal(err)
+				if selectedFork {
+					event = eventtest.TargetRouted(event, route.Target.Route())
 				}
 				authority, err := deliverylifecycle.NewNormalExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.GrantID, evidence.RuntimeGeneration)
+				if selectedFork {
+					authority, err = deliverylifecycle.NewSelectedExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.SelectedFork.ExecutionID, runID, evidence.SelectedFork.ExecutionGeneration)
+				}
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
+				if selectedFork {
+					commitSelectedReceiverClaimEvent(t, ctx, selected, event, route, authority)
+				} else if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 					t.Fatal(err)
+				}
+				if !selectedFork {
+					if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
+						t.Fatal(err)
+					}
 				}
 				before := loadDeliverySnapshotFixture(t, ctx, selected, event.ID(), route)
 				if before.Status != deliverylifecycle.StatusPending || before.ClaimVersion != 0 || !before.Authority.Equal(authority) {
@@ -117,6 +156,10 @@ func TestReceiverOrdinaryGrantRetirementFencesClaimBothStores(t *testing.T) {
 					after := loadDeliverySnapshotFixture(t, ctx, selected, event.ID(), route)
 					if after.ClaimVersion != before.ClaimVersion || after.Status != before.Status {
 						t.Fatalf("retirement-wins changed pending delivery: %+v", after)
+					}
+					var attempts int
+					if err := receiverClaimTestDB(t, selected).QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1`, before.DeliveryID).Scan(&attempts); err != nil || attempts != 0 {
+						t.Fatalf("retirement-wins created attempts: %d err=%v", attempts, err)
 					}
 					return
 				}
@@ -215,7 +258,7 @@ func TestReceiverOrdinaryGrantRetirementFencesClaimBothStores(t *testing.T) {
 						t.Fatalf("retirement returned before durable fact: %s", durableGrantState)
 					}
 					if _, acquired := outcome.result.Acquired(); acquired || after.ClaimVersion != before.ClaimVersion || attempts != 0 {
-						t.Errorf("retired ordinary grant admitted a new durable claim after retirement committed: disposition=%s claimVersion=%d attempts=%d", outcome.result.Disposition, after.ClaimVersion, attempts)
+						t.Errorf("retired grant admitted a new durable claim after retirement committed: disposition=%s claimVersion=%d attempts=%d", outcome.result.Disposition, after.ClaimVersion, attempts)
 					}
 				} else {
 					if !errors.Is(retireErr, context.DeadlineExceeded) {
@@ -234,4 +277,108 @@ func TestReceiverOrdinaryGrantRetirementFencesClaimBothStores(t *testing.T) {
 			})
 		}
 	}
+}
+
+func receiverClaimTestDB(t *testing.T, selected agentFixtureFlowStore) *sql.DB {
+	t.Helper()
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.backend.ConstructionHandle()
+	case *SQLiteRuntimeStore:
+		return store.backend.ConstructionHandle()
+	default:
+		t.Fatalf("unsupported fixture %T", selected)
+		return nil
+	}
+}
+
+func commitSelectedReceiverClaimEvent(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, event events.Event, route events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
+	t.Helper()
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, release, err := semanticEventFixtureContext(ctx, selected, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	owner := pipelineObligationOwnerForFixture(selected)
+	claim, err := owner.ClaimPublication(ctx, event.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := owner.Release(context.WithoutCancel(ctx), claim); err != nil {
+			t.Error(err)
+		}
+	}()
+	scope, hasScope := authoractivity.ScopeFromContext(ctx)
+	descriptor, hasDescriptor, err := authoractivity.ResolvedEventDescriptorFromContext(ctx, scope, string(event.Type()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = selected.(interface {
+		CommitPublication(context.Context, bus.PublicationCommand) (bus.CommittedPublication, error)
+	}).CommitPublication(ctx, bus.PublicationCommand{
+		Commit:      bus.CommitPublishRequest{Event: admitted, RouteSettlement: testRouteSettlement(event, []events.DeliveryRoute{route}), DeliveryRoutes: []events.DeliveryRoute{route}, DeliveryAuthority: authority, ReplayScope: pipelineobligation.ScopeSubscribed, PipelineClaim: claim},
+		AuthorScope: scope, HasAuthorScope: hasScope, AuthorDescriptor: descriptor, HasAuthorDescriptor: hasDescriptor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func selectedReceiverClaimGrant(t *testing.T, ctx context.Context, selected agentFixtureFlowStore) (agentidentity.Identity, startupownership.GenerationGrant) {
+	t.Helper()
+	_, sqlite := selected.(*SQLiteRuntimeStore)
+	fixture := newSelectedCompletionFixture(t, selected.(selectedCompletionAuthorityStore), receiverClaimTestDB(t, selected), sqlite)
+	ctx = correlation.WithRunID(ctx, fixture.forkRun)
+	identity := mustTestAgentIdentityForRun(fixture.forkRun, "grant-receiver", "global")
+	record := agentFixtureStaticRecord(t, identity)
+	plan, err := identity.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err := manager.AgentConfigPlanRevision(record.Config, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := fixture.request.DeclarationPlan.BundleHash
+	fixture.request.DeclarationPlan, err = agenttopology.NewSelectedDeclarationPlan(hash, []agenttopology.DesiredAgent{{
+		Identity: plan, ConfigRevision: revision, Source: agenttopology.SourceCoordinate{BundleHash: hash},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.request.Preparation.DeclarationPlanFingerprint = fixture.request.DeclarationPlan.Revision
+	fixture.request.Preparation.Actors = []runfork.SelectedForkPreparedActor{{
+		Plan: plan, ConfigurationRevision: revision, Backend: selection.BackendAnthropic, Mode: executionmode.Live,
+	}}
+	grant := selectedMutationFenceGrant(t, ctx, fixture)
+	topology, err := agenttopology.SelectedDeclarationAdmission(fixture.forkRun, fixture.request.DeclarationPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Topology = topology
+	now := time.Now().UTC()
+	registered, err := grant.CommitAgentLifecycleTransition(ctx, manager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(),
+		Identity: identity, AgentID: identity.AgentID(), Trigger: "selected-claim-fence-test",
+		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: manager.AgentLifecycleRegistered,
+		ConfigRevision: revision, RunMode: manager.AgentRunModeStopped, Agent: &record, Topology: topology, Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.CommitAgentLifecycleTransition(ctx, manager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "start", RequestHash: uuid.NewString(),
+		Identity: identity, AgentID: identity.AgentID(), Trigger: "selected-claim-fence-test",
+		ExpectedEpoch: registered.RuntimeEpoch, ExpectedGeneration: registered.Generation, ExpectedPhase: registered.Phase,
+		TargetEpoch: registered.RuntimeEpoch, TargetGeneration: registered.Generation + 1, TargetPhase: manager.AgentLifecycleRunning,
+		ConfigRevision: revision, RunMode: manager.AgentRunModeAuthoritativeDeliveryOnly, Topology: topology, Now: now.Add(time.Nanosecond),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return identity, grant
 }
