@@ -66,6 +66,22 @@ func CopyReceiverMaterializationWithAgent(t testing.TB, agent string) string {
 	return root
 }
 
+func CopyReceiverMaterializationCompetingNodes(t testing.TB) string {
+	t.Helper()
+	root := CopyReceiverMaterializationWithAgent(t, "collector")
+	applyClosedReplacement(t, filepath.Join(root, "consumer/nodes.yaml"), "collector:\n", `competing-materializer:
+  id: competing-materializer
+  execution_type: system_node
+  subscribes_to: [receiver.seeded]
+  event_handlers:
+    receiver.seeded:
+      create_entity: true
+      advances_to: active
+collector:
+`)
+	return root
+}
+
 func CopyReceiverMaterializationGeometry(t testing.TB, nested bool) string {
 	t.Helper()
 	receivers := []ForkReceiver{{Path: "consumer", Policy: ForkReceiverRequiredExisting}, {Path: "sibling", Policy: ForkReceiverRequiredExisting}}
