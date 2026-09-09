@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -76,7 +77,19 @@ func (p *diagnosticForkActivationProbe) ActivateRunForkForSelectedContractExecut
 			if err != nil {
 				p.t.Fatal(err)
 			}
-			if err := selected.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{EventID: uuid.NewString(), CreatedAt: time.Now().UTC(), RunID: req.ForkRunID, ParentEventID: parent, ExecutionMode: executionmode.Live, Payload: payload}); err != nil {
+			admissionEvent, err := events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{
+				Type: events.EventTypePlatformRuntimeLog, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+				Payload: payload, ExecutionMode: executionmode.Live,
+			}})
+			if err != nil {
+				p.t.Fatal(err)
+			}
+			admit := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(p.h.bundle), catalogSourceArtifactFact(p.t, p.h.bundle))
+			admission, err := admit(ctx, admissionEvent, "")
+			if err != nil {
+				p.t.Fatal(err)
+			}
+			if err := selected.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{EventID: uuid.NewString(), CreatedAt: time.Now().UTC(), RunID: req.ForkRunID, ParentEventID: parent, ExecutionMode: executionmode.Live, Payload: admission.Payload(), PayloadAdmission: admission}); err != nil {
 				p.t.Fatal(err)
 			}
 		}

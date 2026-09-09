@@ -537,7 +537,7 @@ func projectDiagnosticTestBatch(ctx context.Context, selected diagnosticProjecti
 	if err != nil {
 		return 0, err
 	}
-	logger := runtimepkg.NewRuntimeLogger(selected, executionposture.Live)
+	logger := runtimepkg.NewRuntimeLogger(selected, executionposture.Live, nil)
 	for i, item := range items {
 		if err := logger.ProjectLifecycleDiagnostic(ctx, item); err != nil {
 			return i, err

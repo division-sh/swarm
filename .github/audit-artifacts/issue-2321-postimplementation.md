@@ -1,5 +1,9 @@
 # Post-Implementation Proof Audit: #2321
 
+Rebased integration and current qualification receipts:
+`issue-2321-pr2441-rebase-accounting.md`. Historical heads below are not rebased
+full-suite proof. LSF-030 remains unresolved.
+
 ## PR #2441 Review Pass 1 Repair
 
 **Current result: not review-ready; no failure-class elimination claimed.**

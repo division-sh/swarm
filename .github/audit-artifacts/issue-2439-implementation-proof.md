@@ -1,5 +1,9 @@
 # Post-Implementation Proof Audit: #2439
 
+Rebased integration receipts: `issue-2321-pr2441-rebase-accounting.md`.
+No SQLite transaction-exit change was required by the rebase. The new compile
+check is not full execution proof, and combined qualification remains blocked.
+
 ## PR #2441 Review Pass 1 Accounting
 
 **Current combined result: not review-ready.** The full profile failed the API

@@ -69,7 +69,17 @@ func validateRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, delivery *store
 }
 
 func admitRuntimeLogRecord(record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
+	if !record.PayloadAdmission.Valid() {
+		return events.AdmittedEvent{}, fmt.Errorf("runtime log payload admission evidence is required")
+	}
+	if !bytes.Equal(record.Payload, record.PayloadAdmission.Payload()) {
+		return events.AdmittedEvent{}, fmt.Errorf("runtime log payload differs from its admission evidence")
+	}
 	constructed, err := runtimeLogEvent(record)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	constructed, err = events.ApplyPayloadAdmission(constructed, record.PayloadAdmission)
 	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
@@ -77,27 +87,31 @@ func admitRuntimeLogRecord(record runtimepkg.RuntimeLogPersistenceRecord) (event
 }
 
 func (s *EventPostgresOwner) admitRuntimeLogRecord(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
-	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
+	constructed, err := runtimeLogEvent(record)
+	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
-	return admitRuntimeLogRecord(record)
+	admitted, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return s.ensureEventPayloadAdmission(ctx, admitted)
 }
 
 func (s *EventSQLiteOwner) admitRuntimeLogRecord(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
-	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
+	constructed, err := runtimeLogEvent(record)
+	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
-	return admitRuntimeLogRecord(record)
+	admitted, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return s.ensureEventPayloadAdmission(ctx, admitted)
 }
 
 func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Event, error) {
 	var event events.Event
-	if !record.PayloadAdmission.Valid() {
-		return event, fmt.Errorf("runtime log payload admission evidence is required")
-	}
-	if !bytes.Equal(record.Payload, record.PayloadAdmission.Payload()) {
-		return event, fmt.Errorf("runtime log payload differs from its admission evidence")
-	}
 	facts := events.EventFacts{
 		ID:       record.EventID,
 		Type:     events.EventType(runtimeLogEventName),
@@ -119,7 +133,7 @@ func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Even
 	if err != nil {
 		return event, err
 	}
-	return events.ApplyPayloadAdmission(event, record.PayloadAdmission)
+	return event, nil
 }
 
 func (s *EventPostgresOwner) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
@@ -162,7 +176,7 @@ func (s *EventPostgresOwner) PersistRuntimeLog(ctx context.Context, record runti
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	evt, err := s.admitRuntimeLogRecord(ctx, record)
+	evt, err := admitRuntimeLogRecord(record)
 	if err != nil {
 		return err
 	}
@@ -210,7 +224,7 @@ func (s *EventSQLiteOwner) PersistRuntimeLog(ctx context.Context, record runtime
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	evt, err := s.admitRuntimeLogRecord(ctx, record)
+	evt, err := admitRuntimeLogRecord(record)
 	if err != nil {
 		return err
 	}

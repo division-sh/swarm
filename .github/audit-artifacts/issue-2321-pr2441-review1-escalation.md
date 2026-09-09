@@ -37,6 +37,12 @@ at edb169908 failed the SQLite cell of
 FAIL github.com/division-sh/swarm/internal/apiv1 236.984s
 ```
 
+The attempt completed exit 1. Log SHA256:
+`d2e1b6f20a96262fb4db237c609bf5f2c0233001ccc72885b97351a76ac443e9`.
+Audit and pack-guard edits occurred during execution, so this failed attempt is
+not clean final-head qualification. Subsequent rebase receipts are recorded in
+`issue-2321-pr2441-rebase-accounting.md`; no coordinator fix was made.
+
 Original log: `/tmp/agent-g-pr2441-review1-full.log`. A bounded isolated both-store
 count=10 run passes (8.010s), not a fix: `/tmp/agent-g-pr2441-pin-cleanup-probe.log`,
 SHA256 `1fb40c9260d7e3fa098ad1240a99cbcd93aea5aea31c1a0963e1a416a463807e`.

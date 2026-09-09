@@ -1,5 +1,9 @@
 # Post-Implementation Proof Audit: #2432
 
+Rebased typed-payload admission and dual-store fork proof:
+`issue-2321-pr2441-rebase-accounting.md`. This preserves the existing diagnostic
+owner and exact receipt validation; combined qualification still awaits LSF-030.
+
 ## PR #2441 Review Pass 1 Repair
 
 **Current combined result: not review-ready.** New LSF-030 blocks qualification;

@@ -64,13 +64,13 @@ type RuntimeLogPersistence interface {
 }
 
 type RuntimeLogPersistenceRecord struct {
-	EventID       string
-	CreatedAt     time.Time
-	RunID         string
-	Payload       []byte
+	EventID          string
+	CreatedAt        time.Time
+	RunID            string
+	Payload          []byte
 	PayloadAdmission events.PayloadAdmission
-	ParentEventID string
-	ExecutionMode executionmode.Mode
+	ParentEventID    string
+	ExecutionMode    executionmode.Mode
 }
 
 // RuntimeLogFacts are explicit persistence facts. Durable domain projections
