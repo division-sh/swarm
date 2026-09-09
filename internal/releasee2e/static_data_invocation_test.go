@@ -97,7 +97,7 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 					serveStarted := time.Now()
 					process := startReleaseServe(t, releaseProcessSpec{
 						BinaryPath: binary, WorkingDir: cell.cwd, Source: cell.operand, ConfigPath: config,
-						Store: backend, APIPort: freeReleaseTCPPort(t), MCPPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env,
+						Store: backend, APIPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env,
 					})
 					ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 					defer cancel()

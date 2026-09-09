@@ -67,7 +67,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				}
 			}
 			start := func() *releaseServeProcess {
-				p := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: base, Source: root, ConfigPath: config, Store: backend, APIPort: freeReleaseTCPPort(t), MCPPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env})
+				p := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, WorkingDir: base, Source: root, ConfigPath: config, Store: backend, APIPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env})
 				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 				defer cancel()
 				if err := p.waitReady(ctx); err != nil {

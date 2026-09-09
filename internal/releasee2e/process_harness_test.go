@@ -61,7 +61,6 @@ type releaseProcessSpec struct {
 	Store                string
 	Dev                  bool
 	APIPort              int
-	MCPPort              int
 	PublicWebhookBaseURL string
 	PublicWebhookListen  string
 	TokenFile            string
@@ -88,7 +87,7 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		"--backend", "claude_cli",
 		"--workspace-backend", "host",
 		"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.APIPort),
-		"--mcp-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.MCPPort),
+		"--mcp-listen-addr", "127.0.0.1:0",
 		"--shutdown-grace", "2s",
 		"--no-color",
 	}

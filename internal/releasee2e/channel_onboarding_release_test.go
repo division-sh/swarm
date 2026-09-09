@@ -53,7 +53,6 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 
 	provider := &releaseTelegramAPIDouble{}
 	apiPort := freeReleaseTCPPort(t)
-	mcpPort := freeReleaseTCPPort(t)
 	publicPort := freeReleaseTCPPort(t)
 	publicListen := fmt.Sprintf("127.0.0.1:%d", publicPort)
 	providerEnv := startReleaseTelegramAPI(t, provider, root, publicListen)
@@ -61,7 +60,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath, WorkingDir: root, ConfigPath: configPath, Source: contracts,
-			Store: "sqlite", APIPort: apiPort, MCPPort: mcpPort,
+			Store: "sqlite", APIPort: apiPort,
 			PublicWebhookBaseURL: "https://" + releaseChannelPublicHost, PublicWebhookListen: publicListen,
 			TokenFile: tokenFile, Token: releaseChannelAPIToken, Env: env,
 		})
