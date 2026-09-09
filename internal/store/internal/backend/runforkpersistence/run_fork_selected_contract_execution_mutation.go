@@ -806,6 +806,9 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan runfork.RunF
 	}
 	for _, item := range plan.PendingWork {
 		classification := strings.TrimSpace(item.Classification)
+		if item.RetainsTerminalBarrierHistory() {
+			continue
+		}
 		if classification == runfork.RunForkPendingClassificationDeliveredCompleted {
 			continue
 		}

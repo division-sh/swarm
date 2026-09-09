@@ -23,6 +23,10 @@ type runForkRevisionedFact struct {
 
 type runForkRevisionEvent struct {
 	runForkRevisionedFact
+	RunID           string               `json:"run_id"`
+	EventClass      string               `json:"event_class"`
+	ExecutionMode   string               `json:"execution_mode"`
+	TaskID          string               `json:"task_id"`
 	EventID         string               `json:"event_id"`
 	EventName       string               `json:"event_name"`
 	EntityID        string               `json:"entity_id"`
@@ -90,11 +94,16 @@ type runForkRevisionReceipt struct {
 
 type runForkRevisionDeadLetter struct {
 	runForkRevisionedFact
-	DeadLetterID    string    `json:"dead_letter_id"`
-	OriginalEventID string    `json:"original_event_id"`
-	DeliveryID      string    `json:"delivery_id"`
-	HandlerNode     string    `json:"handler_node"`
-	CreatedAt       time.Time `json:"created_at"`
+	DeadLetterID      string          `json:"dead_letter_id"`
+	OriginalEventID   string          `json:"original_event_id"`
+	DeliveryID        string          `json:"delivery_id"`
+	HandlerNode       string          `json:"handler_node"`
+	CreatedAt         time.Time       `json:"created_at"`
+	ClaimVersion      int64           `json:"claim_version"`
+	Outcome           string          `json:"outcome"`
+	OutcomeReasonCode string          `json:"outcome_reason_code"`
+	OutcomeFailure    json.RawMessage `json:"outcome_failure"`
+	OutcomeSettledAt  *time.Time      `json:"outcome_settled_at"`
 }
 
 type runForkRevisionTimer struct {

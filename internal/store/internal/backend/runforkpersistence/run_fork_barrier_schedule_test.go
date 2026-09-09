@@ -34,12 +34,16 @@ func TestFixedRevisionBarrierScheduleExactRelation(t *testing.T) {
 				timer.OccurrenceEventID = genericschedule.OccurrenceEventID(timer.TimerID, timer.FireAt)
 				timer.OccurrenceAdmittedAt = &at
 			}
+			var pending []runfork.RunForkPendingWork
+			if status == fanoutbarrier.StatusOutcomeDeadLettered {
+				snapshot, obligations, pending = terminalBarrierHistoryFixture(t)
+			}
 			before, _ := json.Marshal(snapshot)
 			owned, err := validateRunForkBarrierSchedules(snapshot, obligations)
 			if err != nil || len(owned) != 1 {
 				t.Fatalf("exact relation: owned=%v err=%v", owned, err)
 			}
-			evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, nil, nil, obligations)
+			evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, nil, pending, obligations)
 			if err != nil || evidence.RelevantTimer {
 				t.Fatalf("owned historical schedule blocked: %+v %v", evidence, err)
 			}

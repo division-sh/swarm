@@ -3711,6 +3711,13 @@ handler_specification:
           creates exactly one fresh child-local activation and repeats create none; terminal inheritance creates no
           activation. This historical materialization rule does not grant pending selected execution: the separate
           3d_selected_contract_timer_route_policy still requires an admitted deferred-work owner under #642.
+          A dead-lettered barrier occurrence is terminal failure history, never replay work. The fixed-revision
+          admission owner must join the exact barrier and activation to its canonical occurrence, recipient route,
+          settled delivery claim version, immutable failed outcome and dead-letter record. Revision capture retains
+          those claim/outcome facts in the existing dead_letters family. Only that exact recipient receives the typed
+          terminal-history projection consumed by replay admission, selected frontier and materialization; other
+          recipients on the event remain independently classified. Missing or contradictory evidence fails closed.
+          Terminal status is not rewritten to delivered, and no child occurrence, delivery or schedule is created.
     join:
       field: join
       type: object

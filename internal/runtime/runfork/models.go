@@ -408,24 +408,26 @@ type RunForkEntityState struct {
 }
 
 type RunForkPendingWork struct {
-	EventID         string               `json:"event_id"`
-	EventName       string               `json:"event_name"`
-	FlowInstance    string               `json:"flow_instance,omitempty"`
-	RoutingSource   events.RoutingSource `json:"routing_source"`
-	DeliveryRoute   events.DeliveryRoute `json:"delivery_route,omitempty"`
-	DeliveryID      string               `json:"delivery_id,omitempty"`
-	SubscriberType  string               `json:"subscriber_type,omitempty"`
-	SubscriberID    string               `json:"subscriber_id,omitempty"`
-	Classification  string               `json:"classification"`
-	Status          string               `json:"status,omitempty"`
-	RetryCount      int                  `json:"retry_count,omitempty"`
-	ReasonCode      string               `json:"reason_code,omitempty"`
-	ActiveSessionID string               `json:"active_session_id,omitempty"`
-	CreatedAt       time.Time            `json:"created_at"`
-	StartedAt       *time.Time           `json:"started_at,omitempty"`
-	DeliveredAt     *time.Time           `json:"delivered_at,omitempty"`
-	ReceiptOutcome  string               `json:"receipt_outcome,omitempty"`
-	ReceiptAt       *time.Time           `json:"receipt_at,omitempty"`
+	TerminalBarrierHistory *TerminalBarrierHistory `json:"terminal_barrier_history,omitempty"`
+	ClaimVersion           int64                   `json:"claim_version,omitempty"`
+	EventID                string                  `json:"event_id"`
+	EventName              string                  `json:"event_name"`
+	FlowInstance           string                  `json:"flow_instance,omitempty"`
+	RoutingSource          events.RoutingSource    `json:"routing_source"`
+	DeliveryRoute          events.DeliveryRoute    `json:"delivery_route,omitempty"`
+	DeliveryID             string                  `json:"delivery_id,omitempty"`
+	SubscriberType         string                  `json:"subscriber_type,omitempty"`
+	SubscriberID           string                  `json:"subscriber_id,omitempty"`
+	Classification         string                  `json:"classification"`
+	Status                 string                  `json:"status,omitempty"`
+	RetryCount             int                     `json:"retry_count,omitempty"`
+	ReasonCode             string                  `json:"reason_code,omitempty"`
+	ActiveSessionID        string                  `json:"active_session_id,omitempty"`
+	CreatedAt              time.Time               `json:"created_at"`
+	StartedAt              *time.Time              `json:"started_at,omitempty"`
+	DeliveredAt            *time.Time              `json:"delivered_at,omitempty"`
+	ReceiptOutcome         string                  `json:"receipt_outcome,omitempty"`
+	ReceiptAt              *time.Time              `json:"receipt_at,omitempty"`
 }
 
 type RunForkUnsupportedBlocker struct {
