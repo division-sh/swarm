@@ -917,6 +917,19 @@ func materializeRunForkFanOutBarrierTx(
 		return err
 	}
 	registration := source.Registration
+	entityProjection, err := runfork.ProjectEntityOwnership(source.Registration.IntentKey.RunID, forkRunID, registration.EntityID, registration.Route.InstancePath)
+	if err != nil {
+		return err
+	}
+	registration.Route, err = runfork.ProjectExecutionRoute(source.Registration.IntentKey.RunID, forkRunID, sourceJoin.FlowPath(), registration.Route)
+	if err != nil {
+		return err
+	}
+	registration.RoutingSource, err = runfork.ProjectProducerOwnership(source.Registration.IntentKey.RunID, forkRunID, registration.RoutingSource)
+	if err != nil {
+		return err
+	}
+	registration.EntityID = entityProjection.Fork.EntityID
 	registration.IntentKey.RunID = strings.TrimSpace(forkRunID)
 	registration.IntentKey.ElementRef = selectedRef.ElementRef
 	registration.PlanRef = selectedRef

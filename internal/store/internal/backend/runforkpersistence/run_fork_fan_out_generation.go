@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -69,12 +70,19 @@ func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, forkRunID stri
 			return capsule, nil, fmt.Errorf("fan-out barrier does not belong to its fixed source intent")
 		}
 		barrierGeneration = join.Generation()
+		if obligation.Barrier.Registration.EntityID != capsule.EntityID || obligation.Barrier.Registration.Route != capsule.Route {
+			return capsule, nil, fmt.Errorf("fan-out barrier contradicts its execution owner")
+		}
+	}
+	projected, err := projectRunForkFanOutExecutionOwnership(plan, forkRunID, capsule)
+	if err != nil {
+		return capsule, nil, err
 	}
 	if !declared {
 		if len(capsule.Loop) != 0 || barrierGeneration != (attemptgeneration.Generation{}) {
 			return capsule, nil, fmt.Errorf("fan-out loop evidence has no original declaration role")
 		}
-		return capsule, nil, nil
+		return projected, nil, nil
 	}
 	if capsule.ExecutionFlowID != role.FlowID() {
 		return capsule, nil, fmt.Errorf("fan-out loop context disagrees with its declaration scope")
@@ -125,9 +133,72 @@ func projectRunForkFanOutCapsule(ctx context.Context, tx *sql.Tx, forkRunID stri
 	if err := correspondence.ValidateChild(child, actual); err != nil {
 		return capsule, nil, err
 	}
-	capsule.Loop, err = child.Context()
+	projected.Loop, err = child.Context()
 	if err != nil {
 		return capsule, nil, err
 	}
-	return capsule, &child, nil
+	return projected, &child, nil
+}
+
+func projectRunForkFanOutExecutionOwnership(plan runfork.RunForkPlan, forkRunID string, capsule fanoutobligation.Capsule) (fanoutobligation.Capsule, error) {
+	projected := capsule
+	node, err := identity.ParseExecutableNodeKey(capsule.NodeKey)
+	if err != nil || node.FlowPath() != capsule.ExecutionFlowID {
+		return capsule, fmt.Errorf("fan-out execution scope contradicts its node")
+	}
+	projected.Route, err = runfork.ProjectExecutionRoute(plan.SourceRunID, forkRunID, capsule.ExecutionFlowID, capsule.Route)
+	if err != nil {
+		return capsule, err
+	}
+	projected.ProducerSource, err = runfork.ProjectProducerOwnership(plan.SourceRunID, forkRunID, capsule.ProducerSource)
+	if err != nil {
+		return capsule, err
+	}
+	if capsule.EntityID != "" {
+		var owner *runfork.RunForkMaterializedEntitySnapshotMetadata
+		for _, entity := range plan.Entities {
+			if entity.EntityID != capsule.EntityID {
+				continue
+			}
+			if owner != nil || entity.MaterializationMetadata == nil || entity.MaterializationMetadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner {
+				return capsule, fmt.Errorf("fan-out execution requires unique fixed-revision entity metadata")
+			}
+			owner = entity.MaterializationMetadata
+		}
+		if owner == nil {
+			if capsule.DeliveryRoute == nil || !capsule.DeliveryRoute.Target.MaterializingEntity() {
+				return capsule, fmt.Errorf("fan-out existing entity is absent at the fixed revision")
+			}
+		} else if owner.FlowInstance != capsule.Route.InstancePath {
+			return capsule, fmt.Errorf("fan-out execution would rehome its fixed-revision entity")
+		}
+		entity, err := runfork.ProjectEntityOwnership(plan.SourceRunID, forkRunID, capsule.EntityID, capsule.Route.InstancePath)
+		if err != nil {
+			return capsule, err
+		}
+		projected.EntityID = entity.Fork.EntityID
+	}
+	if capsule.DeliveryRoute != nil {
+		delivery := *capsule.DeliveryRoute
+		receiver := delivery.Target.Route()
+		if delivery.Recipient != events.MustNodeDeliveryRecipient(node) || receiver.FlowID != capsule.ExecutionFlowID || receiver.FlowInstance != capsule.Route.InstancePath || receiver.EntityID != capsule.EntityID {
+			return capsule, fmt.Errorf("fan-out delivery target contradicts its execution owner")
+		}
+		receiver.FlowInstance, receiver.EntityID = projected.Route.InstancePath, projected.EntityID
+		switch {
+		case delivery.Target.ExistingEntity():
+			delivery.Target, err = events.NewExistingEntityTarget(receiver)
+		case delivery.Target.MaterializingEntity():
+			delivery.Target, err = events.NewMaterializingEntityTarget(receiver)
+		case delivery.Target.EntitylessReceiver():
+			delivery.Target, err = events.NewEntitylessReceiverTarget(receiver)
+		default:
+			return capsule, fmt.Errorf("fan-out delivery target has no admitted ownership")
+		}
+		if err != nil {
+			return capsule, err
+		}
+		projected.DeliveryRoute = &delivery
+	}
+	return projected, projected.Validate()
 }
