@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/mcp"
@@ -243,7 +244,7 @@ func TestPreparedProviderPreflightRejectsCensusBeforeProviderResolution(t *testi
 }
 
 func TestPreparedProviderPreflightFailureDoesNotReturnReceipts(t *testing.T) {
-	for _, scenario := range []string{"provider_failure", "replaced_receipt", "retired_during_last_probe", "canceled"} {
+	for _, scenario := range []string{"provider_failure", "replaced_receipt", "retired_during_last_probe", "canceled", "mock_only"} {
 		t.Run(scenario, func(t *testing.T) {
 			process, plans := newPreparedProviderTestPlans(t)
 			plans = plans[:1]
@@ -273,12 +274,19 @@ func TestPreparedProviderPreflightFailureDoesNotReturnReceipts(t *testing.T) {
 			catalog := preparedProviderTestCatalog(t, runtimes, &startupProbeToolExecutor{}, plans)
 			// Empty tools keep this proof at the provider boundary. The positive
 			// matrix above independently exercises the real MCP HTTP protocol.
-			ids, err := ValidatePreparedSelectedForkProviderPreflight(ctx, cfg, testToolGatewayBinding("http://127.0.0.1:1", "http://127.0.0.1:1", "probe-token"), catalog, mcp.NewTurnContextRegistry(actors.ActorFromContext), uuid.NewString(), process, plans, liveTestEffectController(&startupEffectStore{}), store)
+			controller := liveTestEffectController(&startupEffectStore{})
+			if scenario == "mock_only" {
+				controller = effects.NewController(&startupEffectStore{}).WithExecutionPosture(executionposture.MockOnly)
+			}
+			ids, err := ValidatePreparedSelectedForkProviderPreflight(ctx, cfg, testToolGatewayBinding("http://127.0.0.1:1", "http://127.0.0.1:1", "probe-token"), catalog, mcp.NewTurnContextRegistry(actors.ActorFromContext), uuid.NewString(), process, plans, controller, store)
 			if err == nil || len(ids) != 0 {
 				t.Fatalf("failed preparation returned receipts: %v %v", ids, err)
 			}
 			if scenario == "provider_failure" && !strings.Contains(err.Error(), "provider-rejected-probe") {
 				t.Fatal(err)
+			}
+			if scenario == "mock_only" && (!strings.Contains(err.Error(), "mock_only rejects live execution") || len(probe.authorities) != 0 || len(store.surfaces) != 0) {
+				t.Fatalf("mock-only preparation reached provider authority: err=%v authorities=%v surfaces=%v", err, probe.authorities, store.surfaces)
 			}
 			if scenario == "replaced_receipt" && !strings.Contains(err.Error(), "changed startup plan") {
 				t.Fatal(err)
@@ -287,7 +295,7 @@ func TestPreparedProviderPreflightFailureDoesNotReturnReceipts(t *testing.T) {
 				if !errors.Is(err, context.Canceled) || len(probe.calls) != 0 || len(store.surfaces) != 0 {
 					t.Fatalf("canceled preparation advanced: %v calls=%v surfaces=%d", err, probe.calls, len(store.surfaces))
 				}
-			} else if len(probe.calls) != 1 || len(store.surfaces) != 1 {
+			} else if scenario != "mock_only" && (len(probe.calls) != 1 || len(store.surfaces) != 1) {
 				t.Fatalf("lost diagnostic or retried provider: calls=%v surfaces=%d err=%v", probe.calls, len(store.surfaces), err)
 			}
 		})

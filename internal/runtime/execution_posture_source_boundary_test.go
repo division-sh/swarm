@@ -66,6 +66,26 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 				}
 				aliases[name] = importPath
 			}
+			comparisons := map[*ast.SelectorExpr]bool{}
+			if rel == "internal/runtime/runfork/preparation.go" {
+				// The persisted preparation decoder tests whether a probe is required.
+				// Only equality operands in this predicate are exempt, never constructors.
+				for _, declaration := range parsed.Decls {
+					fn, ok := declaration.(*ast.FuncDecl)
+					if !ok || fn.Name.Name != "RequiresProbe" {
+						continue
+					}
+					ast.Inspect(fn.Body, func(node ast.Node) bool {
+						comparison, ok := node.(*ast.BinaryExpr)
+						if ok && comparison.Op == token.EQL {
+							if selector, ok := comparison.Y.(*ast.SelectorExpr); ok {
+								comparisons[selector] = true
+							}
+						}
+						return true
+					})
+				}
+			}
 			ast.Inspect(parsed, func(node ast.Node) bool {
 				selector, ok := node.(*ast.SelectorExpr)
 				if !ok {
@@ -78,7 +98,7 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 				importPath := aliases[qualifier.Name]
 				isLive := importPath == "github.com/division-sh/swarm/internal/runtime/executionmode" && selector.Sel.Name == "Live"
 				isEffectsLive := importPath == "github.com/division-sh/swarm/internal/runtime/effects" && selector.Sel.Name == "ExecutionModeLive"
-				if (isLive || isEffectsLive) && !allowed[rel] {
+				if (isLive || isEffectsLive) && !allowed[rel] && !comparisons[selector] {
 					violations = append(violations, rel+":"+selector.Sel.Name)
 				}
 				return true

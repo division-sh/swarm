@@ -786,6 +786,7 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
+		LifecycleStore: storetest.AgentLifecycleFixture(t, pg),
 	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {

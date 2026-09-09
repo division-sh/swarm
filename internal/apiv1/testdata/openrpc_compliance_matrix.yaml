@@ -126,7 +126,7 @@ methods:
   - method: agent.replay
     transport: http
     required_params: [event_id, run_id, agent_id]
-    declared_errors: [EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentReplayProjectsSingletonEventReplayOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -141,7 +141,7 @@ methods:
   - method: agent.restart
     transport: http
     required_params: [run_id, agent_id]
-    declared_errors: [AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, AGENT_NOT_FOUND, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -156,7 +156,7 @@ methods:
   - method: agent.send_directive
     transport: http
     required_params: [agent_id, directive, run_id]
-    declared_errors: [AGENT_NOT_FOUND, AGENT_NOT_RUNNING, RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT, AGENT_DIRECTIVE_IN_PROGRESS, AGENT_DIRECTIVE_COMPLETION_PENDING, AGENT_DIRECTIVE_EXECUTION_FAILED, AGENT_DIRECTIVE_OUTCOME_INDETERMINATE]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, AGENT_NOT_FOUND, AGENT_NOT_RUNNING, RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT, AGENT_DIRECTIVE_IN_PROGRESS, AGENT_DIRECTIVE_COMPLETION_PENDING, AGENT_DIRECTIVE_EXECUTION_FAILED, AGENT_DIRECTIVE_OUTCOME_INDETERMINATE]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -576,7 +576,7 @@ methods:
   - method: event.publish
     transport: http
     required_params: [event_name, payload]
-    declared_errors: [BUNDLE_MISMATCH, BUNDLE_SCOPE_REQUIRED, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, UNSUPPORTED_BUNDLE_HASH, EVENT_NOT_DECLARED, EVENT_PUBLISH_FAILED, PAYLOAD_VALIDATION_FAILED, RUN_NOT_FOUND, EVENT_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT, MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_DEPENDENCY_INCOMPLETE, DATA_PIN_CONFLICT, DATA_SCHEMA_MISMATCH, RUN_DATA_IMMUTABLE, RUN_DATA_REJECTED, RUN_DATA_HEAD_CONFLICT, DATA_INTEGRITY_ERROR]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, BUNDLE_MISMATCH, BUNDLE_SCOPE_REQUIRED, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, UNSUPPORTED_BUNDLE_HASH, EVENT_NOT_DECLARED, EVENT_PUBLISH_FAILED, PAYLOAD_VALIDATION_FAILED, RUN_NOT_FOUND, EVENT_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT, MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_DEPENDENCY_INCOMPLETE, DATA_PIN_CONFLICT, DATA_SCHEMA_MISMATCH, RUN_DATA_IMMUTABLE, RUN_DATA_REJECTED, RUN_DATA_HEAD_CONFLICT, DATA_INTEGRITY_ERROR]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency}, {kind: go_test, name: TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonicalTarget}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -606,7 +606,7 @@ methods:
   - method: event.replay
     transport: http
     required_params: [event_id]
-    declared_errors: [EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, EVENT_NOT_FOUND, EVENT_REPLAY_NO_DELIVERY_HISTORY, EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL, EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE, EVENT_REPLAY_NOT_ELIGIBLE, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -696,7 +696,7 @@ methods:
   - method: mailbox.begin_input
     transport: http
     required_params: [card_id, verdict, observed_content_hash]
-    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -711,7 +711,7 @@ methods:
   - method: mailbox.cancel_input
     transport: http
     required_params: [card_id, input_draft_id]
-    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -726,7 +726,7 @@ methods:
   - method: mailbox.decide
     transport: http
     required_params: [card_id, verdict, observed_content_hash]
-    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, MAILBOX_CARD_SUPERSEDED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, MAILBOX_CARD_SUPERSEDED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -741,7 +741,7 @@ methods:
   - method: mailbox.defer
     transport: http
     required_params: [card_id, until]
-    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, INVALID_DEFER_UNTIL, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, INVALID_DEFER_UNTIL, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -816,7 +816,7 @@ methods:
   - method: run.continue
     transport: http
     required_params: [run_id]
-    declared_errors: [RUN_NOT_FOUND, RUN_NOT_PAUSED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, RUN_NOT_FOUND, RUN_NOT_PAUSED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -891,7 +891,7 @@ methods:
   - method: run.pause
     transport: http
     required_params: [run_id]
-    declared_errors: [RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, RUN_ALREADY_PAUSED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, RUN_ALREADY_PAUSED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}

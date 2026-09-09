@@ -2670,13 +2670,13 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 		BundleHash: wantHash,
 	})
 	agentIdentity := runtimebustest.IdentityForRun(t, runID, "agent-a", "bundle-source-test")
-	if err := storetest.UpsertStaticAgentFixture(t, context.Background(), pg, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, context.Background(), pg, runtimemanager.PersistedAgent{
 		Config: busTestAgentConfig(t, runtimeactors.AgentConfig{
 			ID: "agent-a", Identity: agentIdentity, FlowID: "bundle-source-test", FlowPath: "bundle-source-test",
 			Role: "worker", Model: "regular", Type: "stub", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),
 		}),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
-	}); err != nil {
+	}, sourceFact); err != nil {
 		t.Fatalf("seed direct recipient: %v", err)
 	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{

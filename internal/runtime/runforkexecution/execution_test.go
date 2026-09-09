@@ -696,18 +696,27 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 	missingProcess := request
 	missingProcess.AgentRuntime.ProcessCapability = nil
-	if _, err := ExecuteSelectedContractRunFork(ctx, missingProcess); err == nil || !strings.Contains(err.Error(), "requires process capability before materialization") {
+	if _, err := ExecuteSelectedContractRunFork(ctx, missingProcess); err == nil || !strings.Contains(err.Error(), "selected preparation requires its bound process capability") {
 		t.Fatalf("missing process refusal = %v", err)
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
 	if err := request.AgentRuntime.ProcessCapability.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ExecuteSelectedContractRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), "prove selected-contract process before materialization") {
+	if _, err := ExecuteSelectedContractRunFork(ctx, request); err == nil || !strings.Contains(err.Error(), "prove selected owner's process capability") {
 		t.Fatalf("retired process refusal = %v", err)
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
 	request.AgentRuntime.ProcessCapability = selectedContractTestProcessCapability(t, ctx, pg)
+	// A successor process gets a new owner; a retired owner's binding is immutable.
+	request.Owner = newSelectedContractExecutionOwnerForTest(t, pg)
+	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
+	if err := request.Owner.BindSelectedProcess(ctx, fixtureValue.(*runForkTestWorkFixture).process, request.AgentRuntime.ProcessCapability); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := request.Owner.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := testGatewayWorkOwner(t).RetireAndWait(ctx); err != nil {
 		t.Fatalf("retire unrelated loaded runtime before selected execution: %v", err)
 	}
@@ -5051,11 +5060,8 @@ func materializeSelectedExecutionForkForTest(
 		t.Fatal(err)
 	}
 	capability := selectedContractTestProcessCapability(t, ctx, pg)
-	defer func() {
-		if err := capability.Release(context.Background()); err != nil {
-			t.Error(err)
-		}
-	}()
+	// The fixture process owns later activation too; its registered cleanup
+	// releases the capability after execution owners retire.
 	operation, err := beginSelectedContractOperation(ctx)
 	if err != nil {
 		t.Fatal(err)

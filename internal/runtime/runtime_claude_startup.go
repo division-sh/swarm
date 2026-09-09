@@ -549,9 +549,16 @@ func (a ManagedProviderPreflightAuthority) probeAuthority(ctx context.Context, p
 		return managedcapabilities.Authority{}, runtimeeffects.Authority{}, err
 	}
 	capability.Preparation = &preparation
+	mode := target.config.ExecutionMode
+	if !mode.Valid() {
+		return managedcapabilities.Authority{}, runtimeeffects.Authority{}, fmt.Errorf("prepared provider probe requires its admitted actor execution mode")
+	}
+	if err := a.EffectController.ExecutionPosture().Admit(mode, "selected preparation provider probe"); err != nil {
+		return managedcapabilities.Authority{}, runtimeeffects.Authority{}, err
+	}
 	effect := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityStartupProbe, ID: probeID, ExecutionOwner: process.OwnerID,
-		FenceGeneration: process.AuthorityGeneration, LeaseExpiresAt: time.Now().UTC().Add(managedProviderStartupProbeLease), ExecutionMode: runtimeeffects.ExecutionModeLive,
+		FenceGeneration: process.AuthorityGeneration, LeaseExpiresAt: time.Now().UTC().Add(managedProviderStartupProbeLease), ExecutionMode: mode,
 		StartupProbe: runtimeeffects.StartupProbeAuthority{
 			ProbeID: probeID, ActorID: target.plan.AgentID(), ExecutionKind: string(a.ExecutionKind), ExecutionAuthorityID: a.ExecutionAuthorityID, Preparation: &preparation,
 		},
