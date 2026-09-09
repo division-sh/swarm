@@ -162,10 +162,12 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 	if err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
-	executableFingerprint, err := runfork.RunForkSelectedContractRuntimeFingerprint(struct {
-		ForkRunID, Admission, Container, Actors, Config, Declarations, Preparation string
-		Generation                                                                 uint64
-	}{admission.ForkRunID, admissionFingerprint, req.ContainerPlanFingerprint, req.ActorCensusFingerprint, req.EffectiveConfigFingerprint, req.DeclarationPlan.Revision, preparationFingerprint, generation})
+	executableFingerprint, err := (runfork.SelectedContractRuntimeExecution{
+		ForkRunID: admission.ForkRunID, AdmissionFingerprint: admissionFingerprint,
+		ContainerPlanFingerprint: req.ContainerPlanFingerprint, ActorCensusFingerprint: req.ActorCensusFingerprint,
+		EffectiveConfigFingerprint: req.EffectiveConfigFingerprint, DeclarationPlanFingerprint: req.DeclarationPlan.Revision,
+		PreparationFingerprint: preparationFingerprint, Generation: generation,
+	}).CoordinateFingerprint()
 	if err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}

@@ -111,7 +111,7 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 						}
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					request := runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID, ConfirmSourceFreeze: true, OriginalLoopCarriage: original, HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{}}
+					request := runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: original, HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{}}
 					activated, err := owner.ActivateRunFork(ctx, request)
 					if cell == "missing_original" || cell == "foreign_original" || cell == "unknown_revision" {
 						if err == nil {

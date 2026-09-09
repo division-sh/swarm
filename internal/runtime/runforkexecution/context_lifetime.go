@@ -17,6 +17,7 @@ import (
 type selectedForkContexts struct {
 	mu         sync.Mutex
 	retired    bool
+	recovered  bool
 	entries    map[*selectedContractOperation]*selectedForkContext
 	cleanupErr error
 	process    *worklifetime.Process
@@ -48,6 +49,9 @@ func (o SelectedContractExecutionOwner) beginPreparation(ctx context.Context) (*
 	defer contexts.mu.Unlock()
 	if contexts.retired {
 		return nil, errors.Join(worklifetime.ErrRetired, op.Finish())
+	}
+	if contexts.process != nil && (!contexts.recovered || contexts.process != op.process) {
+		return nil, errors.Join(errors.New("selected preparation requires its reconciled process owner"), op.Finish())
 	}
 	if contexts.entries == nil {
 		contexts.entries = make(map[*selectedContractOperation]*selectedForkContext)

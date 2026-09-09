@@ -19,6 +19,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -168,6 +169,10 @@ func (o RunFork) RetireSelectedContexts(ctx context.Context) error {
 	return o.executionOwner.RetireSelectedContexts(ctx)
 }
 
+func (o RunFork) RecoverSelectedForkContexts(ctx context.Context, req effects.RecoveryRequest) ([]runfork.SelectedForkRecoveryResult, error) {
+	return o.executionOwner.RecoverSelectedForkContexts(ctx, req)
+}
+
 func (o RunFork) BindSelectedProcess(ctx context.Context, process *worklifetime.Process, capability runtimestartupownership.ProcessCapability) error {
 	return o.executionOwner.BindSelectedProcess(ctx, process, capability)
 }
@@ -181,6 +186,10 @@ func (o RunFork) Plan(ctx context.Context, req runfork.RunForkPlanRequest) (runf
 		return runfork.RunForkPlan{}, errors.New("selected run.fork runtime owner is required")
 	}
 	return o.planner.PlanRunFork(ctx, req)
+}
+
+func (o RunFork) Prepare(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (*runtimerunforkexecution.PreparedSelectedFork, error) {
+	return o.executionOwner.Prepare(ctx, req)
 }
 
 func (o RunFork) Materialize(ctx context.Context, req runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error) {

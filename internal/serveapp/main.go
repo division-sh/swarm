@@ -1265,6 +1265,10 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			presenter.fail(5, "selected_fork_context", err)
 			return 1
 		}
+		if _, err := apiStoreCaps.SelectedForkProcess.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture)); err != nil {
+			presenter.fail(5, "selected_fork_recovery", err)
+			return 1
+		}
 	}
 	storeDeps := stores.RuntimeDeps()
 	idempotency := stores.Idempotency()

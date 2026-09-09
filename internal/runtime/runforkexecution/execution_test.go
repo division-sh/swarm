@@ -5049,8 +5049,15 @@ func materializeSelectedExecutionForkForTest(
 	if err != nil {
 		t.Fatal(err)
 	}
+	repo := runForkExecutionRepoRoot(t)
+	original, err := loadOriginalLoopCarriage(ctx, SourceArtifactSelectedContractSourceLoader{
+		RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: pg,
+	}, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		Preparation: prepared.evidence(),
+		Preparation: prepared.evidence(), OriginalLoopCarriage: original,
 		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection, SourceArtifactFact: loaded.SourceArtifactFact,
 		EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
 		FrontierAdmission:       frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, Readiness: readiness,

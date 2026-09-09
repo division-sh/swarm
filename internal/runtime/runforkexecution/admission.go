@@ -51,7 +51,7 @@ type LoadedSelectedContractSource struct {
 
 // The selected artifact may be a replacement. Load the original independently
 // through the run-bound loader; only detached semantic evidence leaves here.
-func loadOriginalLoopCarriage(ctx context.Context, loader SelectedContractSourceLoader, sourceRunID string) (semanticview.OriginalLoopCarriage, error) {
+func loadOriginalLoopCarriage(ctx context.Context, loader SelectedContractSourceLoader, sourceRunID string) (_ semanticview.OriginalLoopCarriage, finalErr error) {
 	loaded, err := loadRunForkSelectedContractSource(ctx, loader, SelectedContractSourceLoadRequest{
 		SourceRunID: sourceRunID,
 		Selection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
@@ -59,7 +59,7 @@ func loadOriginalLoopCarriage(ctx context.Context, loader SelectedContractSource
 	if err != nil {
 		return semanticview.OriginalLoopCarriage{}, fmt.Errorf("load original fork source: %w", err)
 	}
-	defer cleanupLoadedSelectedContractSource(loaded)
+	defer func() { finalErr = errors.Join(finalErr, cleanupLoadedSelectedContractSource(loaded)) }()
 	carriage, err := semanticview.CompileOriginalLoopCarriage(loaded.Source)
 	if err != nil {
 		return semanticview.OriginalLoopCarriage{}, err

@@ -167,9 +167,6 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	if err != nil {
 		return nil, err
 	}
-	if frontier.FrontierEventCount == 0 {
-		return nil, fmt.Errorf("selected-contract execution requires selected frontier events")
-	}
 	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
 		Plan:              plan,
 		Source:            loadedSource.Source,

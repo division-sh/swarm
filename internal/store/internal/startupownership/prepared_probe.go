@@ -43,3 +43,33 @@ func PreparedProcessCurrent(ctx context.Context, q authorityQueryer, preparation
 		authority.BootID == preparation.ProcessBootID &&
 		authority.AuthorityGeneration == generation, nil
 }
+
+// PreparedProcessPredecessor proves recorded ancestry, rather than inferring
+// abandonment from a different UUID or an elapsed lease.
+func PreparedProcessPredecessor(ctx context.Context, q authorityQueryer, preparation managedcapabilities.SelectedForkPreparationCoordinates, generation uint64, current runtimeownership.Authority, sqlite bool) (bool, error) {
+	if err := preparation.Validate(); err != nil {
+		return false, err
+	}
+	backend := "postgres_retained_session"
+	if sqlite {
+		backend = "sqlite_retained_owner"
+	}
+	for id := current.PredecessorAuthorityID; id != ""; {
+		record, found, err := loadAuthorityRecord(ctx, q, id, nil, sqlite)
+		if err != nil {
+			return false, err
+		}
+		if !found {
+			return false, fmt.Errorf("selected recovery predecessor is missing")
+		}
+		authority, err := validateAuthorityLineage(ctx, q, record, backend, sqlite, make(map[string]struct{}))
+		if err != nil {
+			return false, err
+		}
+		if authority.AuthorityID == preparation.ProcessAuthorityID {
+			return authority.AuthorityGeneration == generation && authority.OwnerID == preparation.ProcessOwnerID && authority.BootID == preparation.ProcessBootID, nil
+		}
+		id = authority.PredecessorAuthorityID
+	}
+	return false, nil
+}

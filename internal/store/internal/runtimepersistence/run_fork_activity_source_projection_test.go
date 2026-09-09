@@ -15,15 +15,12 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
-	runtimecore "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -654,56 +651,6 @@ func selectedSourceMaterializationRequest(t *testing.T, ctx context.Context, sto
 	if _, err := store.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 		t.Fatal(err)
 	}
-	sourceFact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-	if err != nil {
-		t.Fatal(err)
-	}
-	effective, err := runtimecore.AdmitEffectiveSourceProjection(runtimecore.EffectiveSourceProjectionRequest{Source: source, SourceArtifactFact: sourceFact})
-	if err != nil {
-		t.Fatal(err)
-	}
-	source = effective.Source()
-	plan, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source})
-	if err != nil {
-		t.Fatal(err)
-	}
-	history, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: source, FrontierAdmission: frontier})
-	if err != nil {
-		t.Fatal(err)
-	}
-	topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: history})
-	if err != nil {
-		t.Fatal(err)
-	}
-	planning, err := runforkexecution.BuildSelectedContractRecipientPlanning(runforkexecution.SelectedContractRecipientPlanningRequest{Admission: frontier, RouteAdmission: history, RouteTopology: topology})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ids := make([]string, len(frontier.FrontierEvents))
-	for i, event := range frontier.FrontierEvents {
-		ids[i] = event.SourceEventID
-	}
-	modes, err := store.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, ids)
-	if err != nil || len(modes) != len(ids) {
-		t.Fatalf("load exact activity fixture source modes: count=%d err=%v", len(modes), err)
-	}
-	sourceModes := map[string]executionmode.Mode{}
-	for i, id := range ids {
-		sourceModes[id] = modes[i]
-	}
-	readiness, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{Binding: runforkreadiness.Binding{
-		Plan: plan, ContractSelection: frontier.ContractSelection, SourceArtifactFact: sourceFact, EffectiveSourceIdentity: effective.Identity(), FrontierAdmission: frontier, RecipientPlanning: planning, SourceModes: sourceModes,
-	}, Source: source})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runforkreadiness.MaterializeRequest{
-		SourceRunID: sourceRunID, At: eventID, ContractSelection: frontier.ContractSelection,
-		SourceArtifactFact: sourceFact, EffectiveSourceIdentity: effective.Identity(), Readiness: readiness,
-		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: planning,
-	}
+	return prepareSelectedStoreMaterializationForTest(t, ctx, store, sourceRunID, eventID,
+		runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}, bundle.SourceArtifact.BundleHash())
 }

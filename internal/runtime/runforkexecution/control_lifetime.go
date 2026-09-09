@@ -83,6 +83,9 @@ func (o SelectedContractExecutionOwner) acquireSelectedStop(ctx context.Context,
 	if contexts.process == nil || contexts.capability == nil {
 		return nil, false, errors.New("selected control process is not bound")
 	}
+	if !contexts.recovered {
+		return nil, false, errors.New("selected control process has not reconciled predecessor work")
+	}
 	// A stop is not work of the occurrence it retires. Build its exact source
 	// scope on a newly admitted process lease, never a borrowed runtime context.
 	lease, err := contexts.process.Begin(context.Background())

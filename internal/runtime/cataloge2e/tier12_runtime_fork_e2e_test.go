@@ -18,15 +18,12 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -81,7 +78,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	}
 	storetest.RequireBundleDataCatalog(t, h.ctx, h.pg, selectedBundle)
 	installCatalogSelectedSourceTopology(t, h.ctx, h, selectedSource)
-	materialized, err := materializeSelectedContractForkCleanupProbe(t, h.ctx, h.pg, loader, selection, sourceRunID, forkAt)
+	materialized, err := materializeSelectedContractForkCleanupProbe(t, h, loader, selection, sourceRunID, forkAt)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution cleanup probe: %v", err)
 	}
@@ -99,7 +96,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	cfg := testRuntimeConfig()
 	cfg.LLM.Backend = "anthropic"
 	executionCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
-	executionOwner := selectedContractExecutionOwnerForCatalogTest(t, h.db, h.pg)
+	executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:       sourceRunID,
 		At:                forkAt,
@@ -189,13 +186,20 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+			t.Errorf("retire selected contexts: %v", err)
+		}
+	})
 	return owner
 }
 
 func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHarness, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
 	t.Helper()
 	if h.pg != nil {
-		return selectedContractExecutionOwnerForCatalogTest(t, h.db, h.pg, forkOverride...)
+		owner := selectedContractExecutionOwnerForCatalogTest(t, h.db, h.pg, forkOverride...)
+		h.selectedOwners = append(h.selectedOwners, owner)
+		return owner
 	}
 	selected := h.sqlite
 	if selected == nil {
@@ -224,6 +228,12 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner(SQLite): %v", err)
 	}
+	h.selectedOwners = append(h.selectedOwners, owner)
+	t.Cleanup(func() {
+		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+			t.Errorf("retire selected contexts: %v", err)
+		}
+	})
 	return owner
 }
 
@@ -341,99 +351,33 @@ func installCatalogSelectedSourceTopology(t testing.TB, ctx context.Context, h *
 
 func materializeSelectedContractForkCleanupProbe(
 	t testing.TB,
-	ctx context.Context,
-	pg *store.PostgresStore,
+	h *runtimeHarness,
 	loader runtimerunforkexecution.SelectedContractSourceLoader,
 	selection runfork.RunForkContractSelection,
 	sourceRunID,
 	forkAt string,
 ) (runfork.RunForkMaterialization, error) {
 	t.Helper()
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runtimerunforkexecution.SelectedContractSourceLoadRequest{
-		Selection: selection,
+	owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
+	cfg := testRuntimeConfig()
+	cfg.LLM.Backend = "anthropic"
+	prepared, err := owner.Prepare(h.ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: sourceRunID, At: forkAt, SourceLoader: loader, ContractSelection: selection,
+		AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
 	})
 	if err != nil {
-		t.Fatalf("load cleanup-probe selected source: %v", err)
+		return runfork.RunForkMaterialization{}, err
 	}
-	if loaded.Cleanup != nil {
-		defer func() {
-			if err := loaded.Cleanup(); err != nil {
-				t.Errorf("cleanup cleanup-probe selected source: %v", err)
-			}
-		}()
-	}
-	selection = loaded.Selection
-	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkAt})
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Errorf("close cleanup-probe preparation: %v", err)
+		}
+	}()
+	req, err := prepared.MaterializationRequest()
 	if err != nil {
-		t.Fatalf("plan cleanup-probe fork: %v", err)
+		return runfork.RunForkMaterialization{}, err
 	}
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
-		Plan:              plan,
-		Source:            loaded.Source,
-		ContractSelection: selection,
-	})
-	if err != nil {
-		t.Fatalf("admit cleanup-probe frontier: %v", err)
-	}
-	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
-		Plan:              plan,
-		Source:            loaded.Source,
-		ContractSelection: selection,
-		FrontierAdmission: frontier,
-	})
-	if err != nil {
-		t.Fatalf("admit cleanup-probe route history: %v", err)
-	}
-	topology, err := runtimerunforkexecution.BuildSelectedContractRouteTopology(runtimerunforkexecution.SelectedContractRouteTopologyRequest{
-		Admission:      frontier,
-		RouteAdmission: routeAdmission,
-	})
-	if err != nil {
-		t.Fatalf("build cleanup-probe route topology: %v", err)
-	}
-	model, err := runtimerunforkexecution.BuildSelectedContractExecutionModel(runtimerunforkexecution.SelectedContractExecutionModelRequest{
-		Admission:      frontier,
-		RouteAdmission: routeAdmission,
-		RouteTopology:  topology,
-	})
-	if err != nil {
-		t.Fatalf("build cleanup-probe execution model: %v", err)
-	}
-	if model.RecipientPlanning == nil {
-		t.Fatal("cleanup-probe execution model has no recipient planning")
-	}
-	var eventIDs []string
-	for _, event := range model.RecipientPlanning.RecipientPlanEvents {
-		eventIDs = append(eventIDs, event.SourceEventID)
-	}
-	modes, err := pg.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, eventIDs)
-	if err != nil || len(modes) != len(eventIDs) {
-		t.Fatalf("load cleanup-probe source modes: %v, %v", modes, err)
-	}
-	sourceModes := make(map[string]executionmode.Mode, len(eventIDs))
-	for i, eventID := range eventIDs {
-		sourceModes[eventID] = modes[i]
-	}
-	readiness, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
-		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: selection,
-			SourceArtifactFact: loaded.SourceArtifactFact, EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-			FrontierAdmission: frontier, RecipientPlanning: *model.RecipientPlanning, SourceModes: sourceModes},
-		Source: loaded.Source,
-	})
-	if err != nil {
-		t.Fatalf("admit cleanup-probe readiness: %v", err)
-	}
-	return pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID:             sourceRunID,
-		At:                      forkAt,
-		ContractSelection:       selection,
-		SourceArtifactFact:      loaded.SourceArtifactFact,
-		EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-		FrontierAdmission:       frontier,
-		RouteTopology:           topology,
-		RecipientPlanning:       *model.RecipientPlanning,
-		Readiness:               readiness,
-	})
+	return h.pg.MaterializeRunForkForSelectedContractExecution(h.ctx, req)
 }
 
 func assertSourcePendingAgentDelivery(t testing.TB, db *sql.DB, runID, eventID, agentID string) {

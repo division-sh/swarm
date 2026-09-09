@@ -17,12 +17,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -357,51 +354,17 @@ func stageForkContentionFixture(t *testing.T, f snapshotOwnershipFixture, select
 			}
 		})
 	}
-	plan := f.plan(t)
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: loaded.Source, ContractSelection: selection})
+	request := prepareSelectedStoreMaterializationForTest(t, f.ctx, f.store, f.runID, f.eventID, selection)
+	_, ids, _, err := runfork.RunForkContractFrontierEvidenceBinding(request.FrontierAdmission)
 	if err != nil {
 		t.Fatal(err)
 	}
-	routes, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: loaded.Source, ContractSelection: selection, FrontierAdmission: frontier})
-	if err != nil {
-		t.Fatal(err)
-	}
-	topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: routes})
-	if err != nil {
-		t.Fatal(err)
-	}
-	model, err := runforkexecution.BuildSelectedContractExecutionModel(runforkexecution.SelectedContractExecutionModelRequest{Admission: frontier, RouteAdmission: routes, RouteTopology: topology})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, ids, _, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
-	if err != nil {
-		t.Fatal(err)
-	}
-	modes, err := store.LoadRunForkSelectedContractSourceEventModes(f.ctx, f.runID, ids)
-	if err != nil || len(modes) != len(ids) {
-		t.Fatalf("source mode census: %v %v", modes, err)
-	}
-	sourceModes := make(map[string]executionmode.Mode, len(ids))
-	for i, id := range ids {
-		sourceModes[id] = modes[i]
-	}
-	readiness, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
-		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: selection, SourceArtifactFact: loaded.SourceArtifactFact, EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-			FrontierAdmission: frontier, RecipientPlanning: *model.RecipientPlanning, SourceModes: sourceModes}, Source: loaded.Source,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	staged, err := store.MaterializeRunForkForSelectedContractExecution(f.ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID: f.runID, At: f.eventID, ContractSelection: selection, SourceArtifactFact: loaded.SourceArtifactFact, EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, Readiness: readiness,
-	})
+	staged, err := store.MaterializeRunForkForSelectedContractExecution(f.ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
-		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning}
+		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning}
 }
 
 type forkContentionResult struct {

@@ -12,8 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -122,6 +124,7 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 type selectedForkProcessOwner interface {
 	apiv1.SelectedForkStopOwner
 	BindSelectedProcess(context.Context, *worklifetime.Process, runtimestartupownership.ProcessCapability) error
+	RecoverSelectedForkContexts(context.Context, effects.RecoveryRequest) ([]runfork.SelectedForkRecoveryResult, error)
 }
 
 type selectedAndNormalContextRetirement struct {

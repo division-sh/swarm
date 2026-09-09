@@ -59,6 +59,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	defer func() { finalErr = errors.Join(finalErr, req.Owner.completePreparation(prepared)) }()
 	ports, operation, loadedSource := req.Owner.ports, prepared.operation, prepared.loadedSource
 	plan, frontier, routeAdmission := prepared.plan, prepared.frontier, prepared.routeAdmission
+	if frontier.FrontierEventCount == 0 {
+		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, fmt.Errorf("selected-contract execution requires selected frontier events")
+	}
 	routeTopology, model := prepared.routeTopology, prepared.model
 	agentRuntime := prepared.agentRuntime
 	deferredWorkAdmission := prepared.deferredWorkAdmission

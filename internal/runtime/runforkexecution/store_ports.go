@@ -28,6 +28,8 @@ import (
 // SelectedContractForkLifecycle owns planning, materialization, activation,
 // binding, and cleanup for one selected-contract fork.
 type SelectedContractForkLifecycle interface {
+	ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+	RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
 	StopSelectedFork(context.Context, runcontrol.SelectedStopRequest) (runcontrol.State, error)
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)

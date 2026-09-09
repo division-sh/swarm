@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
@@ -178,6 +179,7 @@ type runtimeHarness struct {
 	reopenedSQLite  *store.SQLiteRuntimeStore
 	rt              *runtime.Runtime
 	processOwner    *worklifetime.Process
+	selectedOwners  []runforkexecution.SelectedContractExecutionOwner
 	processTopology runtimestartupownership.ProcessCapability
 	workflow        catalogWorkflowPersistence
 	llm             *scriptedLLMRuntime
@@ -285,6 +287,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), catalogRuntimeRunID))
 	processOwner := worklifetime.NewProcess()
+	ctx = worklifetime.WithProcess(ctx, processOwner)
 	fixture := runlifecyclefixture.Fixture{
 		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID,
 		Source: sourceArtifactFact, Artifact: bundle.SourceArtifact,
@@ -575,6 +578,15 @@ func (h *runtimeHarness) shutdown() {
 		return
 	}
 	h.shutdownOnce.Do(func() {
+		for _, owner := range h.selectedOwners {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := owner.RetireSelectedContexts(ctx)
+			cancel()
+			if err != nil {
+				h.t.Errorf("retire catalog selected contexts: %v", err)
+				return
+			}
+		}
 		if h.rt != nil {
 			if err := h.rt.Shutdown(); err != nil {
 				h.t.Errorf("shutdown catalog runtime: %v", err)
@@ -645,6 +657,7 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), catalogRuntimeRunID))
 	processOwner := worklifetime.NewProcess()
+	ctx = worklifetime.WithProcess(ctx, processOwner)
 	var workflowPersistence runtimepipeline.WorkflowPersistence
 	var deps runtime.RuntimeDeps
 	if pg != nil {

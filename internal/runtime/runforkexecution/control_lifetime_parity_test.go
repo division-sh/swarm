@@ -6,9 +6,11 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -21,26 +23,32 @@ import (
 
 func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, phase := range []string{"executing", "retained"} {
+		for _, phase := range []string{"executing", "retained", "reconstructed"} {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				var selected any
 				var db *sql.DB
 				var authorityStore startupownership.Store
 				var owner SelectedContractExecutionOwner
+				var newOwner func() SelectedContractExecutionOwner
 				if backend == "sqlite" {
 					s := storetest.StartSQLiteRuntimeStore(t)
 					selected, db, authorityStore = s, storetest.Database(s), s
 					owner = selectedContractSQLiteExecutionOwnerForTest(t, s)
+					newOwner = func() SelectedContractExecutionOwner { return selectedContractSQLiteExecutionOwnerForTest(t, s) }
 				} else {
 					_, db, _ = testutil.StartPostgres(t)
 					s := storetest.AdmitPostgresRuntimeStore(t, db)
 					selected, authorityStore = s, s
 					owner = selectedContractExecutionOwnerForTest(t, s)
+					newOwner = func() SelectedContractExecutionOwner { return selectedContractExecutionOwnerForTest(t, s) }
 				}
 				ctx := runForkTestContext(t)
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				capability := selectedContractTestProcessCapability(t, ctx, authorityStore)
 				if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly)); err != nil {
 					t.Fatal(err)
 				}
 				root := runForkExecutionRepoRoot(t)
@@ -55,12 +63,53 @@ func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
 				var forkRun string
-				if phase == "retained" {
+				if phase != "executing" {
 					result, err := ExecuteSelectedContractRunFork(ctx, request)
 					if err != nil {
 						t.Fatal(err)
 					}
 					forkRun = result.Materialization.ForkRunID
+					if phase == "reconstructed" {
+						if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+							t.Fatal(err)
+						}
+						if err := capability.Release(context.Background()); err != nil {
+							t.Fatal(err)
+						}
+						freshProcess := worklifetime.NewProcess()
+						t.Cleanup(func() {
+							freshProcess.Retire()
+							if _, err := freshProcess.Join(context.Background()); err != nil {
+								t.Error(err)
+							}
+						})
+						capability = selectedContractTestProcessCapability(t, ctx, authorityStore)
+						owner = newOwner()
+						if err := owner.BindSelectedProcess(ctx, freshProcess, capability); err != nil {
+							t.Fatal(err)
+						}
+						var beforeEvents, beforeExecutions int
+						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1`, forkRun).Scan(&beforeEvents); err != nil {
+							t.Fatal(err)
+						}
+						if err := db.QueryRow(`SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkRun).Scan(&beforeExecutions); err != nil {
+							t.Fatal(err)
+						}
+						recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
+						if err != nil || len(recovered) != 1 || recovered[0].RunID != forkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
+							t.Fatalf("control reconstruction = %+v %v", recovered, err)
+						}
+						var afterEvents, afterExecutions int
+						if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1`, forkRun).Scan(&afterEvents); err != nil {
+							t.Fatal(err)
+						}
+						if err := db.QueryRow(`SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkRun).Scan(&afterExecutions); err != nil {
+							t.Fatal(err)
+						}
+						if afterEvents != beforeEvents || afterExecutions != beforeExecutions {
+							t.Fatal("control reconstruction executed selected work")
+						}
+					}
 					if _, err := testGatewayWorkOwner(t).RetireAndWait(context.Background()); err != nil {
 						t.Fatal(err)
 					}

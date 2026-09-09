@@ -1268,6 +1268,14 @@ type SelectedContractRuntimeExecution struct {
 	ExecutionMode                   executionmode.Mode
 }
 
+func (e SelectedContractRuntimeExecution) CoordinateFingerprint() (string, error) {
+	return RunForkSelectedContractRuntimeFingerprint(struct {
+		ForkRunID, Admission, Container, Actors, Config, Declarations, Preparation string
+		Generation                                                                 uint64
+	}{e.ForkRunID, e.AdmissionFingerprint, e.ContainerPlanFingerprint, e.ActorCensusFingerprint,
+		e.EffectiveConfigFingerprint, e.DeclarationPlanFingerprint, e.PreparationFingerprint, e.Generation})
+}
+
 func RunForkSelectedContractRuntimeFingerprint(value any) (string, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {

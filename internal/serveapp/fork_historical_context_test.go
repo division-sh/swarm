@@ -10,13 +10,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/selected"
 	"github.com/google/uuid"
 )
 
@@ -75,7 +74,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatal("selected availability projection does not expose the actual store fixture")
 			}
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}
-			request, loaded := admitForkHistoricalSelectedRequest(t, ctx, direct, loader, plan, rt.BundleHash)
+			request, loaded := admitForkHistoricalSelectedRequest(t, ctx, family, loader, plan, rt.BundleHash, rt.ForkRuntime)
 			var revision, latestRevision int64
 			var original, latest []byte
 			if err := rt.DB.QueryRow(`SELECT revision, fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision<=$3 ORDER BY revision DESC LIMIT 1`, seed.RunID, deliveryID, plan.ForkPoint.Revision).Scan(&revision, &original); err != nil {
@@ -144,7 +143,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				if result.Materialization.ForkRunID != "" || result.ExecutedEventCount != 0 {
 					t.Fatalf("corrupt R reached child execution: %#v", result)
 				}
-				params := map[string]any{"source_run_id": seed.RunID, "confirm_source_freeze": true, "idempotency_key": "historical-refusal-" + at}
+				params := map[string]any{"source_run_id": seed.RunID, "allow_source_freeze": true, "idempotency_key": "historical-refusal-" + at}
 				if at != "" {
 					params["fork_event_id"] = at
 				}
@@ -210,7 +209,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			sourceNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
 			siblingNotices := readForkReceiverNoticeDomain(t, rt, sibling.RunID)
 			var result apiv1.RunForkExecutionResult
-			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "confirm_source_freeze": true, "idempotency_key": "historical-restored-control"}
+			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "historical-restored-control"}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &result)
 			if result.ForkRunID == "" || result.ExecutedEventCount != 1 {
 				t.Fatalf("restored historical reader did not execute actual static receiver: %#v", result)
@@ -243,7 +242,7 @@ type forkHistoricalSelectedStore interface {
 	runforkexecution.SelectedContractReplayPersistence
 }
 
-func admitForkHistoricalSelectedRequest(t *testing.T, ctx context.Context, store forkHistoricalSelectedStore, loader runforkexecution.SourceArtifactSelectedContractSourceLoader, plan runfork.RunForkPlan, hash string) (runforkreadiness.MaterializeRequest, runforkexecution.LoadedSelectedContractSource) {
+func admitForkHistoricalSelectedRequest(t *testing.T, ctx context.Context, owner selected.RunFork, loader runforkexecution.SourceArtifactSelectedContractSourceLoader, plan runfork.RunForkPlan, hash string, options runforkexecution.SelectedContractAgentRuntimeOptions) (runforkreadiness.MaterializeRequest, runforkexecution.LoadedSelectedContractSource) {
 	t.Helper()
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: plan.SourceRunID, BundleHash: hash, Selection: selection})
@@ -257,44 +256,21 @@ func admitForkHistoricalSelectedRequest(t *testing.T, ctx context.Context, store
 			}
 		})
 	}
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: loaded.Source, ContractSelection: selection})
-	if err != nil {
-		t.Fatal(err)
-	}
-	routes, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: loaded.Source, ContractSelection: selection, FrontierAdmission: frontier})
-	if err != nil {
-		t.Fatal(err)
-	}
-	topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: routes})
-	if err != nil {
-		t.Fatal(err)
-	}
-	model, err := runforkexecution.BuildSelectedContractExecutionModel(runforkexecution.SelectedContractExecutionModelRequest{Admission: frontier, RouteAdmission: routes, RouteTopology: topology})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, eventIDs, _, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
-	if err != nil {
-		t.Fatal(err)
-	}
-	modes, err := store.LoadRunForkSelectedContractSourceEventModes(ctx, plan.SourceRunID, eventIDs)
-	if err != nil || len(modes) != len(eventIDs) {
-		t.Fatalf("source mode census: %v, %v", modes, err)
-	}
-	sourceModes := make(map[string]executionmode.Mode, len(modes))
-	for i, id := range eventIDs {
-		sourceModes[id] = modes[i]
-	}
-	readiness, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
-		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: selection, SourceArtifactFact: loaded.SourceArtifactFact,
-			EffectiveSourceIdentity: loaded.EffectiveSourceIdentity, FrontierAdmission: frontier, RecipientPlanning: *model.RecipientPlanning, SourceModes: sourceModes}, Source: loaded.Source,
+	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ExpectedBundleHash: hash,
+		ContractSelection: selection, SourceLoader: loader, AgentRuntime: options,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runforkreadiness.MaterializeRequest{
-		SourceRunID: plan.SourceRunID, At: plan.ForkPoint.EventID, ContractSelection: selection,
-		SourceArtifactFact: loaded.SourceArtifactFact, EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, Readiness: readiness,
-	}, loaded
+	t.Cleanup(func() {
+		if err := prepared.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	request, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request, loaded
 }

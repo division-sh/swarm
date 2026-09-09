@@ -20,7 +20,7 @@ import (
 
 // Component store tests consume real artifact/readiness/provider preparation.
 // They still invoke the named materialization separately to inject SQL faults.
-func prepareSelectedStoreMaterializationForTest(t *testing.T, ctx context.Context, selected any, sourceRun, at string, selection runfork.RunForkContractSelection) runforkreadiness.MaterializeRequest {
+func prepareSelectedStoreMaterializationForTest(t *testing.T, ctx context.Context, selected any, sourceRun, at string, selection runfork.RunForkContractSelection, targetHash ...string) runforkreadiness.MaterializeRequest {
 	t.Helper()
 	storeTestWorkOwner(t)
 	value, _ := storeTestWorkFixtures.Load(t)
@@ -33,8 +33,12 @@ func prepareSelectedStoreMaterializationForTest(t *testing.T, ctx context.Contex
 	}
 	repo := canonicalrouting.RepoRoot(t)
 	owner := selectedStorePreparationOwnerForTest(t, selected)
+	var hash string
+	if len(targetHash) > 0 {
+		hash = targetHash[0]
+	}
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRun, At: at, ContractSelection: selection,
+		SourceRunID: sourceRun, At: at, ContractSelection: selection, ExpectedBundleHash: hash,
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: sourceStore},
 		AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
 			ProcessCapability: capability, ExecutionPosture: executionposture.Live,

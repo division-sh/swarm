@@ -25,7 +25,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -264,7 +263,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			agentRuntime := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
 			executionCtx := worklifetime.WithOccurrence(catalogRunContext(h, sourceRunID), h.rt.WorkOccurrence())
 			materialization := materializeCatalogSelectedForkForBootResume(
-				t, executionCtx, selected, selectedSource, selection, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID,
+				t, executionCtx, selected, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, sourcePlan, agentRuntime, sourceEvent.ID(), flowPath, flowEntityID,
 			)
 			result, err := runtimerunforkexecution.ActivateSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractActivationGateRequest{
 				ForkRunID: materialization.ForkRunID, AllowSourceFreeze: true, Store: selected,
@@ -305,83 +304,36 @@ func materializeCatalogSelectedForkForBootResume(
 	t testing.TB,
 	ctx context.Context,
 	selected runScopedCatalogSelectedStore,
-	loaded runtimerunforkexecution.LoadedSelectedContractSource,
+	owner runtimerunforkexecution.SelectedContractExecutionOwner,
+	loader runtimerunforkexecution.SelectedContractSourceLoader,
 	selection runfork.RunForkContractSelection,
 	plan runfork.RunForkPlan,
 	agentRuntime runtimerunforkexecution.SelectedContractAgentRuntimeOptions,
 	sourceEventID, flowPath, entityID string,
 ) runfork.RunForkMaterialization {
 	t.Helper()
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
-		Plan: plan, Source: loaded.Source, ContractSelection: selection,
+	prepared, err := owner.Prepare(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: plan.SourceRunID, At: sourceEventID, ContractSelection: selection,
+		SourceLoader: loader, AgentRuntime: agentRuntime,
 	})
 	if err != nil {
-		t.Fatalf("admit selected-contract boot-resume frontier: %v", err)
+		t.Fatalf("prepare selected-contract boot-resume: %v", err)
 	}
-	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
-		Plan: plan, Source: loaded.Source, ContractSelection: selection, FrontierAdmission: frontier,
-	})
-	if err != nil {
-		t.Fatalf("admit selected-contract boot-resume route history: %v", err)
-	}
-	topology, err := runtimerunforkexecution.BuildSelectedContractRouteTopology(runtimerunforkexecution.SelectedContractRouteTopologyRequest{
-		Admission: frontier, RouteAdmission: routeAdmission,
-	})
-	if err != nil {
-		t.Fatalf("build selected-contract boot-resume route topology: %v", err)
-	}
-	model, err := runtimerunforkexecution.BuildSelectedContractExecutionModel(runtimerunforkexecution.SelectedContractExecutionModelRequest{
-		Admission: frontier, RouteAdmission: routeAdmission, RouteTopology: topology,
-	})
-	if err != nil || model.RecipientPlanning == nil {
-		t.Fatalf("build selected-contract boot-resume execution model: model=%#v err=%v", model, err)
-	}
-	managerOptions := agentRuntime.AgentManagerOptions
-	managerOptions.ExecutionPosture = agentRuntime.ExecutionPosture
-	if agentRuntime.Config != nil {
-		profile, err := agentRuntime.Config.LLMBackendProfile()
-		if err != nil {
-			t.Fatalf("resolve selected-contract boot-resume backend profile: %v", err)
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Errorf("close boot-resume preparation: %v", err)
 		}
-		managerOptions.LLMBackend = profile.ID
-	}
-	var eventIDs []string
-	for _, event := range model.RecipientPlanning.RecipientPlanEvents {
-		eventIDs = append(eventIDs, event.SourceEventID)
-	}
-	modes, err := selected.LoadRunForkSelectedContractSourceEventModes(ctx, plan.SourceRunID, eventIDs)
-	if err != nil || len(modes) != len(eventIDs) {
-		t.Fatalf("load selected-contract boot-resume source mode: %v, %v", modes, err)
-	}
-	sourceModes := make(map[string]executionmode.Mode, len(eventIDs))
-	for i, eventID := range eventIDs {
-		sourceModes[eventID] = modes[i]
-	}
-	readiness, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
-		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: selection,
-			SourceArtifactFact: loaded.SourceArtifactFact, EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-			FrontierAdmission: frontier, RecipientPlanning: *model.RecipientPlanning, SourceModes: sourceModes},
-		Source: loaded.Source, ModelOptions: managerOptions,
-	})
+	}()
+	request, err := prepared.MaterializationRequest()
 	if err != nil {
-		t.Fatalf("admit selected-contract boot-resume readiness: %v", err)
+		t.Fatal(err)
 	}
-	projection, err := readiness.Projection()
+	projection, err := request.Readiness.Projection()
 	if err != nil || len(projection.States) != 1 || projection.States[0].EntityID != entityID || projection.States[0].Route.InstancePath != flowPath || len(projection.States[0].Agents) == 0 {
 		t.Fatalf("admitted boot-resume readiness lacks exact template owner: %#v, %v", projection, err)
 	}
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
-	materialization, err := selected.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID:             plan.SourceRunID,
-		At:                      sourceEventID,
-		ContractSelection:       selection,
-		SourceArtifactFact:      loaded.SourceArtifactFact,
-		EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
-		FrontierAdmission:       frontier,
-		RouteTopology:           topology,
-		RecipientPlanning:       *model.RecipientPlanning,
-		Readiness:               readiness,
-	})
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, request.SourceArtifactFact)
+	materialization, err := selected.MaterializeRunForkForSelectedContractExecution(ctx, request)
 	if err != nil {
 		t.Fatalf("materialize selected-contract boot-resume crash boundary: %v", err)
 	}
