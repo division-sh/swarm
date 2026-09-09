@@ -317,7 +317,11 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	}
 	startupIndex, liveIndex, notifyIndex, emitIndex := -1, -1, -1, -1
 	startupSession, liveSession := "", ""
+	containerNames := map[string]string{}
 	for index, record := range records {
+		if record.Class == "container_create" && record.ContainerID != "" {
+			containerNames[record.ContainerID] = dockerOptionValue(record.Args, "--name")
+		}
 		if record.Class == "unexpected" {
 			return fmt.Errorf("strict Docker emulator observed an unexpected command: %#v", record.Args)
 		}
@@ -325,7 +329,7 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			if len(record.Args) != 3 {
 				return fmt.Errorf("invalid container removal evidence")
 			}
-			name := record.Args[len(record.Args)-1]
+			name := containerNames[record.Args[len(record.Args)-1]]
 			if _, provider := releaseProviderContainerBase(name); !provider {
 				return fmt.Errorf("release lifecycle replaced a workspace container between runless startup admission and live execution")
 			}

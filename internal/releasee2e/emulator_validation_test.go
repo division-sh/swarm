@@ -376,6 +376,24 @@ func TestReleaseEvidenceRejectsDuplicateClosureAttempts(t *testing.T) {
 			}
 		}
 	})
+	t.Run("provider disposal uses issued immutable object", func(t *testing.T) {
+		id := strings.Repeat("d", 64)
+		name := "swarm-" + releaseE2EFixtureScope + "-system-claude-" + strings.Repeat("e", 24)
+		for _, target := range []string{id, name, strings.Repeat("f", 64)} {
+			records := []fakeDockerRecord{
+				{Class: "container_create", ContainerID: id, Args: []string{"create", "--name", name}},
+				{Class: "container_remove", Args: []string{"rm", "--force", target}},
+			}
+			records = append(records, base...)
+			err := validateReleaseDockerEvidence(records)
+			if target == id && err != nil {
+				t.Fatalf("exact provider disposal rejected: %v", err)
+			}
+			if target != id && err == nil {
+				t.Fatalf("unissued or name-only provider target accepted: %q", target)
+			}
+		}
+	})
 	t.Run("terminal projection cleanup", func(t *testing.T) {
 		records := append(append([]fakeDockerRecord(nil), base...), fakeDockerRecord{Class: "container_remove", Args: []string{"rm", "--force", releaseE2EFixtureAgent}})
 		if err := validateReleaseDockerEvidence(records); err != nil {
@@ -384,8 +402,11 @@ func TestReleaseEvidenceRejectsDuplicateClosureAttempts(t *testing.T) {
 	})
 	t.Run("disposable provider cleanup", func(t *testing.T) {
 		for index := range base {
+			id := strings.Repeat("d", 64)
 			records := append([]fakeDockerRecord(nil), base[:index]...)
-			records = append(records, fakeDockerRecord{Class: "container_remove", Args: []string{"rm", "--force", releaseE2EFixtureAgent + "-claude-" + strings.Repeat("a", 24)}})
+			records = append(records,
+				fakeDockerRecord{Class: "container_create", ContainerID: id, Args: []string{"create", "--name", releaseE2EFixtureAgent + "-claude-" + strings.Repeat("a", 24)}},
+				fakeDockerRecord{Class: "container_remove", Args: []string{"rm", "--force", id}})
 			records = append(records, base[index:]...)
 			if err := validateReleaseDockerEvidence(records); err != nil {
 				t.Fatalf("isolated provider cleanup rejected: %v", err)

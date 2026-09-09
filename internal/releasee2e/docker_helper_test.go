@@ -77,15 +77,16 @@ type fakeDockerState struct {
 }
 
 type fakeDockerRecord struct {
-	Class      string   `json:"class"`
-	Args       []string `json:"args,omitempty"`
-	SessionID  string   `json:"session_id,omitempty"`
-	ToolName   string   `json:"tool_name,omitempty"`
-	ToolStatus string   `json:"tool_status,omitempty"`
-	MailboxID  string   `json:"mailbox_id,omitempty"`
-	RawMCPURL  string   `json:"raw_mcp_url,omitempty"`
-	MCPURL     string   `json:"mcp_url,omitempty"`
-	Reason     string   `json:"reason,omitempty"`
+	ContainerID string   `json:"container_id,omitempty"`
+	Class       string   `json:"class"`
+	Args        []string `json:"args,omitempty"`
+	SessionID   string   `json:"session_id,omitempty"`
+	ToolName    string   `json:"tool_name,omitempty"`
+	ToolStatus  string   `json:"tool_status,omitempty"`
+	MailboxID   string   `json:"mailbox_id,omitempty"`
+	RawMCPURL   string   `json:"raw_mcp_url,omitempty"`
+	MCPURL      string   `json:"mcp_url,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
 }
 
 type fakeClaudeInvocation struct {
@@ -953,7 +954,7 @@ func fakeDockerCreate(root string, args []string) int {
 		state.ContainerIDs[id] = name
 		state.Containers[name] = fakeDockerContainer{ID: id, Labels: labels}
 	})
-	recordFakeDocker(root, fakeDockerRecord{Class: "container_create", Args: redactDockerArgs(args)})
+	recordFakeDocker(root, fakeDockerRecord{Class: "container_create", ContainerID: id, Args: redactDockerArgs(args)})
 	fmt.Fprintln(os.Stdout, id)
 	return 0
 }

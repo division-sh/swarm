@@ -137,18 +137,7 @@ func (s *dockerClaudeState) CheckHead(ctx context.Context, head string) error {
 }
 
 func (s *dockerClaudeState) Release(ctx context.Context) error {
-	exists, _, err := s.manager.InspectContainer(ctx, s.container)
-	if err != nil || !exists {
-		return err
-	}
-	identity, present, err := s.manager.inspectRuntimeContainerIdentity(ctx, s.container)
-	if err != nil {
-		return err
-	}
-	if !present || !identity.Equal(s.identity) {
-		return fmt.Errorf("Claude state container ownership changed")
-	}
-	if _, err := s.manager.RunDocker(ctx, "rm", "--force", s.container); err != nil {
+	if err := s.manager.removeProjectionContainer(ctx, s.identity); err != nil {
 		return err
 	}
 	s.manager.projectionMu.Lock()
