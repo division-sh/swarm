@@ -3,11 +3,13 @@ package runtimepersistence
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -33,6 +35,12 @@ func prepareSelectedStoreMaterializationForTest(t *testing.T, ctx context.Contex
 	}
 	repo := canonicalrouting.RepoRoot(t)
 	owner := selectedStorePreparationOwnerForTest(t, selected)
+	if err := owner.BindSelectedProcess(ctx, work.process, capability); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
+		t.Fatal(err)
+	}
 	var hash string
 	if len(targetHash) > 0 {
 		hash = targetHash[0]

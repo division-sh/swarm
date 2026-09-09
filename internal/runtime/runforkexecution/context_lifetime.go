@@ -50,7 +50,7 @@ func (o SelectedContractExecutionOwner) beginPreparation(ctx context.Context) (*
 	if contexts.retired {
 		return nil, errors.Join(worklifetime.ErrRetired, op.Finish())
 	}
-	if contexts.process != nil && (!contexts.recovered || contexts.process != op.process) {
+	if contexts.process == nil || !contexts.recovered || contexts.process != op.process {
 		return nil, errors.Join(errors.New("selected preparation requires its reconciled process owner"), op.Finish())
 	}
 	if contexts.entries == nil {

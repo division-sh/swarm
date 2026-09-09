@@ -67,7 +67,7 @@ func TestPreparedSelectedForkReleasesInvalidSourceBeforeReturning(t *testing.T) 
 				}
 				return cleanupFailure
 			}
-			owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{contexts: new(selectedForkContexts)}}
+			owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{contexts: &selectedForkContexts{process: process, recovered: true}}}
 			prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{
 				SourceLoader: &fakeSelectedContractSourceLoader{loaded: loaded}, ContractSelection: testContractSelection(),
 			})

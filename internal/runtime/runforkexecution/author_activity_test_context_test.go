@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
@@ -47,8 +48,11 @@ func mustRunForkTestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
 }
 
 type runForkTestWorkFixture struct {
-	process *worklifetime.Process
-	runtime *worklifetime.RuntimeOccurrence
+	process      *worklifetime.Process
+	runtime      *worklifetime.RuntimeOccurrence
+	mu           sync.Mutex
+	capabilities map[startupownership.Store]startupownership.ProcessCapability
+	owners       map[startupownership.Store]SelectedContractExecutionOwner
 }
 
 var runForkTestWorkFixtures sync.Map

@@ -34,23 +34,17 @@ func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 					s := storetest.StartSQLiteRuntimeStore(t)
 					selected, db, authorityStore = s, storetest.Database(s), s
 					owner = selectedContractSQLiteExecutionOwnerForTest(t, s)
-					newOwner = func() SelectedContractExecutionOwner { return selectedContractSQLiteExecutionOwnerForTest(t, s) }
+					newOwner = func() SelectedContractExecutionOwner { return newSelectedContractSQLiteExecutionOwnerForTest(t, s) }
 				} else {
 					_, db, _ = testutil.StartPostgres(t)
 					s := storetest.AdmitPostgresRuntimeStore(t, db)
 					selected, authorityStore = s, s
 					owner = selectedContractExecutionOwnerForTest(t, s)
-					newOwner = func() SelectedContractExecutionOwner { return selectedContractExecutionOwnerForTest(t, s) }
+					newOwner = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 				}
 				ctx := runForkTestContext(t)
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				capability := selectedContractTestProcessCapability(t, ctx, authorityStore)
-				if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly)); err != nil {
-					t.Fatal(err)
-				}
 				root := runForkExecutionRepoRoot(t)
 				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: contracts.DefaultPlatformSpecFile(root)}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})

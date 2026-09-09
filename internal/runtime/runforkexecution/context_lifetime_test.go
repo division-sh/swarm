@@ -15,7 +15,7 @@ import (
 func contextLifetimeOwner(t *testing.T) (SelectedContractExecutionOwner, *worklifetime.Process, context.Context) {
 	t.Helper()
 	process := worklifetime.NewProcess()
-	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{contexts: new(selectedForkContexts)}}
+	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{contexts: &selectedForkContexts{process: process, recovered: true}}}
 	t.Cleanup(func() {
 		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 			t.Error(err)
@@ -196,7 +196,7 @@ func TestSelectedForkOperationRetireVersusBind(t *testing.T) {
 
 func TestSelectedForkContextCleanupPanicSettlesPossession(t *testing.T) {
 	process := worklifetime.NewProcess()
-	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{contexts: new(selectedForkContexts)}}
+	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{contexts: &selectedForkContexts{process: process, recovered: true}}}
 	op, err := owner.beginPreparation(worklifetime.WithProcess(context.Background(), process))
 	if err != nil {
 		t.Fatal(err)

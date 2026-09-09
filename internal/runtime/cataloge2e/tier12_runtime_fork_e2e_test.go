@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -196,8 +197,12 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 
 func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHarness, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
 	t.Helper()
+	if len(forkOverride) == 0 && len(h.selectedOwners) > 0 {
+		return h.selectedOwners[0]
+	}
 	if h.pg != nil {
 		owner := selectedContractExecutionOwnerForCatalogTest(t, h.db, h.pg, forkOverride...)
+		bindCatalogSelectedOwner(t, h, owner)
 		h.selectedOwners = append(h.selectedOwners, owner)
 		return owner
 	}
@@ -228,6 +233,7 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner(SQLite): %v", err)
 	}
+	bindCatalogSelectedOwner(t, h, owner)
 	h.selectedOwners = append(h.selectedOwners, owner)
 	t.Cleanup(func() {
 		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
@@ -235,6 +241,16 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 		}
 	})
 	return owner
+}
+
+func bindCatalogSelectedOwner(t testing.TB, h *runtimeHarness, owner runtimerunforkexecution.SelectedContractExecutionOwner) {
+	t.Helper()
+	if err := owner.BindSelectedProcess(h.ctx, h.processOwner, h.processTopology); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.RecoverSelectedForkContexts(h.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func selectedContractAgentRuntimeOptionsForCatalogHarness(h *runtimeHarness, cfg *config.Config) runtimerunforkexecution.SelectedContractAgentRuntimeOptions {
