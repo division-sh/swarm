@@ -895,35 +895,39 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 	if err != nil {
 		diagnosticCtx, diagnosticCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer diagnosticCancel()
+		collectGoldenFailureEvidence(diagnosticCtx, rpc, store.diagnosticDB, runID, func(part string, evidence any, partErr error) {
+			// Flush each part immediately; later failures cannot erase earlier facts.
+			encoded, encodeErr := json.Marshal(evidence)
+			t.Logf("golden completion failure evidence part=%s error=%v encode_error=%v: %s", part, partErr, encodeErr, encoded)
+		})
+		t.Fatalf("wait for golden run completion: %v; last run=%#v\nserve output:\n%s", err, last, process.output.String())
+	}
+}
+
+func collectGoldenFailureEvidence(ctx context.Context, rpc *releaseRPCClient, db *sql.DB, runID string, emit func(string, any, error)) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	collect := func(part string, read func(context.Context) (any, error)) {
+		partCtx, partCancel := context.WithTimeout(ctx, time.Second)
+		defer partCancel()
+		value, err := read(partCtx)
+		emit(part, value, err)
+	}
+	collect("diagnosis", func(ctx context.Context) (any, error) {
 		var diagnosis goldenDiagnosis
-		diagnosisErr := rpc.call(diagnosticCtx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
-		events, eventsErr := listGoldenEvents(diagnosticCtx, rpc, runID)
-		eventCounts := make(map[string]int)
-		deliveryCounts := make(map[string]int)
-		for _, event := range events {
-			eventCounts[event.EventName]++
-			for _, delivery := range event.Deliveries {
-				deliveryCounts[delivery.Status]++
-			}
-		}
-		entities := listGoldenEntities(t, diagnosticCtx, rpc, runID)
+		err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
+		return diagnosis, err
+	})
+	collect("events", func(ctx context.Context) (any, error) { return listGoldenEvents(ctx, rpc, runID) })
+	collect("entities", func(ctx context.Context) (any, error) { return readGoldenEntities(ctx, rpc, runID) })
+	collect("runtime_logs", func(ctx context.Context) (any, error) {
 		var logs struct {
 			Logs []map[string]any `json:"logs"`
 		}
-		logsErr := rpc.call(diagnosticCtx, "runtime.logs", map[string]any{"run_id": runID, "limit": 100, "order": "desc"}, &logs)
-		logCounts := make(map[string]int)
-		for _, log := range logs.Logs {
-			logCounts[fmt.Sprintf("%v/%v", log["component"], log["action"])]++
-		}
-		completion, completionErr := readGoldenCompletionCandidate(diagnosticCtx, store.diagnosticDB, runID)
-		// Preserve exact public facts before the disposable store is removed.
-		if evidence, encodeErr := json.Marshal(map[string]any{"events": events, "runtime_logs": logs.Logs}); encodeErr == nil {
-			t.Logf("golden completion failure public evidence: %s", evidence)
-		} else {
-			t.Logf("encode golden completion failure evidence: %v", encodeErr)
-		}
-		t.Fatalf("wait for golden run completion: %v; last run=%#v; completion=%#v completion_err=%v; diagnosis=%#v diagnosis_err=%v; event_counts=%#v delivery_counts=%#v events_err=%v; entities=%#v; runtime_log_counts=%#v logs_err=%v\nserve output:\n%s", err, last, completion, completionErr, diagnosis, diagnosisErr, eventCounts, deliveryCounts, eventsErr, entities, logCounts, logsErr, process.output.String())
-	}
+		err := rpc.call(ctx, "runtime.logs", map[string]any{"run_id": runID, "limit": 100, "order": "desc"}, &logs)
+		return logs.Logs, err
+	})
+	collect("completion", func(ctx context.Context) (any, error) { return readGoldenCompletionCandidate(ctx, db, runID) })
 }
 
 type goldenCompletionCandidate struct {
@@ -1017,11 +1021,11 @@ func listGoldenEvents(ctx context.Context, rpc *releaseRPCClient, runID string) 
 			NextCursor string        `json:"next_cursor"`
 		}
 		if err := rpc.call(ctx, "event.list", params, &page); err != nil {
-			return nil, err
+			return all, err
 		}
 		for _, event := range page.Events {
 			if strings.TrimSpace(event.EventID) == "" || event.RunID != runID || seenEvents[event.EventID] {
-				return nil, fmt.Errorf("event.list returned malformed or duplicate row %#v", event)
+				return all, fmt.Errorf("event.list returned malformed or duplicate row %#v", event)
 			}
 			seenEvents[event.EventID] = true
 			all = append(all, event)
@@ -1030,7 +1034,7 @@ func listGoldenEvents(ctx context.Context, rpc *releaseRPCClient, runID string) 
 			return all, nil
 		}
 		if seenCursors[page.NextCursor] {
-			return nil, fmt.Errorf("event.list repeated cursor %q", page.NextCursor)
+			return all, fmt.Errorf("event.list repeated cursor %q", page.NextCursor)
 		}
 		seenCursors[page.NextCursor] = true
 		cursor = page.NextCursor
@@ -1232,6 +1236,14 @@ func assertGoldenDeliveryTarget(t *testing.T, event goldenEvent, delivery golden
 
 func listGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string) []goldenEntitySummary {
 	t.Helper()
+	entities, err := readGoldenEntities(ctx, rpc, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entities
+}
+
+func readGoldenEntities(ctx context.Context, rpc *releaseRPCClient, runID string) ([]goldenEntitySummary, error) {
 	var all []goldenEntitySummary
 	cursor := ""
 	seenCursors := map[string]bool{}
@@ -1246,20 +1258,20 @@ func listGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClient
 			NextCursor string                `json:"next_cursor"`
 		}
 		if err := rpc.call(ctx, "entity.list", params, &page); err != nil {
-			t.Fatal(err)
+			return all, err
 		}
 		for _, entity := range page.Entities {
 			if entity.EntityID == "" || entity.RunID != runID || seenEntities[entity.EntityID] {
-				t.Fatalf("entity.list returned malformed or duplicate row %#v", entity)
+				return all, fmt.Errorf("entity.list returned malformed or duplicate row %#v", entity)
 			}
 			seenEntities[entity.EntityID] = true
 			all = append(all, entity)
 		}
 		if page.NextCursor == "" {
-			return all
+			return all, nil
 		}
 		if seenCursors[page.NextCursor] {
-			t.Fatalf("entity.list repeated cursor %q", page.NextCursor)
+			return all, fmt.Errorf("entity.list repeated cursor %q", page.NextCursor)
 		}
 		seenCursors[page.NextCursor] = true
 		cursor = page.NextCursor
