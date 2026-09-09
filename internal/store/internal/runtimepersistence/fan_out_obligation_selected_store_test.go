@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -1202,18 +1203,14 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 func TestRunForkFanOutMaterializationRetainsExactEntityRevisionSource(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	fixture := seedFanOutOwnerFixture(t, ctx, db, pg, true, 3, createdAt)
-	entityID := uuid.NewString()
+	ctx, fixture := seedDeclaredForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 3, createdAt)
+	entityID := fixture.runID
 	mutationID := uuid.NewString()
 	itemsJSON := `["entity-000","entity-001","entity-002"]`
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		) VALUES ($1::uuid,$2::uuid,'root/one','fan_out_fixture','queued','{}'::jsonb,$3::jsonb,'{}'::jsonb,'{}'::jsonb,1,$4,$4,$4)
+		UPDATE entity_state SET fields=$3::jsonb, updated_at=$4
+		WHERE run_id=$1::uuid AND entity_id=$2::uuid
 	`, fixture.runID, entityID, `{"items":`+itemsJSON+`}`, createdAt); err != nil {
 		t.Fatalf("seed entity fan-out state: %v", err)
 	}
@@ -1251,7 +1248,7 @@ func TestRunForkFanOutMaterializationRetainsExactEntityRevisionSource(t *testing
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, "fork.entity", events.EventProducerPlatform, "fork-test", "", "", createdAt.Add(time.Second))
 	captureRunForkTestRevision(t, db, fixture.runID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork entity source: %v", err)
 	}
@@ -1456,7 +1453,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				owner = store
 			}
 			createdAt := time.Now().UTC().Truncate(time.Microsecond)
-			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 5, createdAt)
+			ctx, fixture := seedDeclaredForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 5, createdAt)
 			ref, err := durabledata.ParseDeclarationRef(".", "fanout.items")
 			if err != nil {
 				t.Fatal(err)
@@ -1531,22 +1528,17 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if !postgres {
-				return
-			}
-			captureRunForkTestRevision(t, db, fixture.runID)
-			forkPointEventID := uuid.NewString()
-			seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, "fork.resource", events.EventProducerPlatform, "fork-test", "", "", createdAt.Add(3*time.Second))
-			captureRunForkTestRevision(t, db, fixture.runID)
+			captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
+			forkPointEventID := historicalLineageCheckpoint(t, db, fixture.runID, postgres, createdAt.Add(3*time.Second))
 			forkOwner := owner.(interface {
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 			})
-			materialized, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID})
+			materialized, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)})
 			if err != nil {
 				t.Fatalf("materialize resource fan-out fork: %v", err)
 			}
 			var childPins int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_version_pins WHERE run_id=$1::uuid AND version_id=$2`, materialized.ForkRunID, imported.Candidate.VersionID).Scan(&childPins); err != nil || childPins != 1 {
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_version_pins WHERE run_id=$1 AND version_id=$2`, materialized.ForkRunID, imported.Candidate.VersionID).Scan(&childPins); err != nil || childPins != 1 {
 				t.Fatalf("fork resource pins = %d err=%v, want 1", childPins, err)
 			}
 			_, childClaim, found, err := claimFanOutForRun(t, ctx, owner, materialized.ForkRunID, fixture.bundleHash, createdAt.Add(4*time.Second))
@@ -1564,22 +1556,42 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	fixture := seedFanOutOwnerFixture(t, ctx, db, pg, true, 2, createdAt)
+	ctx, fixture := seedDeclaredForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 2, createdAt)
 	captureRunForkTestRevision(t, db, fixture.runID)
 	forkPointEventID := uuid.NewString()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, "fork.selected-bundle", events.EventProducerPlatform, "fork-test", "", "", createdAt.Add(time.Second))
 	captureRunForkTestRevision(t, db, fixture.runID)
 
-	targetArtifact := storeTestSourceArtifact("fan-out-selected-fork-target")
+	targetRoot := canonicalrouting.CopyForkFanOutCarrier(t, false, false)
+	schemaPath := filepath.Join(targetRoot, "schema.yaml")
+	schema, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(schemaPath, append(schema, []byte("\n# Semantically unchanged replacement bundle.\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	targetBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, targetRoot, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetArtifact := targetBundle.SourceArtifact
 	targetHash := targetArtifact.BundleHash()
+	if targetHash == fixture.bundleHash {
+		t.Fatal("replacement proof requires distinguishable source artifacts")
+	}
+	targetPlans := semanticview.Wrap(targetBundle).FanOutPlansForHandler(mustPersistenceRootNode("fan-out-source"), "items.ready")
+	if len(targetPlans) != 1 {
+		t.Fatal("replacement must carry the exact compiled fan-out declaration")
+	}
 	seedStoreTestPersistedArtifact(t, db, targetArtifact)
 	targetSource, err := runtimecorrelation.NewSourceArtifactFact(targetHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource}
+	base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)}
 	if _, err := pg.MaterializeRunFork(ctx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
 		t.Fatalf("missing selected fan-out proof error = %v", err)
 	}
@@ -1597,7 +1609,7 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 		t.Fatalf("forks after rejected selected proofs = %d err=%v", prematureForks, err)
 	}
 	matching := changed
-	matching.FanOutPlanRefs[0].SemanticDigest = "sha256:" + strings.Repeat("2", 64)
+	matching.FanOutPlanRefs = []runtimecontracts.FanOutPlanRef{targetPlans[0].Ref}
 	materialized, err := pg.MaterializeRunFork(ctx, matching)
 	if err != nil {
 		t.Fatalf("materialize semantically unchanged selected fan-out: %v", err)
