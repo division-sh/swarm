@@ -34,7 +34,7 @@ func TestServedForkAbsentSourceIngressBothStores(t *testing.T) {
 				t.Fatalf("ordinary API admission was not absent-source: %s %s", kind, sourceRoute)
 			}
 			before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
-			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "confirm_source_freeze": true, "idempotency_key": "absent-source-fork"}
+			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "allow_source_freeze": true, "idempotency_key": "absent-source-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 			if fork.ExecutedEventCount != 1 || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
