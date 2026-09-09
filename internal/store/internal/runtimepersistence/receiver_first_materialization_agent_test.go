@@ -39,7 +39,7 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 				if name == "" {
 					name = "node-only-control"
 				}
-				for _, settlement := range []string{"failed", "missing", "retry_cancel", "terminal_race"} {
+				for _, settlement := range []string{"failed", "missing", "retry_cancel", "terminal_race", "rollback_retry"} {
 					if agent == "competing-materializers" && settlement != "failed" {
 						continue
 					}
@@ -128,12 +128,30 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 							}
 						}
 						command := plans[0].(bus.EnginePublicationPlan).PublicationCommand()
+						if agent == "renamed-observer" {
+							command.Commit.DeliveryRoutes = append([]events.DeliveryRoute(nil), routes...)
+							for i, j := 0, len(routes)-1; i < j; i, j = i+1, j-1 {
+								command.Commit.DeliveryRoutes[i], command.Commit.DeliveryRoutes[j] = command.Commit.DeliveryRoutes[j], command.Commit.DeliveryRoutes[i]
+							}
+						}
 						store := fixture.store.(interface {
 							CommitPublication(context.Context, bus.PublicationCommand) (bus.CommittedPublication, error)
 							deliverylifecycle.Store
 						})
 						if _, err := store.CommitPublication(ctx, command); err != nil {
 							t.Fatalf("commit actual prepared receiver publication: %v", err)
+						}
+						duplicate := command
+						duplicate.Commit.DeliveryRoutes = append([]events.DeliveryRoute(nil), command.Commit.DeliveryRoutes...)
+						for i, j := 0, len(duplicate.Commit.DeliveryRoutes)-1; i < j; i, j = i+1, j-1 {
+							duplicate.Commit.DeliveryRoutes[i], duplicate.Commit.DeliveryRoutes[j] = duplicate.Commit.DeliveryRoutes[j], duplicate.Commit.DeliveryRoutes[i]
+						}
+						beforeDuplicate := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+						if _, err := store.CommitPublication(ctx, duplicate); err != nil {
+							t.Fatalf("recipient permutation changed duplicate identity: %v", err)
+						}
+						if !reflect.DeepEqual(beforeDuplicate, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+							t.Fatal("reordered duplicate changed receiver obligations or history")
 						}
 						admitted := command.Commit.Event.Event()
 						var nodeRoute, agentRoute events.DeliveryRoute
@@ -187,6 +205,40 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 						}
 						wantReason := "receiver_materialization_terminal"
 						switch settlement {
+						case "rollback_retry":
+							dependentID := mustReceiverDeliveryID(t, admitted.ID(), agentRoute)
+							var original []byte
+							if err := fixture.db.QueryRowContext(ctx, `SELECT receiver_materialization_plan FROM event_deliveries WHERE delivery_id=$1`, dependentID).Scan(&original); err != nil {
+								t.Fatal(err)
+							}
+							var corrupt map[string]json.RawMessage
+							if err := json.Unmarshal(original, &corrupt); err != nil {
+								t.Fatal(err)
+							}
+							corrupt["run_id"], _ = json.Marshal(uuid.NewString())
+							bad, err := json.Marshal(corrupt)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if _, err := fixture.db.ExecContext(ctx, `UPDATE event_deliveries SET receiver_materialization_plan=$1 WHERE delivery_id=$2`, string(bad), dependentID); err != nil {
+								t.Fatal(err)
+							}
+							terminal := deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "test_materializer_failed", Failure: &failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()}
+							beforeSettlement := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+							if _, err := store.SettleFailure(ctx, claimed.Claim, terminal); err == nil {
+								t.Fatal("terminal settlement accepted contradictory dependent evidence")
+							}
+							if !reflect.DeepEqual(beforeSettlement, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+								t.Fatal("failed dependent validation partially committed materializer settlement")
+							}
+							// Restore only the injected corruption, then retry the same
+							// still-current claim through the ordinary settlement owner.
+							if _, err := fixture.db.ExecContext(ctx, `UPDATE event_deliveries SET receiver_materialization_plan=$1 WHERE delivery_id=$2`, string(original), dependentID); err != nil {
+								t.Fatal(err)
+							}
+							if _, err := store.SettleFailure(ctx, claimed.Claim, terminal); err != nil {
+								t.Fatalf("retry settlement after fault removal: %v", err)
+							}
 						case "terminal_race":
 							var workers sync.WaitGroup
 							start := make(chan struct{})
