@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -176,7 +177,7 @@ func TestRunExecutionOwnershipBothStores(t *testing.T) {
 			if _, found, err := ports.LoadAgentLifecycleState(ctx, declaredIdentity); err != nil || found {
 				t.Fatalf("rejected selected declaration created lifecycle: %v %v", found, err)
 			}
-			if _, err := selected.CommitAgentLifecycleTransition(ctx, mutation); err != nil {
+			if _, err := commitSelectedLifecycleBehindStoryBarrier(t, ctx, db, sqlite, selected, mutation); err != nil {
 				t.Fatalf("selected declaration lifecycle: %v", err)
 			}
 			persisted, found, err := ports.LoadAgentLifecycleState(ctx, declaredIdentity)
@@ -204,6 +205,73 @@ func TestRunExecutionOwnershipBothStores(t *testing.T) {
 			}
 		})
 	}
+}
+
+func commitSelectedLifecycleBehindStoryBarrier(t *testing.T, parent context.Context, db *sql.DB, sqlite bool, grant startupownership.GenerationGrant, mutation manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {
+	t.Helper()
+	if sqlite {
+		return grant.CommitAgentLifecycleTransition(parent, mutation)
+	}
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+	holder, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+	var sequence int64
+	if err := holder.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id=1 FOR UPDATE`).Scan(&sequence); err != nil {
+		t.Fatal(err)
+	}
+	type outcome struct {
+		result manager.AgentLifecycleTransitionResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := grant.CommitAgentLifecycleTransition(ctx, mutation)
+		done <- outcome{result, err}
+	}()
+	joined := false
+	defer func() {
+		cancel()
+		_ = holder.Rollback()
+		if !joined {
+			<-done
+		}
+	}()
+	// Observe the actual blocked SQL statement, never infer entry from elapsed
+	// time. NOWAIT below makes the inverse lock order fail deterministically.
+	for {
+		select {
+		case result := <-done:
+			joined = true
+			t.Fatalf("lifecycle did not reach the held story lock: %v", result.err)
+		default:
+		}
+		var waiting bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+			AND pid<>pg_backend_pid() AND wait_event_type='Lock'
+			AND query LIKE '%SELECT last_sequence FROM author_activity_order%'
+		)`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		runtime.Gosched()
+	}
+	var runID string
+	if err := holder.QueryRowContext(ctx, `SELECT run_id FROM runs WHERE run_id=$1 FOR UPDATE NOWAIT`, mutation.Identity.RunID).Scan(&runID); err != nil {
+		t.Fatalf("lifecycle acquired run ownership before the held author-activity order: %v", err)
+	}
+	if err := holder.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	result := <-done
+	joined = true
+	return result.result, result.err
 }
 
 func emptySelectedDeclarationForTest(t *testing.T, db *sql.DB, runID string) agenttopology.SelectedDeclarationPlan {

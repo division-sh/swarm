@@ -398,11 +398,11 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	if err := AuthorizeRetainedGrantLifecycleTx(ctx, tx, req, false); err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
 	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if err := AuthorizeRetainedGrantLifecycleTx(ctx, tx, req, false); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	effects := privaterunforkrevision.NewEffects()
@@ -430,11 +430,11 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	if err := AuthorizeRetainedGrantLifecycleTx(ctx, tx, req, true); err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
 	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectSQLite)
 	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if err := AuthorizeRetainedGrantLifecycleTx(ctx, tx, req, true); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	effects := privaterunforkrevision.NewEffects()

@@ -12892,6 +12892,7 @@ platform_tables:
       Runtime source tables remain authoritative for execution outcomes. This journal MUST NOT reinterpret those outcomes.
     transaction_contract:
       - A story-bearing outer transaction MUST lock author_activity_order singleton_id=1 before any domain lock or domain database action.
+      - Agent lifecycle mutations, including retained selected-fork grant authorization and deferred termination, acquire that story lock before locking the run or selected execution. Authorization still precedes every domain mutation in the same transaction; it cannot invert the story/run order or be moved outside the transaction.
       - Nested registered producers MUST join the exact outer transaction and draft batch. A registered producer reached through a raw transaction without the story context MUST fail closed.
       - Source transitions, story rows, and counter advancement MUST commit or roll back atomically.
       - Sequence ranges MUST be assigned only while the singleton is locked. BIGSERIAL, allocation-order cursors, timestamps, UUID order, post-commit appends, and fallback readers are forbidden.
