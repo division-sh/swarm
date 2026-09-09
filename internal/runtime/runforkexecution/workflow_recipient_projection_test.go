@@ -153,7 +153,7 @@ func TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence(
 			}
 		})
 	}
-	for _, name := range []string{"foreign root entity", "missing event identity", "missing routing authority", "duplicate source event"} {
+	for _, name := range []string{"foreign root entity", "missing event identity", "activity missing routing authority", "duplicate source event"} {
 		t.Run(name, func(t *testing.T) {
 			e := event
 			switch name {
@@ -161,7 +161,8 @@ func TestSelectedContractWorkflowRecipientProjectionRequiresExactCorrespondence(
 				e.RoutingSource = eventtest.RootRoutingSource("other-entity")
 			case "missing event identity":
 				e.SourceEventID = ""
-			case "missing routing authority":
+			case "activity missing routing authority":
+				e.EventName = runfork.RunForkSelectedContractPlatformActivityEvent
 				e.RoutingSource = events.NoRoutingSource()
 			}
 			inputs := []runfork.RunForkSelectedContractSourceEvent{e}

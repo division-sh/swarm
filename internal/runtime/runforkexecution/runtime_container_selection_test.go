@@ -52,15 +52,37 @@ func TestSelectedContractSourceProjectionPreservesProducerRoutingAcrossDifferent
 	}
 }
 
-func TestSelectedContractSourceProjectionRejectsMissingProducerRoutingAuthority(t *testing.T) {
+func TestSelectedContractActivityProjectionRejectsMissingProducerRoutingAuthority(t *testing.T) {
 	_, _, err := projectSelectedContractSourceEvents(
 		"source-run", testWorkflowRecipientRoot(t),
 		[]runfork.RunForkSelectedContractSourceEvent{{
-			SourceEventID: "source-event", EventName: "work.ready", RoutingSource: events.NoRoutingSource(),
+			SourceEventID: "source-event", EventName: runfork.RunForkSelectedContractPlatformActivityEvent, RoutingSource: events.NoRoutingSource(),
 		}},
 	)
 	if err == nil || !strings.Contains(err.Error(), "persisted producer routing authority") {
 		t.Fatalf("missing producer routing error = %v", err)
+	}
+}
+
+func TestSelectedContractSourceProjectionPreservesAdmittedAbsence(t *testing.T) {
+	input := []runfork.RunForkSelectedContractSourceEvent{{
+		SourceEventID: "source-event", EventName: "work.ready", RoutingSource: events.NoRoutingSource(), ExecutionMode: executionmode.Live,
+	}}
+	projected, projection, err := projectSelectedContractSourceEvents("source-run", testWorkflowRecipientRoot(t), input)
+	if err != nil || !reflect.DeepEqual(projected, input) {
+		t.Fatalf("ordinary source absence changed: projected=%#v err=%v", projected, err)
+	}
+	recipient := testNodeFrontierRecipient(mustRunForkRootNode("test-node"), "work.ready", ".", "subscription")
+	bound, err := projection.BindRecipient("source-event", recipient)
+	if err != nil || bound.Path != "fork-run" {
+		t.Fatalf("admitted independent receiver = %#v, %v", bound, err)
+	}
+	event, err := selectedContractForkEvent("source-run", "fork-run", "fork-event", projected[0], runfork.RunForkSelectedContractExecutionOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !event.RoutingSource().Empty() || !event.SourceRoute().Empty() || event.HasTargetRoute() || len(event.TargetRoutes()) != 0 {
+		t.Fatal("ordinary absence acquired producer or historical receiver authority")
 	}
 }
 
