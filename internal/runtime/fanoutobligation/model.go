@@ -191,7 +191,9 @@ func (r IntentRequest) Validate() error {
 	if r.Source.Kind == SourceEventPayloadField && strings.TrimSpace(r.Source.EventID) != strings.TrimSpace(r.Capsule.Lineage.ParentEventID) {
 		return errors.New("fan-out payload source must be the exact triggering event")
 	}
-	if r.Source.Kind == SourceEntityField && strings.TrimSpace(r.Source.EntityID) != strings.TrimSpace(r.Capsule.EntityID) {
+	// A same-run capture reads the executing entity. A retained ancestor source
+	// remains immutable; its exact revision and lineage are admitted by the reader.
+	if r.Source.Kind == SourceEntityField && r.Source.RunID == r.Key.RunID && strings.TrimSpace(r.Source.EntityID) != strings.TrimSpace(r.Capsule.EntityID) {
 		return errors.New("fan-out entity source must be the exact selected execution entity")
 	}
 	if r.Cardinality < 0 {

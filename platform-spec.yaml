@@ -3688,13 +3688,22 @@ handler_specification:
           terminality or generation supersession. Startup, multiprocess serving, destructive reset, diagnostics, and
           global-work accounting consume this same owner.
         fork: >-
-          fan_out_obligations is a closed fixed-revision family. A child inherits exact capsule, source, cardinality,
+          fan_out_obligations is a closed fixed-revision family. A child inherits frozen capsule data, source, cardinality,
           cursor, terminal prefix, and exact delivery-barrier state at the selected revision, resets operational
           claim/tuning facts, and never reissues the prefix. An armed barrier resumes against the child-local intent;
           closed-unfired work receives one child-local schedule; fired, dead-lettered, and suppressed states remain
           terminal. Same-contract and selected-contract execution require the same stable element identity and semantic
           digest. Unsupported historical prefix work, a missing retained source artifact, or digest disagreement fails closed;
           source event and delivery rows are never copied.
+          Capsule node/declaration, handler, current state, chain depth, ancestor lineage and all frozen business,
+          computed and state maps retain their exact values. Only execution entity/route, typed producer source,
+          delivery target ownership and declared loop generation project to the child through the canonical
+          source/entity ownership and generation owners. Producer and receiver roles are independently validated;
+          absent ownership cannot be replaced by the source entity. Non-root entities retain their owner. Barrier
+          registration and child schedules consume the same projected executable coordinates. A retained entity-field
+          source keeps its exact ancestor run/entity/mutation reference; it is not renamed to the child execution
+          entity. Reading it requires exact retained revision and ancestor-lineage proof. Same-run captures still
+          require the executing entity. Repeat projection changes neither source history nor frozen business values.
     join:
       field: join
       type: object

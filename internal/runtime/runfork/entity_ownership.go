@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
 type EntityIdentity struct {
@@ -16,6 +17,50 @@ type EntityIdentity struct {
 type EntityProjection struct {
 	Source EntityIdentity
 	Fork   EntityIdentity
+}
+
+// ProjectExecutionRoute preserves declaration scope and only replaces the exact
+// admitted root execution coordinate. Entity and producer ownership are separate.
+func ProjectExecutionRoute(sourceRunID, forkRunID, flowID string, route flowidentity.Route) (flowidentity.Route, error) {
+	if sourceRunID == "" || forkRunID == "" || sourceRunID == forkRunID || !route.Valid() || route.ScopeKey != flowID {
+		return route, fmt.Errorf("fork execution route requires exact runs and declaration scope")
+	}
+	if flowID != "." {
+		if route.InstancePath == sourceRunID || route.InstancePath == forkRunID {
+			return route, fmt.Errorf("non-root execution route cannot use root ownership")
+		}
+		return route, nil
+	}
+	if (route.InstancePath != sourceRunID && route.InstancePath != forkRunID) || route.InstanceID != route.InstancePath {
+		return route, fmt.Errorf("root execution route contradicts the admitted runs")
+	}
+	route.InstanceID, route.InstancePath = forkRunID, forkRunID
+	return route, nil
+}
+
+// ProjectProducerOwnership consumes typed source authority without interpreting
+// receiver state or immutable source lineage.
+func ProjectProducerOwnership(sourceRunID, forkRunID string, source events.RoutingSource) (events.RoutingSource, error) {
+	if sourceRunID == "" || forkRunID == "" || sourceRunID == forkRunID {
+		return source, fmt.Errorf("producer projection requires distinct source and child runs")
+	}
+	if source.Empty() {
+		return source, nil
+	}
+	route := source.Route()
+	root := source.Kind() == events.RoutingSourceRoot ||
+		(source.Kind() == events.RoutingSourceExternalIngress && (route.EntityID == sourceRunID || route.EntityID == forkRunID))
+	if root {
+		if route.EntityID != sourceRunID && route.EntityID != forkRunID {
+			return source, fmt.Errorf("root producer belongs to neither admitted run")
+		}
+		route.EntityID = forkRunID
+		return events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode())
+	}
+	if route.EntityID == sourceRunID || route.EntityID == forkRunID {
+		return source, fmt.Errorf("non-root producer cannot own the root entity")
+	}
+	return source, nil
 }
 
 // ProjectEntityOwnership changes only the canonical root coordinate. A copied
@@ -61,27 +106,14 @@ func ProjectSelectedContractSourceEvent(sourceRunID, forkRunID string, event Run
 		}
 		return event, nil
 	}
-	source := event.RoutingSource
+	source, err := ProjectProducerOwnership(sourceRunID, forkRunID, event.RoutingSource)
+	if err != nil {
+		return event, err
+	}
+	event.RoutingSource = source
 	route := source.Route()
 	root := source.Kind() == events.RoutingSourceRoot ||
 		(source.Kind() == events.RoutingSourceExternalIngress && (route.EntityID == sourceRunID || route.EntityID == forkRunID))
-	if root {
-		if route.EntityID != sourceRunID && route.EntityID != forkRunID {
-			return event, fmt.Errorf("selected-contract root source event %s belongs to neither admitted run", event.SourceEventID)
-		}
-		projection, err := ProjectEntityOwnership(sourceRunID, forkRunID, sourceRunID, sourceRunID)
-		if err != nil {
-			return event, err
-		}
-		route.EntityID = projection.Fork.EntityID
-		source, err = events.RestoreRoutingSource(source.Kind().StorageCode(), route, source.Authority().StorageCode())
-		if err != nil {
-			return event, fmt.Errorf("project selected-contract root producer: %w", err)
-		}
-		event.RoutingSource = source
-	} else if route.EntityID == sourceRunID || route.EntityID == forkRunID {
-		return event, fmt.Errorf("selected-contract non-root source event %s cannot own the root entity", event.SourceEventID)
-	}
 	if event.EventName != RunForkSelectedContractPlatformActivityEvent {
 		return event, nil
 	}
