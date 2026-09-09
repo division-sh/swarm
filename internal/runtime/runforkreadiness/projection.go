@@ -176,6 +176,10 @@ func Project(
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].EntityID < out[j].EntityID })
 	prepared.States = out
+	prepared.Blueprints, err = PreparedActorCensus(prepared.Blueprints)
+	if err != nil {
+		return nil, err
+	}
 	return prepared, nil
 }
 

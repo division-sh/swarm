@@ -28,7 +28,7 @@ func receiverExecutionReadyTx(ctx context.Context, tx *sql.Tx, route events.Deli
 	if err := AuthorizeReceiverExecutionTx(ctx, tx, state, sqlite); err != nil {
 		return false, err
 	}
-	// Grant authorization acquires the run fence used by lifecycle mutations.
+	// Grant authorization holds the shared mutation fence through claim commit.
 	// Recheck and lock the cell afterwards so retirement/replacement cannot race
 	// a claim based on the earlier read-only readiness observation.
 	current, entityID, found, err := loadAgentLifecycleState(ctx, tx, route.AgentIdentity, sqlite, true)
@@ -97,7 +97,7 @@ func ReceiverExecutionReady(ctx context.Context, q rowQueryer, route events.Deli
 // AuthorizeReceiverExecutionTx uses the same durable execution fence as lifecycle
 // mutations. A ready projection alone never grants selected or normal execution.
 func AuthorizeReceiverExecutionTx(ctx context.Context, tx *sql.Tx, state manager.AgentLifecycleState, sqlite bool) error {
-	return AuthorizeRetainedGrantLifecycleTx(ctx, tx, manager.AgentLifecycleTransition{
+	return AuthorizeGenerationMutationTx(ctx, tx, manager.AgentLifecycleTransition{
 		Identity: state.Identity, ProcessBinding: state.ProcessBinding,
 	}, sqlite)
 }
