@@ -104,7 +104,6 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 				Store:      store.name,
 				Dev:        test.dev,
 				APIPort:    freeReleaseTCPPort(t),
-				MCPPort:    freeReleaseTCPPort(t),
 				TokenFile:  tokenFile,
 				Token:      goldenAPIToken,
 				Env:        env,
@@ -236,7 +235,6 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 
 	apiPort := freeReleaseTCPPort(t)
-	mcpPort := freeReleaseTCPPort(t)
 	start := func(dev bool) *releaseServeProcess {
 		return startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath,
@@ -246,7 +244,6 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 			Store:      store.name,
 			Dev:        dev,
 			APIPort:    apiPort,
-			MCPPort:    mcpPort,
 			TokenFile:  tokenFile,
 			Token:      goldenAPIToken,
 			Env:        env,
@@ -326,7 +323,6 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 				Source:     contracts,
 				Dev:        true,
 				APIPort:    freeReleaseTCPPort(t),
-				MCPPort:    freeReleaseTCPPort(t),
 				TokenFile:  "api-token",
 				Token:      goldenAPIToken,
 				Env:        env,
@@ -386,7 +382,6 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			WorkingDir: invocationRoot,
 			Source:     contracts,
 			APIPort:    freeReleaseTCPPort(t),
-			MCPPort:    freeReleaseTCPPort(t),
 			TokenFile:  "api-token",
 			Token:      goldenAPIToken,
 			Env:        invocationEnv,
@@ -412,7 +407,6 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			Source:     contracts,
 			Dev:        true,
 			APIPort:    freeReleaseTCPPort(t),
-			MCPPort:    freeReleaseTCPPort(t),
 			TokenFile:  "api-token",
 			Token:      goldenAPIToken,
 			Env:        projectEnv,
@@ -575,7 +569,6 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		t.Fatalf("golden release verify result is not canonical success: err=%v output=%s", err, verify.output)
 	}
 	apiPort := freeReleaseTCPPort(t)
-	mcpPort := freeReleaseTCPPort(t)
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath,
@@ -584,7 +577,6 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 			Source:     contractsOperand,
 			Store:      store.name,
 			APIPort:    apiPort,
-			MCPPort:    mcpPort,
 			TokenFile:  tokenOperand,
 			Token:      goldenAPIToken,
 			Env:        env,

@@ -124,7 +124,6 @@ func prepareFullLifecycleProject(t *testing.T, binary, root string, store golden
 		Store:      store.name,
 		Dev:        dev,
 		APIPort:    freeReleaseTCPPort(t),
-		MCPPort:    freeReleaseTCPPort(t),
 		TokenFile:  "api-token",
 		Token:      fullLifecycleAPIToken,
 		Env:        env,
