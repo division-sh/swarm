@@ -10405,6 +10405,13 @@ tool_model:
       ack.mode: >
         Both modes consume the same committed inbound_publications operation, immutable ordered event batch, and each
         event's immutable commit-time recipient-manifest fingerprint.
+        Recipient manifests use the existing complete DeliveryRoute normalization and exact-identity deduplication.
+        Precompute each normalized route's complete JSON wire bytes, order those bytes lexicographically, encode that
+        ordered JSON array, and apply the existing SHA256 fingerprint. All encoded route fields participate, including
+        full agent identity, target ownership, delivery context, payload projection, and connect execution claim.
+        Input or database readback order must not affect this identity. Nil and empty route sets encode as [].
+        Marshal errors remain fail-closed; exact-slot/projection contradiction validation remains separately authoritative.
+        No route may be dropped, nor any encoded field omitted, to reconcile a manifest mismatch.
         `after_publish` returns after normal post-commit dispatch/reconciliation completes. `durable_before_dispatch` returns
         after the parent, all child memberships, evidence event, executable events, recipient manifests, subscribed replay
         scopes, deliveries, receipts, and counters commit atomically, without waiting for post-commit pipeline dispatch,
