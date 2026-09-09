@@ -57,16 +57,21 @@ func ResolveNonConnectFlowInputProducerWithOptions(source Source, flowID, eventT
 		return out
 	}
 
+	census := BuildAuthoredEventEndpointCensus(source)
+	var pins []runtimecontracts.CompiledFlowInputPin
+	if isInputEvent {
+		pins = flowInputPinsForEvent(source, census, flowID, eventType)
+	}
 	if isInputEvent && !opts.AllowNonInputEvent {
-		appendBoundaryIngressEvidence(source, flowID, eventType, opts, appendEvidence)
+		appendBoundaryIngressEvidence(pins, flowID, eventType, opts, appendEvidence)
 	} else {
 		appendExternalMetadataEvidence(source, flowID, eventType, appendEvidence)
 	}
 	if isInputEvent {
-		appendHarnessInputEvidence(source, flowID, eventType, appendEvidence)
+		appendHarnessInputEvidence(pins, flowID, eventType, appendEvidence)
 	}
 	appendPlatformSourceEvidence(source, flowID, eventType, appendEvidence)
-	appendInternalTopologyEvidence(source, flowID, eventType, appendEvidence)
+	appendInternalTopologyEvidence(census, flowID, eventType, appendEvidence)
 
 	sort.SliceStable(out.Evidence, func(i, j int) bool {
 		left := flowInputProducerEvidenceSortKey(out.Evidence[i])
@@ -76,7 +81,7 @@ func ResolveNonConnectFlowInputProducerWithOptions(source Source, flowID, eventT
 	return out
 }
 
-func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
+func appendBoundaryIngressEvidence(pins []runtimecontracts.CompiledFlowInputPin, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	if flowID == "." && !opts.AllowNonInputEvent {
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerBoundaryExternalIngress,
@@ -85,7 +90,7 @@ func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts
 		})
 		return
 	}
-	for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
+	for _, pin := range pins {
 		if pin.Source() != runtimecontracts.FlowInputPinSourceExternal {
 			continue
 		}
@@ -98,8 +103,8 @@ func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts
 	}
 }
 
-func appendHarnessInputEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
+func appendHarnessInputEvidence(pins []runtimecontracts.CompiledFlowInputPin, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
+	for _, pin := range pins {
 		if pin.Source() != runtimecontracts.FlowInputPinSourceHarness {
 			continue
 		}
@@ -150,8 +155,7 @@ func appendExternalMetadataEvidence(source Source, flowID, eventType string, app
 	})
 }
 
-func appendInternalTopologyEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	census := BuildAuthoredEventEndpointCensus(source)
+func appendInternalTopologyEvidence(census AuthoredEventEndpointCensus, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	for _, endpoint := range census.MatchingProducers(flowID, eventType) {
 		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform {
 			continue
@@ -166,11 +170,11 @@ func appendInternalTopologyEvidence(source Source, flowID, eventType string, app
 	}
 }
 
-func flowInputPinsForEvent(source Source, flowID, eventType string) []runtimecontracts.CompiledFlowInputPin {
+func flowInputPinsForEvent(source Source, census AuthoredEventEndpointCensus, flowID, eventType string) []runtimecontracts.CompiledFlowInputPin {
 	if source == nil || eventidentity.Normalize(eventType) == "" {
 		return nil
 	}
-	association := BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, eventType)
+	association := census.ResolveDeclaredInputEndpoint(flowID, eventType)
 	endpoint, ok := association.Endpoint()
 	if !ok {
 		return nil
