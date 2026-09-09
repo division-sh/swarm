@@ -42,7 +42,11 @@ func TestSelectedContractOperationLifetime(t *testing.T) {
 	if owner, ok := worklifetime.OccurrenceFromContext(operation.Context()); !ok || owner != operation.selected {
 		t.Fatal("operation lost exact selected occurrence")
 	}
-	if err := operation.selected.WaitForQuiescence(context.Background()); err != nil {
+	// No finite work exists: even an already-cancelled waiter must succeed.
+	// Counting orchestration as finite work must fail here, not self-join.
+	quiescent, stopWaiting := context.WithCancel(context.Background())
+	stopWaiting()
+	if err := operation.selected.WaitForQuiescence(quiescent); err != nil {
 		t.Fatal(err)
 	}
 	if err := operation.Bind(identity); err == nil {
