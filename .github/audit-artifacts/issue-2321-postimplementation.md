@@ -12,8 +12,13 @@ live proof has now executed successfully on both stores, with failed attempts
 retained below. This is the consolidated current claim;
 dated progress artifacts retain historical failures and receipts, not competing
 current contracts. This audit is posted as a PR comment alongside separate #2432
-and #2439 proof tables. The final documentation-only commit does not alter the
-qualified executable/test/spec tree.
+and #2439 proof tables. Final head accounting: after qualification, audit documents
+changed and CI identified two gofmt alignment omissions in internal/serveapp/main.go.
+Applying gofmt changes whitespace only; comparing that file to gofmt of the
+qualified source is byte-identical. No executable tokens, test or spec changed.
+The initial CI static failure remains recorded, not called a passing CI run.
+After formatting, repo-wide gofmt reports no files; go build ./..., go vet ./...,
+OpenRPC --check and the remote canonical-routing tracker check all pass locally.
 
 ## Boundary And Authority
 

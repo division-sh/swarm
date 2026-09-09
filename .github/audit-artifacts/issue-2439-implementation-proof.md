@@ -5,7 +5,10 @@ Gate: https://github.com/division-sh/swarm/issues/2439#issuecomment-5602701049.
 This supplements the reviewer-completed pre-implementation audit on #2439; it
 does not ask for a new gate. Final integrated full-profile swarm-test passed at
 qualifying HEAD 1f5680f25bdb7fc988ac5e74a9c8bb27c1698336, code/test tree
-be9e98fe3fb2504b68dcefa487eaec66a222a519. Subsequent final audit edits are docs only.
+be9e98fe3fb2504b68dcefa487eaec66a222a519. Subsequent edits are audit documents and
+two gofmt alignment corrections in serveapp/main.go. The formatted file exactly
+matches gofmt of the qualified source; SQLite/tests/spec are unchanged. Initial
+CI static-format failure is retained, not represented as a pass.
 Independent PR/merge review remains required.
 
 Update: the pre-master-integration combined full-profile suite exited 0 at the

@@ -890,7 +890,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		BootStartedAt: bootStartedAt, RuntimeInstanceID: runtimeInstanceID,
 	}
 	scratchAuthority = nil // The common constructor now owns abort-or-joined-close.
-	publicListener = nil // Listener ownership follows the admitted composition request.
+	publicListener = nil   // Listener ownership follows the admitted composition request.
 	return buildRuntimeComposition(ctx, composition)
 }
 
@@ -1584,7 +1584,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		publicExposure, controllerErr = runtimepublicingress.NewController(runtimepublicingress.Options{
 			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,
 			Listener: publicListener,
-			Handler: publicHandler, Readiness: ready,
+			Handler:  publicHandler, Readiness: ready,
 			StartupAuthority: func() string {
 				current, _ := supervisor.PublicIngressState()
 				if current == nil {
