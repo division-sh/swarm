@@ -421,6 +421,15 @@ func TestExecutor_NativeWebSearchHardcodedProviderUsesRateLimit(t *testing.T) {
 }
 
 func TestExecutor_NativeWebSearchCustomProviderUsesRateLimit(t *testing.T) {
+	for _, delay := range []time.Duration{0, 60 * time.Millisecond} {
+		t.Run("first_transport_delay_"+delay.String(), func(t *testing.T) {
+			testNativeWebSearchCustomProviderRateLimit(t, delay)
+		})
+	}
+}
+
+func testNativeWebSearchCustomProviderRateLimit(t *testing.T, firstTransportDelay time.Duration) {
+	t.Helper()
 	var recorder dispatchTimeRecorder
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		recorder.record()
@@ -439,17 +448,39 @@ func TestExecutor_NativeWebSearchCustomProviderUsesRateLimit(t *testing.T) {
 		WorkflowSource: rateLimitedNativeWebSearchSource("custom", "1/40ms", "500ms", customHTTP),
 		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
+	transport := server.Client().Transport
+	first := true
+	exec.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if first {
+			first = false
+			// Admission precedes transport; network delay must not redefine the rate window.
+			time.Sleep(firstTransportDelay)
+		}
+		return transport.RoundTrip(req)
+	})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
 		NativeTools:   models.NativeToolConfig{WebSearch: true},
 	})
+	ctx = withExternalDispatchAdmissionCollector(ctx)
+	started := time.Now()
 	for i := 0; i < 2; i++ {
 		if _, err := exec.Execute(ctx, "web_search", map[string]any{"query": "swarm"}); err != nil {
 			t.Fatalf("Execute custom web_search #%d: %v", i+1, err)
 		}
 	}
-	recorder.requireGapAtLeast(t, 25*time.Millisecond)
+	if elapsed := time.Since(started); elapsed < 40*time.Millisecond {
+		t.Fatalf("two admissions completed in %s, want at least one 40ms rate window", elapsed)
+	}
+	if got := len(recorder.timesSnapshot()); got != 2 {
+		t.Fatalf("outbound requests = %d, want 2", got)
+	}
+	collector := ctx.Value(externalDispatchAdmissionCollectorKey{}).(*externalDispatchAdmissionCollector)
+	summary, ok := collector.snapshot()
+	if !ok || summary.Attempts != 2 || summary.Scope != externalDispatchScopeNativeWebSearch || summary.Period != 40*time.Millisecond {
+		t.Fatalf("admission summary = %+v, want two custom native web-search admissions at 1/40ms", summary)
+	}
 }
 
 func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(t *testing.T) {
