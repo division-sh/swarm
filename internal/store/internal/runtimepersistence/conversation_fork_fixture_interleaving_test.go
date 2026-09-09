@@ -65,7 +65,7 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 	done := make(chan error, 1)
 	armed.Store(true)
 	go func() {
-		done <- runtimepkg.NewRuntimeLogger(store, executionposture.Live).ProjectLifecycleDiagnostic(ctx, item)
+		done <- runtimepkg.NewRuntimeLogger(store, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, item)
 	}()
 	select {
 	case <-entered:

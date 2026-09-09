@@ -177,7 +177,7 @@ func collectionItemSemanticsSource(handler runtimecontracts.SystemNodeEventHandl
 			}},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"worker": {ID: "worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.received": handler}},
+			"worker": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.received": handler}},
 		},
 	})
 }

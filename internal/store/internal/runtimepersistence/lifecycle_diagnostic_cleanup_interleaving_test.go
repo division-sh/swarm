@@ -147,7 +147,7 @@ func TestLifecycleDiagnosticCleanupTransactionInterleavingsBothStores(t *testing
 				}
 				request := admitRetainedResetCleanupProof(t, capability, cleanupStore, item.Identity.RunID, false)
 				project := func() error {
-					return runtimepkg.NewRuntimeLogger(logStore, executionposture.Live).ProjectLifecycleDiagnostic(ctx, item)
+					return runtimepkg.NewRuntimeLogger(logStore, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, item)
 				}
 				cleanup := func() error { _, err := capability.ApplyDestructiveResetCleanup(ctx, request, nil); return err }
 				firstOperation, secondOperation := cleanup, project

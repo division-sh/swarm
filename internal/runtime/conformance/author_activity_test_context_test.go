@@ -384,11 +384,6 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
-	if opts.Logger == nil {
-		if logs, ok := eventStore.(runtimepkg.RuntimeLogPersistence); ok {
-			opts.Logger = conformanceRuntimeLoggerHook{logger: runtimepkg.NewRuntimeLogger(logs, opts.ExecutionPosture)}
-		}
-	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
@@ -402,6 +397,11 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 			opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 				return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 			}
+		}
+	}
+	if opts.Logger == nil {
+		if logs, ok := eventStore.(runtimepkg.RuntimeLogPersistence); ok {
+			opts.Logger = conformanceRuntimeLoggerHook{logger: runtimepkg.NewRuntimeLogger(logs, opts.ExecutionPosture, opts.PayloadAdmitter)}
 		}
 	}
 	if opts.WorkOwner == nil {
