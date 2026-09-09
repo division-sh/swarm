@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -152,10 +153,28 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 					if len(prepared.States) != 1 || prepared.States[0].Config[key] != "instance-1" || len(prepared.States[0].Agents) != declarations {
 						t.Fatalf("flow-owned readiness = %#v", prepared.States)
 					}
-					if selected == 0 {
-						runtime, err := prepareSelectedContractAgentRuntimeMaterialization(context.Background(), loaded, planning, prepared.Blueprints, SelectedContractAgentRuntimeOptions{})
-						if err != nil || runtime.Proof.MaterializationRequired || len(runtime.Blueprints) != 0 {
-							t.Fatalf("non-agent frontier fabricated a handler: %#v, %v", runtime, err)
+					factoryCalls := 0
+					runtime, err := prepareSelectedContractAgentRuntimeMaterialization(context.Background(), loaded, planning, prepared.Blueprints, SelectedContractAgentRuntimeOptions{
+						AgentFactory: func(actors.AgentConfig) (runtimemanager.Agent, error) {
+							factoryCalls++
+							return nil, fmt.Errorf("preparation cannot construct an executing agent")
+						},
+					})
+					if err != nil || len(runtime.Blueprints) != declarations || runtime.Proof.MaterializationRequired != (declarations > 0) {
+						t.Fatalf("complete admitted preparation census: %#v, %v", runtime, err)
+					}
+					if factoryCalls != 0 || len(runtime.Proof.AgentRecipientPlans) != selected {
+						t.Fatalf("preparation changed initial dispatch or executed a factory: calls=%d recipients=%v", factoryCalls, runtime.Proof.AgentRecipientPlans)
+					}
+					if runtime.workspaceProjection != nil {
+						if err := runtime.workspaceProjection.Release(); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if declarations > 0 && selected == 0 {
+						_, err := prepareSelectedContractAgentRuntimeMaterialization(context.Background(), loaded, planning, prepared.Blueprints, SelectedContractAgentRuntimeOptions{})
+						if err == nil {
+							t.Fatal("downstream actor without runtime configuration passed preparation")
 						}
 					}
 				})
@@ -188,6 +207,44 @@ func TestSelectedContractWorkflowStateProjectionUsesPlatformActivityRoutingSourc
 		states[0].AddressKind != runfork.RunForkSelectedContractWorkflowStateExact ||
 		states[0].Route.InstancePath != "producer" {
 		t.Fatalf("workflow states = %#v, want exact source-owned activity route", states)
+	}
+}
+
+func TestSelectedContractPreparedActorCensusExactPlans(t *testing.T) {
+	loaded := selectedContractReadinessFixture(t, 2)
+	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/instance-1", "entity-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actors, err := runforkreadiness.PreparedActorCensus(flow.Agents)
+	if err != nil || len(actors) != 2 {
+		t.Fatalf("concrete template census: %v, %v", actors, err)
+	}
+	reversed := []runtimemanager.AgentMaterializationBlueprint{flow.Agents[1], flow.Agents[0], flow.Agents[1]}
+	canonical, err := runforkreadiness.PreparedActorCensus(reversed)
+	if err != nil || len(canonical) != 2 || canonical[0].Identity != actors[0].Identity || canonical[1].Identity != actors[1].Identity {
+		t.Fatalf("order/exact repeated declaration changes census: %v, %v", canonical, err)
+	}
+	conflicting := append([]runtimemanager.AgentMaterializationBlueprint(nil), reversed...)
+	conflicting[2].Config.Role += "-changed"
+	if _, err := runforkreadiness.PreparedActorCensus(conflicting); err == nil {
+		t.Fatal("same-plan conflicting configuration accepted")
+	}
+	live := append([]runtimemanager.AgentMaterializationBlueprint(nil), actors...)
+	live[0].Config.Identity, err = live[0].Identity.Live(selectedContractAgentTestRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runforkreadiness.PreparedActorCensus(live); err == nil {
+		t.Fatal("live actor configuration adopted into prospective census")
+	}
+	foreign, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/instance-2", "entity-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	separate, err := runforkreadiness.PreparedActorCensus(append(flow.Agents, foreign.Agents...))
+	if err != nil || len(separate) != 4 {
+		t.Fatalf("same-name concrete template owners merged: %v, %v", separate, err)
 	}
 }
 

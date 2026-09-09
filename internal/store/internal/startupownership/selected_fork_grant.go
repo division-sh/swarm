@@ -15,9 +15,6 @@ func proveSelectedForkGrantTx(ctx context.Context, tx *sql.Tx, evidence runtimeo
 		return err
 	}
 	query := `SELECT snapshot FROM runtime_generation_grants WHERE grant_id = $1 ORDER BY state_version DESC LIMIT 1`
-	if !sqlite {
-		query += ` FOR UPDATE`
-	}
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, query, evidence.GrantID).Scan(&raw); err != nil {
 		return err

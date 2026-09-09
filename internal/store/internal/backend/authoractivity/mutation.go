@@ -148,6 +148,16 @@ func (m *Mutation) lock(ctx context.Context) error {
 	return nil
 }
 
+// FenceMutationOrder holds the existing story ordering coordinate until the
+// transaction ends without appending an author occurrence. Authority transitions
+// use it before any domain locks so they serialize with story-bearing mutations.
+func FenceMutationOrder(ctx context.Context, tx *sql.Tx, dialect Dialect) error {
+	if tx == nil || (dialect != DialectPostgres && dialect != DialectSQLite) {
+		return fmt.Errorf("mutation order requires a transaction and supported dialect")
+	}
+	return (&Mutation{tx: tx, dialect: dialect}).lock(ctx)
+}
+
 func (m *Mutation) updateLast(ctx context.Context, last int64) error {
 	query := `UPDATE author_activity_order SET last_sequence = $1 WHERE singleton_id = 1 AND last_sequence = $2`
 	if m.dialect == DialectSQLite {

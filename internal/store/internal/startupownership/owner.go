@@ -17,6 +17,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
@@ -265,6 +266,9 @@ func (s *postgresSession) CommitSourceSet(ctx context.Context, req runtimeagentt
 func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	var result runtimedestructivereset.CleanupResult
 	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := generationauthority.FenceMutation(txctx, tx, false); err != nil {
+			return err
+		}
 		if topology != nil {
 			if _, err := commitSourceSetTx(txctx, tx, *topology, false); err != nil {
 				return err
@@ -571,6 +575,9 @@ func loadAuthorityHeadTx(ctx context.Context, tx *sql.Tx, backend string, sqlite
 }
 
 func acquireAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupownership.AcquireRequest, backend string, sqlite bool) (runtimestartupownership.Authority, error) {
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return runtimestartupownership.Authority{}, err
+	}
 	prior, exists, err := loadAuthorityHeadTx(ctx, tx, backend, sqlite)
 	if err != nil {
 		return runtimestartupownership.Authority{}, err
@@ -619,6 +626,9 @@ func acquireAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupowner
 }
 
 func recordAuthorityTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimestartupownership.Authority, next runtimestartupownership.Authority, sqlite bool) error {
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return err
+	}
 	if err := runtimestartupownership.ValidateTransition(previous, next); err != nil {
 		return err
 	}
@@ -650,9 +660,12 @@ func recordAuthorityTransitionTx(ctx context.Context, tx *sql.Tx, previous *runt
 }
 
 func retireAuthorityGenerationGrantsTx(ctx context.Context, tx *sql.Tx, authorityID string, sqlite bool) error {
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return err
+	}
 	query := `SELECT g.snapshot FROM runtime_generation_grants g WHERE g.process_authority_id = ? AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id`
 	if !sqlite {
-		query = `SELECT g.snapshot FROM runtime_generation_grants g WHERE g.process_authority_id = $1::uuid AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id FOR UPDATE`
+		query = `SELECT g.snapshot FROM runtime_generation_grants g WHERE g.process_authority_id = $1::uuid AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id`
 	}
 	rows, err := tx.QueryContext(ctx, query, authorityID)
 	if err != nil {
@@ -662,10 +675,10 @@ func retireAuthorityGenerationGrantsTx(ctx context.Context, tx *sql.Tx, authorit
 }
 
 func retireAllGenerationGrantsTx(ctx context.Context, tx *sql.Tx, sqlite bool) error {
-	query := `SELECT g.snapshot FROM runtime_generation_grants g WHERE NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id`
-	if !sqlite {
-		query += ` FOR UPDATE`
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return err
 	}
+	query := `SELECT g.snapshot FROM runtime_generation_grants g WHERE NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id`
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return err
@@ -718,6 +731,9 @@ func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimes
 	if err := next.Validate(); err != nil {
 		return err
 	}
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return err
+	}
 	if next.SelectedFork != nil && next.State != runtimestartupownership.GrantRetired {
 		if err := storeagent.ProveSelectedForkGenerationGrantTx(ctx, tx, next, sqlite); err != nil {
 			return err
@@ -725,7 +741,7 @@ func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimes
 	}
 	loadCurrent := `SELECT snapshot FROM runtime_generation_grants WHERE grant_id = ? ORDER BY state_version DESC LIMIT 1`
 	if !sqlite {
-		loadCurrent = `SELECT snapshot FROM runtime_generation_grants WHERE grant_id = $1::uuid ORDER BY state_version DESC LIMIT 1 FOR UPDATE`
+		loadCurrent = `SELECT snapshot FROM runtime_generation_grants WHERE grant_id = $1::uuid ORDER BY state_version DESC LIMIT 1`
 	}
 	var currentRaw []byte
 	currentErr := tx.QueryRowContext(ctx, loadCurrent, next.GrantID).Scan(&currentRaw)

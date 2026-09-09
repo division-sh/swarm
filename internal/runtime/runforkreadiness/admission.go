@@ -211,25 +211,17 @@ func (a Admission) ValidatePreparation(preparation runfork.SelectedForkPreparati
 	if err != nil {
 		return err
 	}
-	var planning runfork.RunForkSelectedContractRecipientPlanning
-	if err := json.Unmarshal(a.sealed.planning, &planning); err != nil {
-		return err
-	}
-	plans, err := planning.SelectedAgentPlans()
+	actors, err := PreparedActorCensus(projection.Blueprints)
 	if err != nil {
 		return err
 	}
-	if len(plans) != len(preparation.Actors) {
+	if len(actors) != len(preparation.Actors) {
 		return fmt.Errorf("selected preparation omits or adds admitted actors")
 	}
-	byPlan := make(map[agentidentity.Plan]manager.AgentMaterializationBlueprint, len(projection.Blueprints))
-	for _, blueprint := range projection.Blueprints {
-		byPlan[blueprint.Identity] = blueprint
-	}
-	for i, plan := range plans {
+	for i, blueprint := range actors {
+		plan := blueprint.Identity
 		actor := preparation.Actors[i]
-		blueprint, ok := byPlan[plan]
-		if !ok || actor.Plan != plan {
+		if actor.Plan != plan {
 			return fmt.Errorf("selected preparation changes admitted actor correspondence")
 		}
 		revision, err := manager.AgentConfigPlanRevision(blueprint.Config, plan)

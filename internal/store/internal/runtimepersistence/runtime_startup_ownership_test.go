@@ -1473,6 +1473,13 @@ func TestProcessCapabilityTakeoverRetiresNewWorkGrantsParity(t *testing.T) {
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, abandoned := abandonedProcessCapabilityFixture(t, backend)
+			proveBulkRetirementWaitsForMutation(t, db, backend, abandoned.Grant, func(ctx context.Context) error {
+				capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("blocked-grant-retirement-successor"))
+				if capability != nil {
+					t.Cleanup(func() { _ = capability.Release(context.Background()) })
+				}
+				return err
+			})
 			successor, err := selected.AcquireProcessCapability(testAuthorActivityContext(), testStartupAcquireRequest("grant-retirement-successor"))
 			if err != nil {
 				t.Fatalf("acquire successor: %v", err)
@@ -1744,6 +1751,10 @@ func TestAuthorityRepairRetiresEveryCurrentNewWorkGrantParity(t *testing.T) {
 			repairRequest := runtimestartupownership.AuthorityRepairRequest{
 				OperationID: uuid.NewString(), FindingsDigest: inspection.FindingsDigest, Confirmed: true,
 			}
+			proveBulkRetirementWaitsForMutation(t, db, backend, abandoned.Grant, func(ctx context.Context) error {
+				_, err := selected.RepairAuthority(ctx, repairRequest)
+				return err
+			})
 			placeholder := "?"
 			if backend == "postgres" {
 				placeholder = "$1::uuid"

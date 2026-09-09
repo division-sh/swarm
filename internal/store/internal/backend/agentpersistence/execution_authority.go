@@ -13,13 +13,17 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	managedcapabilitystore "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/google/uuid"
 )
 
-// AuthorizeRetainedGrantLifecycleTx runs inside the retained session's named
-// lifecycle transaction, so selected execution fencing cannot race the write.
-func AuthorizeRetainedGrantLifecycleTx(ctx context.Context, tx *sql.Tx, req manager.AgentLifecycleTransition, sqlite bool) error {
+// AuthorizeGenerationMutationTx revalidates exact current grant authority while
+// holding the store mutation fence, whether the connection is retained or pooled.
+func AuthorizeGenerationMutationTx(ctx context.Context, tx *sql.Tx, req manager.AgentLifecycleTransition, sqlite bool) error {
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return err
+	}
 	query := `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, query, req.ProcessBinding.GenerationGrantID).Scan(&raw); err != nil {
@@ -69,6 +73,9 @@ func processBindingForGrant(evidence startupownership.GrantEvidence) manager.Pro
 func InspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite bool) (manager.RunExecutionOwnership, error) {
 	if tx == nil {
 		return 0, errors.New("run execution ownership requires a transaction")
+	}
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return 0, err
 	}
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&raw); err != nil {
@@ -154,6 +161,9 @@ func loadRunExecutionBindingTx(ctx context.Context, tx *sql.Tx, runID string, sq
 // binding and run coordinate. These three facts collectively authorize the
 // grant; a matching bundle or readiness projection alone does not.
 func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, sqlite bool) error {
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return err
+	}
 	if err := evidence.Validate(); err != nil {
 		return err
 	}

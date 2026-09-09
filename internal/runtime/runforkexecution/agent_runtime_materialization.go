@@ -287,6 +287,10 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if err != nil {
 		return selectedContractAgentRuntimePlan{}, err
 	}
+	actors, err := runforkreadiness.PreparedActorCensus(blueprints)
+	if err != nil {
+		return selectedContractAgentRuntimePlan{}, err
+	}
 	declarations, err := prepareSelectedContractDeclarations(loaded, blueprints)
 	if err != nil {
 		return selectedContractAgentRuntimePlan{}, err
@@ -296,11 +300,11 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 		RecipientPlanningOwner:   planning.Owner,
 		ExecutionOwner:           runfork.RunForkSelectedContractExecutionOwner,
 		AgentRecipientPlans:      append([]agentidentity.Plan(nil), agentPlans...),
-		MaterializationRequired:  len(agentPlans) > 0,
-		MaterializationSupported: len(agentPlans) == 0,
+		MaterializationRequired:  len(actors) > 0,
+		MaterializationSupported: len(actors) == 0,
 		EphemeralForkLocal:       true,
 	}
-	if len(agentPlans) == 0 {
+	if len(actors) == 0 && len(agentPlans) == 0 {
 		return selectedContractAgentRuntimePlan{Declarations: declarations, Proof: proof, Options: options}, nil
 	}
 	options, workspaceProjection, err := bindSelectedContractWorkspaceProjection(loaded, options)
@@ -313,32 +317,27 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 		}
 	}()
 	blueprintsByPlan := map[agentidentity.Plan]runtimemanager.AgentMaterializationBlueprint{}
-	configured := make([]agentidentity.Plan, 0, len(blueprints))
-	for _, blueprint := range blueprints {
-		plan := blueprint.Identity.Normalize()
-		if err := plan.Validate(); err != nil {
-			return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("selected-contract agent declaration plan: %w", err)
-		}
-		if _, exists := blueprintsByPlan[plan]; exists {
-			continue
-		}
+	configured := make([]agentidentity.Plan, 0, len(actors))
+	for _, blueprint := range actors {
+		plan := blueprint.Identity
 		blueprint.Status = "ephemeral"
 		blueprint.HiredBy = "selected-contract-fork-agent-runtime"
 		blueprintsByPlan[plan] = blueprint
 		configured = append(configured, plan)
 	}
-	sortAgentPlans(configured)
 	proof.ConfiguredAgentPlans = append([]agentidentity.Plan(nil), configured...)
 
-	selected := make([]runtimemanager.AgentMaterializationBlueprint, 0, len(agentPlans))
+	selected := make([]runtimemanager.AgentMaterializationBlueprint, 0, len(actors))
+	for _, plan := range configured {
+		selected = append(selected, blueprintsByPlan[plan])
+	}
 	missing := []agentidentity.Plan{}
 	for _, plan := range agentPlans {
-		blueprint, ok := blueprintsByPlan[plan.Normalize()]
+		_, ok := blueprintsByPlan[plan.Normalize()]
 		if !ok {
 			missing = append(missing, plan)
 			continue
 		}
-		selected = append(selected, blueprint)
 	}
 	if len(missing) > 0 {
 		sortAgentPlans(missing)
@@ -346,7 +345,7 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 		return selectedContractAgentRuntimePlan{Proof: proof, Blueprints: selected, ConfiguredPlans: configured, Options: options}, selectedContractAgentRuntimeUnsupportedPlanError(missing, "missing selected-source declaration-owned agent materialization blueprint")
 	}
 	if options.AgentFactory == nil && options.Config == nil {
-		return selectedContractAgentRuntimePlan{Proof: proof, Blueprints: selected, ConfiguredPlans: configured, Options: options}, selectedContractAgentRuntimeUnsupportedPlanError(agentPlans, "missing selected-fork agent factory/runtime configuration")
+		return selectedContractAgentRuntimePlan{Proof: proof, Blueprints: selected, ConfiguredPlans: configured, Options: options}, selectedContractAgentRuntimeUnsupportedPlanError(configured, "missing selected-fork agent factory/runtime configuration")
 	}
 	proof.MaterializationSupported = true
 	return selectedContractAgentRuntimePlan{Declarations: declarations, Proof: proof, Blueprints: selected, ConfiguredPlans: configured, Options: options, workspaceProjection: workspaceProjection}, nil
