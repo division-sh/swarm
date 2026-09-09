@@ -3,12 +3,16 @@ package schemastore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
 
-func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) error {
+func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) (err error) {
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("sqlite store is required for schema bootstrap")
 	}
@@ -27,18 +31,25 @@ func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapReq
 	if err != nil {
 		return fmt.Errorf("open serialized sqlite schema connection: %w", err)
 	}
-	defer conn.Close()
+	discard := false
+	defer func() { err = errors.Join(err, sqlitebackend.CloseConnection(conn, discard)) }()
 	// A restart may overlap the previous runtime's final write transaction.
 	if _, err := conn.ExecContext(ctx, `PRAGMA busy_timeout = 5000`); err != nil {
 		return fmt.Errorf("configure sqlite schema bootstrap lock timeout: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		discard = true
 		return fmt.Errorf("serialize sqlite schema bootstrap: %w", err)
 	}
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+			_, rollbackErr := conn.ExecContext(context.Background(), `ROLLBACK`)
+			if rollbackErr != nil {
+				discard = true
+				slog.Error("sqlite schema rollback failed", "error", rollbackErr)
+				err = errors.Join(err, fmt.Errorf("rollback sqlite schema bootstrap: %w", rollbackErr))
+			}
 		}
 	}()
 	report, err := inspectSQLiteCompatibility(ctx, conn, expected)
@@ -64,10 +75,11 @@ func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapReq
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		discard = true
 		return fmt.Errorf("commit sqlite schema bootstrap: %w", err)
 	}
 	committed = true
-	if _, err := s.backend.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
+	if _, err := conn.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
 		return fmt.Errorf("enable sqlite WAL after schema acceptance: %w", err)
 	}
 	s.schemaAdmission.markCurrent()

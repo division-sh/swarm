@@ -309,7 +309,7 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteOwnsNamedTransaction(t *testin
 		t.Fatalf("seed sqlite flow_instances: %v", err)
 	}
 	seedFlowRouteTestEntities(t, ctx, store.backend.ConstructionHandle(), false, route.Identity.Route.InstancePath)
-	tx, err := store.backend.BeginTx(ctx, nil)
+	tx, err := store.backend.ConstructionHandle().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsOwnsNamedTransaction(t
 		t.Fatalf("second exact route set: routes=%#v err=%v", got, err)
 	}
 
-	tx, err := store.backend.BeginTx(ctx, nil)
+	tx, err := store.backend.ConstructionHandle().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}

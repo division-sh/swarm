@@ -127,7 +127,7 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1Read
 		Payload:       json.RawMessage(`{"review_kind":"validation"}`),
 	}
 
-	rollbackTx, err := store.backend.BeginTx(ctx, nil)
+	rollbackTx, err := store.backend.ConstructionHandle().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx rollback: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1Read
 	}
 	assertSQLiteMailboxMaterializationCount(t, ctx, store, item.ItemID, 1)
 
-	commitTx, err := store.backend.BeginTx(ctx, nil)
+	commitTx, err := store.backend.ConstructionHandle().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx commit: %v", err)
 	}

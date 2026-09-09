@@ -886,21 +886,25 @@ func (s *standingServiceAdapter) ListStandingServiceStatuses(ctx context.Context
 			ORDER BY ss.flow_path
 		`
 	}
-	beginner, ok := s.db.(interface {
-		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	reader, ok := s.db.(interface {
+		RunReadTransaction(context.Context, func(context.Context, *sql.Tx) error) error
 	})
 	if !ok {
-		return nil, errors.New("standing status selected-store transaction owner is required")
+		return nil, errors.New("standing status selected-store read transaction owner is required")
 	}
-	txOptions := &sql.TxOptions{ReadOnly: true}
-	if !s.isSQLite() {
-		txOptions.Isolation = sql.LevelRepeatableRead
-	}
-	tx, err := beginner.BeginTx(ctx, txOptions)
+	var out []runtimepipeline.StandingServiceStatus
+	err := reader.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = s.listStandingServiceStatusesTx(ctx, tx, query)
+		return err
+	})
 	if err != nil {
-		return nil, fmt.Errorf("begin standing service status read: %w", err)
+		return nil, err
 	}
-	defer tx.Rollback()
+	return out, nil
+}
+
+func (s *standingServiceAdapter) listStandingServiceStatusesTx(ctx context.Context, tx *sql.Tx, query string) ([]runtimepipeline.StandingServiceStatus, error) {
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list standing service statuses: %w", err)
@@ -950,9 +954,6 @@ func (s *standingServiceAdapter) ListStandingServiceStatuses(ctx context.Context
 		if err != nil {
 			return nil, fmt.Errorf("classify standing service %s status: %w", out[i].ServiceID, err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit standing service status read: %w", err)
 	}
 	return out, nil
 }

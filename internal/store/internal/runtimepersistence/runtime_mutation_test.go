@@ -19,7 +19,7 @@ func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), 2*time.Second)
 	defer cancel()
 
-	lockTx, err := lockStore.backend.BeginTx(ctx, nil)
+	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin locking tx: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline(t *testin
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
 	baseCtx := testAuthorActivityContext()
 
-	lockTx, err := lockStore.backend.BeginTx(baseCtx, nil)
+	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(baseCtx, nil)
 	if err != nil {
 		t.Fatalf("begin locking tx: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestSQLiteRuntimeStore_PrivateMutationContextDeadlineCapsDriverBusyTimeout(
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, 50*time.Millisecond)
 	baseCtx := testAuthorActivityContext()
 
-	lockTx, err := lockStore.backend.BeginTx(baseCtx, nil)
+	lockTx, err := lockStore.backend.ConstructionHandle().BeginTx(baseCtx, nil)
 	if err != nil {
 		t.Fatalf("begin locking tx: %v", err)
 	}

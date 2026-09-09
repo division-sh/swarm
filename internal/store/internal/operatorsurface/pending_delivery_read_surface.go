@@ -113,22 +113,21 @@ func (s *AgentSQLite) ListPendingAgentDeliveryFacts(ctx context.Context, identit
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var result map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts
+	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
+		if err != nil {
+			return err
+		}
+		aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, tx, normalized, since, asOf)
+		if err != nil {
+			return err
+		}
+		result = pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, asOf)
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	defer tx.Rollback()
-	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, tx, normalized, since, asOf)
-	if err != nil {
-		return nil, err
-	}
-	result := pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, asOf)
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit sqlite pending agent facts snapshot: %w", err)
 	}
 	return result, nil
 }
@@ -137,21 +136,20 @@ func (s *AgentSQLite) ListPendingAgentDeliveryDetails(ctx context.Context, opts 
 	if err := s.requireCurrentSchema(); err != nil {
 		return operatorread.PendingAgentDeliveryPage{}, err
 	}
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var result operatorread.PendingAgentDeliveryPage
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result, err = s.listPendingAgentDeliveryDetailsTx(ctx, tx, opts, asOf)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return operatorread.PendingAgentDeliveryPage{}, err
-	}
-	defer tx.Rollback()
-	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
-	if err != nil {
-		return operatorread.PendingAgentDeliveryPage{}, err
-	}
-	result, err := s.listPendingAgentDeliveryDetailsTx(ctx, tx, opts, asOf)
-	if err != nil {
-		return operatorread.PendingAgentDeliveryPage{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return operatorread.PendingAgentDeliveryPage{}, fmt.Errorf("commit sqlite pending agent delivery snapshot: %w", err)
 	}
 	return result, nil
 }
