@@ -6,6 +6,13 @@ gate and complete required matrix are in
 `issue-2321-activation-lifetime-amendment.md`. The prior provider-backing progress
 artifact remains historical evidence, including its failed forced-restart rows.
 
+Verification checkpoint: code/test head `eace6c528` passes the complete full-profile
+swarm-test invocation (exit 0). Runtime head `97a9ea04a` passes genuine dual-store
+live restart; the only later executable change adds scaffold proof/harness flags.
+The remaining acceptance blocker is #2432 approval, repair and integration, not
+another pending live run or a current full-suite failure. A final integrated-head
+audit/review is still required after that separately gated work.
+
 ## Exact changed concepts and owners
 
 The bounded class is exact executable channel-publication admission and lifetime
@@ -72,7 +79,7 @@ commands are still outstanding below. Final closure must bind a committed head.
 | Real stateless reclaim and startup probe isolation | `TestClaudeStateDockerRetentionAndRefusal` and `TestClaudeStateDockerSharedWorkspaceIsolation` PASS with real Docker, network disabled (46.366s aggregate). Typed session/fork/delivery constructors produce backing; real Claude recognizes the reclaimed delivery and temporary fork/invocation transcript before refusing offline authentication. Probe cannot read ordinary state, ordinary state cannot read probe head, probe release destroys its tmpfs. Foreign actor/marker and corrupt/missing retained backing refuse. This does not claim a paid stateless tool-successor completion. |
 | Async lifetime and persistence inventories | Complete worklifetime/MCP/channelactivation packages PASS; persistence-authority registry and API specification checks PASS; `git diff --check` PASS. |
 | Broader startup failure/configured/no-channel/multi-context matrix | PASS through swarm-test: runtime 3.959s, serveapp 38.390s. Exact selection: `TestChannelOnboarding`, `TestConnectedChannel`, `TestDynamicTopologyStartup`, `TestValidateServeMultiContext`, `TestServeRuntimeConfiguredChannel`, `TestPrivateTestStartupFailure`, `TestInboundAdmissionSupportedSurfaceStartupFailures`, `TestRuntimeStartWithholdsDueSchedules`, `TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads`. |
-| Complete integrated suite | First activation run completed with four failing guard/fixture tests only: release duplicate-closure malformed removal evidence, retired tools-private presentation helper expectation, missing sync.Once primitive inventory entry, and standing preparation source-consumer count. All four are repaired and targeted tests PASS. Serveapp (410.856s), conformance (326.723s) and runtimepersistence (583.816s) passed. The queued rerun was canceled before acquiring its slot to finish scaffold evidence. A new full-profile rerun is required; no whole-suite pass claimed. |
+| Complete integrated suite | `SWARM_TEST_PROOF_PROFILE=full go run ./cmd/swarm-test -- -timeout=30m ./...` PASS, exit 0, code/test head eace6c528. Releasee2e 462.329s, conformance 266.181s, serveapp 405.360s, runtimepersistence 582.435s, manager 19.062s, CLI 90.476s, API 199.577s. Cached unchanged packages are explicitly reported by Go. The earlier four guard/fixture failures are fixed. This full run does not enable opt-in paid/live flags: the real dual-store journey and scaffold proof are separate executed results above/below, not inferred from skips. #2432 is still unimplemented and unapproved; a green run does not retract that separately reproduced class. |
 | Genuine live forced/dev and complete retained history | `TestCommandLiveServeAndRestartParity` PASS against runtime head 97a9ea04a, SQLite 103.97s and PostgreSQL 100.49s (209.675s aggregate). Real public binary, Claude, Docker and Telegram; no H entry. Six fresh ingresses per backend prove initial turn, graceful retained restart, paused pending delivery recovered after SIGKILL, subsequent new ingress with old delivery unchanged, and two fresh dev epochs. Each checks reply/card and delivery settlement, not delivered status alone. Dev storage is SQLite by contract in both parent journeys. Reopening the retained source after dev preserves exact event/delivery/card history. Twelve authorized new messages total; no old settled delivery replay. |
 | Untouched generated archetypes | `TestCommandLiveUneditedScaffoldReadiness` PASS (23.930s), using unchanged runtime 97a9ea04a plus the new test-only harness option. Both zero-agent-automation and webhook-responder pass bare verify/describe/test then real public retained/dev readiness. Claude/image/network are legitimate operator-global provisioning; no project config or command source/backend/store selector. Credentials enter through public secrets set. Authored tree snapshots stay identical. No business inputs/messages sent or turn proof claimed. First run correctly refused the unprovisioned built-in Anthropic profile; the test was corrected to select its provisioned Claude profile globally, not by changing production defaults. |
 
@@ -102,4 +109,5 @@ Final verification logs (local, not merge artifacts):
 `/tmp/agent-g-2321-release-guard-final.log`,
 `/tmp/agent-g-2321-activation-integrated-final.log` (canceled while queued), and
 `/tmp/agent-g-2321-activation-live.log` (fresh dual-store live PASS),
-`/tmp/agent-g-2321-scaffold-live-final.log` (both generated archetypes PASS).
+`/tmp/agent-g-2321-scaffold-live-final.log` (both generated archetypes PASS),
+`/tmp/agent-g-2321-activation-full-verified.log` (full profile PASS at eace6c528).

@@ -19,7 +19,13 @@ and delivery settles. Dev uses SQLite in both journeys. Retained history is
 reopened and unchanged after dev. No previously settled failed delivery was
 replayed. This supersedes earlier failed live observations below, not their
 historical evidence. It is lifecycle-fixture proof, not untouched-scaffold proof.
-#2432 approval/repair and a green complete suite remain acceptance obligations.
+#2432 approval/repair remains an acceptance obligation. The full-profile
+`SWARM_TEST_PROOF_PROFILE=full go run ./cmd/swarm-test -- -timeout=30m ./...`
+passes at code/test head `eace6c528` (exit 0). Opt-in L journey/scaffold executions
+are separately recorded, not credited from their full-suite skips. Unchanged
+packages may be cached, as recorded in the run log. Re-run integrated proof and
+bind the final audit after #2432 lands; green execution does not close that known,
+independently reproduced diagnostic defect.
 
 ## Owner And Consumption Recheck
 
