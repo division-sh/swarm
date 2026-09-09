@@ -11,6 +11,16 @@ No row below grants final-head closure. T = actual public fresh mock test;
 L = actual public live serve/dev; H = internal retained mock lifecycle execution.
 An H result never substitutes for L, or for a public test restart feature.
 
+Latest provisioned L update, 2026-09-09: runtime head `97a9ea04a` passes the
+complete `TestCommandLiveServeAndRestartParity` (209.675s), with real Claude,
+Docker and Telegram on both retained stores. Six fresh ingresses per backend
+cover first/graceful/forced/subsequent turns and two dev epochs; every reply/card
+and delivery settles. Dev uses SQLite in both journeys. Retained history is
+reopened and unchanged after dev. No previously settled failed delivery was
+replayed. This supersedes earlier failed live observations below, not their
+historical evidence. It is lifecycle-fixture proof, not untouched-scaffold proof.
+#2432 approval/repair and a green complete suite remain acceptance obligations.
+
 ## Owner And Consumption Recheck
 
 Additional approved owner/consumer census: cliStreamAccumulator/Response owns
@@ -110,25 +120,25 @@ must be rebound to the final integrated head before the final audit is posted.
 
 | ID | Named evidence / remaining obligation |
 |---|---|
-| M1 | `TestScaffoldAdmittedArchetypesRunUneditedZeroCredentialSQLite` proves T/structural zero-edit startup; both-sample provisioned L dev remains pending. |
+| M1 | `TestScaffoldAdmittedArchetypesRunUneditedZeroCredentialSQLite` proves T/structural zero-edit startup. `TestCommandLiveUneditedScaffoldReadiness` PASS (23.930s): both fresh archetypes reach public retained/dev L readiness with no generated-source edits; real operator-global Claude/image/network provisioning, no command backend/config/source/store selector. No message/turn credit claimed by this readiness test. |
 | M2 | `TestScaffoldEmbedsNoHiddenDeploymentConfig`, `TestCatalogRequiredVerifyGateRejectsAddedDeploymentArtifact`, canonical catalog full inventory. |
 | M3 | `TestLoadRejectsRetiredExecutionPosture`, `TestCommandConfigRejectsMaskedExecutionSelectors`, missing-purpose selector negatives. |
-| M4 | Compiled scaffold T/verify proof and `TestGoldenInvocationRootDevReadiness` L; both-sample provisioned L retained/dev remains pending. |
-| M5 | `TestCommandOwnedAgentSelection`, `TestCommandSelectionSeparatesSourceDoubleFromLiveDescriptor`, `TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles`; external provisioned L acceptance pending. |
+| M4 | Compiled scaffold T/verify proof and `TestGoldenInvocationRootDevReadiness` L; `TestCommandLiveUneditedScaffoldReadiness` PASS (23.930s) runs bare verify/describe/test and public retained/dev serve for both roots, asserting authored bytes unchanged. Backend credentials are provisioned by public secrets set, with Claude chosen in operator-global config. Built-in Anthropic default is unchanged; no project config or source operand. |
+| M5 | `TestCommandOwnedAgentSelection`, `TestCommandSelectionSeparatesSourceDoubleFromLiveDescriptor`, `TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles`; `TestCommandLiveServeAndRestartParity` PASS with authored doubles retained and genuine live turns on both stores at 97a9ea04a. |
 | M6 | `TestCredentialChecksCensusScopedAgentsHiddenByAmbiguousAlias`, `TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias`, `TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock`; retain exact scoped identities in H. |
 | M7 | `TestCredentialChecksUseTypedSelectionAndExactResponseAuthority`, `TestCredentialChecksRetainAgentFreeToolRequirement`, `TestCredentialChecksRetainNonToolRequirementsSharingAKey`, live/mock startup credential negatives. |
 | M8 | `TestCommandWorkspaceSelectionIgnoresLiveSourceDoubles`, `TestCommandPurposeControlsClaudeStartupRequirements`, `TestValidateNativeToolBootConfig_CommandPurposeOwnsNativeAdmission`, managed Claude capability/probe matrix. |
 | M9 | `TestCommandDescriptorBothStoresPreserveSelectionAndRefuseCorruption` executes Live/MockOnly on SQLite/PostgreSQL, preserves custom write-time model and exact double bytes, and rejects repeated reads with missing model/provider/transport without changing persisted bytes. H separately proves retained reopen. |
-| M10 | `TestAuthoredMockSelectionSurvivesReconfigureAndRestart`, `TestAgentRuntimeSetRecoveryRejectsBackendDriftWithoutRewritingDescriptor`, `TestCommandRecoveryNeverSelectsAnIncompleteStoredDescriptor`, H J1-J4; L restart pending. |
+| M10 | `TestAuthoredMockSelectionSurvivesReconfigureAndRestart`, `TestAgentRuntimeSetRecoveryRejectsBackendDriftWithoutRewritingDescriptor`, `TestCommandRecoveryNeverSelectsAnIncompleteStoredDescriptor`, H J1-J4; `TestCommandLiveServeAndRestartParity` PASS, genuine graceful/forced L retained restart on both stores at 97a9ea04a. |
 | M11 | `TestSelectedContractContainerValidatesStoredSelectionsWithoutRepair`, `TestSelectedContractContainerRejectsIncompleteStoredDescriptor`, `TestLLMForkChatExecutorRefusesConflictingStoredBackendWithoutReselection`, served selected-fork and fork-chat positives. |
 | M12 | `TestPrivateTestDoesNotSelectConcurrentLiveRuntime`, `TestPrivateTestAdmissionPrecedesResourceAcquisition`; private API shared-client boundary guard. |
 | M13 | `TestServedParityHarnessDerivedScenarioLifecycle`, `TestServedParityHarnessGeneratedInputFixtureLifecycle`, `TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsAndModes`; public fresh authored/derived proof must remain separately credited. |
 | M14 | `TestPrivateTestSessionJoinedCleanupAndPrivateTransport` covers success, failure, cancellation and scenario deadline; `TestPrivateTestStartupFailureUnwindsAcquiredResources`, `TestPrivateTestRootCleanupRemovesImmutableProjectionsWithoutFollowingLinks`; resource-by-resource mapping and executed listener, late-readiness, projection and ownership failures are tabulated below. |
 | M15 | Private transport proves auth/absent ingress; the registered-adapter fence proves zero authorized external attempts; activity proof checks zero journal attempts, credential reads and HTTP requests. Deployment isolation checks zero ambient API calls. Exact counter map below; H outcomes remain separate from provisioned L. |
-| M16 | `TestCommandConfigRecoveryDefaultsAndExplicitFalse`, H J1-J4 and exact startup refusal tests; provisioned L retained-recovery parity pending. |
-| M17 | `TestGoldenInvocationRootDevReadiness` L and `TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch` H, existing scratch-path/borrowed-store refusals. L repeated epoch/retained sentinel proof pending. |
+| M16 | `TestCommandConfigRecoveryDefaultsAndExplicitFalse`, H J1-J4 and exact startup refusal tests; `TestCommandLiveServeAndRestartParity` PASS with omitted recovery and exact pending-delivery convergence on both stores at 97a9ea04a. |
+| M17 | `TestGoldenInvocationRootDevReadiness` L and `TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch` H, existing scratch-path/borrowed-store refusals. `TestCommandLiveServeAndRestartParity` PASS for two fresh SQLite dev epochs, later started_at/empty predecessor history, and exact retained-source history preservation in both parent-store journeys. |
 | M18 | `TestCommandConfigRejectsMaskedExecutionSelectors` plus existing config/path provenance and precedence tests. |
-| M19 | `TestCompiledProcessFullLifecycleJourneysSQLitePostgres` H J1-J5, golden H smoke/restart/burst, separate compiled L possession/invocation proof. Provisioned live turns, signed ingress and retained restart not yet credited. |
+| M19 | `TestCompiledProcessFullLifecycleJourneysSQLitePostgres` H J1-J5, golden H smoke/restart/burst, separate compiled L possession/invocation proof. `TestCommandLiveServeAndRestartParity` PASS at 97a9ea04a: real signed ingress, ordered receipt/event/delivery route, live reply/card, graceful/forced retained restart and fresh dev. H remains distinct; no public retained-test feature claimed. |
 | M20 | Private callback checks authenticated `health.check` ready/mock_only before execution and rejects predecessor tokens; golden exact health posture checks and controlled live adapter observation. Bind notices/subscriptions/root modes to final T/L/H result set. |
 | M21 | `TestStructuralValidationNeverObservesDeployment`, `TestStructuralCheckPurposeCensus`, `TestStructuralValidationRejectsUnknownPurpose`, structural CLI output tests. |
 | M22 | Split / tracked separately: F-owned `#2319` retains credential-absent webhook startup, subsequent activation and Telegram example collapse. These are not passed or credited to provisioned L/internal H proof. Under the user-approved split, they do not block #2321 review/merge/closure; the broader onboarding claim remains unproven. |

@@ -92,6 +92,7 @@ type releaseProcessSpec struct {
 	Token                       string
 	Env                         []string
 	WorkspaceBackend            string
+	DefaultExecutionSelection   bool
 	RedactValues                []string
 }
 
@@ -117,15 +118,16 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	if mcpHost == "" {
 		mcpHost = "127.0.0.1"
 	}
-	args := []string{
-		"serve",
-		"--backend", "claude_cli",
-		"--workspace-backend", workspaceBackend,
+	args := []string{"serve"}
+	if !options.DefaultExecutionSelection {
+		args = append(args, "--backend", "claude_cli", "--workspace-backend", workspaceBackend)
+	}
+	args = append(args,
 		"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.APIPort),
 		"--mcp-listen-addr", net.JoinHostPort(mcpHost, fmt.Sprint(options.MCPPort)),
 		"--shutdown-grace", "2s",
 		"--no-color",
-	}
+	)
 	if options.ConfigPath != "" {
 		args = append(args, "--config", options.ConfigPath)
 	}

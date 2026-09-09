@@ -75,7 +75,7 @@ Proposed missing-performance scope: all effective agent declarations admitted in
 
 Independent ruling accepts structural verify and describe without execution selection or live credentials; live startup readiness remains in serve/doctor, and test performs mock-specific completeness/effect admission. Amendment 2 classifies existing checks and output fields; no indiscriminate suppression.
 
-The current configured backend default is Claude CLI. The independent ruling confirms genuine Claude/Docker/model prerequisites and honest installation guidance remain: zero project edits does not mean an unprovisioned machine. Do not change backend default or waive native/exec checks incidentally. No real external provider is invoked by this audit.
+The built-in backend default is Anthropic API (`selection.DefaultBackend`), unchanged by this work. The original audit incorrectly called Claude CLI the default; Claude is the operator-selected profile used for provisioned L proof. The independent ruling confirms genuine Claude/Docker/model prerequisites and honest installation guidance remain: zero project edits does not mean an unprovisioned machine. Do not change backend default or waive native/exec checks incidentally. No real external provider was invoked by this pre-implementation audit.
 
 ### G4: ingress dependency and deployment defaults
 
