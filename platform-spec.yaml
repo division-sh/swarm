@@ -5849,7 +5849,7 @@ engine:
         method: run.fork
         selected_capability: RunForkAvailability plus RunFork
         postgres_support: supported through the backend-neutral selected-contract run-fork owner and private PostgreSQL transaction adapters
-        sqlite_support: supported for disk-loaded same-bundle local/dev runtimes through the same backend-neutral selected-contract run-fork owner and private SQLite transaction adapters
+        sqlite_support: supported through the same artifact-backed selected-contract run-fork owner as PostgreSQL, including exact changed-target preparation independent of loaded normal runtimes
         semantic_owner: internal/runtime/runforkexecution plus the closed internal/store/selected RunFork capability
         boundary: >
           Both selected backends expose the same planning, historical readback, materialization, source-freeze,
@@ -14167,6 +14167,8 @@ platform_tables:
             effective_config_fingerprint   TEXT NOT NULL,
             declaration_plan_fingerprint   TEXT NOT NULL CHECK (declaration_plan_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
             declaration_plan               JSONB NOT NULL,
+            preparation_fingerprint        TEXT NOT NULL CHECK (preparation_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            preparation_binding            JSONB NOT NULL,
             state                          TEXT NOT NULL CHECK (state IN ('prepared', 'running', 'quiesced', 'failed', 'closed')),
             execution_owner                TEXT,
             lease_expires_at               TIMESTAMPTZ,
@@ -14740,6 +14742,7 @@ platform_tables:
             created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (authority_kind, authority_id),
             CHECK (execution_kind <> 'selected_fork_preparation' OR (authority_kind = 'startup_probe' AND run_id IS NULL)),
+            CHECK (execution_kind <> 'selected_contract_fork' OR authority_kind = 'provider_turn'),
             INDEX idx_managed_capability_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_managed_capability_actor (actor_id, created_at),
             INDEX idx_managed_capability_execution (execution_kind, execution_authority_id, created_at)
@@ -26009,7 +26012,7 @@ cli_specification:
       - no `swarm control run fork` command shape is promoted
       - no draft `--bundle` flag is promoted
       - no direct DB/store/runtime/fork harness access from CLI
-      - cross-bundle targets select already loaded/boot-pinned RuntimeContextManager BundleContexts; valid but unloaded/unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR
+      - cross-bundle targets select exact retained source artifacts under process-owned selected preparation, independent of loaded normal runtimes; missing artifacts fail with BUNDLE_UNAVAILABLE and corrupt or mismatched artifact bytes fail with BUNDLE_DATA_INTEGRITY_ERROR
       - DB-loaded same-bundle source loading is exercised through /v1/rpc run.fork, not a direct CLI runtime/store helper
       - missing API token source, invalid args, and legacy harness flags make zero API calls
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, IDEMPOTENCY_CONFLICT, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
@@ -32195,6 +32198,21 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           current_status:
             $ref: '#/components/schemas/RunStatus'
+      SELECTED_FORK_CONTROL_UNSUPPORTED:
+        type: object
+        additionalProperties: false
+        required: [operation, run_id, binding_id, required_capability]
+        properties:
+          operation:
+            type: string
+            enum: [run.pause, run.continue, agent.restart, agent.send_directive, agent.replay, event.replay, event.publish, mailbox.decide, mailbox.defer, mailbox.begin_input, mailbox.cancel_input]
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          binding_id:
+            $ref: '#/components/schemas/OpaqueId'
+          required_capability:
+            type: string
+            enum: [selected_fork_deferred_execution]
       RUN_ALREADY_PAUSED:
         type: object
         additionalProperties: false
@@ -32782,6 +32800,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/EventPublishResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - BUNDLE_MISMATCH
       - BUNDLE_SCOPE_REQUIRED
       - BUNDLE_UNAVAILABLE
@@ -32934,6 +32953,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/EventReplayResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - EVENT_NOT_FOUND
       - EVENT_REPLAY_NO_DELIVERY_HISTORY
       - EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL
@@ -33026,7 +33046,25 @@ api_specification:
       - DATA_INTEGRITY_ERROR
     run.fork:
       tier: should_have
-      description: "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. Before mutation, the method resolves the source run's canonical `runs.bundle_hash`, loads the immutable `source_artifacts` row for that hash, and verifies its exact logical blob against the hash. A missing artifact fails closed with BUNDLE_UNAVAILABLE; malformed bytes or a hash mismatch fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from nullable identity, compatibility aliases, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-artifact selected_contracts fork may proceed. The runtime projection is reconstructed only from the admitted immutable source artifact and must verify the resulting canonical bundle_hash before execution. Fork-created runs are stamped with that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A and the exact immutable source artifact for that hash. The method persists selected-contract ownership as mode=bundle_hash with the target hash, recovers routes against that same identity, executes against the target BundleContext runtime projection, and stamps fork-created runs with the target canonical bundle_hash. A target hash that is not loaded by this process or lacks its immutable source artifact fails closed with BUNDLE_UNAVAILABLE; malformed or hash-mismatched target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, ambient CLI bundle selection, or ambient filesystem source discovery. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n"
+      description: >-
+        Public selected-contract run fork mutation. Before domain mutation, resolve the source run's canonical
+        runs.bundle_hash and verify its immutable source artifact. Missing or invalid authority fails closed;
+        nullable identities, compatibility aliases, loaded-runtime modules and ambient filesystem discovery
+        cannot supply it.
+
+        If bundle_hash is omitted or equals the source hash, use selected_contracts against that exact artifact.
+        A different hash selects the exact retained target artifact and persists mode=bundle_hash. The selected
+        execution owner reconstructs the effective source and its non-executable preparation independently of
+        RuntimeContextManager. A target need not be loaded by this process; missing target bytes fail with
+        BUNDLE_UNAVAILABLE and corrupt or mismatched bytes with BUNDLE_DATA_INTEGRITY_ERROR.
+
+        Preparation fixes source, frontier, declaration correspondence, provider configuration and catalog before
+        domain mutation. Only exact post-materialization binding may issue selected execution authority.
+        Process-owned work retains preparation and selected execution through activation and failure disposition.
+        A same-hash loaded runtime is not authority and cannot supply configuration, module, grants or lifetime.
+        This does not perform Dynamic Load or make the target available for ordinary ingress. Normal runtime
+        admission and deferred-work replay refusals remain unchanged. The swarm run fork CLI consumes this
+        method and cannot call runtime/store helpers directly.
       scope:
         required:
         - write:runs
@@ -33044,7 +33082,7 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: bundle_hash
         required: false
-        description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects an already loaded/boot-pinned RuntimeContextManager BundleContext under #976; valid but unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
+        description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects the exact retained target artifact for independent process-owned selected preparation. Loaded normal runtime membership is irrelevant; missing target artifacts fail with BUNDLE_UNAVAILABLE and corrupt or mismatched artifact bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
         schema:
           $ref: '#/components/schemas/BundleHash'
       - name: allow_source_freeze
@@ -33185,6 +33223,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OkResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - RUN_NOT_FOUND
       - RUN_ALREADY_TERMINAL
       - RUN_ALREADY_PAUSED
@@ -33211,6 +33250,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OkResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - RUN_NOT_FOUND
       - RUN_NOT_PAUSED
       - IDEMPOTENCY_CONFLICT
@@ -33758,6 +33798,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/DecisionCardMutationResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
       - MAILBOX_STALE_CARD
@@ -33794,6 +33835,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/DecisionCardMutationResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
       - INVALID_DEFER_UNTIL
@@ -33810,7 +33852,7 @@ api_specification:
       - {name: delivery_receipt_id, required: false, schema: {type: string}}
       - {name: idempotency_key, required: false, schema: {type: string, minLength: 1}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/DecisionCardInputResult'}}
-      errors: [MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
+      errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
     mailbox.cancel_input:
       tier: must_have
       description: Cancel the caller's still-active durable input draft. Foreign, stale, expired, replaced, or consumed drafts fail closed.
@@ -33821,7 +33863,7 @@ api_specification:
       - {name: input_draft_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: idempotency_key, required: false, schema: {type: string, minLength: 1}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/DecisionCardInputResult'}}
-      errors: [MAILBOX_NOT_FOUND, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, IDEMPOTENCY_CONFLICT]
+      errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, IDEMPOTENCY_CONFLICT]
     mailbox.acknowledge:
       tier: must_have
       description: Acknowledge a notice. Decision cards reject this operation with a teaching error.
@@ -34332,6 +34374,7 @@ api_specification:
               type: string
               const: platform.agent_directive
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - AGENT_NOT_FOUND
       - AGENT_NOT_RUNNING
       - RUN_NOT_FOUND
@@ -34372,6 +34415,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OkResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - AGENT_NOT_FOUND
       - IDEMPOTENCY_CONFLICT
     agent.replay:
@@ -34421,6 +34465,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/AgentReplayResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - EVENT_NOT_FOUND
       - EVENT_REPLAY_NO_DELIVERY_HISTORY
       - EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL
@@ -35220,8 +35265,9 @@ api_specification:
       source_replacement: >
         The retired Builder package and its project reload/source-replacement implementation do not exist. A process epoch
         loads exactly one generation for each boot-selected source; changing files on disk does not mutate that generation.
-        Existing runs retain immutable bundle authority. Changed-bundle continuation uses run.fork against an already loaded
-        target bundle. Any future reload product requires a new lifecycle owner and specification.
+        Existing runs retain immutable bundle authority. Changed-bundle continuation uses run.fork against an exact
+        retained target artifact under independent selected-fork preparation and execution ownership, not a loaded
+        normal runtime. Any future reload product requires a new lifecycle owner and specification.
     operator_api_disposition:
       transport: "REST at /api/* is retired as an operator-facing compatibility surface. It MUST NOT remain reachable in\
         \ production; consumers use /v1/rpc or /v1/ws."
@@ -36092,7 +36138,13 @@ managed_agent_capability_surface:
       protocol_consumption: The shared managed preflight protocol accepts an explicitly prepared prospective census without constructing a Manager. It validates every runless actor plan and configuration projection, one common preparation target, exact process possession and duplicate-plan exclusion before provider resolution. Same-name plans with different declaration owners remain distinct. Possession is reproved before each probe and before returning successful preparation receipts. Provider and MCP evidence must advance the original immutable surface; replacing its plan or authority is rejected even when the replacement is independently well formed. Normal-runtime preflight retains its existing source and live-candidate admission guards.
       frozen_catalog: The preparation owner constructs one opaque non-executable provider catalog from the complete prospective actor census. Its fingerprint includes exact declaration-owned actor plans, admitted configuration revisions, resolved configuration and backend selection, assembled provider prompts, delivered tool descriptions and schemas, and capability decisions. Actor enumeration order does not change identity. Mutable caller configuration, schema or capability maps cannot change the frozen plan. Preflight consumes the frozen resolutions and tools, rejects changed or missing actors/configuration/catalog coordinates before provider dispatch, and verifies MCP evidence against that same plan rather than resolving a replacement catalog during probing.
       probe_gateway_lifetime: A probe gateway acquires process work before listener construction. Construction failure settles that exact work. Successful construction transfers it to the synchronous gateway cleanup owner, which shuts down and joins all accepted HTTP handlers and the serving loop before settlement; Serve returning alone is not completion. Cleanup is terminal and idempotent. The preparation cancellation bridge is stopped or joined before its enclosing process lease is released. Neither probe gateway nor cancellation bridge requires a live runtime generation or selected execution occurrence.
-      binding: A successful receipt remains preparation evidence. Binding verifies unchanged process, exact selected source and fixed admitted plan, configuration, catalog and prospective actor plan before consuming actual materialization. Missing or mismatched evidence fails closed; a receipt cannot be promoted into a provider-turn authority or silently reissued for another target.
+      provider_construction: Preparation constructs provider protocol/catalog clients without completion controllers, event publishers, conversations, or managed/live session services. These dependencies are rejected, not inherited from a loaded runtime. Normal provider construction continues to require its completion authority. The readiness owner retains immutable derived prompts beside its sealed runtime projection, keyed by the exact runless plan; it neither persists rendered prompts in configuration JSON nor reconstructs them through a later Manager.
+      source_consumption: Direct and admitted staged orchestration retain the loaded selected artifact and its projection through binding, execution, activation and failure disposition. Execution admission verifies the durable binding against that same loaded value; it cannot reload another artifact or release the preparation owner's projection. Materialization evidence is detached from mutable consumer copies. Closed, consumed, cancelled or incomplete preparation cannot expose a new materialization request. Invalid loaded evidence releases its projection while process ownership is still retained and propagates cleanup failure.
+      retained_context_lifetime: After successful execution closure and activation of an active fork, the selected execution owner explicitly transfers its exact bound context and retained projection resources from synchronous orchestration to process-owned controls. Request completion settles the orchestration lease, not the selected occurrence or retained process ownership. Terminal or failed operations release their own resources after settlement. The selected owner registers preparation before loading and publishes materialization and its exact binding under the same admission boundary consumed by stop and retirement. Reset and process shutdown retire this owner, reject further preparation, cancel accepted operations, join their disposition and retained contexts, and only then permit process join and store release. A retired owner is terminal; fresh process composition must construct a new owner rather than reopening it or adopting old tokens.
+      selected_stop_commit: The named selected-fork stop operation consumes an exact durable binding and current process possession. Both selected stores reprove those facts in the terminal transaction, serialize against execution claim through the run lock, reject unsettled running execution, and consume the existing run-lifecycle terminalization owner. A prepared but unclaimed execution is terminally closed with cancellation evidence and a new fence in the same transaction, so a late claim cannot execute it. An admitted stop use remains process-owned while selected execution settles and joins; that stop owns terminal disposition, and execution failure cleanup must not separately discard its fork. A conflicting binding, stale process or failed terminal mutation changes no run, delivery, control or author-activity state. Terminal repeats retain the existing run-control refusal. This operation grants no ordinary ingress, historical replay, deferred execution or loaded-runtime authority.
+      materialization: Before any fork-domain write, the named selected-store transaction rechecks current process possession and generation, original successful probe surfaces, the effective selected source fingerprint, fixed admitted plan including its historical event certificate, and the complete selected actor/configuration census from sealed readiness. An explicitly empty census is valid only when the admitted plan selects no agents. Caller-authored empty evidence cannot skip an admitted actor.
+      binding: A successful receipt remains preparation evidence. Binding is single-consumption and verifies unchanged process, exact selected source and fixed admitted plan, configuration, catalog and prospective actor plan against actual materialized actor identities, configurations and prompts. The existing selected runtime execution row persists the immutable typed preparation binding and its canonical fingerprint; no second registry or durable configuration-secret copy exists. Missing or mismatched evidence fails closed; a receipt cannot be promoted into a provider-turn authority or silently reissued for another target.
+      grant_consumption: Execution issuance, claiming and selected generation authority consume the exact preparation fingerprint. Grant issuance and every later authority use re-read the original integrity-checked surfaces and compare their preparation, process, prospective actor, source, plan, configuration and catalog coordinates. Probe settlement accepts exactly the declared sorted receipt IDs, without trimming, deduplication or inference. A missing, narrowed, corrupt or crossed receipt cannot retain executable authority. Selected execution authority is never accepted as startup-probe authority, including by fresh-store DDL. Old stores and receipt relabeling are unsupported.
     startup_authority: >
       Every cold-start and prepared-handoff state change compare-and-sets the exact persisted lease head. transition_ordinal is
       strictly consecutive across the lease even when handoff-local state_version restarts; rollback persists rolled_back plus

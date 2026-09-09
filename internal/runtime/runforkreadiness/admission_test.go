@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecore "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -235,6 +236,60 @@ func TestAdmissionSealsResolvedModelRevision(t *testing.T) {
 	}
 	if revisions[0] == revisions[1] {
 		t.Fatal("changed resolved model did not change the admitted agent revision")
+	}
+}
+
+func TestAdmissionRetainsExactRunlessPromptWithoutPersistingIt(t *testing.T) {
+	req := templateAdmissionRequest(t)
+	admitted, err := Admit(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := admitted.Projection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Blueprints) != 1 || len(first.Flows) != 1 || len(first.Flows[0].Agents) != 1 {
+		t.Fatal("fixture requires the same actor in both prospective projections")
+	}
+	blueprint := first.Blueprints[0]
+	want, err := blueprint.Config.ProviderPrompt(agentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantText, err := want.Text()
+	if err != nil || wantText == "" {
+		t.Fatalf("missing admitted prompt: %v", err)
+	}
+	var decoded Projection
+	if err := json.Unmarshal(admitted.sealed.projection, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Blueprints[0].Config.Prompt.Empty() || !decoded.Flows[0].Agents[0].Config.Prompt.Empty() {
+		t.Fatal("derived runtime prompt leaked into durable JSON")
+	}
+	first.Blueprints[0].Config.Prompt = agentintent.DerivedPrompt{}
+	first.Flows[0].Agents[0].Config.Prompt = agentintent.DerivedPrompt{}
+	second, err := admitted.Projection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, actor := range []manager.AgentMaterializationBlueprint{second.Blueprints[0], second.Flows[0].Agents[0]} {
+		if actor.Identity != blueprint.Identity || !actor.Config.Identity.IsZero() {
+			t.Fatal("prompt restoration changed prospective identity")
+		}
+		got, err := actor.Config.ProviderPrompt(agentintent.RuntimeEnvironmentContext())
+		if err != nil {
+			t.Fatal(err)
+		}
+		text, err := got.Text()
+		if err != nil || text != wantText {
+			t.Fatalf("admitted prompt changed: %v", err)
+		}
+	}
+	delete(admitted.sealed.prompts, blueprint.Identity)
+	if _, err := admitted.Projection(); err == nil {
+		t.Fatal("missing prompt was reconstructed or silently accepted")
 	}
 }
 

@@ -112,16 +112,15 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				t.Cleanup(resumeSettlement)
 				ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 30*time.Second)
 				defer cancel()
+				forkOptions := rt.ForkRuntime
+				forkOptions.AgentManagerOptions = runtimemanager.AgentManagerOptions{TestLifecycleProbe: barrier}
 				request := runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 						RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
 					},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
-					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
-						ExecutionPosture:    rt.Runtime.ExecutionPosture,
-						AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: barrier},
-					},
+					AgentRuntime:      forkOptions,
 				}
 				type executionResult struct {
 					result runforkexecution.SelectedContractExecutionResult
@@ -291,8 +290,67 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
+				if name == "available_control" {
+					requireSelectedForkPublicControlBoundary(t, rt, claim.RunID(), claimed.signal.EventID)
+				}
 			})
 		}
+	}
+}
+
+func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, runID, eventID string) {
+	t.Helper()
+	var bindingID string
+	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&bindingID); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		method string
+		params map[string]any
+	}{
+		{"run.pause", map[string]any{"run_id": runID}},
+		{"run.continue", map[string]any{"run_id": runID}},
+		{"agent.restart", map[string]any{"run_id": runID, "agent_id": "same-name"}},
+		{"agent.send_directive", map[string]any{"run_id": runID, "agent_id": "same-name", "directive": "must not execute"}},
+		{"event.publish", map[string]any{"run_id": runID, "event_name": "start.requested", "source_event_id": eventID, "payload": map[string]any{"token": "must-not-execute"}}},
+		{"event.replay", map[string]any{"event_id": eventID}},
+	} {
+		t.Run(test.method, func(t *testing.T) {
+			before := snapshotForkReceiverApplication(t, rt)
+			err := requireServedJSONRPCError(t, rt.Endpoint, test.method, test.params)
+			if err.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
+				t.Fatalf("selected control escaped through loaded same-hash runtime: %+v", err)
+			}
+			details, ok := err.Data["details"].(map[string]any)
+			if !ok || details["operation"] != test.method || details["run_id"] != runID || details["binding_id"] != bindingID {
+				t.Fatalf("selected refusal lost exact binding: %+v", err)
+			}
+			after := snapshotForkReceiverApplication(t, rt)
+			for _, table := range []string{"runs", "entity_state", "entity_mutations", "event_deliveries", "event_delivery_attempts", "event_delivery_outcomes", "run_control_state", "api_idempotency"} {
+				if _, ok := before[table]; !ok {
+					t.Fatalf("missing mutation oracle table %s", table)
+				}
+				if !reflect.DeepEqual(before[table], after[table]) {
+					t.Fatalf("refused %s changed %s: before=%v after=%v", test.method, table, before[table], after[table])
+				}
+			}
+		})
+	}
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.stop", map[string]any{"run_id": runID, "idempotency_key": "selected-exact-stop"}, &result)
+	if !result.OK {
+		t.Fatal("selected public stop did not return its terminal result")
+	}
+	var terminal struct {
+		Run struct {
+			Status string `json:"status"`
+		} `json:"run"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": runID}, &terminal)
+	if terminal.Run.Status != "cancelled" {
+		t.Fatalf("public selected stop readback = %+v", terminal)
 	}
 }
 

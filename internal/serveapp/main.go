@@ -1256,12 +1256,23 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
+	if apiStoreCaps.SelectedForkRetirement != nil {
+		if err := apiStoreCaps.SelectedForkProcess.BindSelectedProcess(ctx, processWorkOwner, processCapability); err != nil {
+			presenter.fail(5, "selected_fork_process", err)
+			return 1
+		}
+		if err := selectedLifecycle.SetSelectedForkContexts(apiStoreCaps.SelectedForkRetirement); err != nil {
+			presenter.fail(5, "selected_fork_context", err)
+			return 1
+		}
+	}
 	storeDeps := stores.RuntimeDeps()
 	idempotency := stores.Idempotency()
 	readyFn := func() bool { return ready.Load() }
 	publication := apiv1.EventPublicationOptions{
-		ExecutionPosture: rt.ExecutionPosture,
-		Idempotency:      idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
+		SelectedForkControls: apiStoreCaps.SelectedForkControls,
+		ExecutionPosture:     rt.ExecutionPosture,
+		Idempotency:          idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
 		Runs: apiStoreCaps.Runs, Entities: apiStoreCaps.Entities, Observability: apiStoreCaps.Observability,
 		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
 		Source: source, Bundle: bootBundleIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
@@ -1335,17 +1346,17 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Effective: rt.Manager}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: idempotency, ExecutionPosture: rt.ExecutionPosture}),
 		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPI()}),
-		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, SourceArtifact: rt.Bus, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, SourceArtifact: rt.Bus, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts, SelectedForkControls: apiStoreCaps.SelectedForkControls}),
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
-		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts, SelectedForkControls: apiStoreCaps.SelectedForkControls}),
 		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: idempotency, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, SourceArtifact: rt.Bus, Source: source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles()}),
-		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Idempotency: idempotency}),
+		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts, SelectedForkControls: apiStoreCaps.SelectedForkControls, SelectedForkStop: apiStoreCaps.SelectedForkProcess}),
 		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager}, Idempotency: idempotency}),
 		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: idempotency}),
-		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts, SelectedForkControls: apiStoreCaps.SelectedForkControls}),
 		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency, Now: opts.TestChannelOnboardingNow}),
 		apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: channelOnboarding, Channels: operatorChannels}),
 	)

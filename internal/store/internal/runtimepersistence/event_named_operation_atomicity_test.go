@@ -300,8 +300,11 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 			t.Fatal("selected-fork atomicity fixture has no selected execution authority owner")
 		}
 		selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
+		declarations := emptySelectedDeclarationForTest(t, fixture.db, forkRunID)
+		process := selectedPreparationProcessForTest(t, fixture.store)
 		issued, err := authorityStore.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
-			DeclarationPlan: emptySelectedDeclarationForTest(t, fixture.db, forkRunID),
+			DeclarationPlan: declarations,
+			Preparation:     selectedPreparationForTest(t, process, sourceRunID, forkRunID, sourceEventID, declarations),
 			Admission: runfork.RunForkSelectedContractExecutionAdmission{
 				Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 				NonMutating: true, ExecutionSupported: false, ForkRunID: forkRunID, SourceRunID: sourceRunID, ForkEventID: sourceEventID,

@@ -11,7 +11,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	managedcapabilitystore "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	"github.com/google/uuid"
 )
 
@@ -160,6 +162,7 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 		execution.admission_fingerprint, execution.container_plan_fingerprint,
 		execution.actor_census_fingerprint, execution.effective_config_fingerprint,
 		execution.declaration_plan_fingerprint, execution.declaration_plan,
+		execution.preparation_fingerprint, execution.preparation_binding,
 		run.bundle_hash
 		FROM run_fork_selected_contract_runtime_executions AS execution
 		JOIN run_fork_selected_contract_bindings AS binding ON binding.binding_id = execution.binding_id
@@ -180,11 +183,13 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 	actual := startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}
 	var bundleHash string
 	var declarationRaw []byte
+	var preparationRaw []byte
 	err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&actual.BindingID, &actual.ForkRunID, &actual.ExecutionGeneration,
 		&actual.FenceGeneration, &actual.ExecutionOwner, &actual.AdmissionFingerprint,
 		&actual.ContainerPlanFingerprint, &actual.ActorCensusFingerprint,
-		&actual.EffectiveConfigFingerprint, &actual.DeclarationPlanFingerprint, &declarationRaw, &bundleHash)
+		&actual.EffectiveConfigFingerprint, &actual.DeclarationPlanFingerprint, &declarationRaw,
+		&actual.PreparationFingerprint, &preparationRaw, &bundleHash)
 	if err == sql.ErrNoRows {
 		return errors.New("selected-fork grant execution is absent, expired, terminal or inconsistent with its binding")
 	}
@@ -203,6 +208,31 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 	}
 	if declarations.Revision != actual.DeclarationPlanFingerprint || declarations.BundleHash != bundleHash {
 		return errors.New("selected-fork declaration plan differs from grant and target source")
+	}
+	var preparation runfork.SelectedForkPreparationBinding
+	if err := canonicaljson.DecodeInto(preparationRaw, &preparation); err != nil {
+		return err
+	}
+	fingerprint, err := preparation.Fingerprint()
+	if err != nil {
+		return err
+	}
+	if fingerprint != actual.PreparationFingerprint || preparation.ForkRunID != actual.ForkRunID ||
+		preparation.Coordinates.BundleHash != evidence.BundleHash ||
+		preparation.Coordinates.ProcessAuthorityID != evidence.ProcessAuthorityID ||
+		preparation.Coordinates.ProcessOwnerID != evidence.ProcessOwnerID ||
+		preparation.Coordinates.ProcessBootID != evidence.ProcessBootID {
+		return errors.New("selected generation differs from prepared process or binding")
+	}
+	if err := managedcapabilitystore.ProveSelectedPreparationReceiptsTx(ctx, tx, preparation.SelectedForkPreparation, sqlite); err != nil {
+		return err
+	}
+	if evidence.State != startupownership.GrantPrepared {
+		if err := preparation.ValidateSurfaceIDs(evidence.ProbeSurfaceIDs); err != nil {
+			return err
+		}
+	} else if len(evidence.ProbeSurfaceIDs) != 0 {
+		return errors.New("issued selected generation cannot pre-settle probe receipts")
 	}
 	return nil
 }

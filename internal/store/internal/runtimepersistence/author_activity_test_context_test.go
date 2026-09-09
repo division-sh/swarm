@@ -25,6 +25,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -33,8 +34,10 @@ const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-11111111111
 const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 type storeTestWorkFixture struct {
-	process *worklifetime.Process
-	runtime *worklifetime.RuntimeOccurrence
+	process        *worklifetime.Process
+	runtime        *worklifetime.RuntimeOccurrence
+	capabilitiesMu sync.Mutex
+	capabilities   map[any]startupownership.ProcessCapability
 }
 
 var storeTestWorkFixtures sync.Map

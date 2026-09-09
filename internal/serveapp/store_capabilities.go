@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -8,11 +9,11 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -34,7 +35,9 @@ type selectedAPICapabilities struct {
 	ConversationForkLifecycle apiv1.ConversationForkLifecycleStore
 	RunForkAvailability       apiv1.RunForkAvailabilityStore
 	RunFork                   apiv1.RunForkExecutor
-	RunForkSelector           apiv1.RunForkExecutorSelector
+	SelectedForkControls      apiv1.SelectedForkControlAdmission
+	SelectedForkRetirement    selectedForkContextRetirement
+	SelectedForkProcess       selectedForkProcessOwner
 	RuntimeContexts           *runtime.RuntimeContextManager
 	ResetCoordinator          apiv1.DestructiveResetCoordinator
 }
@@ -58,7 +61,9 @@ type selectedAPICapabilityRequest struct {
 	NoticePresentation      runtimetools.InformationalNoticePresentationSink
 }
 
-func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+var buildSelectedAPICapabilities = constructSelectedAPICapabilities
+
+func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 	caps := selectedAPICapabilities{
 		Database: owner.Pinger(), Runs: owner.Runs(), Entities: owner.Entities(), Agents: owner.Agents(),
 		Conversations: owner.Conversations(), Observability: owner.Observability(),
@@ -92,7 +97,6 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 		executor := apiv1.SelectedContractRunForkExecutor{
 			ExecuteSelectedContractRunFork: family.Execute,
 			SourceLoader:                   loader,
-			ContractSelection:              runforkadmission.SelectedContractSelection(req.Source),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config: req.Config, ExecutionPosture: req.ExecutionPosture,
 				EntityStore: deps.ToolEntityStore, HumanTaskStore: deps.HumanTaskStore,
@@ -105,7 +109,32 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 		}
 		caps.RunForkAvailability = family.Availability()
 		caps.RunFork = executor
-		caps.RunForkSelector = executor
+		caps.SelectedForkControls = family
+		caps.SelectedForkRetirement = family
+		caps.SelectedForkProcess = family
+		if reset, ok := caps.ResetCoordinator.(*runtimedestructivereset.Coordinator); ok {
+			reset.RuntimeContexts = selectedAndNormalContextRetirement{selected: family, normal: req.RuntimeContextManager}
+		}
 	}
 	return caps, nil
+}
+
+type selectedForkProcessOwner interface {
+	apiv1.SelectedForkStopOwner
+	BindSelectedProcess(context.Context, *worklifetime.Process, runtimestartupownership.ProcessCapability) error
+}
+
+type selectedAndNormalContextRetirement struct {
+	selected selectedForkContextRetirement
+	normal   *runtime.RuntimeContextManager
+}
+
+func (q selectedAndNormalContextRetirement) QuiesceAllRuntimeContexts(ctx context.Context) error {
+	if err := q.selected.RetireSelectedContexts(ctx); err != nil {
+		return err
+	}
+	if q.normal != nil {
+		return q.normal.QuiesceAllRuntimeContexts(ctx)
+	}
+	return nil
 }

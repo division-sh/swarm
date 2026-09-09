@@ -9,6 +9,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 type RunBundleContextStore interface {
@@ -37,6 +38,9 @@ func resolveEventPublicationBundleScope(
 
 	resolvedHash := requestedHash
 	if hasRunContext {
+		if err := requireNormalRunControl(ctx, opts.SelectedForkControls, params.RunID, runfork.ControlEventPublish); err != nil {
+			return ctx, opts, params, err
+		}
 		if requestedHash != "" && runAvailability.BundleHash != "" && requestedHash != runAvailability.BundleHash {
 			return ctx, opts, params, NewApplicationError(BundleMismatchCode, false, bundleMismatchDetails(params.RunID, requestedHash, runAvailability))
 		}

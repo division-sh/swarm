@@ -22,6 +22,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
@@ -158,6 +159,22 @@ type RunFork struct {
 }
 
 func (o RunFork) Availability() apiv1.RunForkAvailabilityStore { return o.availability }
+
+func (o RunFork) RequireNormalControl(ctx context.Context, runID string, operation runfork.SelectedControl) error {
+	return o.executionOwner.RequireNormalControl(ctx, runID, operation)
+}
+
+func (o RunFork) RetireSelectedContexts(ctx context.Context) error {
+	return o.executionOwner.RetireSelectedContexts(ctx)
+}
+
+func (o RunFork) BindSelectedProcess(ctx context.Context, process *worklifetime.Process, capability runtimestartupownership.ProcessCapability) error {
+	return o.executionOwner.BindSelectedProcess(ctx, process, capability)
+}
+
+func (o RunFork) StopSelectedFork(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.TransitionResult, bool, error) {
+	return o.executionOwner.StopSelectedFork(ctx, req)
+}
 
 func (o RunFork) Plan(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 	if o.planner == nil {

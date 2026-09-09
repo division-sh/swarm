@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -214,16 +213,6 @@ func TestOperatorRunForkHandlersFailClosedOnBundleAvailability(t *testing.T) {
 			params:       fmt.Sprintf(`{"source_run_id":%q,"fork_event_id":%q}`, runForkTestSourceRunID, runForkTestEventID),
 			wantCode:     BundleDataIntegrityErrorCode,
 		},
-		{
-			name:         "different bundle hash",
-			availability: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
-			params: fmt.Sprintf(
-				`{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":"bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","allow_source_freeze":true}`,
-				runForkTestSourceRunID,
-				runForkTestEventID,
-			),
-			wantCode: BundleUnavailableCode,
-		},
 	}
 
 	for _, tc := range tests {
@@ -387,8 +376,4 @@ func (e *recordingRunForkExecutor) ExecuteRunFork(_ context.Context, req RunFork
 		result.BundleHash = req.BundleHash
 	}
 	return result, nil
-}
-
-func (e *recordingRunForkExecutor) SelectRunForkExecutor(*swruntime.BundleContext, *swruntime.Runtime) (RunForkExecutor, error) {
-	return e, nil
 }

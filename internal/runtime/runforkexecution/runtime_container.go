@@ -81,6 +81,9 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if req.Operation == nil {
 		return selectedContractForkLocalRuntimeContainer{}, errors.New("selected-contract runtime container requires its admitted operation")
 	}
+	if req.Prepared == nil || req.Prepared.operation != req.Operation {
+		return selectedContractForkLocalRuntimeContainer{}, errors.New("selected-contract container requires its exact preparation")
+	}
 	ports, err := req.Owner.require()
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
@@ -198,7 +201,12 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(scope.RuntimeInstanceID) == "" || scope.BundleHash != bundleHash {
 		return selectedContractForkLocalRuntimeContainer{}, errors.New("selected-contract runtime container requires exact selected bundle scope")
 	}
+	preparation, err := req.Prepared.bind(ctx, forkRunID, req.LoadedSource, req.AgentRuntime)
+	if err != nil {
+		return selectedContractForkLocalRuntimeContainer{}, err
+	}
 	issued, err := ports.runtimeExecution.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
+		Preparation:     preparation,
 		DeclarationPlan: req.AgentRuntime.Declarations,
 		Admission:       req.Admission, ContainerPlanFingerprint: containerFingerprint,
 		ActorCensusFingerprint: actorFingerprint, EffectiveConfigFingerprint: configFingerprint, ExecutionMode: mode,
@@ -226,7 +234,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
 	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, authority.SelectedFork.ExecutionID,
 		authority.SelectedFork.Generation, authority.SelectedFork.ForkRunID, issued.ActorCensusFingerprint,
-		bundleHash, nil)
+		bundleHash, preparation.SurfaceIDs())
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}

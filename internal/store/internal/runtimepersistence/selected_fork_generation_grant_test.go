@@ -37,16 +37,11 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			acquire := testStartupAcquireRequest("selected-grant-process")
-			capability, err := ports.AcquireProcessCapability(ctx, acquire)
+			capability := fixture.process
+			acquire, err := capability.Evidence()
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() {
-				if err := capability.Release(context.Background()); err != nil {
-					t.Errorf("release process: %v", err)
-				}
-			})
 			req := startupownership.SelectedForkGrantRequest{
 				RuntimeInstanceID: acquire.RuntimeInstanceID,
 				Binding: startupownership.SelectedForkGrantBinding{
@@ -56,6 +51,7 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 					ContainerPlanFingerprint: issued.ContainerPlanFingerprint, ActorCensusFingerprint: issued.ActorCensusFingerprint,
 					EffectiveConfigFingerprint: issued.EffectiveConfigFingerprint,
 					DeclarationPlanFingerprint: issued.DeclarationPlanFingerprint,
+					PreparationFingerprint:     issued.PreparationFingerprint,
 				},
 			}
 			if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.forkRun).Scan(&req.BundleHash); err != nil {

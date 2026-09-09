@@ -10,15 +10,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
-	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 )
 
@@ -55,155 +51,19 @@ type SelectedContractExecutionResult struct {
 }
 
 func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest) (out SelectedContractExecutionResult, finalErr error) {
-	ports, err := req.Owner.require()
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	if req.SourceLoader == nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires selected source loader")
-	}
-	selection, err := normalizeSelectedContractExecutionSelection(req.ContractSelection)
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	expectedBundleHash := strings.TrimSpace(req.ExpectedBundleHash)
-	if req.SourceArtifactFact.BundleHash() != "" {
-		if err := req.SourceArtifactFact.Validate(); err != nil {
-			return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution expected bundle source fact is invalid: %w", err)
-		}
-		if expectedBundleHash != "" && expectedBundleHash != req.SourceArtifactFact.BundleHash() {
-			return SelectedContractExecutionResult{}, fmt.Errorf(
-				"selected-contract execution expected bundle_hash %s does not match source fact %s",
-				expectedBundleHash,
-				req.SourceArtifactFact.BundleHash(),
-			)
-		}
-		expectedBundleHash = req.SourceArtifactFact.BundleHash()
-	}
-	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:        req.SourceRunID,
-		BundleHash:         expectedBundleHash,
-		SourceArtifactFact: req.SourceArtifactFact,
-		Selection:          selection,
-	})
-	if err != nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("load selected semantic source for execution: %w", err)
-	}
-	defer cleanupLoadedSelectedContractSource(loadedSource)
-	selection = loadedSource.Selection
-	if loadedSource.Module == nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires executable selected workflow module")
-	}
-	if err := loadedSource.SourceArtifactFact.Validate(); err != nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source loader returned incomplete bundle identity: %w", err)
-	}
-	if err := loadedSource.EffectiveSourceIdentity.Validate(); err != nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source loader returned incomplete effective source identity: %w", err)
-	}
-	if err := req.EffectiveSourceIdentity.Validate(); err == nil && !req.EffectiveSourceIdentity.Equal(loadedSource.EffectiveSourceIdentity) {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract effective source identity does not match loaded effective source")
-	}
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loadedSource.SourceArtifactFact)
-	materializationBundleHash := loadedSource.SourceArtifactFact.BundleHash()
-	selectedScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, materializationBundleHash)
-	if err != nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("resolve selected-contract author activity scope: %w", err)
-	}
-	ctx = runtimeauthoractivity.WithScope(ctx, selectedScope)
-	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
-	if err != nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("project selected-contract author activity descriptors: %w", err)
-	}
-	descriptorLease, err := ports.fork.RegisterAuthorActivityEventCatalog(selectedScope, descriptors)
-	if err != nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("register selected-contract author activity descriptors: %w", err)
-	}
-	defer descriptorLease.Release()
-	operation, err := beginSelectedContractOperation(ctx)
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	defer func() { finalErr = errors.Join(finalErr, operation.Finish()) }()
-	ctx = operation.PreparationContext()
-	plan, err := ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{
-		SourceRunID: strings.TrimSpace(req.SourceRunID),
-		At:          strings.TrimSpace(req.At),
-	})
-	if err != nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("plan selected-contract execution: %w", err)
-	}
-	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
+	prepared, err := req.Owner.Prepare(ctx, req)
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
 	}
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{
-		Plan:              plan,
-		Source:            loadedSource.Source,
-		ContractSelection: selection,
-	})
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	if frontier.FrontierEventCount == 0 {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires selected frontier events")
-	}
-	routeAdmission, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
-		Plan:              plan,
-		Source:            loadedSource.Source,
-		ContractSelection: selection,
-		FrontierAdmission: frontier,
-	})
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	if err := validateSelectedContractExecutionFrontierForMutation(frontier); err != nil {
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
-	}
-	routeTopology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
-		Admission:      frontier,
-		RouteAdmission: routeAdmission,
-	})
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
-		Admission:      frontier,
-		RouteAdmission: routeAdmission,
-		RouteTopology:  routeTopology,
-	})
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
+	defer func() { finalErr = errors.Join(finalErr, req.Owner.completePreparation(prepared)) }()
+	ports, operation, loadedSource := req.Owner.ports, prepared.operation, prepared.loadedSource
+	plan, frontier, routeAdmission := prepared.plan, prepared.frontier, prepared.routeAdmission
+	routeTopology, model := prepared.routeTopology, prepared.model
+	agentRuntime := prepared.agentRuntime
+	deferredWorkAdmission := prepared.deferredWorkAdmission
 	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
-	agentRuntime, readiness, err := prepareSelectedContractWorkflowReadiness(
-		ctx, ports.replay, loadedSource, *model.RecipientPlanning, plan, frontier, sourceEventIDs, req.AgentRuntime,
-	)
-	if err != nil {
-		return SelectedContractExecutionResult{
-			Owner:                       runfork.RunForkSelectedContractExecutionOwner,
-			AgentRuntimeMaterialization: &agentRuntime.Proof,
-		}, err
-	}
-	defer func() { finalErr = errors.Join(finalErr, agentRuntime.releaseWorkspaceProjection()) }()
-	if req.AgentRuntime.ProcessCapability == nil {
-		return SelectedContractExecutionResult{}, errors.New("selected-contract execution requires process capability before materialization")
-	}
-	if err := req.AgentRuntime.ProcessCapability.ProveCurrent(ctx); err != nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("prove selected-contract process before materialization: %w", err)
-	}
-	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID:             plan.SourceRunID,
-		At:                      plan.ForkPoint.EventID,
-		ContractSelection:       selection,
-		SourceArtifactFact:      loadedSource.SourceArtifactFact,
-		EffectiveSourceIdentity: loadedSource.EffectiveSourceIdentity,
-		FrontierAdmission:       frontier,
-		RouteTopology:           routeTopology,
-		RecipientPlanning:       *model.RecipientPlanning,
-		Readiness:               readiness,
-		DataPinOverrides:        req.DataPinOverrides,
-		FanOutPlanRefs:          deferredWorkAdmission.fanOutPlanRefs,
-	})
+	ctx = operation.PreparationContext()
+	materialization, err := req.Owner.materializePrepared(ctx, prepared)
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
@@ -230,7 +90,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		SourceRunID:           plan.SourceRunID,
 		SourceArtifactFact:    loadedSource.SourceArtifactFact,
 		BindingReader:         ports.fork,
-		SourceLoader:          req.SourceLoader,
+		LoadedSource:          loadedSource,
 		FrontierAdmission:     frontier,
 		RouteAdmission:        routeAdmission,
 		RouteTopology:         routeTopology,
@@ -241,6 +101,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
+		Prepared:              prepared,
 		Operation:             operation,
 		Owner:                 req.Owner,
 		Admission:             admission,
@@ -316,6 +177,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err := container.Close(ctx); err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
+	if activation.ForkRunStatus == runfork.RunForkActivatedStatus {
+		if err := req.Owner.retainPrepared(prepared); err != nil {
+			return SelectedContractExecutionResult{}, err
+		}
+	}
 	result := SelectedContractExecutionResult{
 		Owner:                              runfork.RunForkSelectedContractExecutionOwner,
 		Materialization:                    materialization,
@@ -352,6 +218,11 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store Selected
 	if store == nil || strings.TrimSpace(forkRunID) == "" {
 		return cause
 	}
+	if selectedStopOwnsDisposition(ctx) {
+		// The admitted stop use remains process-owned until this execution has
+		// joined and the named terminal operation has committed or failed closed.
+		return cause
+	}
 	if err := store.DiscardMaterializedSelectedContractExecutionFork(context.WithoutCancel(ctx), forkRunID); err != nil {
 		return errors.Join(cause, fmt.Errorf("cleanup selected-contract fork %s: %w", forkRunID, err))
 	}
@@ -359,6 +230,7 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store Selected
 }
 
 type publishSelectedContractForkEventsRequest struct {
+	Prepared              *PreparedSelectedFork
 	Operation             *selectedContractOperation
 	Owner                 SelectedContractExecutionOwner
 	Admission             runfork.RunForkSelectedContractExecutionAdmission

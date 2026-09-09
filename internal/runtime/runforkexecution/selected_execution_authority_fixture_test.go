@@ -9,8 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store"
@@ -22,8 +20,9 @@ import (
 
 // Component tests bind a real retained execution before constructing a runtime;
 // fabricated effect evidence alone can no longer pass generation admission.
-func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore, source correlation.SourceArtifactFact, runID string, declarations agenttopology.SelectedDeclarationPlan) effects.Authority {
+func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore, loaded LoadedSelectedContractSource, runID string, agents selectedContractAgentRuntimePlan) (effects.Authority, *PreparedSelectedFork) {
 	t.Helper()
+	source := loaded.SourceArtifactFact
 	sourceRun, eventID, bindingID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	for _, id := range []string{sourceRun, runID} {
 		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
@@ -37,8 +36,23 @@ func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db 
 		(binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at) VALUES ($1,$2,$3,$4,'selected_contracts',$5)`, bindingID, runID, sourceRun, eventID, now); err != nil {
 		t.Fatal(err)
 	}
+	captureSelectedExecutionSourceRevision(t, db, sourceRun)
+	plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := selectedContractOperationForTest(t, ctx)
+	owner := selectedContractExecutionOwnerForTest(t, selected)
+	prepared, err := prepareSelectedFork(ctx, operation, owner.ports, loaded, plan, runfork.RunForkContractFrontierAdmission{}, runfork.RunForkSelectedContractRecipientPlanning{}, agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := prepared.bind(ctx, runID, loaded, agents)
+	if err != nil {
+		t.Fatal(err)
+	}
 	issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
-		DeclarationPlan: declarations,
+		DeclarationPlan: agents.Declarations, Preparation: binding,
 		Admission: runfork.RunForkSelectedContractExecutionAdmission{
 			Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 			NonMutating: true, ForkRunID: runID, SourceRunID: sourceRun, ForkEventID: eventID,
@@ -56,5 +70,5 @@ func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return authority
+	return authority, prepared
 }

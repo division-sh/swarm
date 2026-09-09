@@ -65,6 +65,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 	}
 
 	err = port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects) error {
+		if err := proveSelectedPreparationForMutationTx(txctx, tx, req.Preparation, !port.postgres); err != nil {
+			return err
+		}
 		sourceRunID := strings.TrimSpace(req.SourceRunID)
 		sourceStatus, err := port.lockSourceStatus(txctx, tx, sourceRunID)
 		if err != nil {
@@ -80,6 +83,18 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		plan, err := port.plan(txctx, tx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: strings.TrimSpace(req.At)})
 		if err != nil {
 			return err
+		}
+		fingerprint, err := runfork.SelectedPreparationPlanFingerprint(plan, req.FrontierAdmission, req.RecipientPlanning, req.Preparation.DeclarationPlanFingerprint)
+		if err != nil {
+			return err
+		}
+		if req.Preparation.SourceRunID != plan.SourceRunID || req.Preparation.ForkEventID != plan.ForkPoint.EventID ||
+			req.Preparation.Coordinates.BundleHash != req.SourceArtifactFact.BundleHash() || fingerprint != req.Preparation.Coordinates.AdmittedPlanFingerprint {
+			return fmt.Errorf("selected preparation differs from transaction's fixed admitted plan")
+		}
+		sourceFingerprint, err := runfork.SelectedPreparationSourceFingerprint(req.EffectiveSourceIdentity)
+		if err != nil || sourceFingerprint != req.Preparation.Coordinates.SourceFingerprint {
+			return fmt.Errorf("selected preparation differs from transaction's effective source")
 		}
 		replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 		forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
@@ -124,6 +139,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			EffectiveSourceIdentity: req.EffectiveSourceIdentity,
 			FrontierAdmission:       req.FrontierAdmission, RecipientPlanning: req.RecipientPlanning, SourceModes: sourceModes,
 		}); err != nil {
+			return err
+		}
+		if err := req.Readiness.ValidatePreparation(req.Preparation); err != nil {
 			return err
 		}
 		workflowStates, err := selectedContractAdmittedWorkflowStates(plan, forkRunID, req.Readiness)

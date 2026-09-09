@@ -12,6 +12,8 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testing.T) {
@@ -57,7 +59,11 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := runForkTestContext(t)
+	capability := selectedContractTestProcessCapability(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db))
+	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: capability},
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -198,7 +204,11 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := runForkTestContext(t)
+	capability := selectedContractTestProcessCapability(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db))
+	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: capability},
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,

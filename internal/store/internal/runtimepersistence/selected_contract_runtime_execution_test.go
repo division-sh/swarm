@@ -18,6 +18,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -38,6 +39,7 @@ type selectedCompletionAuthorityStore interface {
 }
 
 type selectedCompletionFixture struct {
+	process   startupownership.ProcessCapability
 	store     selectedCompletionAuthorityStore
 	db        *sql.DB
 	sqlite    bool
@@ -289,7 +291,7 @@ func TestSelectedForkRuntimeAuthorityFinalizationAfterRunTerminalSelectedStorePa
 				t.Fatalf("close terminal fork authority: %v", err)
 			}
 
-			failFixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			failFixture := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, quiesceFixture.process)
 			issued, err = store.IssueRunForkSelectedContractRuntimeExecution(ctx, failFixture.request)
 			if err != nil {
 				t.Fatalf("issue failure authority: %v", err)
@@ -1217,6 +1219,10 @@ func requireSelectedAttemptUsesCurrentLease(t *testing.T, fixture selectedComple
 }
 
 func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool) selectedCompletionFixture {
+	return newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, selectedPreparationProcessForTest(t, store))
+}
+
+func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability) selectedCompletionFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
@@ -1260,10 +1266,13 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
 		DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
 	}
+	declarations := emptySelectedDeclarationForTest(t, db, forkRun)
 	return selectedCompletionFixture{
-		store: store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
+		process: process,
+		store:   store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
 		request: runfork.SelectedContractRuntimeExecutionIssueRequest{
-			DeclarationPlan: emptySelectedDeclarationForTest(t, db, forkRun),
+			Preparation:     selectedPreparationForTest(t, process, sourceRun, forkRun, eventID, declarations),
+			DeclarationPlan: declarations,
 			Admission:       admission, ContainerPlanFingerprint: "sha256:container", ActorCensusFingerprint: "sha256:actors",
 			EffectiveConfigFingerprint: "sha256:config", ExecutionMode: runtimeeffects.ExecutionModeLive, Now: now,
 		},

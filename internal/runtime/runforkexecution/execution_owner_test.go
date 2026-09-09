@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"context"
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -11,6 +12,7 @@ import (
 
 func selectedContractExecutionOwnerForTest(t testing.TB, selected *store.PostgresStore) SelectedContractExecutionOwner {
 	t.Helper()
+	_ = runForkTestContext(t)
 	if selected == nil {
 		t.Fatal("selected postgres store is required")
 	}
@@ -33,11 +35,17 @@ func selectedContractExecutionOwnerForTest(t testing.TB, selected *store.Postgre
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 	return owner
 }
 
 func selectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *store.SQLiteRuntimeStore) SelectedContractExecutionOwner {
 	t.Helper()
+	_ = runForkTestContext(t)
 	durable := runtimebus.DurableDependencies{
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
@@ -57,5 +65,10 @@ func selectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *store.S
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 	return owner
 }

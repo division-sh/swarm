@@ -1043,6 +1043,14 @@ func (s *SelectedForkOccurrence) RetireAndWait(ctx context.Context) error {
 	return s.occurrence.finish(ctx)
 }
 
+// Retire fences admission and cancels accepted selected work. Its owning
+// orchestration must settle before RetireAndWait can join the occurrence.
+func (s *SelectedForkOccurrence) Retire() {
+	if s != nil {
+		s.occurrence.retire()
+	}
+}
+
 func (s *SelectedForkOccurrence) Identity() SelectedForkIdentity {
 	if s == nil {
 		return SelectedForkIdentity{}

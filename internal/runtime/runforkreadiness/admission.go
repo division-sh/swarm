@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -22,6 +24,7 @@ import (
 
 // MaterializeRequest carries an admitted relation, never caller-authored states.
 type MaterializeRequest struct {
+	Preparation             runfork.SelectedForkPreparation
 	SourceRunID             string
 	At                      string
 	ContractSelection       runfork.RunForkContractSelection
@@ -57,6 +60,7 @@ type Admission struct {
 }
 
 type admittedProjection struct {
+	prompts         map[agentidentity.Plan]agentintent.DerivedPrompt
 	planBinding     string
 	frontierBinding string
 	selection       runfork.RunForkContractSelection
@@ -97,6 +101,23 @@ func Admit(req AdmissionRequest) (Admission, error) {
 	if err != nil {
 		return Admission{}, err
 	}
+	// DerivedPrompt is immutable runtime data excluded from persisted config JSON.
+	// Keep it beside the sealed projection so pre-domain probes consume the
+	// already-admitted prompt instead of depending on later Manager hydration.
+	prompts := make(map[agentidentity.Plan]agentintent.DerivedPrompt, len(prepared.Blueprints))
+	for _, blueprint := range prepared.Blueprints {
+		if err := blueprint.Config.ValidateIntentCarrier(); err != nil {
+			return Admission{}, err
+		}
+		if previous, duplicate := prompts[blueprint.Identity]; duplicate {
+			prior, err := previous.Text(blueprint.Config.Intent, blueprint.Config.Criteria)
+			current, currentErr := blueprint.Config.DerivedSystemPrompt()
+			if err != nil || currentErr != nil || prior != current {
+				return Admission{}, fmt.Errorf("selected readiness repeats a conflicting actor prompt owner")
+			}
+		}
+		prompts[blueprint.Identity] = blueprint.Config.Prompt
+	}
 	projection, err := json.Marshal(prepared)
 	if err != nil {
 		return Admission{}, fmt.Errorf("seal selected-contract readiness projection: %w", err)
@@ -110,6 +131,7 @@ func Admit(req AdmissionRequest) (Admission, error) {
 		return Admission{}, err
 	}
 	return Admission{sealed: &admittedProjection{
+		prompts:     prompts,
 		planBinding: planBinding, frontierBinding: frontierBinding,
 		selection: req.ContractSelection, sourceFact: req.SourceArtifactFact,
 		planning: planning, modes: modes, effectiveSource: req.EffectiveSourceIdentity, projection: projection,
@@ -125,6 +147,26 @@ func (a Admission) Projection() (Projection, error) {
 	decoder.UseNumber()
 	if err := decoder.Decode(&out); err != nil {
 		return Projection{}, fmt.Errorf("read admitted selected-contract readiness: %w", err)
+	}
+	restore := func(blueprint *manager.AgentMaterializationBlueprint) error {
+		prompt, ok := a.sealed.prompts[blueprint.Identity]
+		if !ok {
+			return fmt.Errorf("selected readiness actor has no admitted derived prompt")
+		}
+		blueprint.Config.Prompt = prompt
+		return blueprint.Config.ValidateIntentCarrier()
+	}
+	for i := range out.Blueprints {
+		if err := restore(&out.Blueprints[i]); err != nil {
+			return Projection{}, err
+		}
+	}
+	for i := range out.Flows {
+		for j := range out.Flows[i].Agents {
+			if err := restore(&out.Flows[i].Agents[j]); err != nil {
+				return Projection{}, err
+			}
+		}
 	}
 	return out, nil
 }
@@ -156,6 +198,43 @@ func (a Admission) ValidateAgainst(binding Binding) error {
 	}
 	if !maps.Equal(modes, binding.SourceModes) {
 		return fmt.Errorf("selected-contract readiness admission disagrees with complete source event modes")
+	}
+	return nil
+}
+
+func (a Admission) ValidatePreparation(preparation runfork.SelectedForkPreparation) error {
+	if err := preparation.Validate(); err != nil {
+		return err
+	}
+	projection, err := a.Projection()
+	if err != nil {
+		return err
+	}
+	var planning runfork.RunForkSelectedContractRecipientPlanning
+	if err := json.Unmarshal(a.sealed.planning, &planning); err != nil {
+		return err
+	}
+	plans, err := planning.SelectedAgentPlans()
+	if err != nil {
+		return err
+	}
+	if len(plans) != len(preparation.Actors) {
+		return fmt.Errorf("selected preparation omits or adds admitted actors")
+	}
+	byPlan := make(map[agentidentity.Plan]manager.AgentMaterializationBlueprint, len(projection.Blueprints))
+	for _, blueprint := range projection.Blueprints {
+		byPlan[blueprint.Identity] = blueprint
+	}
+	for i, plan := range plans {
+		actor := preparation.Actors[i]
+		blueprint, ok := byPlan[plan]
+		if !ok || actor.Plan != plan {
+			return fmt.Errorf("selected preparation changes admitted actor correspondence")
+		}
+		revision, err := manager.AgentConfigPlanRevision(blueprint.Config, plan)
+		if err != nil || revision != actor.ConfigurationRevision || blueprint.Config.ResolvedLLMBackend != actor.Backend || blueprint.Config.ExecutionMode != actor.Mode {
+			return fmt.Errorf("selected preparation changes admitted actor configuration")
+		}
 	}
 	return nil
 }

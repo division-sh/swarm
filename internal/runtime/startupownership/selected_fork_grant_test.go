@@ -20,6 +20,7 @@ func TestSelectedForkGrantEvidenceHasOneAuthority(t *testing.T) {
 			ActorCensusFingerprint:     "sha256:" + strings.Repeat("3", 64),
 			EffectiveConfigFingerprint: "sha256:" + strings.Repeat("4", 64),
 			DeclarationPlanFingerprint: "sha256:" + strings.Repeat("5", 64),
+			PreparationFingerprint:     "sha256:" + strings.Repeat("6", 64),
 		},
 	}
 	if err := evidence.Validate(); err != nil {

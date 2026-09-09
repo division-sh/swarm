@@ -430,16 +430,11 @@ func (a ManagedProviderPreflightAuthority) validate() error {
 	if strings.TrimSpace(a.ExecutionAuthorityID) == "" || strings.TrimSpace(a.StartupOwnerID) == "" || a.StartupGeneration == 0 {
 		return fmt.Errorf("managed provider preflight authority is incomplete")
 	}
-	if a.ExecutionKind != managedcapabilities.ExecutionNormalAgent && a.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork {
+	if a.ExecutionKind != managedcapabilities.ExecutionNormalAgent {
 		return fmt.Errorf("managed provider preflight execution kind %q is invalid", a.ExecutionKind)
 	}
 	if a.ExecutionKind == managedcapabilities.ExecutionNormalAgent && strings.TrimSpace(a.RunID) != "" {
 		return fmt.Errorf("normal managed provider preflight cannot carry a fork run identity")
-	}
-	if a.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork {
-		if _, err := uuid.Parse(strings.TrimSpace(a.RunID)); err != nil {
-			return fmt.Errorf("selected-fork managed provider preflight run id is invalid: %w", err)
-		}
 	}
 	if a.EffectController == nil || a.CapabilityStore == nil || a.EffectAuthority == nil {
 		return fmt.Errorf("managed provider preflight requires effect controller, capability persistence, and exact effect authority")
@@ -509,15 +504,16 @@ func ValidatePreparedSelectedForkProviderPreflight(ctx context.Context, cfg *con
 	if catalog == nil || catalog.Fingerprint() == "" || len(catalog.targets) != len(probes) {
 		return nil, fmt.Errorf("prepared provider preflight requires its exact frozen catalog")
 	}
+	blueprints := make([]runtimemanager.AgentMaterializationBlueprint, len(probes))
+	for i, probe := range probes {
+		blueprints[i] = probe.Agent
+	}
+	if err := catalog.ValidateActors(blueprints); err != nil {
+		return nil, err
+	}
 	for _, probe := range probes {
-		target, ok := catalog.targets[probe.Agent.Identity]
-		revision, err := runtimemanager.AgentConfigPlanRevision(probe.Agent.Config, probe.Agent.Identity)
-		if !ok || err != nil || target.revision != revision || probe.Authority.CatalogFingerprint != catalog.Fingerprint() {
+		if probe.Authority.CatalogFingerprint != catalog.Fingerprint() {
 			return nil, fmt.Errorf("prepared provider preflight catalog or configuration changed")
-		}
-		prompt, err := preparedProviderPrompt(probe.Agent.Config)
-		if err != nil || prompt != target.prompt {
-			return nil, fmt.Errorf("prepared provider preflight prompt changed")
 		}
 	}
 	sort.Slice(configs, func(i, j int) bool { return runtimeagentidentity.LessPlan(configs[i].plan, configs[j].plan) })
@@ -564,6 +560,9 @@ func (a ManagedProviderPreflightAuthority) probeAuthority(ctx context.Context, p
 }
 
 func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, source semanticview.Source, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager, authority ManagedProviderPreflightAuthority) ([]string, error) {
+	if authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork {
+		return nil, fmt.Errorf("selected-fork startup requires non-executable preparation")
+	}
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
 	if err != nil {
 		return nil, err
@@ -601,15 +600,6 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 	targets := make([]preflightTarget, 0)
 	for _, candidate := range preflightConfigs {
 		agentCfg := candidate.config
-		if authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork {
-			// A selected fork probes only its already-materialized execution census.
-			if agentCfg.Identity.IsZero() {
-				continue
-			}
-			if agentCfg.Identity.RunID != authority.RunID {
-				return nil, fmt.Errorf("selected-fork preflight agent run does not match execution authority")
-			}
-		}
 		var resolved llm.AgentRuntimeResolution
 		var resolveErr error
 		var catalogTarget preparedProviderCatalogTarget
@@ -714,7 +704,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 		}
 		expectedNames := startupSurfaceCanonicalNames(surface, managedcapabilities.BindingMCPTool)
 		if len(expectedNames) == 0 {
-			if err := validateEffectiveManagedCapabilitySurface(surface); err != nil {
+			if err := surface.ValidateEffective(); err != nil {
 				return nil, fmt.Errorf("managed capability startup surface is incomplete for agent %s: %w", agentID, err)
 			}
 			surfaceIDs = append(surfaceIDs, surface.ID)
@@ -757,7 +747,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			turnStore.UnregisterTurnContext(binding.ContextToken)
 			return nil, fmt.Errorf("persist managed capability MCP evidence for agent %s: %w", agentID, err)
 		}
-		if err := validateEffectiveManagedCapabilitySurface(listedSurface); err != nil {
+		if err := listedSurface.ValidateEffective(); err != nil {
 			turnStore.UnregisterTurnContext(binding.ContextToken)
 			return nil, fmt.Errorf("managed capability startup surface is incomplete for agent %s: %w", agentID, err)
 		}
@@ -777,21 +767,6 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 	}
 	sort.Strings(surfaceIDs)
 	return surfaceIDs, nil
-}
-
-func validateEffectiveManagedCapabilitySurface(surface managedcapabilities.Surface) error {
-	if err := surface.Validate(); err != nil {
-		return err
-	}
-	if surface.HasMismatch() {
-		return fmt.Errorf("surface contains typed delivery mismatch")
-	}
-	for _, tool := range surface.Tools {
-		if tool.Capability.Visible && tool.Capability.Callable && (!tool.EffectiveVisible || !tool.EffectiveCallable) {
-			return fmt.Errorf("capability %s is not effectively callable: %s", tool.Name, tool.EffectiveDenial)
-		}
-	}
-	return nil
 }
 
 func isClaudeCLIBackend(cfg *config.Config) (bool, error) {

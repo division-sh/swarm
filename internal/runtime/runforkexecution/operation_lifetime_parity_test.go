@@ -301,6 +301,20 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				if bound == nil {
 					t.Fatal("activation was not reached")
 				}
+				if err == nil {
+					owner.ports.contexts.mu.Lock()
+					retained := false
+					for _, entry := range owner.ports.contexts.entries {
+						retained = retained || (entry.binding.ForkRunID == result.Materialization.ForkRunID && entry.retained != nil)
+					}
+					owner.ports.contexts.mu.Unlock()
+					if !retained || process.ActiveCount() == 0 {
+						t.Fatal("successful active fork lost its process-owned control handoff")
+					}
+				}
+				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := bound.Begin(context.Background()); !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("operation did not release selected execution: %v", err)
 				}

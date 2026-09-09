@@ -67,7 +67,7 @@ func (postgresDialect) maxGenerationSQL() string {
 	return `SELECT COALESCE(MAX(generation),0) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid`
 }
 func (postgresDialect) insertSQL() string {
-	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at,declaration_plan_fingerprint,declaration_plan) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,'prepared',$12,$13,1,'{}'::jsonb,$14,$14,$15,$16::jsonb)`
+	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,'prepared',$12,$13,1,'{}'::jsonb,$14,$14,$15,$16::jsonb,$17,$18::jsonb)`
 }
 
 type sqliteDialect struct{}
@@ -84,7 +84,7 @@ func (sqliteDialect) maxGenerationSQL() string {
 	return `SELECT COALESCE(MAX(generation),0) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=?`
 }
 func (sqliteDialect) insertSQL() string {
-	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at,declaration_plan_fingerprint,declaration_plan) VALUES (?,?,?,?,?,?,?,?,?,?,?,'prepared',?,?,1,'{}',?,?,?,?)`
+	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding) VALUES (?,?,?,?,?,?,?,?,?,?,?,'prepared',?,?,1,'{}',?,?,?,?,?,?)`
 }
 
 func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dialect selectedRuntimeDialect, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
@@ -92,6 +92,24 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime issuance transaction is required")
 	}
 	admission := req.Admission
+	preparationFingerprint, err := req.Preparation.Fingerprint()
+	if err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
+	if req.Preparation.DeclarationPlanFingerprint != req.DeclarationPlan.Revision {
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected preparation declaration differs from execution")
+	}
+	if req.Preparation.ForkRunID != admission.ForkRunID || req.Preparation.SourceRunID != admission.SourceRunID || req.Preparation.ForkEventID != admission.ForkEventID || req.Preparation.Coordinates.BundleHash != req.DeclarationPlan.BundleHash {
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected preparation does not match execution binding")
+	}
+	_, sqlite := dialect.(sqliteDialect)
+	if err := proveSelectedPreparationForMutationTx(ctx, tx, req.Preparation.SelectedForkPreparation, sqlite); err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
+	preparationRaw, err := canonicaljson.Bytes(req.Preparation)
+	if err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
 	if err := validateSelectedRuntimeAdmission(admission); err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
@@ -129,9 +147,9 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 		strings.TrimSpace(bundleHash) != strings.TrimSpace(admission.ContractSelection.BundleHash) {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime admission does not match durable binding")
 	}
-	var current string
-	if err := tx.QueryRowContext(ctx, dialect.currentSQL(), dialect.uuid(admission.ForkRunID)).Scan(&current); err == nil {
-		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime fork %s already has current execution %s", admission.ForkRunID, current)
+	var currentExecution string
+	if err := tx.QueryRowContext(ctx, dialect.currentSQL(), dialect.uuid(admission.ForkRunID)).Scan(&currentExecution); err == nil {
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime fork %s already has current execution %s", admission.ForkRunID, currentExecution)
 	} else if err != sql.ErrNoRows {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("check selected-contract current runtime: %w", err)
 	}
@@ -145,9 +163,9 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
 	executableFingerprint, err := runfork.RunForkSelectedContractRuntimeFingerprint(struct {
-		ForkRunID, Admission, Container, Actors, Config, Declarations string
-		Generation                                                    uint64
-	}{admission.ForkRunID, admissionFingerprint, req.ContainerPlanFingerprint, req.ActorCensusFingerprint, req.EffectiveConfigFingerprint, req.DeclarationPlan.Revision, generation})
+		ForkRunID, Admission, Container, Actors, Config, Declarations, Preparation string
+		Generation                                                                 uint64
+	}{admission.ForkRunID, admissionFingerprint, req.ContainerPlanFingerprint, req.ActorCensusFingerprint, req.EffectiveConfigFingerprint, req.DeclarationPlan.Revision, preparationFingerprint, generation})
 	if err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
@@ -157,7 +175,8 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 	}
 	executionID := uuid.NewString()
 	issued := runfork.SelectedContractRuntimeExecution{
-		ExecutionID: executionID, ForkRunID: admission.ForkRunID, SourceRunID: admission.SourceRunID, ForkEventID: admission.ForkEventID,
+		PreparationFingerprint: preparationFingerprint,
+		ExecutionID:            executionID, ForkRunID: admission.ForkRunID, SourceRunID: admission.SourceRunID, ForkEventID: admission.ForkEventID,
 		Generation: generation, ExecutableCoordinateFingerprint: executableFingerprint, AdmissionFingerprint: admissionFingerprint,
 		ContainerPlanFingerprint: req.ContainerPlanFingerprint, ActorCensusFingerprint: req.ActorCensusFingerprint,
 		EffectiveConfigFingerprint: req.EffectiveConfigFingerprint, State: "prepared",
@@ -171,7 +190,7 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 	if _, ok := dialect.(sqliteDialect); ok {
 		args = append(args, now)
 	}
-	args = append(args, req.DeclarationPlan.Revision, string(declarations))
+	args = append(args, req.DeclarationPlan.Revision, string(declarations), preparationFingerprint, string(preparationRaw))
 	if _, err := tx.ExecContext(ctx, dialect.insertSQL(), args...); err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("insert selected-contract runtime execution: %w", err)
 	}
@@ -237,6 +256,9 @@ func claimSelectedContractRuntimeExecutionTx(ctx context.Context, tx *sql.Tx, sq
 	if sqlite {
 		dialect = sqliteDialect{}
 	}
+	if err := proveSelectedExecutionPreparationTx(ctx, tx, issued, sqlite); err != nil {
+		return runtimeeffects.Authority{}, err
+	}
 	if err := requireSelectedRuntimeRunActive(ctx, tx, issued.ForkRunID, dialect); err != nil {
 		return runtimeeffects.Authority{}, err
 	}
@@ -249,8 +271,9 @@ func claimSelectedContractRuntimeExecutionTx(ctx context.Context, tx *sql.Tx, sq
 		args = []any{owner, expires, now, issued.ExecutionID, issued.ForkRunID, issued.Generation, issued.AdmissionFingerprint, issued.ContainerPlanFingerprint, issued.ActorCensusFingerprint, issued.EffectiveConfigFingerprint, issued.ExecutionOwner, issued.LeaseExpiresAt.UTC(), now}
 	}
 	query += ` AND declaration_plan_fingerprint=` + dialect.placeholder(len(args)+1) +
-		` AND executable_coordinate_fingerprint=` + dialect.placeholder(len(args)+2)
-	args = append(args, issued.DeclarationPlanFingerprint, issued.ExecutableCoordinateFingerprint)
+		` AND executable_coordinate_fingerprint=` + dialect.placeholder(len(args)+2) +
+		` AND preparation_fingerprint=` + dialect.placeholder(len(args)+3)
+	args = append(args, issued.DeclarationPlanFingerprint, issued.ExecutableCoordinateFingerprint, issued.PreparationFingerprint)
 	res, err := tx.ExecContext(ctx, query, args...)
 	if err := requireExactlyOneMutation(res, err, "claim selected-contract runtime execution"); err != nil {
 		return runtimeeffects.Authority{}, err

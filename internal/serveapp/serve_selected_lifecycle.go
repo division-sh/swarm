@@ -31,6 +31,19 @@ type activatedServeLifecycle struct {
 	store      activatedSelectedStore
 	process    *worklifetime.Process
 	capability serveProcessCapability
+	selected   selectedForkContextRetirement
+}
+
+type selectedForkContextRetirement interface {
+	RetireSelectedContexts(context.Context) error
+}
+
+func (l *activatedServeLifecycle) SetSelectedForkContexts(selected selectedForkContextRetirement) error {
+	if l == nil || selected == nil || l.selected != nil {
+		return errors.New("serve selected-fork context owner must be installed exactly once")
+	}
+	l.selected = selected
+	return nil
 }
 
 func activateServeLifecycle(store activatedSelectedStore, process *worklifetime.Process) (*activatedServeLifecycle, error) {
@@ -62,6 +75,14 @@ func (l *activatedServeLifecycle) Finalize(joinCtx context.Context, diagnostics 
 		joinCtx = context.Background()
 	}
 	l.process.Retire()
+	if l.selected != nil {
+		if err := l.selected.RetireSelectedContexts(joinCtx); err != nil {
+			diagnostics = errors.Join(diagnostics, fmt.Errorf("retire selected-fork contexts: %w", err))
+			if err := l.selected.RetireSelectedContexts(context.Background()); err != nil {
+				return errors.Join(diagnostics, err)
+			}
+		}
+	}
 	receipt, joinErr := l.process.Join(joinCtx)
 	if joinErr != nil {
 		diagnostics = errors.Join(diagnostics, fmt.Errorf("process work join exceeded shutdown budget: %w", joinErr))

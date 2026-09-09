@@ -17,10 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -333,34 +330,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 		t.Fatalf("fixture failed to publish exact fixed-revision metadata: %+v", plan.Entities)
 	}
 	fixture.advance()
-	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
-	if err != nil {
-		t.Fatal(err)
-	}
-	routes, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: source, ContractSelection: selection, FrontierAdmission: frontier})
-	if err != nil {
-		t.Fatal(err)
-	}
-	topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: routes})
-	if err != nil {
-		t.Fatal(err)
-	}
-	model, err := runforkexecution.BuildSelectedContractExecutionModel(runforkexecution.SelectedContractExecutionModelRequest{Admission: frontier, RouteAdmission: routes, RouteTopology: topology})
-	if err != nil {
-		t.Fatal(err)
-	}
-	modes := map[string]executionmode.Mode{}
-	for _, event := range frontier.FrontierEvents {
-		modes[event.SourceEventID] = executionmode.Live
-	}
-	admitted, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{Binding: runforkreadiness.Binding{
-		Plan: plan, ContractSelection: selection, SourceArtifactFact: sourceFact, EffectiveSourceIdentity: effective.Identity(), FrontierAdmission: frontier, RecipientPlanning: *model.RecipientPlanning, SourceModes: modes}, Source: source})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ctx, runforkreadiness.MaterializeRequest{SourceRunID: runID, At: eventID, ContractSelection: selection,
-		SourceArtifactFact: sourceFact, EffectiveSourceIdentity: effective.Identity(), FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, Readiness: admitted}
+	return ctx, prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, runID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 }
 
 func requireForkWorkflowOwnershipPreserved(t *testing.T, db *sql.DB, sourceRun, forkRun string) {

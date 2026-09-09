@@ -1397,14 +1397,15 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 }
 
 type servedControlProofRuntime struct {
-	Endpoint   string
-	DB         *sql.DB
-	Backend    string
-	BundleHash string
-	Probe      *lifecycletest.Probe
-	Runtime    *runtimepkg.Runtime
-	Postgres   *store.PostgresStore
-	SQLite     *store.SQLiteRuntimeStore
+	Endpoint    string
+	DB          *sql.DB
+	Backend     string
+	BundleHash  string
+	Probe       *lifecycletest.Probe
+	Runtime     *runtimepkg.Runtime
+	Postgres    *store.PostgresStore
+	SQLite      *store.SQLiteRuntimeStore
+	ForkRuntime selectedForkRuntimeProofOptions
 }
 
 func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
@@ -1423,6 +1424,10 @@ func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProof
 	if rt.Runtime.WorkOccurrence() == nil {
 		t.Fatal("served control proof runtime work occurrence is required")
 	}
+	if rt.Runtime.Options.ProcessWorkOwner == nil {
+		t.Fatal("served control proof process work owner is required")
+	}
+	ctx = worklifetime.WithProcess(ctx, rt.Runtime.Options.ProcessWorkOwner)
 	return worklifetime.WithOccurrence(ctx, rt.Runtime.WorkOccurrence())
 }
 
@@ -2349,6 +2354,7 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 
 func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
+	forkOptions := captureServedForkRuntimeOptions(t)
 	var handlerStart runtimepipeline.WorkflowNodeHandlerStartHook
 	if len(hooks) > 1 {
 		t.Fatal("at most one handler-start barrier is supported")
@@ -2380,7 +2386,7 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions}
 	case servedparity.BackendExplicitPostgres:
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -2399,7 +2405,7 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Runtime: rt}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}

@@ -37,10 +37,13 @@ func TestPreparedSelectedForkProbeSurfaceBothStores(t *testing.T) {
 					Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(),
 					ExecutionKind: managedcapabilities.ExecutionSelectedForkPreparation, ExecutionAuthorityID: uuid.NewString(),
 					Preparation: &managedcapabilities.PreparedSelectedForkProbeAuthority{
-						ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "probe-process", ProcessBootID: uuid.NewString(),
-						BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), SourceFingerprint: strings.Repeat("b", 64),
-						AdmittedPlanFingerprint: strings.Repeat("c", 64), ConfigurationFingerprint: strings.Repeat("d", 64),
-						CatalogFingerprint: strings.Repeat("e", 64), ActorPlanFingerprint: fingerprint,
+						SelectedForkPreparationCoordinates: managedcapabilities.SelectedForkPreparationCoordinates{
+							ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "probe-process", ProcessBootID: uuid.NewString(),
+							BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), SourceFingerprint: strings.Repeat("b", 64),
+							AdmittedPlanFingerprint: strings.Repeat("c", 64), ConfigurationFingerprint: strings.Repeat("d", 64),
+							CatalogFingerprint: strings.Repeat("e", 64),
+						},
+						ActorPlanFingerprint: fingerprint,
 					},
 				}, CreatedAt: time.Unix(1, 0).UTC(),
 			})
@@ -104,6 +107,10 @@ func TestPreparedSelectedForkProbeSurfaceBothStores(t *testing.T) {
 			}
 			if _, err := fixture.db.ExecContext(context.Background(), query, surface.ID); err == nil {
 				t.Fatal("DDL accepted provider-turn projection for preparation")
+			}
+			read()
+			if _, err := fixture.db.ExecContext(context.Background(), `UPDATE managed_agent_capability_surfaces SET execution_kind='selected_contract_fork' WHERE surface_id=$1`, surface.ID); err == nil {
+				t.Fatal("DDL accepted post-materialization selected startup authority")
 			}
 			read()
 			var runs int

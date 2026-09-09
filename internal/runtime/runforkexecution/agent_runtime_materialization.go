@@ -21,7 +21,6 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -238,16 +237,8 @@ type selectedContractAgentRuntimeFactory struct {
 	options     runtimemanager.AgentManagerOptions
 	bindManager func(runtimetools.Manager)
 	cleanup     func()
-	preflight   *selectedContractAgentRuntimePreflight
-}
-
-type selectedContractAgentRuntimePreflight struct {
-	config   *config.Config
-	source   semanticview.Source
-	gateway  toolgateway.Binding
-	runtimes *runtimellm.AgentRuntimeSet
-	turns    runtimellm.MCPTurnContextStore
-	tools    *runtimetools.Executor
+	runtimes    *runtimellm.AgentRuntimeSet
+	tools       *runtimetools.Executor
 }
 
 func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, lifecycle runtimemanager.AgentLifecyclePersistence, bus *runtimebus.EventBus, ports *selectedContractExecutionPorts, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.AgentManagerOptions {
@@ -292,7 +283,7 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if strings.TrimSpace(planning.Owner) != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract agent runtime materialization requires %s; got %q", runfork.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
 	}
-	agentPlans, err := selectedContractPlannedAgentRecipientPlans(planning)
+	agentPlans, err := planning.SelectedAgentPlans()
 	if err != nil {
 		return selectedContractAgentRuntimePlan{}, err
 	}
@@ -544,6 +535,15 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
+	if builder.runtimes != nil {
+		actual, err := swaruntime.PrepareSelectedForkProviderCatalog(ctx, builder.runtimes, builder.tools, req.AgentRuntime.Blueprints)
+		if err != nil || actual.Fingerprint() != req.Prepared.catalog.Fingerprint() {
+			if builder.cleanup != nil {
+				builder.cleanup()
+			}
+			return nil, managedexecution.Admission{}, errors.Join(errors.New("selected execution provider catalog differs from preparation"), err)
+		}
+	}
 	builder.options.BaseContext = context.WithoutCancel(ctx)
 	builder.options.DeliveryStore = ports.busDurable.DeliveryLifecycle
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, builder.factory, builder.options, ports.manager)
@@ -576,48 +576,6 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			EntityID: rec.Config.EffectiveEntityID(),
 		})
 	}
-	if builder.preflight != nil {
-		controller, ok := runtimeeffects.ControllerFromContext(ctx)
-		if !ok {
-			return nil, managedexecution.Admission{}, fmt.Errorf("selected-fork managed provider preflight requires the existing effect controller")
-		}
-		surfaceIDs, err := swaruntime.ValidateManagedProviderPreflight(
-			ctx,
-			builder.preflight.config,
-			builder.preflight.source,
-			builder.preflight.gateway,
-			builder.preflight.runtimes,
-			builder.preflight.turns,
-			builder.preflight.tools,
-			manager,
-			swaruntime.ManagedProviderPreflightAuthority{
-				ExecutionKind:        managedcapabilities.ExecutionSelectedContractFork,
-				ExecutionAuthorityID: authority.SelectedFork.ExecutionID,
-				RunID:                authority.SelectedFork.ForkRunID,
-				StartupOwnerID:       authority.ExecutionOwner,
-				StartupGeneration:    authority.SelectedFork.Generation,
-				EffectController:     controller,
-				CapabilityStore:      ports.managedCapabilities,
-				EffectAuthority: func(string, string) (runtimeeffects.Authority, error) {
-					return authority, nil
-				},
-			},
-		)
-		if err != nil {
-			return nil, managedexecution.Admission{}, err
-		}
-		admission, err = admission.WithCapabilitySurfaces(surfaceIDs)
-		if err != nil {
-			return nil, managedexecution.Admission{}, err
-		}
-		ctx = managedexecution.WithAdmission(ctx, admission)
-		if err := bus.FinalizeSelectedReceiverAdmission(admission); err != nil {
-			return nil, managedexecution.Admission{}, err
-		}
-		if err := pipeline.FinalizeSelectedReceiverAdmission(admission); err != nil {
-			return nil, managedexecution.Admission{}, err
-		}
-	}
 	if _, err := generationGrant.MarkProbesSettled(ctx, admission.CapabilitySurfaceIDs); err != nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("settle selected-contract runtime generation probes: %w", err)
 	}
@@ -644,6 +602,9 @@ func issueSelectedContractAgentRuntimeGenerationGrant(
 	req publishSelectedContractForkEventsRequest,
 	authority runtimeeffects.Authority,
 ) (runtimestartupownership.GenerationGrant, error) {
+	if req.Prepared == nil || !req.Prepared.bound {
+		return nil, errors.New("selected generation grant requires bound preparation")
+	}
 	capability := req.AgentRuntime.Options.ProcessCapability
 	if capability == nil {
 		return nil, errors.New("selected-contract agent runtime requires the process topology capability")
@@ -673,6 +634,7 @@ func issueSelectedContractAgentRuntimeGenerationGrant(
 			ActorCensusFingerprint:     authority.SelectedFork.ActorCensusFingerprint,
 			EffectiveConfigFingerprint: authority.SelectedFork.EffectiveConfigFingerprint,
 			DeclarationPlanFingerprint: req.AgentRuntime.Declarations.Revision,
+			PreparationFingerprint:     req.Prepared.bindingFingerprint,
 		},
 	})
 	if err != nil {
@@ -779,15 +741,9 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		bindManager: func(manager runtimetools.Manager) {
 			managerRef = manager
 		},
-		cleanup: cleanup,
-		preflight: &selectedContractAgentRuntimePreflight{
-			config:   options.Config,
-			source:   source,
-			gateway:  binding,
-			runtimes: runtimes,
-			turns:    mcpTurns,
-			tools:    exec,
-		},
+		cleanup:  cleanup,
+		runtimes: runtimes,
+		tools:    exec,
 	}, nil
 }
 

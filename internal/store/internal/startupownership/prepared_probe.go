@@ -14,6 +14,14 @@ func PreparedProbeProcessCurrent(ctx context.Context, q authorityQueryer, prepar
 	if err := preparation.Validate(); err != nil {
 		return false, err
 	}
+	return PreparedProcessCurrent(ctx, q, preparation.SelectedForkPreparationCoordinates, generation, sqlite, lock)
+}
+
+// PreparedProcessCurrent also admits an explicitly empty prospective census.
+func PreparedProcessCurrent(ctx context.Context, q authorityQueryer, preparation managedcapabilities.SelectedForkPreparationCoordinates, generation uint64, sqlite, lock bool) (bool, error) {
+	if err := preparation.Validate(); err != nil {
+		return false, err
+	}
 	if generation == 0 {
 		return false, fmt.Errorf("prepared probe requires process generation")
 	}

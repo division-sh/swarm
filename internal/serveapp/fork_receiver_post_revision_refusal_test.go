@@ -91,15 +91,15 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 	probe := &forkReceiverRefusalProbe{}
 	ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), servedProofPollDeadline)
 	defer cancel()
+	forkOptions := rt.ForkRuntime
+	forkOptions.AgentManagerOptions = runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}
 	result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: frontierEventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
 		},
 		ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
-		AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
-			ExecutionPosture: rt.Runtime.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe},
-		},
+		AgentRuntime:      forkOptions,
 	})
 	const refusal = "selected-contract committed replay-scope marker policy blocked: source_committed_replay_scope_advanced_after_fork_point"
 	if err == nil || err.Error() != refusal {

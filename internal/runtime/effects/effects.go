@@ -896,7 +896,7 @@ func BeginStartupProbe(ctx context.Context, adapter string, request []byte, line
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
 	authority, ok := AuthorityFromContext(ctx)
-	if !ok || (authority.Kind != AuthorityStartupProbe && authority.Kind != AuthoritySelectedContractFork) {
+	if !ok || authority.Kind != AuthorityStartupProbe {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_missing", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
 	surface, ok := managedcapabilities.FromContext(ctx)
@@ -1289,12 +1289,6 @@ func startupProbeSurfaceMatchesAuthority(surface managedcapabilities.Surface, au
 		return surface.Authority.ID == authority.StartupProbe.ProbeID &&
 			surface.Authority.ExecutionKind == managedcapabilities.ExecutionKind(authority.StartupProbe.ExecutionKind) &&
 			surface.Authority.ExecutionAuthorityID == authority.StartupProbe.ExecutionAuthorityID
-	case AuthoritySelectedContractFork:
-		return surface.Authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork &&
-			surface.Authority.ExecutionAuthorityID == authority.SelectedFork.ExecutionID &&
-			surface.Authority.RunID == authority.SelectedFork.ForkRunID &&
-			surface.Authority.StartupOwnerID == authority.ExecutionOwner &&
-			surface.Authority.StartupGeneration == authority.SelectedFork.Generation
 	default:
 		return false
 	}

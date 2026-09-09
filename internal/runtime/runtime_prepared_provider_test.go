@@ -108,9 +108,12 @@ func newPreparedProviderTestPlans(t *testing.T) (startupownership.ProcessCapabil
 		}
 		blueprint.Identity = plan
 		probes = append(probes, PreparedSelectedForkProviderProbe{Agent: blueprint, Authority: managedcapabilities.PreparedSelectedForkProbeAuthority{
-			ProcessAuthorityID: evidence.AuthorityID, ProcessOwnerID: evidence.OwnerID, ProcessBootID: evidence.BootID,
-			BundleHash: runtimeTestBundleHash, SourceFingerprint: strings.Repeat("a", 64), AdmittedPlanFingerprint: strings.Repeat("b", 64),
-			ConfigurationFingerprint: strings.Repeat("c", 64), CatalogFingerprint: strings.Repeat("d", 64), ActorPlanFingerprint: actor,
+			SelectedForkPreparationCoordinates: managedcapabilities.SelectedForkPreparationCoordinates{
+				ProcessAuthorityID: evidence.AuthorityID, ProcessOwnerID: evidence.OwnerID, ProcessBootID: evidence.BootID,
+				BundleHash: runtimeTestBundleHash, SourceFingerprint: strings.Repeat("a", 64), AdmittedPlanFingerprint: strings.Repeat("b", 64),
+				ConfigurationFingerprint: strings.Repeat("c", 64), CatalogFingerprint: strings.Repeat("d", 64),
+			},
+			ActorPlanFingerprint: actor,
 		}})
 	}
 	return process, probes
@@ -167,7 +170,7 @@ func TestPreparedProviderPreflightUsesRunlessPlansWithoutManager(t *testing.T) {
 		if !surface.ActorIdentity.IsZero() || surface.ActorPlan.IsZero() || surface.Authority.ExecutionAuthorityID != preparationID || surface.Authority.Preparation == nil {
 			t.Fatalf("not preparation evidence: %+v", surface)
 		}
-		if err := validateEffectiveManagedCapabilitySurface(surface); err != nil {
+		if err := surface.ValidateEffective(); err != nil {
 			t.Fatal(err)
 		}
 	}

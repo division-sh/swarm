@@ -694,7 +694,11 @@ func (g *generationGrant) transition(ctx context.Context, from, to GrantState, p
 	next.State = to
 	next.StateVersion++
 	if to == GrantProbeSettled {
-		next.ProbeSurfaceIDs = normalizeIDs(probeSurfaceIDs)
+		if next.SelectedFork != nil {
+			next.ProbeSurfaceIDs = append([]string(nil), probeSurfaceIDs...)
+		} else {
+			next.ProbeSurfaceIDs = normalizeIDs(probeSurfaceIDs)
+		}
 	}
 	if err := next.Validate(); err != nil {
 		return GrantEvidence{}, err

@@ -62,8 +62,7 @@ func normalizeActorOwner(authority Authority, identity agentidentity.Identity, p
 	if hasIdentity == hasPlan {
 		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability surface requires exactly one typed actor owner")
 	}
-	requireLive := authority.Kind == AuthorityProviderTurn ||
-		(authority.Kind == AuthorityStartupProbe && authority.ExecutionKind == ExecutionSelectedContractFork)
+	requireLive := authority.Kind == AuthorityProviderTurn
 	if requireLive && !hasIdentity {
 		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability authority requires a live actor identity")
 	}
@@ -130,6 +129,9 @@ func (a Authority) Validate() error {
 			return fmt.Errorf("managed capability provider-turn authority is malformed")
 		}
 	case AuthorityStartupProbe:
+		if a.ExecutionKind != ExecutionNormalAgent {
+			return fmt.Errorf("selected startup requires non-executable preparation authority")
+		}
 		if strings.TrimSpace(a.StartupOwnerID) == "" || a.StartupGeneration == 0 || a.SessionID != "" || a.TurnOrdinal != 0 {
 			return fmt.Errorf("managed capability startup-probe authority is malformed")
 		}
@@ -216,6 +218,23 @@ type Surface struct {
 
 type Persistence interface {
 	SaveManagedCapabilitySurface(context.Context, Surface) error
+}
+
+// ValidateEffective is shared by preflight and durable receipt consumption.
+// Integrity alone does not establish the planned tools' effective callability.
+func (s Surface) ValidateEffective() error {
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	if s.HasMismatch() {
+		return fmt.Errorf("surface contains typed delivery mismatch")
+	}
+	for _, tool := range s.Tools {
+		if tool.Capability.Visible && tool.Capability.Callable && (!tool.EffectiveVisible || !tool.EffectiveCallable) {
+			return fmt.Errorf("capability %s is not effectively callable: %s", tool.Name, tool.EffectiveDenial)
+		}
+	}
+	return nil
 }
 
 type PlannedTool struct {

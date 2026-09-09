@@ -105,7 +105,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						SourceRunID: request.RunID, At: request.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
-						AgentRuntime:      runtimerunforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
+						AgentRuntime:      rt.ForkRuntime,
 					})
 					if admitted {
 						if err != nil {

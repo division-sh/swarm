@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 // PreparedSelectedForkProviderCatalog freezes the resolved prospective inputs.
@@ -37,6 +38,46 @@ func (p *PreparedSelectedForkProviderCatalog) Fingerprint() string {
 		return ""
 	}
 	return p.fingerprint
+}
+
+// Actors returns values, not the mutable resolved configuration or tool plans.
+func (p *PreparedSelectedForkProviderCatalog) Actors() []runfork.SelectedForkPreparedActor {
+	if p == nil {
+		return nil
+	}
+	actors := make([]runfork.SelectedForkPreparedActor, 0, len(p.targets))
+	for plan, target := range p.targets {
+		actors = append(actors, runfork.SelectedForkPreparedActor{
+			Plan: plan, ConfigurationRevision: target.revision,
+			Backend: target.resolved.Selection.Profile.ID, Mode: target.resolved.Selection.Mode,
+		})
+	}
+	sort.Slice(actors, func(i, j int) bool { return agentidentity.LessPlan(actors[i].Plan, actors[j].Plan) })
+	return actors
+}
+
+func (p *PreparedSelectedForkProviderCatalog) ValidateActors(blueprints []manager.AgentMaterializationBlueprint) error {
+	if p == nil || p.fingerprint == "" || len(p.targets) != len(blueprints) {
+		return fmt.Errorf("prepared provider catalog actor census changed")
+	}
+	seen := make(map[agentidentity.Plan]bool, len(blueprints))
+	for _, blueprint := range blueprints {
+		plan := blueprint.Identity
+		if plan != plan.Normalize() || seen[plan] {
+			return fmt.Errorf("prepared provider catalog actor plan changed")
+		}
+		seen[plan] = true
+		target, ok := p.targets[plan]
+		revision, err := manager.AgentConfigPlanRevision(blueprint.Config, plan)
+		if !ok || err != nil || revision != target.revision {
+			return fmt.Errorf("prepared provider catalog actor configuration changed")
+		}
+		prompt, err := preparedProviderPrompt(blueprint.Config)
+		if err != nil || prompt != target.prompt {
+			return fmt.Errorf("prepared provider catalog actor prompt changed")
+		}
+	}
+	return nil
 }
 
 func PrepareSelectedForkProviderCatalog(ctx context.Context, runtimes *llm.AgentRuntimeSet, tools claudeStartupToolSource, blueprints []manager.AgentMaterializationBlueprint) (*PreparedSelectedForkProviderCatalog, error) {

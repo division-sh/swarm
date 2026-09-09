@@ -33,16 +33,11 @@ func TestRunExecutionOwnershipBothStores(t *testing.T) {
 			if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, fixture.forkRun).Scan(&hash); err != nil {
 				t.Fatal(err)
 			}
-			acquire := testStartupAcquireRequest("run-ownership")
-			capability, err := ports.AcquireProcessCapability(ctx, acquire)
+			capability := fixture.process
+			acquire, err := capability.Evidence()
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() {
-				if err := capability.Release(context.Background()); err != nil {
-					t.Error(err)
-				}
-			})
 			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -126,6 +121,7 @@ func TestRunExecutionOwnershipBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			fixture.request.Preparation.DeclarationPlanFingerprint = fixture.request.DeclarationPlan.Revision
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatal(err)
@@ -147,6 +143,7 @@ func TestRunExecutionOwnershipBothStores(t *testing.T) {
 					ContainerPlanFingerprint: issued.ContainerPlanFingerprint, ActorCensusFingerprint: issued.ActorCensusFingerprint,
 					EffectiveConfigFingerprint: issued.EffectiveConfigFingerprint,
 					DeclarationPlanFingerprint: issued.DeclarationPlanFingerprint,
+					PreparationFingerprint:     issued.PreparationFingerprint,
 				},
 			})
 			if err != nil {

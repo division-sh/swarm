@@ -29,10 +29,13 @@ func TestPreparedSelectedForkStartupSurfaceNeverProjectsLiveActor(t *testing.T) 
 		Kind: managedcapabilities.AuthorityStartupProbe, ID: uuid.NewString(),
 		ExecutionKind: managedcapabilities.ExecutionSelectedForkPreparation, ExecutionAuthorityID: uuid.NewString(),
 		Preparation: &managedcapabilities.PreparedSelectedForkProbeAuthority{
-			ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "process-owner", ProcessBootID: uuid.NewString(),
-			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), SourceFingerprint: strings.Repeat("b", 64),
-			AdmittedPlanFingerprint: strings.Repeat("c", 64), ConfigurationFingerprint: strings.Repeat("d", 64),
-			CatalogFingerprint: strings.Repeat("e", 64), ActorPlanFingerprint: fingerprint,
+			SelectedForkPreparationCoordinates: managedcapabilities.SelectedForkPreparationCoordinates{
+				ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "process-owner", ProcessBootID: uuid.NewString(),
+				BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), SourceFingerprint: strings.Repeat("b", 64),
+				AdmittedPlanFingerprint: strings.Repeat("c", 64), ConfigurationFingerprint: strings.Repeat("d", 64),
+				CatalogFingerprint: strings.Repeat("e", 64),
+			},
+			ActorPlanFingerprint: fingerprint,
 		},
 	}
 	actor := runtimeactors.AgentConfig{ID: "worker"}

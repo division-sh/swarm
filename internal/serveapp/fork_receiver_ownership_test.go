@@ -515,7 +515,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 				SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash,
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},
-				AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
+				AgentRuntime:      rt.ForkRuntime,
 			})
 			if err == nil || !strings.Contains(err.Error(), "receiver target owner is missing") || !strings.Contains(err.Error(), "consumer") || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
 				t.Fatalf("required missing receiver must reject before materialization: result=%+v err=%v", result, err)

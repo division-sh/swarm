@@ -120,3 +120,56 @@ func TestSelectedContractOperationJoinsAcceptedHandoff(t *testing.T) {
 		t.Fatalf("settled operation retained %d leases", process.ActiveCount())
 	}
 }
+
+func TestPreparedSelectedForkCloseJoinsBeforeProjectionCleanup(t *testing.T) {
+	ctx := runForkTestContext(t)
+	process, _ := worklifetime.ProcessFromContext(ctx)
+	baseline := process.ActiveCount()
+	operation := selectedContractOperationForTest(t, ctx)
+	if err := operation.Bind(worklifetime.SelectedForkIdentity{ExecutionID: "prepared-execution", RunID: "fork", Generation: 1}); err != nil {
+		t.Fatal(err)
+	}
+	work, err := operation.selected.Begin(operation.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleaned := make(chan struct{})
+	sentinel := errors.New("projection cleanup failed")
+	prepared := &PreparedSelectedFork{operation: operation, loadedSource: LoadedSelectedContractSource{Cleanup: func() error {
+		if process.ActiveCount() <= baseline {
+			t.Error("process released before projection cleanup")
+		}
+		close(cleaned)
+		return sentinel
+	}}}
+	finished := make(chan error, 1)
+	go func() { finished <- prepared.Close() }()
+	<-work.Context().Done()
+	select {
+	case <-cleaned:
+		t.Fatal("projection released before accepted selected work settled")
+	default:
+	}
+	if err := work.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-finished; !errors.Is(err, sentinel) {
+		t.Fatalf("cleanup error lost: %v", err)
+	}
+	if err := prepared.Close(); !errors.Is(err, sentinel) {
+		t.Fatalf("terminal cleanup evidence changed: %v", err)
+	}
+	if _, err := prepared.MaterializationRequest(); err == nil {
+		t.Fatal("closed preparation remained consumable")
+	}
+	if process.ActiveCount() != baseline {
+		t.Fatal("terminal cleanup retained accepted work")
+	}
+	control, err := testGatewayWorkOwner(t).Begin(ctx)
+	if err != nil {
+		t.Fatalf("selected cleanup retired normal runtime: %v", err)
+	}
+	if err := control.Done(); err != nil {
+		t.Fatal(err)
+	}
+}

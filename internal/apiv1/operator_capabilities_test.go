@@ -185,6 +185,5 @@ func testOperatorEventReplayHandlers(c testOperatorCapabilities) map[string]Meth
 }
 
 func testOperatorRunForkHandlers(c testOperatorCapabilities) map[string]MethodHandler {
-	selector, _ := c.RunFork.(RunForkExecutorSelector)
-	return OperatorRunForkHandlers(RunForkHandlerOptions{Now: c.Now, Availability: c.RunForkAvailability, Executor: c.RunFork, Selector: selector, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts})
+	return OperatorRunForkHandlers(RunForkHandlerOptions{Now: c.Now, Availability: c.RunForkAvailability, Executor: c.RunFork, Idempotency: c.Idempotency})
 }

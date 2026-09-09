@@ -302,7 +302,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		},
 	}
 	foundNotify := false
-	for _, definition := range builder.preflight.tools.ToolDefinitionsForActor(actor) {
+	for _, definition := range builder.tools.ToolDefinitionsForActor(actor) {
 		if definition.Name == runtimetools.NotifyHumanToolName {
 			foundNotify = true
 			break
@@ -311,7 +311,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	if !foundNotify {
 		t.Fatalf("selected-contract fork executor omitted canonical %s", runtimetools.NotifyHumanToolName)
 	}
-	resolved, err := builder.preflight.runtimes.ResolveAgentRuntime(actor)
+	resolved, err := builder.runtimes.ResolveAgentRuntime(actor)
 	if err != nil {
 		t.Fatalf("resolve selected-contract exact mock runtime: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	}
 	forkRunID := uuid.NewString()
 	wantScope := runtimeauthoractivity.BundleScope("00000000-0000-0000-0000-000000000313", sourceFact.BundleHash())
-	initiatingCtx, cancel := context.WithCancel(context.Background())
+	initiatingCtx, cancel := context.WithCancel(runForkTestContext(t))
 	ctx := runtimecorrelation.WithSourceArtifactFact(initiatingCtx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
@@ -439,14 +439,14 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	if err != nil {
 		t.Fatalf("selected-contract declaration plan: %v", err)
 	}
-	config := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
+	agentConfig := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
 		ID: "fork-agent", Identity: identity, FlowID: ".", Role: "worker", Model: llmselection.ModelAliasRegular,
-		ExecutionMode: "live", Subscriptions: []string{"item.received"},
+		ExecutionMode: "live", LLMBackend: llmselection.BackendAnthropic, Subscriptions: []string{"item.received"},
 	})
-	config.Identity = agentidentity.Identity{}
+	agentConfig.Identity = agentidentity.Identity{}
 	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(
 		runtimemanager.AgentManagerOptions{},
-		runtimemanager.AgentMaterializationBlueprint{Config: config, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
+		runtimemanager.AgentMaterializationBlueprint{Config: agentConfig, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
 	)
 	if err != nil {
 		t.Fatalf("resolve selected-contract declaration blueprint: %v", err)
@@ -477,7 +477,19 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	if err != nil {
 		t.Fatalf("construct selected-contract static topology: %v", err)
 	}
-	authority := selectedContractTestRuntimeAuthority(t, ctx, db, selected, sourceFact, forkRunID, declarations)
+	loaded := LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
+	agents := selectedContractAgentRuntimePlan{
+		Declarations: declarations, Blueprints: []runtimemanager.AgentMaterializationBlueprint{blueprint},
+		Records: []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
+		Options: SelectedContractAgentRuntimeOptions{
+			ExecutionPosture: executionposture.Live, ProcessCapability: processCapability,
+			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
+			AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+				return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
+			},
+		},
+	}
+	authority, prepared := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, forkRunID, agents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
@@ -498,23 +510,10 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 		t.Fatal(err)
 	}
 
+	agents.Options.AgentManagerOptions = runtimemanager.AgentManagerOptions{WorkOwner: owner, ReceiverExecution: receiverExecution}
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Owner:        selectedContractExecutionOwnerForTest(t, selected),
-		LoadedSource: LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact},
-		AgentRuntime: selectedContractAgentRuntimePlan{
-			Declarations: declarations,
-			Records:      []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
-			Options: SelectedContractAgentRuntimeOptions{
-				ExecutionPosture:  executionposture.Live,
-				ProcessCapability: processCapability,
-				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-					return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
-				},
-				AgentManagerOptions: runtimemanager.AgentManagerOptions{
-					WorkOwner: owner, ReceiverExecution: receiverExecution,
-				},
-			},
-		},
+		Owner: selectedContractExecutionOwnerForTest(t, selected), LoadedSource: loaded,
+		Prepared: prepared, AgentRuntime: agents,
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntime: %v", err)

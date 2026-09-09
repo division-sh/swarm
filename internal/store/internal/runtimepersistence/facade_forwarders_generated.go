@@ -1215,6 +1215,10 @@ func (s *PostgresStore) StopRunControl(ctx context.Context, req runcontrol.Trans
 	return s.runLifecyclePostgresOwner.StopRunControl(ctx, req)
 }
 
+func (s *PostgresStore) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
+	return s.runForkPostgresOwner.StopSelectedFork(ctx, req)
+}
+
 func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.SpendQuery) (float64, error) {
 	return s.budgetPostgresOwner.SumSpendUSD(ctx, query)
 }
@@ -2401,6 +2405,10 @@ func (s *SQLiteRuntimeStore) StartActivityAttempt(ctx context.Context, record pi
 
 func (s *SQLiteRuntimeStore) StopRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
 	return s.runLifecycleSQLiteOwner.StopRunControl(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
+	return s.runForkSQLiteOwner.StopSelectedFork(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) SumSpendUSD(ctx context.Context, query budgetspend.SpendQuery) (float64, error) {

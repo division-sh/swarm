@@ -19,6 +19,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 )
@@ -26,6 +27,7 @@ import (
 // SelectedContractForkLifecycle owns planning, materialization, activation,
 // binding, and cleanup for one selected-contract fork.
 type SelectedContractForkLifecycle interface {
+	StopSelectedFork(context.Context, runcontrol.SelectedStopRequest) (runcontrol.State, error)
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
@@ -65,6 +67,7 @@ type SelectedContractExecutionOwner struct {
 }
 
 type selectedContractExecutionPorts struct {
+	contexts                *selectedForkContexts
 	workflow                runtimepipeline.WorkflowPersistence
 	fork                    SelectedContractForkLifecycle
 	runtimeExecution        SelectedContractRuntimeExecutionLifecycle
@@ -147,6 +150,7 @@ func NewSelectedContractExecutionOwner(
 		return SelectedContractExecutionOwner{}, errors.New("selected-contract execution requires valid workflow persistence")
 	}
 	return SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{
+		contexts: new(selectedForkContexts),
 		workflow: workflow, fork: fork, runtimeExecution: runtimeExecution, replay: replay,
 		events: events, busDurable: busDurable, pipelineObligations: pipelineObligations,
 		manager: manager, managerRoles: managerRoles, effects: effects, completion: completion,

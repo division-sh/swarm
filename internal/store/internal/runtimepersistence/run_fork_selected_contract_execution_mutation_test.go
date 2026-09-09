@@ -17,13 +17,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -1714,65 +1711,11 @@ func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocke
 // Missing source declarations are fixture errors, not invented readiness facts.
 func canonicalSelectedContractExecutionStoreRequest(t *testing.T, ctx context.Context, pg *PostgresStore, sourceRunID, at string, selection runfork.RunForkContractSelection, fact runtimecorrelation.SourceArtifactFact) runforkreadiness.MaterializeRequest {
 	t.Helper()
-	req := runforkreadiness.MaterializeRequest{SourceRunID: sourceRunID, At: at, ContractSelection: selection, SourceArtifactFact: fact}
-	repo := canonicalrouting.RepoRoot(t)
-	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: pg}
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-		SourceRunID: req.SourceRunID, BundleHash: req.SourceArtifactFact.BundleHash(), SourceArtifactFact: req.SourceArtifactFact, Selection: req.ContractSelection,
-	})
-	if err != nil {
-		t.Fatalf("prepare selected-store fixture source: %v", err)
+	request := prepareSelectedStoreMaterializationForTest(t, ctx, pg, sourceRunID, at, selection)
+	if !request.SourceArtifactFact.Matches(fact) {
+		t.Fatalf("prepared source differs from requested fixture artifact: got %s want %s", request.SourceArtifactFact.BundleHash(), fact.BundleHash())
 	}
-	if loaded.Cleanup != nil {
-		t.Cleanup(func() {
-			if err := loaded.Cleanup(); err != nil {
-				t.Errorf("release selected-store fixture source: %v", err)
-			}
-		})
-	}
-	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: req.SourceRunID, At: req.At})
-	if err != nil {
-		t.Fatalf("plan selected-store fixture readiness: %v", err)
-	}
-	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: loaded.Source, ContractSelection: req.ContractSelection})
-	if err != nil {
-		t.Fatalf("admit selected-store fixture frontier: %v", err)
-	}
-	routes, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: loaded.Source, ContractSelection: req.ContractSelection, FrontierAdmission: frontier})
-	if err != nil {
-		t.Fatalf("admit selected-store fixture routes: %v", err)
-	}
-	topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: routes})
-	if err != nil {
-		t.Fatalf("build selected-store fixture topology: %v", err)
-	}
-	model, err := runforkexecution.BuildSelectedContractExecutionModel(runforkexecution.SelectedContractExecutionModelRequest{Admission: frontier, RouteAdmission: routes, RouteTopology: topology})
-	if err != nil {
-		t.Fatalf("build selected-store fixture execution model: %v", err)
-	}
-	_, eventIDs, _, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
-	if err != nil {
-		t.Fatal(err)
-	}
-	modes, err := pg.LoadRunForkSelectedContractSourceEventModes(ctx, req.SourceRunID, eventIDs)
-	if err != nil || len(modes) != len(eventIDs) {
-		t.Fatalf("load selected-store fixture exact event modes: modes=%v events=%v err=%v", modes, eventIDs, err)
-	}
-	sourceModes := make(map[string]executionmode.Mode, len(eventIDs))
-	for i, eventID := range eventIDs {
-		sourceModes[eventID] = modes[i]
-	}
-	admitted, err := runforkreadiness.Admit(runforkreadiness.AdmissionRequest{
-		Binding: runforkreadiness.Binding{Plan: plan, ContractSelection: req.ContractSelection, SourceArtifactFact: loaded.SourceArtifactFact,
-			EffectiveSourceIdentity: loaded.EffectiveSourceIdentity, FrontierAdmission: frontier, RecipientPlanning: *model.RecipientPlanning, SourceModes: sourceModes},
-		Source: loaded.Source,
-	})
-	if err != nil {
-		t.Fatalf("admit selected-store fixture readiness: %v", err)
-	}
-	req.SourceArtifactFact, req.EffectiveSourceIdentity = loaded.SourceArtifactFact, loaded.EffectiveSourceIdentity
-	req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning, req.Readiness = frontier, topology, *model.RecipientPlanning, admitted
-	return req
+	return request
 }
 
 func TestSelectedContractExecutionStoreFixtureBootAdmission(t *testing.T) {

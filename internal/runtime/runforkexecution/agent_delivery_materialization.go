@@ -3,7 +3,6 @@ package runforkexecution
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -79,7 +78,7 @@ func selectedContractAgentRuntimeCoversRecipients(runtime SelectedContractAgentR
 }
 
 func selectedContractPlannedAgentRecipients(runID string, planning runfork.RunForkSelectedContractRecipientPlanning) ([]agentidentity.Identity, error) {
-	plans, err := selectedContractPlannedAgentRecipientPlans(planning)
+	plans, err := planning.SelectedAgentPlans()
 	if err != nil {
 		return nil, err
 	}
@@ -92,27 +91,5 @@ func selectedContractPlannedAgentRecipients(runID string, planning runfork.RunFo
 		out = append(out, identity)
 	}
 	sortAgentIdentities(out)
-	return out, nil
-}
-
-func selectedContractPlannedAgentRecipientPlans(planning runfork.RunForkSelectedContractRecipientPlanning) ([]agentidentity.Plan, error) {
-	seen := map[agentidentity.Plan]struct{}{}
-	for _, event := range planning.RecipientPlanEvents {
-		for _, recipient := range event.Recipients {
-			if err := recipient.Validate(); err != nil {
-				return nil, err
-			}
-			if !recipient.Recipient.IsAgent() {
-				continue
-			}
-			plan := recipient.AgentPlan.Normalize()
-			seen[plan] = struct{}{}
-		}
-	}
-	out := make([]agentidentity.Plan, 0, len(seen))
-	for plan := range seen {
-		out = append(out, plan)
-	}
-	sort.Slice(out, func(i, j int) bool { return agentidentity.LessPlan(out[i], out[j]) })
 	return out, nil
 }

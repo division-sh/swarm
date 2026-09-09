@@ -1236,6 +1236,7 @@ func (e *RunForkSourceFreezeBusyError) Unwrap() error {
 }
 
 type SelectedContractRuntimeExecutionIssueRequest struct {
+	Preparation                SelectedForkPreparationBinding
 	DeclarationPlan            agenttopology.SelectedDeclarationPlan
 	Admission                  RunForkSelectedContractExecutionAdmission
 	ContainerPlanFingerprint   string
@@ -1246,6 +1247,7 @@ type SelectedContractRuntimeExecutionIssueRequest struct {
 }
 
 type SelectedContractRuntimeExecution struct {
+	PreparationFingerprint          string
 	DeclarationPlanFingerprint      string
 	ExecutionID                     string
 	ForkRunID                       string
