@@ -2423,6 +2423,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	}
 	reused := want
 	reused.Target = events.MustExistingEntityTarget(want.Target.Route())
+	reused.Initialization = events.ReceiverInitialization{}
 	if !deliveryRoutesContain(store.routes[retry.ID()], reused) || len(store.routes[retry.ID()]) != 1 {
 		t.Fatalf("retry delivery routes = %#v, want existing instance route %#v", store.routes[retry.ID()], reused)
 	}
@@ -3299,6 +3300,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	}
 	reusedWant := createdWant
 	reusedWant.Target = events.MustExistingEntityTarget(createdWant.Target.Route())
+	reusedWant.Initialization = events.ReceiverInitialization{}
 	if !deliveryRoutesContain(store.routes[retryID], reusedWant) || len(store.routes[retryID]) != 1 {
 		t.Fatalf("retry persisted routes = %#v, want existing reused route %#v", store.routes[retryID], reusedWant)
 	}

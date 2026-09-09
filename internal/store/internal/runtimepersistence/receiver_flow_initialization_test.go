@@ -32,7 +32,7 @@ func TestReceiverFlowInitializationPublicationBothStores(t *testing.T) {
 			name  string
 			kind  canonicalrouting.TemplateInstanceConsumer
 			count int
-		}{{"node", canonicalrouting.TemplateInstanceNodeConsumer, 1}, {"agent", canonicalrouting.TemplateInstanceAgentConsumer, 1}, {"observer_and_agent", canonicalrouting.TemplateInstanceNodeAndAgentConsumer, 2}} {
+		}{{"node", canonicalrouting.TemplateInstanceNodeConsumer, 1}, {"agent", canonicalrouting.TemplateInstanceAgentConsumer, 1}, {"observer_and_agent", canonicalrouting.TemplateInstanceNodeAndAgentConsumer, 2}, {"observer_and_two_agents", canonicalrouting.TemplateInstanceNodeAndTwoAgentConsumer, 3}} {
 			t.Run(backend.name+"/"+consumer.name, func(t *testing.T) {
 				fixture := backend.open(t)
 				root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{Mode: canonicalrouting.TemplateInstanceRouteSelectOrCreate, Consumer: consumer.kind})
