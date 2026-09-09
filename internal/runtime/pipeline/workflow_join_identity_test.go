@@ -401,6 +401,29 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 			if target.FlowID != wantExecutionFlow || target.FlowInstance != wantInstance || target.EntityID != entityID || handler.ExecutionFlowID(source) != wantExecutionFlow {
 				t.Fatalf("delivery target = %#v handler=%#v, want flow=%q instance=%q entity=%q", target, handler, wantExecutionFlow, wantInstance, entityID)
 			}
+			owner := events.MustExistingEntityTarget(target)
+			if err := ValidateStampedDeliveryTargetOwnership(source, tc.event, recipient, handler, resolution.Handler, owner); err != nil {
+				t.Fatalf("valid stamped join occurrence: %v", err)
+			}
+			wrongEntity := target
+			wrongEntity.EntityID = eventtest.UUID("wrong-stamped-join-entity")
+			wrongTask := exactJoinOccurrenceEventWithFacts(t, "wrong-stamped-task", string(tc.event.Type()), "runtime.generic_schedule", resolution.Handle.TaskID()+"-hostile", resolution.Handle, tc.event.RoutingSource(), tc.event.NormalizedEnvelope())
+			for _, bad := range []struct {
+				name    string
+				event   events.Event
+				handler DeliveryTargetHandler
+				owner   events.DeliveryTargetOwnership
+			}{
+				{"wrong task", wrongTask, handler, owner},
+				{"wrong entity", tc.event, handler, events.MustExistingEntityTarget(wrongEntity)},
+				{"wrong handler event", tc.event, handler.ForEvent("unrelated.event"), owner},
+			} {
+				t.Run(bad.name, func(t *testing.T) {
+					if err := ValidateStampedDeliveryTargetOwnership(source, bad.event, recipient, bad.handler, resolution.Handler, bad.owner); err == nil {
+						t.Fatalf("stamped join accepted %s", bad.name)
+					}
+				})
+			}
 		})
 	}
 
