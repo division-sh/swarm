@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/replayconformance"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 const catalogSecondRunID = "99999999-9999-4999-8999-999999999999"
@@ -91,7 +90,7 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 	fixtureRoot := catalogRuntimeFixture(t, "catalog.runtime.flow_lifecycle", "test-create-flow-instance").Root
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			h := newRuntimeHarnessForBackend(t, fixtureRoot, backend, true)
+			h := newRuntimeHarnessForBackend(t, fixtureRoot, backend, true, catalogSecondRunID)
 			selected := runScopedCatalogStore(t, h)
 			flowPath := "worker-flow/worker-001"
 			runA, runB := catalogRuntimeRunID, catalogSecondRunID
@@ -103,7 +102,6 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 				runs:     map[string]chan<- struct{}{runA: completedA, runB: completedB},
 			})
 
-			catalogRequireSecondRun(t, h, runB)
 			seedCatalogRootStateForRun(t, h, runA)
 			seedCatalogRootStateForRun(t, h, runB)
 			if err := publishCatalogRunScopedSpawn(h, runA, uuid.NewString()); err != nil {
@@ -454,21 +452,6 @@ func runScopedCatalogStore(t testing.TB, h *runtimeHarness) runScopedCatalogSele
 	}
 	t.Fatal("catalog selected store is required")
 	return nil
-}
-
-func catalogRequireSecondRun(t testing.TB, h *runtimeHarness, runID string) {
-	t.Helper()
-	source := catalogSourceArtifactFact(t, h.bundle)
-	fixture := runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID,
-		BundleHash: source.BundleHash(),
-	}
-	ctx := catalogRunContext(h, runID)
-	if h.pg != nil {
-		runlifecyclefixture.RequirePostgres(t, ctx, h.db, fixture)
-		return
-	}
-	runlifecyclefixture.RequireSQLite(t, ctx, h.db, fixture)
 }
 
 func catalogRunContext(h *runtimeHarness, runID string) context.Context {
