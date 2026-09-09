@@ -22,6 +22,12 @@ func admitRunForkTerminalBarrierHistory(snapshot *runForkRevisionSnapshot, oblig
 		if barrier == nil || barrier.Status != fanoutbarrier.StatusOutcomeDeadLettered {
 			continue
 		}
+		// A previously materialized terminal barrier has no local activation or
+		// copied occurrence. It grants no delivery exception here: any pending
+		// recipient still goes through ordinary replay/refusal classification.
+		if barrier.ScheduleActivationID == "" {
+			continue
+		}
 		var timer *runForkRevisionTimer
 		for i := range snapshot.Timers {
 			if snapshot.Timers[i].TimerID == barrier.ScheduleActivationID {

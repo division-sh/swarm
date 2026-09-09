@@ -101,6 +101,28 @@ func TestTerminalBarrierHistoryExactRecipientOnly(t *testing.T) {
 	}
 }
 
+func TestTerminalBarrierWithoutOccurrenceGrantsNoDeliveryException(t *testing.T) {
+	snapshot, obligations, pending := terminalBarrierHistoryFixture(t)
+	obligations[0].Barrier.ScheduleActivationID = ""
+	snapshot.Timers = nil
+	if err := admitRunForkTerminalBarrierHistory(snapshot, obligations, pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending[0].RetainsTerminalBarrierHistory() {
+		t.Fatal("terminal label manufactured a delivery exception")
+	}
+	admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{Pending: pending})
+	if admission.StateOnlyExecutionReady || len(admission.UnsupportedBlockers) == 0 {
+		t.Fatal("failed recipient escaped ordinary refusal")
+	}
+	// The actual copied terminal shape contains no historical occurrence or
+	// delivery; its terminal state is not an instruction to reissue either.
+	snapshot.Events, snapshot.Deliveries, snapshot.DeadLetters = nil, nil, nil
+	if err := admitRunForkTerminalBarrierHistory(snapshot, obligations, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTerminalBarrierHistoryRejectsContradictionsWithoutProjectionMutation(t *testing.T) {
 	for _, variant := range []string{"activation_missing", "occurrence_missing", "occurrence_run", "occurrence_class", "occurrence_mode", "occurrence_task", "occurrence_producer", "occurrence_parent", "occurrence_payload", "occurrence_time", "occurrence_duplicate", "delivery_missing", "delivery_run", "delivery_route", "delivery_status", "delivery_claim", "delivery_failure", "delivery_retry", "delivery_duplicate", "dead_letter_missing", "dead_letter_event", "dead_letter_claim", "dead_letter_handler", "dead_letter_duplicate", "outcome", "outcome_reason", "outcome_failure", "outcome_time", "pending_status", "pending_claim", "pending_duplicate", "pending_missing"} {
 		t.Run(variant, func(t *testing.T) {
