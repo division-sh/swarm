@@ -138,7 +138,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						Key:     fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: claimed.Claim.DeliveryID(), ElementRef: plans[0].Ref.ElementRef},
 						PlanRef: plans[0].Ref, Source: fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: trigger.ID(), Field: "items"}, Cardinality: 2,
 						Capsule: fanoutobligation.Capsule{NodeKey: node.Key(), ExecutionFlowID: ".", Route: flowidentity.StoredRoute(".", runID, runID), EntityID: runID,
-							HandlerEventKey: "items.ready", CurrentState: "review", ProducerSource: trigger.RoutingSource(), DeliveryRoute: &route, Lineage: events.LineageFromEvent(trigger), Loop: loopContext,
+							HandlerEventKey: "items.ready", CurrentState: "review", ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger), Loop: loopContext,
 							Entity: map[string]any{"business_revision": generation.RevisionID, "exact_integer": json.Number("9007199254740993")}, StateFields: map[string]any{"sentinel": "unchanged"}},
 					}
 					declaration, err := plans[0].Ref.ElementRef.DeclarationIdentity()

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -82,6 +83,28 @@ func (r SourceRef) Validate(persisted bool) error {
 	return nil
 }
 
+// ExecutionReceiver is the receiver context of an already admitted handler,
+// not a publication obligation. Initialization and dependency authority cannot
+// be inherited by persisting this projection.
+type ExecutionReceiver struct {
+	Node   identity.ExecutableNode        `json:"node"`
+	Target events.DeliveryTargetOwnership `json:"target"`
+}
+
+func ProjectExecutionReceiver(route events.DeliveryRoute) (ExecutionReceiver, error) {
+	if _, err := route.Identity(); err != nil {
+		return ExecutionReceiver{}, err
+	}
+	if !route.Recipient.IsNode() {
+		return ExecutionReceiver{}, fmt.Errorf("fan-out execution receiver requires a node")
+	}
+	node, err := identity.ParseExecutableNodeKey(route.Recipient.ID())
+	if err != nil {
+		return ExecutionReceiver{}, err
+	}
+	return ExecutionReceiver{Node: node, Target: route.Target}, nil
+}
+
 type Capsule struct {
 	NodeKey          string                    `json:"node_key"`
 	ExecutionFlowID  string                    `json:"execution_flow_id"`
@@ -91,7 +114,7 @@ type Capsule struct {
 	CurrentState     string                    `json:"current_state,omitempty"`
 	ChainDepth       int                       `json:"chain_depth"`
 	ProducerSource   events.RoutingSource      `json:"producer_source"`
-	DeliveryRoute    *events.DeliveryRoute     `json:"delivery_route,omitempty"`
+	Receiver         *ExecutionReceiver        `json:"receiver,omitempty"`
 	Lineage          events.EventLineage       `json:"lineage"`
 	Entity           map[string]any            `json:"entity,omitempty"`
 	PlatformEntity   map[string]any            `json:"platform_entity,omitempty"`
@@ -135,9 +158,14 @@ func (c Capsule) Validate() error {
 	if !c.Route.Valid() || c.ChainDepth < 0 || c.ProducerSource.Empty() {
 		return errors.New("fan-out capsule requires route, producer source, and nonnegative chain depth")
 	}
-	if c.DeliveryRoute != nil {
-		if _, err := c.DeliveryRoute.Identity(); err != nil {
-			return fmt.Errorf("fan-out capsule delivery route: %w", err)
+	if c.Receiver != nil {
+		r := c.Receiver
+		if err := r.Target.Validate(); err != nil {
+			return fmt.Errorf("fan-out capsule receiver: %w", err)
+		}
+		target := r.Target.Route()
+		if !r.Node.Valid() || r.Node.Key() != c.NodeKey || r.Node.FlowPath() != c.ExecutionFlowID || target.FlowID != c.ExecutionFlowID || target.FlowInstance != c.Route.InstancePath || target.EntityID != c.EntityID {
+			return fmt.Errorf("fan-out capsule receiver contradicts its execution owner")
 		}
 	}
 	if !c.Lineage.ExecutionMode.Valid() {

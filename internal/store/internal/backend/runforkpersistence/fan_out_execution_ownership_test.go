@@ -32,7 +32,7 @@ func TestFanOutExecutionOwnershipProjectionRoles(t *testing.T) {
 						wantEntity = "child-run"
 					}
 				}
-				if got.EntityID != wantEntity || got.Route.InstancePath != wantPath || got.DeliveryRoute.Target.Route().EntityID != wantEntity || got.DeliveryRoute.Target.Route().FlowInstance != wantPath || got.DeliveryRoute.Target.Code() != capsule.DeliveryRoute.Target.Code() {
+				if got.EntityID != wantEntity || got.Route.InstancePath != wantPath || got.Receiver.Target.Route().EntityID != wantEntity || got.Receiver.Target.Route().FlowInstance != wantPath || got.Receiver.Target.Code() != capsule.Receiver.Target.Code() {
 					t.Fatalf("wrong child receiver projection: %+v", got)
 				}
 				if flow == "." {
@@ -92,21 +92,21 @@ func TestFanOutExecutionOwnershipRejectsContradictions(t *testing.T) {
 			case "foreign_root_producer":
 				capsule.ProducerSource = eventtest.RootRoutingSource("foreign")
 			case "receiver_entity":
-				target := capsule.DeliveryRoute.Target.Route()
+				target := capsule.Receiver.Target.Route()
 				target.EntityID = "foreign"
-				capsule.DeliveryRoute.Target = events.MustExistingEntityTarget(target)
+				capsule.Receiver.Target = events.MustExistingEntityTarget(target)
 			case "receiver_flow":
-				target := capsule.DeliveryRoute.Target.Route()
+				target := capsule.Receiver.Target.Route()
 				target.FlowID = "foreign"
-				capsule.DeliveryRoute.Target = events.MustExistingEntityTarget(target)
+				capsule.Receiver.Target = events.MustExistingEntityTarget(target)
 			case "receiver_kind":
-				capsule.DeliveryRoute.Target = events.DeliveryTargetOwnership{}
+				capsule.Receiver.Target = events.DeliveryTargetOwnership{}
 			case "receiver_node":
 				node, err := identity.AdmitExecutableNodeDeclaration(".", "other")
 				if err != nil {
 					t.Fatal(err)
 				}
-				capsule.DeliveryRoute.Recipient = events.MustNodeDeliveryRecipient(node)
+				capsule.Receiver.Node = node
 			}
 			before, _ := json.Marshal(capsule)
 			if _, err := projectRunForkFanOutExecutionOwnership(plan, "child-run", capsule); err == nil {
@@ -158,16 +158,16 @@ func fanOutOwnershipFixture(t *testing.T, flow, kind string) (runfork.RunForkPla
 	return plan, fanoutobligation.Capsule{
 		NodeKey: node.Key(), ExecutionFlowID: flow, EntityID: entity, Route: flowidentity.StoredRoute(flow, path, path), HandlerEventKey: "scatter.requested",
 		CurrentState: "working", ChainDepth: 2, ProducerSource: producer,
-		DeliveryRoute: &events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: target},
-		Lineage:       events.EventLineage{RunID: "ancestor-run", ParentEventID: "original-trigger", ExecutionMode: executionmode.Live},
-		Entity:        frozen(), PlatformEntity: frozen(), Computed: frozen(), Accumulated: frozen(), Join: frozen(), StateFields: frozen(), StateBookkeeping: frozen(), StateGates: map[string]bool{"ready": true},
+		Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: target},
+		Lineage:  events.EventLineage{RunID: "ancestor-run", ParentEventID: "original-trigger", ExecutionMode: executionmode.Live},
+		Entity:   frozen(), PlatformEntity: frozen(), Computed: frozen(), Accumulated: frozen(), Join: frozen(), StateFields: frozen(), StateBookkeeping: frozen(), StateGates: map[string]bool{"ready": true},
 	}
 }
 
 func assertFanOutCapsuleFieldPartition(t *testing.T, source, child fanoutobligation.Capsule) {
 	t.Helper()
 	immutable := []string{"NodeKey", "ExecutionFlowID", "HandlerEventKey", "CurrentState", "ChainDepth", "Lineage", "Entity", "PlatformEntity", "Computed", "Accumulated", "Join", "StateFields", "StateBookkeeping", "StateGates"}
-	executable := []string{"EntityID", "Route", "ProducerSource", "DeliveryRoute", "Loop"}
+	executable := []string{"EntityID", "Route", "ProducerSource", "Receiver", "Loop"}
 	if len(immutable)+len(executable) != reflect.TypeOf(source).NumField() {
 		t.Fatal("capsule field census changed; classify every new field")
 	}
