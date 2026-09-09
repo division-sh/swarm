@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -69,6 +71,62 @@ func TestSelectedDownstreamPreparationFailsBeforeMaterializationBothStores(t *te
 			}
 			if after := counts(); !reflect.DeepEqual(before, after) {
 				t.Fatalf("preparation failure mutated domain: before=%v after=%v", before, after)
+			}
+			options = selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
+			options.Config.LLM.Backend = "anthropic"
+			prepared, err := owner.Prepare(ctx, forkexecution.SelectedContractExecutionRequest{
+				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
+				Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+			})
+			if err != nil {
+				t.Fatalf("complete downstream preparation: %v", err)
+			}
+			defer func() {
+				if err := prepared.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			request, err := prepared.MaterializationRequest()
+			if err != nil || len(request.Preparation.Actors) != 1 {
+				t.Fatalf("missing prepared downstream actor: %v, %v", request.Preparation.Actors, err)
+			}
+			initial, err := request.RecipientPlanning.SelectedAgentPlans()
+			if err != nil || len(initial) != 0 {
+				t.Fatalf("node-only frontier acquired initial agent dispatch: %v, %v", initial, err)
+			}
+			for _, change := range []string{"empty_census", "missing_census", "duplicate_actor", "configuration", "same_name_foreign_owner", "unknown_template_instance"} {
+				t.Run(change, func(t *testing.T) {
+					bad := request
+					bad.Preparation.Actors = append([]runfork.SelectedForkPreparedActor(nil), request.Preparation.Actors...)
+					switch change {
+					case "empty_census":
+						bad.Preparation.Actors = []runfork.SelectedForkPreparedActor{}
+					case "missing_census":
+						bad.Preparation.Actors = nil
+					case "duplicate_actor":
+						bad.Preparation.Actors = append(bad.Preparation.Actors, bad.Preparation.Actors[0])
+					case "configuration":
+						bad.Preparation.Actors[0].ConfigurationRevision = strings.Repeat("d", 64)
+					case "same_name_foreign_owner":
+						bad.Preparation.Actors[0].Plan.Name.Owner += "-foreign"
+					case "unknown_template_instance":
+						route, err := flowidentity.StoredRoute("consumer", "unknown", "consumer/unknown").AgentIdentityRoute()
+						if err != nil {
+							t.Fatal(err)
+						}
+						bad.Preparation.Actors[0].Plan.Route = route
+					}
+					if _, err := lifecycle.MaterializeRunForkForSelectedContractExecution(ctx, bad); err == nil {
+						t.Fatalf("named materialization admitted %s", change)
+					}
+					if after := counts(); !reflect.DeepEqual(before, after) {
+						t.Fatalf("rejected census mutated domain: before=%v after=%v", before, after)
+					}
+				})
+			}
+			materialized, err := lifecycle.MaterializeRunForkForSelectedContractExecution(ctx, request)
+			if err != nil || materialized.ForkRunID == "" {
+				t.Fatalf("exact prepared census cannot materialize: %+v, %v", materialized, err)
 			}
 		})
 	}
