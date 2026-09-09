@@ -25,13 +25,8 @@ type cliStartupProbeResult struct {
 	err   error
 }
 
-func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor models.AgentConfig, systemPrompt string, tools []ToolDefinition) (*Response, error) {
+func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor models.AgentConfig, systemPrompt string, tools []ToolDefinition) (_ *Response, retErr error) {
 	ctx = models.WithActor(ctx, actor)
-	target, err := r.resolveWorkspaceForCapabilityAdmission(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	s := &Session{
 		ID:           ensurePlatformSessionID(""),
 		AgentID:      strings.TrimSpace(actor.ID),
@@ -57,6 +52,18 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_attempt_identity_missing", "claude-cli-adapter", "startup_probe", nil)
 	}
+	request, err := workspace.ClaudeProbeState(childSessionID)
+	if err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
+		return nil, err
+	}
+	target, err := r.resolveClaudeState(ctx, actor, request, "")
+	if err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
+		return nil, err
+	}
+	s.claudeState = target.ClaudeState
+	defer func() { retErr = errors.Join(retErr, r.releaseInvocationState(ctx, s)) }()
 
 	buildArgs := func(includeSystemPrompt bool) ([]string, string, error) {
 		args := []string{

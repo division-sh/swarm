@@ -64,9 +64,10 @@ func claudeAttemptProofContext(source runtimecorrelation.SourceArtifactFact) con
 }
 
 type claudeAttemptProofSurface struct {
-	name         string
-	memory       bool
-	outputFormat string
+	name           string
+	memory         bool
+	outputFormat   string
+	backingFailure error
 }
 
 func defaultClaudeAttemptProofSurface() claudeAttemptProofSurface {
@@ -110,7 +111,21 @@ type claudeAttemptProofStore interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
-type claudeAttemptProofWorkspace struct{}
+type claudeAttemptProofWorkspace struct{ failure error }
+
+type claudeAttemptProofState struct{ failure error }
+
+func (claudeAttemptProofState) Directory() string                         { return workspace.ClaudeStateDirectory }
+func (s claudeAttemptProofState) CheckHead(context.Context, string) error { return s.failure }
+func (claudeAttemptProofState) Release(context.Context) error             { return nil }
+
+func (w claudeAttemptProofWorkspace) ResolveClaudeWorkspace(ctx context.Context, actor runtimeactors.AgentConfig, _ workspace.ClaudeStateRequest, _ string) (*workspace.Target, error) {
+	target, err := w.ResolveWorkspace(ctx, actor)
+	if err == nil {
+		target.ClaudeState = claudeAttemptProofState{failure: w.failure}
+	}
+	return target, err
+}
 
 func (claudeAttemptProofWorkspace) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
 	return &workspace.Target{Backend: workspace.BackendDocker, Container: "claude-attempt-proof", Workdir: workspace.LogicalWorkspaceMount}, nil
@@ -339,6 +354,42 @@ func TestClaudePostlaunchFailurePreservesClassificationAndRestartRefusesProvider
 
 func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 	testClaudeProviderHeadCommitFailure(t, runtimefailures.ClassOutcomeUncertain)
+}
+
+func TestClaudeMissingCandidateBackingNeverPromotesHead(t *testing.T) {
+	for _, backendName := range []string{"sqlite", "postgres"} {
+		t.Run(backendName, func(t *testing.T) {
+			backend := newClaudeAttemptProofBackend(t, backendName)
+			t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
+			captureDir := t.TempDir()
+			t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_CAPTURE", captureDir)
+			t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE", "success")
+			dockerBin := filepath.Join(t.TempDir(), "docker")
+			writeClaudeAttemptProofDocker(t, dockerBin)
+			calls := &atomic.Int32{}
+			surface := defaultClaudeAttemptProofSurface()
+			surface.backingFailure = fmt.Errorf("candidate transcript unavailable")
+			manager, bus, _ := newClaudeAttemptProofManager(t, backend, dockerBin, calls, surface)
+			t.Cleanup(func() {
+				if err := manager.Shutdown(); err != nil {
+					t.Error(err)
+				}
+			})
+			runClaudeAttemptProofManager(t, backend, manager)
+			eventID := publishClaudeAttemptProofEvent(t, backend, bus)
+			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
+			if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassOutcomeUncertain || receipt.Failure.Retryable {
+				t.Fatalf("candidate backing failure=%+v", receipt)
+			}
+			if head := loadClaudeAttemptProofProviderHead(t, backend); head != "" {
+				t.Fatalf("promoted unusable provider head %q", head)
+			}
+			attempts := loadClaudeAttemptProofAttempts(t, backend)
+			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateOutcomeUncertain) || readClaudeAttemptProofCount(t, captureDir) != 1 {
+				t.Fatalf("candidate backing failure redispatched: %+v", attempts)
+			}
+		})
+	}
 }
 
 func TestClaudeRetryableSettlementFailureRemainsTerminal(t *testing.T) {
@@ -595,7 +646,7 @@ func newClaudeAttemptProofManagerForGeneration(
 		cfg,
 		backend.sessions,
 		"claude-proof-worker",
-		claudeAttemptProofWorkspace{},
+		claudeAttemptProofWorkspace{failure: surface.backingFailure},
 		backend.store,
 		eventBus,
 		runtimellm.ClaudeCLIRuntimeOptions{

@@ -438,7 +438,7 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 printf '%s\n' '{"result":"done"}'
 `)
 	cfg.Workspace.DockerBin = scriptPath
-	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
+	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace", ClaudeState: claudeStateStub{}}
 	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 
@@ -484,7 +484,7 @@ fi
 printf '%s\n' '{"result":"done"}'
 `)
 	cfg.Workspace.DockerBin = scriptPath
-	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
+	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace", ClaudeState: claudeStateStub{}}
 	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 

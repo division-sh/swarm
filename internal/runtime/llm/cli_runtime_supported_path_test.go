@@ -119,7 +119,7 @@ func testClaudeCLIManagedRequestInventory(t *testing.T, rejectAt int, inventory 
 	setEffectHarnessAgent(t, effects, "market-research-agent", "market/inst-1")
 	runtime := NewClaudeCLIRuntimeWithOptions(
 		cfg,
-		sessions.NewInMemoryRegistry(0),
+		claudeSettledTestRegistry{Registry: sessions.NewInMemoryRegistry(0), effects: effects},
 		"worker-1",
 
 		workspaceResolverStub{target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}},

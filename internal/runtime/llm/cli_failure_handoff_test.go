@@ -40,7 +40,7 @@ func TestClaudeStartedTimeoutIsTerminal(t *testing.T) {
 			runCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 			defer cancel()
 			profile, model := testClaudeProviderSelection(t)
-			_, err := runtime.runWithPreparedInput(runCtx, nil, &workspace.Target{Container: "test", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+			_, err := runtime.runWithPreparedInput(runCtx, nil, &workspace.Target{Container: "test", Workdir: "/workspace", ClaudeState: claudeStateStub{}}, "hello", MonitorTurnMeta{}, dispatch, profile, model)
 			if dispatch.invocation != completionProviderInvocationStarted || claudeCompletionFailureState(err) != effects.StateOutcomeUncertain || engine.FailureDispositionFor(err) != engine.FailureDispositionTerminal {
 				t.Fatalf("started timeout mismatch: invocation=%v err=%v", dispatch.invocation, err)
 			}

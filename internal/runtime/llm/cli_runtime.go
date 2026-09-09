@@ -257,9 +257,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, s.ID, lease.SessionID)
 			s.ID = lease.SessionID
 		}
-		if sid := strings.TrimSpace(lease.ProviderSessionID); sid != "" {
-			s.ProviderSessionID = sid
-		}
+		s.ProviderSessionID = strings.TrimSpace(lease.ProviderSessionID)
 	}
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the reused agent delivery in progress failed", map[string]any{
 		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
@@ -277,7 +275,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if err != nil {
 		return nil, err
 	}
-	target, err := r.resolveWorkspace(ctx)
+	target, err := r.resolveSessionClaudeState(ctx, actor, s)
 	if err != nil {
 		return nil, err
 	}
@@ -489,6 +487,12 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			return nil, errors.Join(err, settleErr)
 		}
 		return nil, err
+	}
+	if backingErr := target.ClaudeState.CheckHead(ctx, childSessionID); backingErr != nil {
+		err := claudeFailureForState(runtimeeffects.StateOutcomeUncertain, backingErr, "validate_provider_backing", nil)
+		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(err, "claude_cli_backing_validation")), resp)
+		_, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_provider_backing"})
+		return nil, errors.Join(err, settleErr)
 	}
 
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {

@@ -139,7 +139,12 @@ func TestClaudeCLIRuntimeResolveWorkspaceForCapabilityAdmissionUsesNonExecutingR
 		ID:            "campaign-coordinator",
 	})
 
-	target, err := runtime.resolveWorkspaceForCapabilityAdmission(ctx)
+	request, err := workspace.ClaudeProbeState("33333333-3333-4333-8333-333333333333")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, _ := runtimeactors.ActorFromContext(ctx)
+	target, err := runtime.resolveClaudeState(ctx, actor, request, "")
 	if err != nil {
 		t.Fatalf("resolveWorkspaceForCapabilityAdmission: %v", err)
 	}
@@ -218,9 +223,10 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "stored-oauth-token")
 
 	cmd, err := runtime.buildCommand(unmanagedLLMTestContext(), []string{"--print", "hello"}, &workspace.Target{
-		Backend:   workspace.BackendDocker,
-		Container: "swarm-agent-market-research",
-		Workdir:   "/workspace",
+		ClaudeState: claudeStateStub{},
+		Backend:     workspace.BackendDocker,
+		Container:   "swarm-agent-market-research",
+		Workdir:     "/workspace",
 	})
 	if err != nil {
 		t.Fatalf("buildCommand: %v", err)
@@ -268,7 +274,7 @@ exit 127
 
 	harness, ctx, dispatch := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
 	profile, model := testClaudeProviderSelection(t)
-	_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+	_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace", ClaudeState: claudeStateStub{}}, "hello", MonitorTurnMeta{}, dispatch, profile, model)
 	settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, err)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassOutcomeUncertain || failure.Failure.Retryable {
@@ -327,7 +333,7 @@ exit 1
 
 			harness, ctx, dispatch := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
 			profile, model := testClaudeProviderSelection(t)
-			_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+			_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace", ClaudeState: claudeStateStub{}}, "hello", MonitorTurnMeta{}, dispatch, profile, model)
 			settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, err)
 			assertClaudeAuthenticationFailure(t, err)
 		})

@@ -84,6 +84,36 @@ fallback, obsolete-container retention, or redispatch is permitted.
 
 ## Failure and diagnostics decisions
 
+### Concrete backing disposition (implementation in progress)
+
+Reusable backing is a named volume keyed by full source hash, exact concrete
+actor fingerprint and session UUID. It is mounted in a disposable execution
+container that inherits the existing three logical mounts. Every launch uses
+the checked private CLAUDE_CONFIG_DIR, never the operator or shared flow home.
+
+The sibling continuation census includes `recoverCompletionContinuation`:
+stateless session UUIDs are intentionally rebound after a process crash, while
+the same delivery's consumed tool-result continuation remains recoverable.
+Therefore a stateless *delivery* uses its existing opaque delivery claim's exact
+delivery ID and actor identity as the private invocation coordinate, not its
+process-local session UUID. It uses retained named backing without acquiring
+agent memory. Recovery and every new dispatch still pass the existing completion
+and delivery fences. No schema, recovery mechanism or second session owner is
+introduced. Add R6 proof for reclaimed delivery/current session rebinding and a
+different-delivery isolation negative, in addition to within-process continuation.
+
+Non-delivery stateless invocations, fork-chat requests and startup probes use
+tmpfs; their root invocation/probe completion releases the container on success,
+failure or cancellation, retaining no provider files. Reusable and delivery
+volumes are deliberately retained even after terminal settlement or session/run
+termination/deletion as inert artifacts. Existing session/delivery owners revoke
+selection; a new session UUID/delivery ID cannot reselect them. No generic GC or
+cleanup registry is added. Tests remove only their exact generated volume keys.
+All source projection containers remain disposable. This records retention, not
+automatic artifact deletion, and does not claim #1965 cleanup closure.
+
+No execution proof for these backing decisions is claimed by this amendment.
+
 The CLI adapter returns the existing platform.outcome_uncertain envelope for
 every started uncertain failure, retaining the original typed cause and bounded
 details. Settling an attempt and returning a retryable original error is invalid.

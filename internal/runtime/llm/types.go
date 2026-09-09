@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
 
@@ -191,6 +192,7 @@ type Session struct {
 	SystemPrompt         string
 	Tools                []ToolDefinition
 	Messages             []Message
+	claudeState          workspace.ClaudeState
 }
 
 type UsageTokens struct {

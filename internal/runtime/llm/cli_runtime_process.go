@@ -413,8 +413,12 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 		return nil, err
 	}
 	if execTarget.Mode == workspace.ExecutionModeDockerContainer {
+		if target.ClaudeState == nil || target.ClaudeState.Directory() != workspace.ClaudeStateDirectory {
+			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_provider_state_binding_missing", "claude-cli-adapter", "build_command", nil)
+		}
 		dockerBin := configuredWorkspaceDockerBin(r.cfg)
 		dockerArgs := []string{"exec", "-i"}
+		dockerArgs = append(dockerArgs, "-e", "CLAUDE_CONFIG_DIR="+target.ClaudeState.Directory())
 		gatewayURL := r.toolGateway.WorkspaceMCPURL()
 		if gatewayURL != "" {
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_URL="+gatewayURL)
@@ -438,14 +442,6 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 }
 
 func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Target, error) {
-	return r.resolveWorkspaceTarget(ctx, false)
-}
-
-func (r *ClaudeCLIRuntime) resolveWorkspaceForCapabilityAdmission(ctx context.Context) (*workspace.Target, error) {
-	return r.resolveWorkspaceTarget(ctx, true)
-}
-
-func (r *ClaudeCLIRuntime) resolveWorkspaceTarget(ctx context.Context, capabilityAdmission bool) (*workspace.Target, error) {
 	if r.workspaces == nil {
 		return nil, fmt.Errorf("%w: workspace resolver is not configured", ErrClaudeWorkspaceRequired)
 	}
@@ -453,13 +449,7 @@ func (r *ClaudeCLIRuntime) resolveWorkspaceTarget(ctx context.Context, capabilit
 	if !ok {
 		return nil, fmt.Errorf("%w: actor context is missing", ErrClaudeWorkspaceRequired)
 	}
-	var target *workspace.Target
-	var err error
-	if capabilityAdmission {
-		target, err = workspace.ResolveForCapabilityAdmission(ctx, r.workspaces, actor)
-	} else {
-		target, err = r.workspaces.ResolveWorkspace(ctx, actor)
-	}
+	target, err := r.workspaces.ResolveWorkspace(ctx, actor)
 	if err != nil {
 		return nil, err
 	}
