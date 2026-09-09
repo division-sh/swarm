@@ -215,6 +215,9 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		opts.PersistenceRoles.LifecycleEffects,
 	)
 	lifecycle.baseContext = opts.BaseContext
+	if opts.LifecycleDiagnosticOrigin != (LifecycleDiagnosticOrigin{}) {
+		lifecycle.diagnosticOrigin = opts.LifecycleDiagnosticOrigin
+	}
 	lifecycle.executionPosture = opts.ExecutionPosture
 	if opts.WorkOwner != nil {
 		_ = lifecycle.prepareRunOwner(opts.BaseContext, opts.WorkOwner)

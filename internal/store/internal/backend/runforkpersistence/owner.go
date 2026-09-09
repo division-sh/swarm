@@ -59,6 +59,7 @@ var cloneConversationToolCalls = storeoperatorsurface.CloneConversationToolCalls
 var cloneConversationToolResults = storeoperatorsurface.CloneConversationToolResults
 
 type RunForkPostgresOwner struct {
+	lifecycleDiagnostics lifecycleDiagnosticObservations
 	*storerunlifecycle.RunLifecyclePostgresOwner
 	*storedecision.DecisionPostgresOwner
 	*storedelivery.DeliveryPostgresOwner
@@ -73,6 +74,7 @@ type RunForkPostgresOwner struct {
 }
 
 type RunForkSQLiteOwner struct {
+	lifecycleDiagnostics lifecycleDiagnosticObservations
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedecision.DecisionSQLiteOwner
 	*storedelivery.DeliverySQLiteOwner
@@ -85,6 +87,25 @@ type RunForkSQLiteOwner struct {
 	events         eventCommitOwner
 	conversations  conversationForkSourceReader
 	durableData    *storedurabledata.Owner
+}
+
+type lifecycleDiagnosticObservations interface {
+	LifecycleObservationIDsTx(context.Context, *sql.Tx, string) ([]string, error)
+}
+
+func (s *RunForkPostgresOwner) BindLifecycleDiagnostics(owner lifecycleDiagnosticObservations) error {
+	if owner == nil || s.lifecycleDiagnostics != nil {
+		return fmt.Errorf("lifecycle observation owner must be bound exactly once")
+	}
+	s.lifecycleDiagnostics = owner
+	return nil
+}
+func (s *RunForkSQLiteOwner) BindLifecycleDiagnostics(owner lifecycleDiagnosticObservations) error {
+	if owner == nil || s.lifecycleDiagnostics != nil {
+		return fmt.Errorf("lifecycle observation owner must be bound exactly once")
+	}
+	s.lifecycleDiagnostics = owner
+	return nil
 }
 
 func NewPostgres(

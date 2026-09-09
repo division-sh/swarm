@@ -32,8 +32,7 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/store/internal/backend/eventpersistence/inbound_publication.go", scope: "commitInboundPublicationTx", name: "AdmitForPersistence"}:                           1,
 	{path: "internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go", scope: "projectRunForkReplayEvent", name: "AdmitForPersistence"}:               1,
 	{path: "internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go", scope: "admitRunForkReplayEventTargetProjection", name: "AdmitForPersistence"}: 1,
-	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "EventPostgresOwner.PersistRuntimeLog", name: "AdmitForPersistence"}:             1,
-	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "EventSQLiteOwner.PersistRuntimeLog", name: "AdmitForPersistence"}:               1,
+	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "admitRuntimeLogRecord", name: "AdmitForPersistence"}:                            1,
 	{path: "internal/store/storetest/event.go", scope: "InsertCanonicalEventRecord", name: "AdmitForPersistence"}:                                                                 1,
 	{path: "internal/store/storetest/event.go", scope: "commitSemanticEventWithInitialFacts", name: "AdmitForPublish"}:                                                            1,
 }
@@ -42,6 +41,7 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/eventfixture/event.go":                                                                {},
 	"internal/store/internal/backend/delivery/lifecycle.go":                                               {},
 	"internal/store/internal/backend/eventpersistence/event_persistence_identity.go":                      {},
+	"internal/store/internal/backend/eventpersistence/runtime_log_persistence.go":                         {}, // Exact named diagnostic replay validation.
 	"internal/store/internal/backend/eventpersistence/event_reference_integrity.go":                       {},
 	"internal/store/internal/backend/eventpersistence/events.go":                                          {},
 	"internal/store/internal/backend/eventpersistence/sqlite_events.go":                                   {},

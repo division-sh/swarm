@@ -75,6 +75,14 @@ func LoadSQLiteEventIdentity(ctx context.Context, q interface {
 }
 
 func (s *EventPostgresOwner) LoadDirectiveEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+	return loadPostgresAdmittedEventTx(ctx, tx, eventID)
+}
+
+func (s *EventPostgresOwner) LoadLifecycleDiagnosticEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+	return loadPostgresAdmittedEventTx(ctx, tx, eventID)
+}
+
+func loadPostgresAdmittedEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
 	row, found, err := loadPostgresEventIdentity(ctx, tx, eventID)
 	if err != nil || !found {
 		return events.AdmittedEvent{}, found, err
@@ -84,6 +92,14 @@ func (s *EventPostgresOwner) LoadDirectiveEventTx(ctx context.Context, tx *sql.T
 }
 
 func (s *EventSQLiteOwner) LoadDirectiveEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+	return loadSQLiteAdmittedEventTx(ctx, tx, eventID)
+}
+
+func (s *EventSQLiteOwner) LoadLifecycleDiagnosticEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+	return loadSQLiteAdmittedEventTx(ctx, tx, eventID)
+}
+
+func loadSQLiteAdmittedEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
 	row, found, err := loadSQLiteEventIdentity(ctx, tx, eventID)
 	if err != nil || !found {
 		return events.AdmittedEvent{}, found, err

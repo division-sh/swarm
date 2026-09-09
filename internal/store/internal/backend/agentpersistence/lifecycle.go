@@ -361,18 +361,6 @@ func scanAgentLifecycleDiagnostics(rows *sql.Rows) ([]runtimemanager.AgentLifecy
 	return out, rows.Err()
 }
 
-func (s *AgentPostgresOwner) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	res, err := s.backend.ExecContext(ctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = $2 WHERE outbox_id = $1::uuid AND projected_at IS NULL`, outboxID, at.UTC())
-	return requireSingleLifecycleDiagnosticProjection(res, err)
-}
-
-func (s *AgentSQLiteOwner) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	return s.backend.RunTransaction(ctx, "sqlite mark lifecycle diagnostic projected", func(txctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(txctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = ? WHERE outbox_id = ? AND projected_at IS NULL`, at.UTC(), outboxID)
-		return requireSingleLifecycleDiagnosticProjection(res, err)
-	})
-}
-
 func requireSingleLifecycleDiagnosticProjection(res sql.Result, err error) error {
 	if err != nil {
 		return err
@@ -403,7 +391,7 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	effects := privaterunforkrevision.NewEffects()
-	result, err := commitPostgresAgentLifecycleTransitionTx(ctx, tx, story, effects, req, s.providerDrains)
+	result, err := commitPostgresAgentLifecycleTransitionTx(ctx, tx, story, effects, req, s.providerDrains, s.diagnosticEvents, s.diagnosticOrigins)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -432,7 +420,7 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	effects := privaterunforkrevision.NewEffects()
-	result, err := commitSQLiteAgentLifecycleTransitionTx(ctx, tx, story, effects, req, s.providerDrains)
+	result, err := commitSQLiteAgentLifecycleTransitionTx(ctx, tx, story, effects, req, s.providerDrains, s.diagnosticEvents, s.diagnosticOrigins)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -445,7 +433,7 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	return result, nil
 }
 
-func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	fingerprint, err := req.Identity.Fingerprint()
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -478,6 +466,9 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, s
 		err = applyPostgresLifecycleCell(ctx, tx, req, result)
 	}
 	if err == nil {
+		err = snapshotLifecycleDiagnostic(ctx, tx, req, &result, eventOwner, originOwner)
+	}
+	if err == nil {
 		err = insertPostgresLifecycleEvidence(ctx, tx, req, result)
 	}
 	if err == nil {
@@ -489,7 +480,7 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, s
 	return result, err
 }
 
-func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainSQLiteCapturer) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainSQLiteCapturer, eventOwner LifecycleDiagnosticEventOwner, originOwner LifecycleDiagnosticOriginValidator) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	previous, exists, err := loadSQLiteLifecycleCell(ctx, tx, req.Identity)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -513,6 +504,9 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, sto
 	result.Subordinate, err = applySQLiteLifecycleSubordinate(ctx, tx, req)
 	if err == nil {
 		err = applySQLiteLifecycleCellTx(ctx, tx, req, result)
+	}
+	if err == nil {
+		err = snapshotLifecycleDiagnostic(ctx, tx, req, &result, eventOwner, originOwner)
 	}
 	if err == nil {
 		err = insertSQLiteLifecycleEvidenceTx(ctx, tx, req, result)
@@ -1122,6 +1116,12 @@ func decodeLifecycleOperationResult(req runtimemanager.AgentLifecycleTransition,
 			map[string]any{"operation_id": req.OperationID},
 		)
 	}
+	if err := result.DiagnosticProvenance.Validate(); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, true, err
+	}
+	if result.DiagnosticProvenance.Origin != req.DiagnosticOrigin {
+		return runtimemanager.AgentLifecycleTransitionResult{}, true, runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "lifecycle_operation_provenance_conflict", "agent-lifecycle-store", req.OperationKind, map[string]any{"operation_id": req.OperationID})
+	}
 	result.Replayed = true
 	return result, true, nil
 }
@@ -1327,6 +1327,10 @@ func lifecycleAgentStatus(req runtimemanager.AgentLifecycleTransition) string {
 }
 
 func insertPostgresLifecycleEvidence(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	provenance, err := lifecycleProvenanceBytes(result)
+	if err != nil {
+		return err
+	}
 	raw, _ := json.Marshal(result)
 	fields, err := IdentityFields(req.Identity)
 	if err != nil {
@@ -1386,18 +1390,22 @@ func insertPostgresLifecycleEvidence(ctx context.Context, tx *sql.Tx, req runtim
 		INSERT INTO agent_lifecycle_diagnostic_outbox (
 			outbox_id, operation_id, agent_id, agent_name_owner,
 			agent_name_source, agent_route_presence, flow_scope_key,
-			flow_instance_id, flow_instance, event_name, payload, created_at, run_id
+			flow_instance_id, flow_instance, event_name, payload, created_at, run_id, execution_mode, provenance
 		) VALUES (
 			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,
-			'platform.agent_lifecycle_transition',$10::jsonb,$11,$12::uuid
+			'platform.agent_lifecycle_transition',$10::jsonb,$11,$12::uuid,$13,$14::jsonb
 		)
 	`, uuid.NewString(), req.OperationID, fields.AgentID, fields.NameOwner,
 		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC(), fields.RunID)
+		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC(), fields.RunID, string(result.DiagnosticProvenance.EventMode), string(provenance))
 	return err
 }
 
 func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	provenance, err := lifecycleProvenanceBytes(result)
+	if err != nil {
+		return err
+	}
 	raw, _ := json.Marshal(result)
 	fields, err := IdentityFields(req.Identity)
 	if err != nil {
@@ -1452,10 +1460,10 @@ func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtim
 		INSERT INTO agent_lifecycle_diagnostic_outbox (
 			outbox_id, operation_id, agent_id, agent_name_owner,
 			agent_name_source, agent_route_presence, flow_scope_key,
-			flow_instance_id, flow_instance, event_name, payload, created_at, run_id
-		) VALUES (?,?,?,?,?,?,?,?,?,'platform.agent_lifecycle_transition',?,?,?)
+			flow_instance_id, flow_instance, event_name, payload, created_at, run_id, execution_mode, provenance
+		) VALUES (?,?,?,?,?,?,?,?,?,'platform.agent_lifecycle_transition',?,?,?,?,?)
 	`, uuid.NewString(), req.OperationID, fields.AgentID, fields.NameOwner,
 		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC(), fields.RunID)
+		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC(), fields.RunID, string(result.DiagnosticProvenance.EventMode), string(provenance))
 	return err
 }

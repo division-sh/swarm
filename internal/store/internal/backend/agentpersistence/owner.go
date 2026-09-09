@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -20,6 +21,17 @@ import (
 type DirectiveEventCommitter interface {
 	CommitDirectiveEventTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 	LoadDirectiveEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
+}
+
+type LifecycleDiagnosticEventOwner interface {
+	CommitRuntimeLogRecordTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimepkg.RuntimeLogPersistenceRecord) (runtimebus.EventAppendOutcome, error)
+	LoadLifecycleDiagnosticEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
+	ValidateRuntimeLogRecordTx(context.Context, *sql.Tx, runtimepkg.RuntimeLogPersistenceRecord) error
+	RequirePresentTx(context.Context, *sql.Tx, string) error
+}
+
+type LifecycleDiagnosticOriginValidator interface {
+	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool) (string, error)
 }
 
 type DirectivePipelineOwner interface {
@@ -39,12 +51,14 @@ type AgentSource interface {
 }
 
 type AgentPostgresOwner struct {
-	backend        *postgresbackend.Backend
-	schemaGuard    func() error
-	agents         AgentSource
-	events         DirectiveEventCommitter
-	pipeline       DirectivePipelineOwner
-	providerDrains ProviderAttemptDrainPostgresCapturer
+	diagnosticEvents  LifecycleDiagnosticEventOwner
+	diagnosticOrigins LifecycleDiagnosticOriginValidator
+	backend           *postgresbackend.Backend
+	schemaGuard       func() error
+	agents            AgentSource
+	events            DirectiveEventCommitter
+	pipeline          DirectivePipelineOwner
+	providerDrains    ProviderAttemptDrainPostgresCapturer
 }
 
 func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, agents AgentSource) (*AgentPostgresOwner, error) {
@@ -68,12 +82,30 @@ func (s *AgentPostgresOwner) requireCurrentSchema() error {
 }
 
 type AgentSQLiteOwner struct {
-	backend        *sqlitebackend.Backend
-	schemaGuard    func() error
-	agents         AgentSource
-	events         DirectiveEventCommitter
-	pipeline       DirectivePipelineOwner
-	providerDrains ProviderAttemptDrainSQLiteCapturer
+	diagnosticEvents  LifecycleDiagnosticEventOwner
+	diagnosticOrigins LifecycleDiagnosticOriginValidator
+	backend           *sqlitebackend.Backend
+	schemaGuard       func() error
+	agents            AgentSource
+	events            DirectiveEventCommitter
+	pipeline          DirectivePipelineOwner
+	providerDrains    ProviderAttemptDrainSQLiteCapturer
+}
+
+func (s *AgentPostgresOwner) BindLifecycleDiagnostics(events LifecycleDiagnosticEventOwner, origins LifecycleDiagnosticOriginValidator) error {
+	if s == nil || events == nil || origins == nil || s.diagnosticEvents != nil || s.diagnosticOrigins != nil {
+		return fmt.Errorf("lifecycle diagnostic dependencies must be bound exactly once")
+	}
+	s.diagnosticEvents, s.diagnosticOrigins = events, origins
+	return nil
+}
+
+func (s *AgentSQLiteOwner) BindLifecycleDiagnostics(events LifecycleDiagnosticEventOwner, origins LifecycleDiagnosticOriginValidator) error {
+	if s == nil || events == nil || origins == nil || s.diagnosticEvents != nil || s.diagnosticOrigins != nil {
+		return fmt.Errorf("lifecycle diagnostic dependencies must be bound exactly once")
+	}
+	s.diagnosticEvents, s.diagnosticOrigins = events, origins
+	return nil
 }
 
 func (s *AgentPostgresOwner) BindProviderAttemptDrains(owner ProviderAttemptDrainPostgresCapturer) error {

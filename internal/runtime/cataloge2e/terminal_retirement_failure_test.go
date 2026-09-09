@@ -19,6 +19,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -169,6 +170,11 @@ func proveDirectTerminalCommitUnwind(t *testing.T, mode string) {
 				expectTerminalShutdownFailure(t, h, injected)
 			}
 			evt := catalogRunScopedWorkerReadyEvent(t, catalogRuntimeRunID, path, entity, uuid.NewString())
+			if h.pg != nil {
+				storetest.CommitSemanticEvent(t, ctx, h.pg, evt)
+			} else {
+				storetest.CommitSemanticEvent(t, ctx, h.sqlite, evt)
+			}
 			request := runtimepipeline.FlowInstanceDeactivationRequest{Instance: flowidentity.Stored(nil, "worker-flow", path, "worker-001", entity, "")}
 			err := h.rt.Manager.DeactivateFlowInstanceModel(runtimecorrelation.WithInboundEvent(callerCtx, evt), request)
 			if probe.calls.Load() != 1 {

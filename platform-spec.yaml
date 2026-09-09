@@ -1035,6 +1035,12 @@ contract_formats:
             event_id and created_at facts are explicit admission output, not
             database defaults; optional run_id remains empty only when the exact
             subtype is global/no-run by design.
+          lifecycle_projection: >-
+            Lifecycle runtime logs use the existing outbox occurrence UUID and timestamp,
+            immutable enqueue-time execution mode, concrete identity and validated origin.
+            Event append, no_subscriber_by_design settlement and projected_at acknowledgement
+            form one selected-store transaction. A lifecycle observation is never a causal root
+            or authority for delivery, execution, effects or a descendant event.
           closed_catalog:
           - platform.runtime_log
           - platform.inbound_recorded
@@ -13942,7 +13948,14 @@ platform_tables:
             INDEX idx_agent_lifecycle_transition_facts_agent (agent_id, flow_instance, created_at)
         );
     agent_lifecycle_diagnostic_outbox:
-      description: Durable non-authoritative projection queue for lifecycle diagnostics. Its complete run-scoped agent coordinate is a snapshot, not a live foreign-key selector.
+      description: >-
+        Durable non-authoritative projection queue for lifecycle diagnostics. Its complete
+        run-scoped agent coordinate, actor/event modes and typed enqueue-time provenance are
+        immutable historical snapshots, not live foreign-key selectors or caller-context tags.
+        The outbox UUID and created_at are the diagnostic event identity and timestamp.
+        Diagnostic event persistence and acknowledgement commit atomically through the existing
+        event owner. Selected-fork discard deletes these projection rows with the discarded events;
+        ordinary execution close retains them. Old selected stores are unsupported.
       ddl: |
         CREATE TABLE agent_lifecycle_diagnostic_outbox (
             outbox_id          UUID PRIMARY KEY,
@@ -13957,6 +13970,8 @@ platform_tables:
             flow_instance      TEXT NOT NULL,
             event_name         TEXT NOT NULL,
             payload            JSONB NOT NULL,
+            execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
+            provenance         JSONB NOT NULL,
             projected_at       TIMESTAMPTZ,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             INDEX idx_agent_lifecycle_outbox_pending (created_at) WHERE projected_at IS NULL
@@ -16025,6 +16040,11 @@ platform_tables:
       - component and action live in details, not as top-level runtime_log fields
       - failure-bearing entries carry details.failure as a platform.failure/v1 envelope; details.error is forbidden and message is not a semantic classifier
       - readers and debug UIs should filter and render structured runtime diagnostics from details
+      - >-
+        Durable lifecycle projection consumes the same explicit-facts runtime-log encoder and
+        named event transaction port as ordinary runtime logging. It never calls an optional
+        logger before a separate acknowledgement. Its stable ID/time, run, mode, parent and
+        structured detail come from the validated occurrence, not the projector caller context.
       - >
         Tool-execution entries that consume external tool-provider dispatch admission include machine-readable
         details fields `rate_limit_scope`, `rate_limit_bucket_hash`, `rate_limit_limit`, `rate_limit_period_ms`,
@@ -16698,6 +16718,9 @@ run_model:
       the existing event ParentEventID/events.source_event_id lineage written by the store/runtime logger. Activation and
       selected-tree validation must continue to consume only persisted fork-run lineage, not in-memory descriptors,
       action/reason strings, produced_by_type alone, readiness JSON, operator OAuth state, or diagnostic payload prose.
+      Exact acknowledged lifecycle observations are validated through agent_lifecycle_authority.diagnostic_projection
+      and may be excluded only from the final stray-event count. They never become selected-tree roots or authorize
+      descendants. Matching runtime_lineage payload tags confer no exemption or execution authority.
       Unrelated fork-run platform rows, source platform facts, source outcomes/deliveries, restart recovery, current-state
       materialization, session/turn/audit reconstruction, non-agent replay, retry/idempotency/follow-up policy beyond
       normal selected-fork output, and operator consumers remain fail-closed, invalid, or split under their own owners.'
@@ -16710,6 +16733,8 @@ run_model:
       pipeline and system-node dead letters, dead-letter-escalation, and runtime-log records. Such events are fork-local lineage/output evidence only when they
       are causally parented to selected-fork execution through the fork event parent/source_event_id chain and persisted
       under the fork run_id. For platform.runtime_log diagnostics, the canonical persisted lineage is events.source_event_id;
+      noncausal lifecycle observations follow agent_lifecycle_authority.diagnostic_projection and are harmless evidence,
+      not an exception to causal execution authority;
       the runtime logger may derive it only from an explicit diagnostic parent_event_id or a verified same-run persisted
       subject EventID. Activity diagnostics emitted while executing a selected-fork platform.activity_requested event MUST
       use the actual persisted fork-local request event as that subject; a recomputed activity request identity that is not
@@ -17003,7 +17028,9 @@ run_model:
         Activation and selected-tree validation must continue to consume persisted lineage only, and unrelated/source
         platform rows, action/reason strings, produced_by_type alone, descriptors, readiness/operator state, restart
         recovery, current-state materialization, sessions/turns/audits, non-agent replay, retry/idempotency, and follow-up
-        policy remain outside this owner.'
+        policy remain outside this owner. Exact acknowledged lifecycle observations follow
+        agent_lifecycle_authority.diagnostic_projection: exempt only the event itself from the final stray count,
+        never its descendants, and never populate the recursive tree from diagnostic tags.'
       3g2_selected_contract_fork_local_runtime_platform_event_lineage_policy: 'For selected-contract mutating fork
         execution, runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy owns
         fresh fork-run runtime/platform control or diagnostic events emitted by the selected-fork runtime container while
@@ -17011,7 +17038,8 @@ run_model:
         causally parented to selected-fork execution through the selected fork event parent/source_event_id chain.
         For platform.runtime_log diagnostics, the runtime logger must persist canonical lineage through events.source_event_id
         derived from an explicit diagnostic parent_event_id or from a verified same-run persisted subject EventID; diagnostic
-        action/reason strings and local caller detail shape are not semantic owners. Unrelated fork-run platform events
+        action/reason strings and local caller detail shape are not semantic owners. Noncausal lifecycle observations
+        follow agent_lifecycle_authority.diagnostic_projection and cannot authorize any descendant. Unrelated fork-run platform events
         without selected-fork causal context, source platform facts, source outcomes, source deliveries, live EventBus
         descriptors, operator surfaces, and produced_by_type alone remain invalid selected-fork lineage. This owner does
         not change the source diagnostic platform outcome policy for platform.runtime_log/platform.inbound_recorded,
@@ -35937,6 +35965,9 @@ agent_lifecycle_authority:
         Direct flow termination retains committed route-retirement evidence across auxiliary panic as well as error.
         Its exact process-route retirement is consumed once on normal return or unwind; a failed retirement remains
         part of the owning completion error, not a successful projection or permission to skip agent-set fencing.
+        After actual retirement succeeds, clear its retained executable responsibility before projecting auxiliary
+        diagnostics. A diagnostic failure remains attributed in the completion/shutdown error but cannot retain or
+        repeat already completed retirement.
       whole_set: >
         The lifecycle coordinator captures and fences every exact affected predecessor before the first member join.
         Member persistence failure or panic cannot leave an unfenced or unowned suffix. The same bounded terminal
@@ -35991,16 +36022,63 @@ agent_lifecycle_authority:
     turn_evidence_split: SettleCompletion is the only provider-turn evidence writer. The selected store locks lifecycle truth, selects one closed current or drained permit, and returns that typed disposition to the common provider caller. A current permit may atomically apply the supplied exact current mutable projection. A drained permit projects the submitted completion candidate into a distinct restricted value containing immutable turn/effect/spend evidence only; it ignores any current-only provider-head candidate and cannot update agent_sessions run_id, timestamps, conversation, provider state, watchdog, output, or successor state. The stale_projection_refused rule is enforced by that locked permit projection, not by an earlier generation check. Every provider adapter consumes a drained disposition as a successful no-output stop before session, conversation, provider-head, turn-count, rotation, output, or successor projection. Evidence failure rolls back the complete current or drained named operation. Direct AppendAgentTurn, catch-error/strip/retry settlement, and any alternate turn insert owner are forbidden.
   public_restart:
     idempotency: A supplied API idempotency key derives a stable lifecycle operation_id. API completion failure is repaired by replaying the stored lifecycle outcome without repeating restart.
-    diagnostic: Success requires durable transition outcome and durable outbox enqueue; immediate projection is non-authoritative.
+    diagnostic: Success requires durable transition outcome and durable outbox enqueue with immutable validated provenance; immediate projection is auxiliary. Its failure retains pending work and is reported through the nonrecursive process diagnostic sink, without changing a committed lifecycle result or repeating restart.
   reconfigure:
     candidate_derivation: The canonical per-agent decision point encloses the authoritative current-config read, partial-patch merge, validation and agent build, subordinate-plan derivation, durable lifecycle/config/session commit, and process-local agent/config projection. A candidate or subordinate plan derived before that serialization point is invalid; concurrent partial patches execute in one serial order against the predecessor committed by the prior decision.
     operation_identity: After per-agent serialization, derive one stable operation id from the agent id, authoritative expected lifecycle occurrence (runtime epoch, generation, and phase), candidate config revision, normalized subordinate plan, and exact dynamic readiness authority when present. Retry while that expected occurrence and authority remain current reuses the id; the same candidate and plan after any intervening committed generation or readiness-plan revision is a distinct operation. A candidate whose revision already equals the authoritative current cell is a no-op and creates no lifecycle operation.
     session_rotation: Rotation consumes the same operation identity and is idempotent, so persistence retry never rotates twice.
   recovery:
-    rule: Recovery hydrates only durable non-terminal cells and projects pending diagnostic outbox rows through the runtime log owner before marking them projected; projection failure leaves the row pending and never repeats the lifecycle transition.
+    rule: Recovery hydrates only durable non-terminal cells. Separately, the selected-store lifecycle diagnostic owner atomically projects pending historical occurrences through the canonical runtime-log encoder and named event Tx port with acknowledgement. Projection failure leaves the row pending, is reported nonrecursively, and never repeats or reverses a lifecycle transition.
+  diagnostic_projection:
+    owner: existing lifecycle persistence owner, composed with the existing named runtime-log event owner and selected-fork provenance owner
+    enqueue: >-
+      The original transition transaction stores required provenance and execution_mode with each occurrence.
+      Origin has independent normal/selected_contract_fork ownership and observation/accepted_event causality.
+      Snapshot the complete concrete agent identity, exact process/source binding and descriptor actor mode.
+      Observations have no parent and use actor mode; causal diagnostics require an already persisted same-run
+      accepted parent and use that parent's mode. Invalid causal origin never degrades to observation.
+      Selected origins require the issued execution, binding, source/fork IDs, generation and fingerprints;
+      validate these through the existing selected-fork owner, never payload tags or projector context.
+      Requested origin participates in operation replay conflict identity. Missing or conflicting origin rolls
+      back enqueue and the original transition. There are no schema defaults, old-store readers or backfills.
+    projection: >-
+      Each bounded batch processes at most 100 occurrences, with one transaction per occurrence and an
+      independently committed prefix. Lock the run before selecting/locking its exact pending occurrence.
+      Queue selection hints are not projection authority; after run locking, a removed queue has no occurrence
+      to project. Never recreate a deleted occurrence or acknowledge a missing row. Validate the operation,
+      transition, concrete coordinate, timestamp, process/source and historical origin before the named append.
+      Append the event using outbox_id/created_at, canonical no_subscriber_by_design settlement and acknowledge
+      in the same transaction; finalize authoractivity/revision once. Failure rolls back both event and ack.
+      An event without its acknowledgement, or an acknowledged event with missing/conflicting canonical facts,
+      is corruption, not an old-store repair opportunity. Concurrent projectors use this selected-store boundary,
+      not a manager-local mutex. No optional log sink can acknowledge durable work.
+    historical: >-
+      Delayed projection uses retained immutable operation/transition/provenance facts. Normal shutdown, retired
+      grants, changed/deleted current actors and closed selected executions do not require a live lease to project.
+      Missing retained historical evidence fails closed. The caller's run, mode, source and runtime lineage are
+      not facts of the diagnostic occurrence.
+    fork_validation: >-
+      Both selected-fork validators consume the exact read-only acknowledged observation relation within their
+      run transaction. Verify event ID, canonical payload bytes, timestamp, run, execution mode, producer, scope,
+      absent parent, no-delivery settlement and absent deliveries. Only those exact observations may be excluded
+      from the final stray-event count. Never insert them into recursive selected-tree roots or use them to admit
+      a descendant, delivery, effect or source freeze. All ordinary causal and selected activity rules remain intact.
+    lifecycle_failure: >-
+      Clear successfully completed retirement responsibility independently of auxiliary projection failure.
+      Preserve original lifecycle, provider and cleanup failures; report diagnostic failure via the existing
+      process sink rather than recursively logging it into the same outbox. Startup hydration and joined shutdown
+      retain explicit diagnostic-error attribution without reversing committed lifecycle outcomes. Joined work and store teardown ordering
+      remain unchanged; no detached worker, retry framework or error suppression is introduced.
   destructive_cleanup_quiescence:
     runtime_nuke: Apply-mode runtime.nuke closes admission and awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
     other_ordering: Manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Selected-store compatibility migration and backfill paths do not exist.
+    diagnostic_lifetime: >-
+      Ordinary selected execution close retains diagnostic occurrences for delayed projection. Admitted destructive
+      selected-fork discard removes pending and projected diagnostic outbox rows in the same run-locked transaction
+      that deletes the fork events, after quiescence. Retain the existing operation/transition, execution/binding,
+      turn and completion evidence according to their aggregate policy. Rollback retains the whole prior relation.
+      Reset, nuke and whole-parent deletion align queue/event lifetime under their existing aggregate owner.
+      Deletion is not successful projection and cannot authorize a zero-row acknowledgement or event resurrection.
   forbidden:
     - direct lifecycle map writes outside the coordinator
     - raw agents-table mutation that bypasses selected-store topology admission

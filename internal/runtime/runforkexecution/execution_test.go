@@ -19,6 +19,7 @@ import (
 	"time"
 
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 
 	"github.com/google/uuid"
 
@@ -65,6 +66,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -2898,7 +2900,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
 	})
-	storetest.RequirePausedRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), forkRunID, now)
+	storetest.RequireRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), storetest.RunFixture{
+		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: storetest.ScenarioSetupOrigin(),
+		Artifact: sourceartifactfixture.Artifact(), StartedAt: now,
+	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
 		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
@@ -2962,7 +2967,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		LoadedSource: LoadedSelectedContractSource{
 			Selection:          selection,
 			Source:             selectedSource,
-			SourceArtifactFact: testEphemeralSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+			SourceArtifactFact: sourceartifactfixture.Fact(),
 		},
 		RecipientPlanning:     planning,
 		SourceRunID:           sourceRunID,
@@ -3026,7 +3031,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 
 	authority := winner.container.authority
 	targetIdentity := selectedContractTestAgentIdentityForRun(t, forkRunID, "selected-agent", "selected-authority-race")
-	seedSelectedExecutionTestAgent(t, ctx, winner.store, targetIdentity, now)
+	seedSelectedExecutionTestAgent(t, ctx, winner.store, targetIdentity, now, runtimemanager.LifecycleDiagnosticOrigin{
+		Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+		SelectedFork: authority.SelectedFork, SourceRunID: baseRequest.Admission.SourceRunID, ForkEventID: baseRequest.Admission.ForkEventID,
+	})
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind:          runtimeeffects.UsageTargetAgentTurn,
 		ID:            uuid.NewString(),
@@ -4930,6 +4938,7 @@ func seedSelectedExecutionTestAgent(
 	selected storetest.AgentFixtureStore,
 	identity agentidentity.Identity,
 	at time.Time,
+	origins ...runtimemanager.LifecycleDiagnosticOrigin,
 ) {
 	t.Helper()
 	config := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
@@ -4944,8 +4953,18 @@ func seedSelectedExecutionTestAgent(
 		FlowPath:           identity.FlowInstance(),
 		Config:             []byte(`{}`),
 	})
-	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
-		Config: config, Status: "active", HiredBy: "test", StartedAt: at,
+	rec := runtimemanager.PersistedAgent{Config: config, Status: "active", HiredBy: "test", StartedAt: at}
+	if len(origins) == 0 {
+		if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, rec); err != nil {
+			t.Fatalf("seed selected-execution test agent: %v", err)
+		}
+		return
+	}
+	op := uuid.NewString()
+	if _, err := agentfixture.CommitStatic(t, ctx, selected, runtimemanager.AgentLifecycleTransition{
+		DiagnosticOrigin: origins[0], OperationID: op, OperationKind: "spawn", RequestHash: op,
+		Identity: identity, AgentID: identity.AgentID(), Trigger: "spawn", TargetEpoch: 1, TargetGeneration: 1,
+		TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: "fixture-v1", RunMode: runtimemanager.AgentRunModeStandard, Agent: &rec, Now: at,
 	}); err != nil {
 		t.Fatalf("seed selected-execution test agent: %v", err)
 	}

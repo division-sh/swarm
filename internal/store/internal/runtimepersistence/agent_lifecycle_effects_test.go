@@ -189,6 +189,14 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	if err != nil || !replayed.Replayed || replayed.Generation != started.Generation {
 		t.Fatalf("lifecycle replay = %#v err=%v", replayed, err)
 	}
+	changedOrigin := start
+	changedOrigin.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{
+		Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticAcceptedEvent,
+		ParentEventID: "00000000-0000-0000-0000-000000001999",
+	}
+	if _, err := agentfixture.CommitStatic(t, ctx, store, changedOrigin); err == nil {
+		t.Fatal("exact lifecycle operation accepted changed diagnostic provenance")
+	}
 	runID := identity.RunID
 	if sqlite {
 		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
@@ -280,13 +288,16 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		t.Fatalf("successor replay failure = %v, want outcome uncertain", err)
 	}
 
-	diagnosticsStore := store.(runtimemanager.AgentLifecycleDiagnosticPersistence)
+	diagnosticsStore := store.(interface {
+		runtimemanager.AgentLifecycleDiagnosticPersistence
+		ListPendingAgentLifecycleDiagnostics(context.Context, int) ([]runtimemanager.AgentLifecycleDiagnostic, error)
+	})
 	diagnostics, err := diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)
 	if err != nil || len(diagnostics) != 3 {
 		t.Fatalf("pending lifecycle diagnostics = %#v err=%v, want spawn, start, and restart", diagnostics, err)
 	}
-	if err := diagnosticsStore.MarkAgentLifecycleDiagnosticProjected(ctx, diagnostics[0].OutboxID, now.Add(3*time.Second)); err != nil {
-		t.Fatalf("mark lifecycle diagnostic projected: %v", err)
+	if count, err := diagnosticsStore.ProjectAgentLifecycleDiagnostics(ctx, 1); err != nil || count != 1 {
+		t.Fatalf("project lifecycle diagnostic: count=%d error=%v", count, err)
 	}
 	diagnostics, err = diagnosticsStore.ListPendingAgentLifecycleDiagnostics(ctx, 10)
 	if err != nil || len(diagnostics) != 2 {

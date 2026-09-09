@@ -2,13 +2,17 @@ package eventpersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/google/uuid"
 )
 
@@ -16,11 +20,83 @@ const runtimeLogEventName = "platform.runtime_log"
 
 const RuntimeLogEventName = runtimeLogEventName
 
+func (s *EventPostgresOwner) ValidateRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, record runtimepkg.RuntimeLogPersistenceRecord) error {
+	admitted, err := s.admitRuntimeLogRecord(ctx, record)
+	if err != nil {
+		return err
+	}
+	got, found, err := loadPostgresEventIdentity(ctx, tx, record.EventID)
+	if err != nil {
+		return err
+	}
+	return validateRuntimeLogRecordTx(ctx, tx, postgresDeliveryAdapter, admitted, got, found)
+}
+
+func (s *EventSQLiteOwner) ValidateRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, record runtimepkg.RuntimeLogPersistenceRecord) error {
+	admitted, err := s.admitRuntimeLogRecord(ctx, record)
+	if err != nil {
+		return err
+	}
+	got, found, err := loadSQLiteEventIdentity(ctx, tx, record.EventID)
+	if err != nil {
+		return err
+	}
+	return validateRuntimeLogRecordTx(ctx, tx, mustDeliveryAdapter(storedelivery.DialectSQLite), admitted, got, found)
+}
+
+func validateRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, delivery *storedelivery.Adapter, admitted events.AdmittedEvent, got eventrecord.Record, found bool) error {
+	if !found {
+		return eventrecord.Missing(admitted.ID())
+	}
+	settlement, err := events.NewNoDeliverySettlement(events.EventWriteRuntimeLogDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	if err != nil {
+		return err
+	}
+	want, err := eventrecord.FromAdmitted(admitted, settlement)
+	if err != nil {
+		return err
+	}
+	if !want.Equal(got) {
+		return &eventIdentityConflictError{EventID: admitted.ID()}
+	}
+	deliveries, err := delivery.SnapshotsForEvent(ctx, tx, admitted.ID())
+	if err != nil {
+		return err
+	}
+	if len(deliveries) != 0 {
+		return fmt.Errorf("lifecycle diagnostic %s unexpectedly has deliveries", admitted.ID())
+	}
+	return nil
+}
+
+func admitRuntimeLogRecord(record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
+	constructed, err := runtimeLogEvent(record)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+}
+
+func (s *EventPostgresOwner) admitRuntimeLogRecord(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
+	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return admitRuntimeLogRecord(record)
+}
+
+func (s *EventSQLiteOwner) admitRuntimeLogRecord(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
+	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return admitRuntimeLogRecord(record)
+}
+
 func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Event, error) {
 	facts := events.EventFacts{
+		ID:       record.EventID,
 		Type:     events.EventType(runtimeLogEventName),
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload:  json.RawMessage(record.Payload), CreatedAt: time.Time{}, ExecutionMode: record.ExecutionMode,
+		Payload:  json.RawMessage(record.Payload), CreatedAt: record.CreatedAt, ExecutionMode: record.ExecutionMode,
 	}
 	runID := strings.TrimSpace(record.RunID)
 	parentEventID := strings.TrimSpace(record.ParentEventID)
@@ -75,14 +151,7 @@ func (s *EventPostgresOwner) PersistRuntimeLog(ctx context.Context, record runti
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
-		return err
-	}
-	constructed, err := runtimeLogEvent(record)
-	if err != nil {
-		return err
-	}
-	evt, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	evt, err := s.admitRuntimeLogRecord(ctx, record)
 	if err != nil {
 		return err
 	}
@@ -130,17 +199,25 @@ func (s *EventSQLiteOwner) PersistRuntimeLog(ctx context.Context, record runtime
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	if err := s.validateEventPayload(ctx, runtimeLogEventName, record.Payload); err != nil {
-		return err
-	}
-	constructed, err := runtimeLogEvent(record)
-	if err != nil {
-		return err
-	}
-	evt, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	evt, err := s.admitRuntimeLogRecord(ctx, record)
 	if err != nil {
 		return err
 	}
 	_, err = s.CommitRuntimeLogEvent(ctx, evt)
 	return err
+}
+
+func (s *EventPostgresOwner) CommitRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, record runtimepkg.RuntimeLogPersistenceRecord) (runtimebus.EventAppendOutcome, error) {
+	admitted, err := s.admitRuntimeLogRecord(ctx, record)
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	return commitRuntimeLogEventTx(ctx, s, tx, story, effects, admitted)
+}
+func (s *EventSQLiteOwner) CommitRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, record runtimepkg.RuntimeLogPersistenceRecord) (runtimebus.EventAppendOutcome, error) {
+	admitted, err := s.admitRuntimeLogRecord(ctx, record)
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	return commitRuntimeLogEventTx(ctx, s, tx, story, effects, admitted)
 }

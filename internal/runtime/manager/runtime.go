@@ -960,38 +960,25 @@ func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error 
 	return nil
 }
 
-func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) error {
-	if am == nil || am.bus == nil || am.lifecycle == nil {
+func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) (err error) {
+	if am == nil || am.lifecycle == nil {
 		return nil
 	}
+	defer func() {
+		if err != nil {
+			diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "lifecycle diagnostic projection failed", map[string]any{"error": err.Error()})
+		}
+	}()
 	store := am.roles.LifecycleDiagnostics
 	if store == nil {
 		return nil
 	}
 	for {
-		items, err := store.ListPendingAgentLifecycleDiagnostics(ctx, 100)
+		count, err := store.ProjectAgentLifecycleDiagnostics(ctx, 100)
 		if err != nil {
 			return err
 		}
-		for _, item := range items {
-			detail := make(map[string]any, len(item.Payload)+3)
-			for key, value := range item.Payload {
-				detail[key] = value
-			}
-			detail["outbox_id"] = item.OutboxID
-			detail["operation_id"] = item.OperationID
-			detail["event_name"] = item.EventName
-			if err := am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-				Level: "info", Component: "agent-lifecycle", Action: item.EventName,
-				AgentID: item.AgentID, Detail: detail,
-			}); err != nil {
-				return err
-			}
-			if err := store.MarkAgentLifecycleDiagnosticProjected(ctx, item.OutboxID, time.Now().UTC()); err != nil {
-				return err
-			}
-		}
-		if len(items) < 100 {
+		if count < 100 {
 			return nil
 		}
 	}

@@ -846,10 +846,6 @@ func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record
 	return s.activityPostgresOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *PostgresStore) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	return s.agentPostgresOwner.MarkAgentLifecycleDiagnosticProjected(ctx, outboxID, at)
-}
-
 func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
 	return s.pipelinePostgresOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
@@ -908,6 +904,10 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req runfork.RunForkPlan
 
 func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error) {
 	return s.runForkPostgresOwner.PrepareOperatorConversationForkChat(ctx, req)
+}
+
+func (s *PostgresStore) ProjectAgentLifecycleDiagnostics(ctx context.Context, limit int) (int, error) {
+	return s.agentPostgresOwner.ProjectAgentLifecycleDiagnostics(ctx, limit)
 }
 
 func (s *PostgresStore) ProjectCompletionConversation(ctx context.Context, attempt effects.Attempt, projection effects.CompletionConversationProjection) error {
@@ -2034,10 +2034,6 @@ func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, r
 	return s.activitySQLiteOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *SQLiteRuntimeStore) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
-	return s.agentSQLiteOwner.MarkAgentLifecycleDiagnosticProjected(ctx, outboxID, at)
-}
-
 func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
 	return s.pipelineSQLiteOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
@@ -2096,6 +2092,10 @@ func (s *SQLiteRuntimeStore) PlanRunFork(ctx context.Context, req runfork.RunFor
 
 func (s *SQLiteRuntimeStore) PrepareOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error) {
 	return s.runForkSQLiteOwner.PrepareOperatorConversationForkChat(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) ProjectAgentLifecycleDiagnostics(ctx context.Context, limit int) (int, error) {
+	return s.agentSQLiteOwner.ProjectAgentLifecycleDiagnostics(ctx, limit)
 }
 
 func (s *SQLiteRuntimeStore) ProjectCompletionConversation(ctx context.Context, attempt effects.Attempt, projection effects.CompletionConversationProjection) error {
