@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -98,19 +99,20 @@ type releaseProcessSpec struct {
 }
 
 type releaseServeProcess struct {
-	cmd      *exec.Cmd
-	output   *releaseProcessOutput
-	exited   chan struct{}
-	waitMu   sync.Mutex
-	waitErr  error
-	apiBase  string
-	rpc      *releaseRPCClient
-	stopOnce sync.Once
+	cmd               *exec.Cmd
+	output            *releaseProcessOutput
+	exited            chan struct{}
+	waitMu            sync.Mutex
+	waitErr           error
+	apiBase           string
+	rpc               *releaseRPCClient
+	stopOnce          sync.Once
+	internalLifecycle bool
 }
 
 func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServeProcess {
 	t.Helper()
-	output := &releaseProcessOutput{secrets: append([]string(nil), options.RedactValues...)}
+	output := &releaseProcessOutput{secrets: append([]string{options.Token}, options.RedactValues...)}
 	workspaceBackend := options.WorkspaceBackend
 	if workspaceBackend == "" {
 		workspaceBackend = "host"
@@ -184,10 +186,11 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", options.APIPort)
 	process := &releaseServeProcess{
-		cmd:     cmd,
-		output:  output,
-		exited:  make(chan struct{}),
-		apiBase: baseURL,
+		cmd:               cmd,
+		output:            output,
+		exited:            make(chan struct{}),
+		apiBase:           baseURL,
+		internalLifecycle: options.InternalMockLifecycleBinary != "",
 		rpc: &releaseRPCClient{
 			endpoint:     baseURL + "/v1/rpc",
 			token:        options.Token,
@@ -228,7 +231,37 @@ func (p *releaseServeProcess) waitReady(ctx context.Context) error {
 		case <-p.exited:
 			return fmt.Errorf("serve exited before readiness: %v\n%s", p.waitError(), p.output.String())
 		case <-ctx.Done():
+			p.collectStartupEvidence()
 			return fmt.Errorf("wait for release readiness: %w\n%s", ctx.Err(), p.output.String())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (p *releaseServeProcess) collectStartupEvidence() {
+	if !p.internalLifecycle {
+		return
+	}
+	if !strings.Contains(p.output.String(), fmt.Sprintf("lifecycle evidence available pid=%d", p.cmd.Process.Pid)) {
+		fmt.Fprintf(p.output, "lifecycle evidence unavailable before handler installation pid=%d\n", p.cmd.Process.Pid)
+		return
+	}
+	if err := p.cmd.Process.Signal(syscall.SIGUSR1); err != nil {
+		fmt.Fprintf(p.output, "lifecycle evidence signal pid=%d: %v\n", p.cmd.Process.Pid, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	marker := fmt.Sprintf("lifecycle evidence end pid=%d", p.cmd.Process.Pid)
+	for !strings.Contains(p.output.String(), marker) {
+		select {
+		case <-p.exited:
+			return
+		case <-ctx.Done():
+			fmt.Fprintf(p.output, "lifecycle evidence capture incomplete pid=%d\n", p.cmd.Process.Pid)
+			return
 		case <-ticker.C:
 		}
 	}

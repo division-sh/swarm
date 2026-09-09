@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,6 +44,43 @@ var fullLifecycleJourneys = []fullLifecycleJourney{
 	{name: "J3-sqlite-crash-intrinsic-recover", backend: "sqlite", kind: fullLifecycleCrashIntrinsic},
 	{name: "J4-postgres-crash-intrinsic-recover", backend: "postgres", kind: fullLifecycleCrashIntrinsic},
 	{name: "J5-sqlite-dev-fresh", backend: "sqlite", kind: fullLifecycleDevFresh},
+}
+
+func TestCompiledProcessLifecycleStartupEvidence(t *testing.T) {
+	releaseRoot := goldenReleaseRoot(t)
+	binary := buildReleaseBinary(t, releaseRoot)
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
+	root := filepath.Join(releaseRoot, "startup-evidence")
+	spec := prepareFullLifecycleProject(t, binary, root, goldenSQLiteStore(filepath.Join(root, "store")), true)
+	spec.InternalMockLifecycleBinary = lifecycleBinary
+	process := startReleaseServe(t, spec)
+	ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleStartupLimit)
+	defer cancel()
+	if err := process.waitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the real evidence signal without simulating or claiming J5's
+	// unknown startup failure. Only the observer's wait is canceled.
+	observer, stop := context.WithCancel(context.Background())
+	stop()
+	err := process.waitReady(observer)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("readiness observer lost cancellation: %v", err)
+	}
+	for _, want := range []string{"ready=true failed=false", "phase=", "writeOwnedLifecycleEvidence", fmt.Sprintf("lifecycle evidence end pid=%d", process.cmd.Process.Pid)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing %q in child evidence: %v", want, err)
+		}
+	}
+	for _, secret := range []string{fullLifecycleAPIToken, fullLifecycleSigningSecret, fullLifecycleBotToken} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatal("child evidence disclosed a configured secret")
+		}
+	}
+	assertFullLifecycleReadySurface(t, process)
+	if err := process.stopAndWait(15 * time.Second); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCompiledProcessFullLifecycleSQLiteSmoke(t *testing.T) {
@@ -199,13 +237,16 @@ func runFullLifecycleJourney(t *testing.T, binary, lifecycleBinary, root string,
 	processSpec := prepareFullLifecycleProject(t, binary, root, store, journey.kind == fullLifecycleDevFresh)
 	processSpec.InternalMockLifecycleBinary = lifecycleBinary
 	t.Log("proof_surface=H; retained lifecycle assertions use internal compiled composition, not public serve/test")
+	childNumber := 0
 	startReady := func() *releaseServeProcess {
+		childNumber++
 		process := startReleaseServe(t, processSpec)
+		t.Logf("lifecycle child=%d pid=%d journey=%s backend=%s phase=waiting_for_readiness", childNumber, process.cmd.Process.Pid, journey.name, journey.backend)
 		ctx, cancel := context.WithTimeout(context.Background(), fullLifecycleStartupLimit)
 		err := process.waitReady(ctx)
 		cancel()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("lifecycle child=%d pid=%d journey=%s: %v", childNumber, process.cmd.Process.Pid, journey.name, err)
 		}
 		assertFullLifecycleReadySurface(t, process)
 		return process

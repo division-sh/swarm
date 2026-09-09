@@ -1,13 +1,16 @@
 package serveapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -136,6 +139,10 @@ func runOwnedMockLifecycle(ctx context.Context, root, retainedRoot string, opts 
 	}
 	presenter := newServeLifecyclePresenter(opts)
 	defer presenter.finish()
+	if os.Getenv("SWARM_INTERNAL_MOCK_LIFECYCLE_REQUEST") != "" {
+		stopEvidence := startOwnedLifecycleEvidence(presenter, opts.ErrorOutput)
+		defer stopEvidence()
+	}
 	code := buildRuntimeComposition(ctx, runtimeCompositionRequest{
 		Purpose: executionposture.MockOnly, ProviderIngress: true,
 		Repo: root, Options: opts, Config: configResult, ResolvedPaths: paths,
@@ -149,6 +156,71 @@ func runOwnedMockLifecycle(ctx context.Context, root, retainedRoot string, opts 
 		DataProjectionRoot: filepath.Join(retainedRoot, ".lifecycle-data-projections"),
 	})
 	return code, nil
+}
+
+// The compiled proof child exposes bounded evidence only on its parent's signal.
+// Snapshot the existing presentation owner before cleanup can block its rendering.
+func startOwnedLifecycleEvidence(presenter *serveLifecyclePresenter, out io.Writer) func() {
+	requests := make(chan os.Signal, 1)
+	signal.Notify(requests, syscall.SIGUSR1)
+	fmt.Fprintf(out, "lifecycle evidence available pid=%d\n", os.Getpid())
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-requests:
+				writeOwnedLifecycleEvidence(presenter, out)
+			}
+		}
+	}()
+	return func() { signal.Stop(requests); close(stop); <-done }
+}
+
+func writeOwnedLifecycleEvidence(presenter *serveLifecyclePresenter, out io.Writer) {
+	presenter.mu.Lock()
+	state := fmt.Sprintf("ready=%t failed=%t startup_failure=%.2048v runtime_failure=%.2048v cleanup_error=%.2048v shutdown_error=%.2048v\n",
+		presenter.ready, presenter.failed, presenter.failure, presenter.runtimeFailureErr, presenter.cleanupErr, presenter.shutdownErr)
+	var phases []runtimepkg.BootProgressEvent
+	for step := 1; step <= runtimepkg.BootProgressTotalSteps; step++ {
+		if event, ok := presenter.bootEvents[step]; ok {
+			phases = append(phases, event)
+		}
+	}
+	presenter.mu.Unlock()
+	fmt.Fprintf(out, "lifecycle evidence begin pid=%d\n%s", os.Getpid(), state)
+	for _, phase := range phases {
+		fmt.Fprintf(out, "phase=%d name=%s status=%s detail=%.2048s\n", phase.Step, phase.Name, phase.Status, phase.Detail)
+	}
+	stacks := make([]byte, 1<<20)
+	n := runtime.Stack(stacks, true)
+	_, _ = out.Write(stacks[:n])
+	fmt.Fprintf(out, "\nlifecycle evidence end pid=%d stack_bytes=%d\n", os.Getpid(), n)
+}
+
+func TestOwnedLifecycleStartupEvidence(t *testing.T) {
+	failure := runtimepkg.BootProgressEvent{Step: 1, Name: "controlled-startup", Detail: "original startup cause"}
+	presenter := &serveLifecyclePresenter{
+		failed: true, failure: &failure,
+		bootEvents:        map[int]runtimepkg.BootProgressEvent{1: failure},
+		runtimeFailureErr: errors.New("continuation cause"),
+		cleanupErr:        errors.New("cleanup cause"), shutdownErr: errors.New("shutdown cause"),
+	}
+	var out bytes.Buffer
+	writeOwnedLifecycleEvidence(presenter, &out)
+	for _, want := range []string{"ready=false failed=true", "original startup cause", "continuation cause", "cleanup cause", "shutdown cause", "phase=1 name=controlled-startup", "TestOwnedLifecycleStartupEvidence", fmt.Sprintf("lifecycle evidence end pid=%d", os.Getpid())} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("evidence missing %q", want)
+		}
+	}
+	presenter.cleanupErr = errors.New(strings.Repeat("x", 1<<20))
+	out.Reset()
+	writeOwnedLifecycleEvidence(presenter, &out)
+	if strings.Contains(out.String(), strings.Repeat("x", 2049)) {
+		t.Fatal("unbounded error in startup evidence")
+	}
 }
 
 func startOwnedMockLifecycleFollowUpRuntime(t *testing.T, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
