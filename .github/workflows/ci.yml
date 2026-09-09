@@ -58,6 +58,28 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ steps.modules.outputs.cache-primary-key }}
 
+      - name: Restore exact-head production Go cache
+        id: production-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+      - name: Compile production dependencies once
+        if: steps.production-cache.outputs.cache-hit != 'true'
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          go build ./...
+          go build -race -o "$RUNNER_TEMP/swarm-ci-race" ./cmd/swarm
+      - name: Save exact-head production Go cache
+        if: steps.production-cache.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.production-cache.outputs.cache-primary-key }}
+
       - name: Plan proof topology
         id: plan
         shell: bash
@@ -222,6 +244,7 @@ jobs:
           path: ~/.cache/go-build
           key: go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-${{ github.ref_name }}-${{ github.sha }}
           restore-keys: |
+            go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
             go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-${{ github.ref_name }}-
             go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-
       - name: Run exact planned proof unit

@@ -258,7 +258,7 @@ units:
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^(Test($|[^CDG].*)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CDG].*|GoldenI.*)|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -286,7 +286,7 @@ units:
   hitl-releasee2e-journeys:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^Test(C.*|GoldenI.*)$'
+    run: '^TestC.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
