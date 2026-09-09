@@ -38,7 +38,7 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 	db := sql.OpenDB(diagnosticSQLConnector{
 		Connector: diagnosticSQLiteConnector{filepath.Join(t.TempDir(), "fork.db") + "?_pragma=journal_mode(WAL)"},
 		afterExec: func(ctx context.Context, query string) error {
-			if !armed.Load() || !strings.Contains(strings.ToLower(query), "insert into events") || !held.CompareAndSwap(false, true) {
+			if !armed.Load() || !strings.Contains(strings.ToLower(query), diagnosticEventInsertSQL) || !held.CompareAndSwap(false, true) {
 				return nil
 			}
 			close(entered)

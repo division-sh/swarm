@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
@@ -98,16 +97,12 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 			if i == 1 {
 				kind, at = "task.done", fixture.Turn2At
 			}
-			event, err := events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{
-				RunID: fixture.RunID,
-				Facts: events.EventFacts{ID: eventID, Type: kind,
-					Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "served-fork-source"},
-					Payload:  []byte("{}"), RoutingSource: events.NoRoutingSource(), CreatedAt: at, ExecutionMode: executionmode.Live},
-			})
+			producer, err := events.NewProducerIdentity(events.EventProducerExternal, "served-fork-source")
 			if err != nil {
 				return err
 			}
-			if err := eventfixture.Insert(ctx, tx, dialect, event); err != nil {
+			event, err := eventfixture.ExistingRunRoot(ctx, tx, dialect, eventID, fixture.RunID, kind, producer, []byte("{}"), events.EventEnvelope{}, at)
+			if err != nil {
 				return err
 			}
 			result[i] = event

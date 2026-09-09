@@ -23,6 +23,8 @@ import (
 // The driver adapter delegates every SQL operation. Its sole intervention is
 // holding a successful real write before the transaction can commit, or
 // observing a competing transaction's admission. No production hook is needed.
+const diagnosticEventInsertSQL = "insert into events"
+
 type diagnosticSQLConnector struct {
 	driver.Connector
 	afterExec func(context.Context, string) error
@@ -101,7 +103,7 @@ func TestLifecycleDiagnosticCleanupTransactionInterleavingsBothStores(t *testing
 				var releaseOnce, competingOnce sync.Once
 				unblock := func() { releaseOnce.Do(func() { close(release) }) }
 				defer unblock()
-				needle := "insert into events"
+				needle := diagnosticEventInsertSQL
 				if !diagnosticFirst {
 					needle = `delete from "runs"`
 				}
