@@ -121,6 +121,13 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				if selectedFork {
 					event = eventtest.TargetRouted(event, route.Target.Route())
 				}
+				// This grant-boundary fixture starts after initialization. Preserve
+				// the future-target/readiness path under test with explicit supplier
+				// evidence; real activation admission has its own both-store journey.
+				route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+				if err != nil {
+					t.Fatal(err)
+				}
 				authority, err := deliverylifecycle.NewNormalExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.GrantID, evidence.RuntimeGeneration)
 				if selectedFork {
 					authority, err = deliverylifecycle.NewSelectedExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.SelectedFork.ExecutionID, runID, evidence.SelectedFork.ExecutionGeneration)
