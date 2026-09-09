@@ -5,10 +5,62 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/google/uuid"
 )
+
+func TestReceiverMaterializationRootPreflightBothStores(t *testing.T) {
+	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyReceiverMaterializationIntoRoot(t), backend, true)
+			route := events.RouteIdentity{FlowID: "child", FlowInstance: "child"}
+			source, err := events.NewStaticFlowRoutingSource(route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			event := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "child/child.ready", eventtest.Producer(events.EventProducerNode, "producer"), "", []byte(`{"token":"root-owned"}`), 0,
+				events.EventLineage{RunID: catalogRuntimeRunID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, route), source, time.Now().UTC())
+			plan, err := h.rt.Bus.CheckPublishRecipientPlan(catalogRunContext(h, catalogRuntimeRunID), event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 2 {
+				t.Fatalf("root preflight: %+v", plan)
+			}
+			for _, delivery := range plan.DeliveryRoutes {
+				if !delivery.Target.MaterializingEntity() || delivery.Target.Route() != (events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID, EntityID: catalogRuntimeRunID}) {
+					t.Fatalf("root preflight inherited source or lost future ownership: %+v", delivery)
+				}
+			}
+			if err := events.ValidateReceiverMaterializations(event, plan.DeliveryRoutes); err != nil {
+				t.Fatal(err)
+			}
+			foreign := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), event.Type(), event.Producer(), "", event.Payload(), 0,
+				events.EventLineage{RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
+				event.NormalizedEnvelope(), source, time.Now().UTC())
+			// Preflight installs the event's admitted run, rather than borrowing the
+			// caller's correlation scope as receiver ownership.
+			other, err := h.rt.Bus.CheckPublishRecipientPlan(catalogRunContext(h, catalogRuntimeRunID), foreign)
+			if err != nil || other.TargetFailure != "" || len(other.DeliveryRoutes) != 2 {
+				t.Fatalf("second run preflight: %+v %v", other, err)
+			}
+			for _, delivery := range other.DeliveryRoutes {
+				if delivery.Target.Route().FlowInstance != foreign.RunID() || delivery.Target.Route().EntityID != foreign.RunID() {
+					t.Fatalf("preflight reused another run's root: %+v", delivery)
+				}
+			}
+			var count int
+			if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM events WHERE event_id IN ($1,$2)`, event.ID(), foreign.ID()).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("preflight persisted event: count=%d err=%v", count, err)
+			}
+		})
+	}
+}
 
 func TestReceiverMaterializationDuplicateNamesAcrossSiblingAndNestedScopesBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
@@ -221,7 +273,7 @@ func TestReceiverMaterializationChildToRootBothStores(t *testing.T) {
 					time.Sleep(10 * time.Millisecond)
 				}
 				if err != nil || snapshot.Status != deliverylifecycle.StatusDelivered {
-					t.Fatalf("root receiver execution: %+v %v", snapshot, err)
+					t.Fatalf("root receiver execution: %+v failure=%+v %v", snapshot, snapshot.Failure, err)
 				}
 				if route.Recipient.IsNode() {
 					node = snapshot

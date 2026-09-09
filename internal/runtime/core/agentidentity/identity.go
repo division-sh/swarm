@@ -299,6 +299,20 @@ func (i Identity) FlowInstance() string {
 	return i.Normalize().Route.InstancePath
 }
 
+// ExecutionCoordinates projects the run-owned root or explicit flow instance
+// without changing the agent's declaration route. These coordinates do not
+// prove that entity state exists or that execution has been authorized.
+func (i Identity) ExecutionCoordinates() (scope, instance, path string, err error) {
+	i = i.Normalize()
+	if err := i.Validate(); err != nil {
+		return "", "", "", err
+	}
+	if i.Route.Presence == RouteRoot {
+		return i.RunID, i.RunID, i.RunID, nil
+	}
+	return i.Route.ScopeKey, i.Route.InstanceID, i.Route.InstancePath, nil
+}
+
 func (i Identity) MatchesAgentID(agentID string) bool {
 	return i.AgentID() == strings.TrimSpace(agentID)
 }

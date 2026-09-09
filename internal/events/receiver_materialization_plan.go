@@ -88,7 +88,11 @@ func AdmitReceiverMaterializationPlan(event Event, materializer DeliveryRoute, d
 		if dependent.AgentIdentity.RunID != event.RunID() {
 			return ReceiverMaterializationPlan{}, fmt.Errorf("receiver dependency agent belongs to another run")
 		}
-		if dependent.AgentIdentity.FlowInstance() != dependent.Target.Route().FlowInstance {
+		_, _, instance, err := dependent.AgentIdentity.ExecutionCoordinates()
+		if err != nil {
+			return ReceiverMaterializationPlan{}, fmt.Errorf("receiver dependency agent coordinates: %w", err)
+		}
+		if instance != dependent.Target.Route().FlowInstance {
 			return ReceiverMaterializationPlan{}, fmt.Errorf("receiver dependency agent instance contradicts its exact target")
 		}
 		dependentPin, ok := dependent.ConnectClaim.ReceiverIdentity()
