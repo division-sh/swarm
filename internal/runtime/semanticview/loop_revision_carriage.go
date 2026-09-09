@@ -98,6 +98,18 @@ func (c OriginalLoopCarriage) Resolve(scope LoopEventScope) (LoopRevisionRole, b
 // Routing sources and declaration scopes use different root projections. Bind
 // that projection once from the original artifact, rather than from run names.
 func (c OriginalLoopCarriage) ResolveEvent(source events.RoutingSource, eventType string, producer identity.ExecutableNode, handlerEvent string) (LoopRevisionRole, bool, error) {
+	if source.Empty() {
+		if c.state == nil || c.state.bundleHash == "" {
+			return LoopRevisionRole{}, false, fmt.Errorf("original loop carriage is not admitted")
+		}
+		if producer != (identity.ExecutableNode{}) || handlerEvent != "" {
+			return LoopRevisionRole{}, false, fmt.Errorf("absent routing source cannot establish loop producer ownership")
+		}
+		if eventType == "" || eventType != strings.TrimSpace(eventType) {
+			return LoopRevisionRole{}, false, fmt.Errorf("original loop event scope is not canonical")
+		}
+		return LoopRevisionRole{}, false, nil
+	}
 	flow, err := c.ExecutionFlow(source)
 	if err != nil {
 		return LoopRevisionRole{}, false, err

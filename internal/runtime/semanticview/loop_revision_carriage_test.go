@@ -3,9 +3,44 @@ package semanticview
 import (
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 )
+
+func TestOriginalLoopCarriageAbsentSourceGrantsNoOwnership(t *testing.T) {
+	bundle, node := loopCarriageBundle(t)
+	state, err := compileLoopCarriage(Wrap(bundle))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.bundleHash = "original"
+	state.rootFlow = "."
+	owner := OriginalLoopCarriage{state: state}
+	if role, found, err := owner.ResolveEvent(events.RoutingSource{}, "review.passed", identity.ExecutableNode{}, ""); err != nil || found || role != (LoopRevisionRole{}) {
+		t.Fatalf("absent source inferred loop ownership: %+v %t %v", role, found, err)
+	}
+	if _, found, err := owner.ResolveEvent(eventtest.RootRoutingSource("source-run"), "review.passed", identity.ExecutableNode{}, ""); err != nil || !found {
+		t.Fatalf("typed root control: found=%t err=%v", found, err)
+	}
+	for _, tc := range []struct {
+		event, handler string
+		producer       identity.ExecutableNode
+	}{
+		{"review.passed", "", node},
+		{"review.passed", "start", identity.ExecutableNode{}},
+		{"", "", identity.ExecutableNode{}},
+		{" review.passed", "", identity.ExecutableNode{}},
+	} {
+		if _, _, err := owner.ResolveEvent(events.RoutingSource{}, tc.event, tc.producer, tc.handler); err == nil {
+			t.Fatalf("absent source accepted contradictory execution evidence: %+v", tc)
+		}
+	}
+	if _, _, err := (OriginalLoopCarriage{}).ResolveEvent(events.RoutingSource{}, "review.passed", identity.ExecutableNode{}, ""); err == nil {
+		t.Fatal("absence bypassed original artifact admission")
+	}
+}
 
 // These tests exercise declaration compilation, not storage admission of R or
 // generation ownership. Those boundaries must supply their own execution proof.

@@ -5355,6 +5355,7 @@ func TestSelectedContractForkEventPreservesSourceExecutionMode(t *testing.T) {
 	evt, err := selectedContractForkEvent(sourceRunID, forkRunID, forkEventID, runfork.RunForkSelectedContractSourceEvent{
 		SourceEventID: sourceEventID,
 		EventName:     "task.started",
+		Scope:         "entity",
 		ExecutionMode: runtimeeffects.ExecutionModeMock,
 		Payload:       json.RawMessage(`{"ok":true}`),
 	}, "selected-contract")
@@ -5363,6 +5364,9 @@ func TestSelectedContractForkEventPreservesSourceExecutionMode(t *testing.T) {
 	}
 	if evt.ExecutionMode() != runtimeeffects.ExecutionModeMock {
 		t.Fatalf("fork event execution mode = %q, want mock", evt.ExecutionMode())
+	}
+	if !evt.RoutingSource().Empty() || !evt.SourceRoute().Empty() || evt.EntityID() != "" || !evt.Envelope().Target.Empty() {
+		t.Fatalf("historical receiver scope invented execution authority: %#v", evt.Envelope())
 	}
 }
 

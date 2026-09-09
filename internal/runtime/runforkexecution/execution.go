@@ -371,9 +371,9 @@ func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourc
 	if len(sourceEvent.Payload) > 0 && json.Valid(sourceEvent.Payload) {
 		payload = append(json.RawMessage(nil), sourceEvent.Payload...)
 	}
-	envelope := events.EventEnvelope{
-		Scope: events.EventScope(strings.TrimSpace(sourceEvent.Scope)),
-	}
+	// Historical scope includes the source event's receiver projection. It is
+	// not producer authority for a new event awaiting selected recipient planning.
+	envelope := (events.EventEnvelope{}).Normalized()
 	routingSource := sourceEvent.RoutingSource
 	if sourceRoute := routingSource.Route(); !sourceRoute.Empty() && routingSource.Kind() != events.RoutingSourceExternalIngress {
 		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)

@@ -16354,6 +16354,10 @@ run_model:
       generation lookup; a producer with state requires the exact projected child state, including a valid empty
       generation set. Missing or corrupt projected state remains an error, and state-dependent activity requires
       fixed-revision producer ownership.
+      An ordinary event admitted without RoutingSource and with an empty envelope Source retains that absence through
+      fixed-revision preparation and execution. Its exact persisted event/run and selected admission remain mandatory;
+      absence grants no producer, receiver, entity, or loop authority. Contradictory envelope or execution claims fail
+      closed. Source-dependent activity and fan-out still require their exact typed source evidence.
     selected_contract_receiver_preparation: >
       Snapshot restoration and receiver acquisition are independent decisions. Node, agent, and activity preparation
       consume fixed-revision entity metadata and canonical selected-source ownership, entity contract, and handler

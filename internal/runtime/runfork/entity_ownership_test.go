@@ -139,7 +139,7 @@ func TestProjectSelectedContractSourceEventRejectsInvalidIdentity(t *testing.T) 
 		{"missing child run", "source-run", "", sourceOwnershipRootEvent()},
 		{"same run", "source-run", "source-run", sourceOwnershipRootEvent()},
 		{"missing event identity", "source-run", "child-run", RunForkSelectedContractSourceEvent{RoutingSource: eventtest.RootRoutingSource("source-run")}},
-		{"missing producer", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event"}},
+		{"activity missing producer", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", EventName: RunForkSelectedContractPlatformActivityEvent}},
 		{"foreign root", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.RootRoutingSource("entity-one")}},
 		{"nonroot claiming source root entity", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.StaticFlowRoutingSource("producer", "producer", "source-run")}},
 		{"nonroot claiming child root entity", "source-run", "child-run", RunForkSelectedContractSourceEvent{SourceEventID: "event", RoutingSource: eventtest.StaticFlowRoutingSource("producer", "producer", "child-run")}},
@@ -153,6 +153,21 @@ func TestProjectSelectedContractSourceEventRejectsInvalidIdentity(t *testing.T) 
 				t.Fatal("rejected projection mutated source evidence")
 			}
 		})
+	}
+}
+
+func TestProjectSelectedContractSourceEventPreservesAbsentSource(t *testing.T) {
+	input := RunForkSelectedContractSourceEvent{
+		SourceEventID: "admitted-event", EventName: "work.ready",
+		Payload: json.RawMessage(`{"source_run_id":"source-run","entity_id":"source-run","loop_generation":{"revision_id":"opaque"},"large":9007199254740993}`),
+	}
+	before := sourceOwnershipJSON(t, input)
+	for i := 0; i < 3; i++ {
+		got, err := ProjectSelectedContractSourceEvent("source-run", "child-run", input)
+		if err != nil || !reflect.DeepEqual(got, input) || !got.RoutingSource.Empty() || sourceOwnershipJSON(t, input) != before {
+			t.Fatalf("absent source acquired authority or changed business data: %#v, %v", got, err)
+		}
+		input = got
 	}
 }
 

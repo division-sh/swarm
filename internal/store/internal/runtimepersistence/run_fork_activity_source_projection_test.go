@@ -81,6 +81,33 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 	}
 }
 
+func TestSelectedContractAbsentSourcePersistenceRejectsContradictoryEnvelopeBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx := testAuthorActivityContext()
+			sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", true, true, false, json.RawMessage(`{"value":"unchanged"}`))
+			owner := fixture.store.(selectedActivityProjectionStore)
+			original := originalCarriageForRun(t, owner, sourceRun)
+			if _, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original); err != nil {
+				t.Fatalf("typed source control: %v", err)
+			}
+			// Corrupt only the discriminant. The nonempty persisted envelope Source
+			// must not be interpreted as lawful source absence or silently repaired.
+			before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+			if _, err := fixture.db.ExecContext(ctx, `UPDATE events SET routing_source_kind='absent', routing_source_authority=NULL WHERE event_id=$1`, event.ID()); err == nil {
+				t.Fatal("durable event owner accepted contradictory absence")
+			}
+			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+				t.Fatal("invalid source rejection mutated durable state")
+			}
+			if _, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original); err != nil {
+				t.Fatalf("rejected corruption damaged the valid source: %v", err)
+			}
+		})
+	}
+}
+
 func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
