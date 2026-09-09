@@ -10,7 +10,11 @@ eb4c8c613 code checkpoint. The branch is now rebased onto B's merged #2440 at
 origin/master 47c0e70d8ef89a2c99f0be4af632f24692121b83. B's receipt owner supersedes
 the historical #2432 reset integration freeze; #2439 remains a separate commit.
 Post-rebase SQLite exit/bootstrap race selections pass (16.971s/13.910s).
-The new integrated swarm-test is queued; no final PR closure is claimed yet.
+The second integrated swarm-test passed the SQLite/store packages but failed one
+unrelated custom web-search rate-limit timing assertion. Test-only repair
+ae8bbb782 checks admission rather than downstream server-arrival spacing and
+adds a delayed-transport control. A fresh full-profile swarm-test is queued;
+no final PR closure is claimed yet. Full accounting is in the #2321 proof audit.
 
 ## Class And Owners
 
