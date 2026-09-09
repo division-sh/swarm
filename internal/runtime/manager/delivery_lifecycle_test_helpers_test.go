@@ -86,6 +86,7 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			delivery_target_route TEXT NOT NULL,
 			delivery_context TEXT NOT NULL,
 			connect_execution_claim TEXT NOT NULL,
+			receiver_materialization_plan TEXT NOT NULL DEFAULT 'null',
 			delivery_payload_projection TEXT NOT NULL,
 			execution_authority_kind TEXT NOT NULL,
 			authority_bundle_hash TEXT NOT NULL,

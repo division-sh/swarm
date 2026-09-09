@@ -725,6 +725,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			delivery_context TEXT NOT NULL,
 			delivery_payload_projection TEXT NOT NULL,
 			connect_execution_claim TEXT NOT NULL,
+			receiver_materialization_plan TEXT NOT NULL DEFAULT 'null',
 			execution_authority_kind TEXT NOT NULL,
 			authority_bundle_hash TEXT NOT NULL,
 			execution_authority_id TEXT NOT NULL,
