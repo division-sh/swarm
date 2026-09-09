@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,22 +34,39 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			for _, agent := range []string{"", "same-name", "renamed-observer"} {
+			for _, agent := range []string{"", "same-name", "renamed-observer", "competing-materializers"} {
 				name := agent
 				if name == "" {
 					name = "node-only-control"
 				}
 				for _, settlement := range []string{"failed", "missing", "retry_cancel", "terminal_race"} {
+					if agent == "competing-materializers" && settlement != "failed" {
+						continue
+					}
 					t.Run(name+"/"+settlement, func(t *testing.T) {
 						root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 						if agent != "" {
 							declaration := agent
-							if agent == "same-name" {
+							if agent == "same-name" || agent == "competing-materializers" {
 								declaration = "collector"
 							}
 							root = canonicalrouting.CopyReceiverMaterializationWithAgent(t, declaration)
+							if agent == "competing-materializers" {
+								root = canonicalrouting.CopyReceiverMaterializationCompetingNodes(t)
+							}
 						}
 						repo := canonicalrouting.RepoRoot(t)
+						if agent == "competing-materializers" {
+							before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+							_, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+							if err == nil || !strings.Contains(err.Error(), "event consumer/receiver.seeded has multiple authoritative system node owners") {
+								t.Fatalf("competing materializers were not rejected at source admission: %v", err)
+							}
+							if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+								t.Fatal("invalid receiver source changed persistence")
+							}
+							return
+						}
 						bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 						if err != nil {
 							t.Fatal(err)
