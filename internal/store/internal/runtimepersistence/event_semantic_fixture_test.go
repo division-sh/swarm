@@ -194,7 +194,7 @@ func commitDeliveryReplayEventFixture(
 	now time.Time,
 ) error {
 	forkEventID := deterministicRunForkReplayEventID(forkRunID, source.ID())
-	replayed, err := projectRunForkReplayEvent(source, runForkActivationLineage{
+	replayed, err := admitDeliveryReplayFixture(source, runForkActivationLineage{
 		SourceRunID: source.RunID(),
 		ForkRunID:   forkRunID,
 	}, forkEventID, now)
@@ -269,6 +269,22 @@ func commitDeliveryReplayEventFixture(
 		)
 		return err
 	})
+}
+
+// This constructs already-projected event facts for event-record/producer
+// fixtures. It is not a fork admission or generation-remapping test adapter.
+func admitDeliveryReplayFixture(source events.Event, lineage runForkActivationLineage, forkEventID string, now time.Time) (events.AdmittedEvent, error) {
+	selected, err := events.NewSelectedForkLineage(lineage.ForkRunID, lineage.SourceRunID, source.ID(), runfork.RunForkDeliveryEventReplayOwner, source.TaskID(), source.ExecutionMode())
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	replayed, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
+		Facts: events.EventFacts{ID: forkEventID, Type: source.Type(), Producer: events.ProducerClaim{Type: source.ProducerType(), ID: source.SourceAgent()}, TaskID: source.TaskID(), Payload: source.Payload(), Envelope: source.Envelope(), RoutingSource: source.RoutingSource(), CreatedAt: now, ExecutionMode: source.ExecutionMode()}, Lineage: selected,
+	})
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return events.AdmitForPersistence(replayed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 }
 
 func commitSemanticEventFixtureOutcome(

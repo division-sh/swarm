@@ -1,6 +1,8 @@
 package fanoutobligation
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -9,6 +11,39 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/google/uuid"
 )
+
+func TestCapsuleFrozenValuesRoundTrip(t *testing.T) {
+	original := validIntentRequest(t).Capsule
+	original.Entity = map[string]any{"large": json.Number("9007199254740993"), "double": json.Number("1.25"), "revision": "business"}
+	original.Loop = map[string]any{"attempt": 2, "revision_id": "typed-revision"}
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Capsule
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Equal(original) || decoded.Entity["large"] != json.Number("9007199254740993") || decoded.Entity["double"] != json.Number("1.25") {
+		t.Fatalf("frozen JSON values changed: %#v", decoded)
+	}
+	decoded.Entity["large"] = json.Number("9007199254740992")
+	if decoded.Equal(original) {
+		t.Fatal("rounded business data compares equal")
+	}
+	before := decoded
+	for _, malformed := range []string{`{"unexpected":true}`, `{"entity":{"large":`, `{"chain_depth":"one"}`} {
+		if err := json.Unmarshal([]byte(malformed), &decoded); err == nil {
+			t.Fatalf("bad capsule accepted: %s", malformed)
+		}
+		if !reflect.DeepEqual(before, decoded) {
+			t.Fatal("failed decode mutated existing capsule")
+		}
+	}
+	if (Capsule{Entity: map[string]any{"invalid": make(chan int)}}).Equal(original) {
+		t.Fatal("invalid frozen JSON compares equal")
+	}
+}
 
 func TestIntentRequestRejectsContradictoryDurableIdentityAndCapsuleFacts(t *testing.T) {
 	valid := validIntentRequest(t)

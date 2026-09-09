@@ -1039,15 +1039,15 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
+	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: store}, sourceRunID, selectedActivityProducerSource(t))
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000840, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, rootEventID, at)
+	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, rootEventID, at)
 
 	sourceID := uuid.NewString()
-	sourceEvent := eventtest.ChildWithLineage(
+	sourceEvent := eventtest.ChildWithLineageAndRoutingSource(
 		sourceID,
 		events.EventType("fork.ready"),
 		"declarative-node",
@@ -1058,6 +1058,7 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 			RunID: sourceRunID, ParentEventID: rootEventID, TaskID: "event-owned-task", ExecutionMode: executionmode.Mock,
 		},
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity, Target: events.RouteIdentity{EntityID: entityID}},
+		eventtest.RootRoutingSource(sourceRunID),
 		at.Add(time.Second),
 	)
 	agentIdentity := runtimebustest.IdentityForRun(t, sourceRunID, "safe-agent", "")
@@ -1076,6 +1077,11 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 		t.Fatalf("decode historical replay source event: %v", err)
 	}
 	sourceEvent = sourceAdmitted.Event()
+	ctx, releaseCatalog, err := semanticEventFixtureContext(ctx, store, sourceEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(releaseCatalog)
 	sourceDelivery := seedDeliveryStateFixture(t, ctx, store, sourceEvent, sourceRoute, runtimedelivery.StateQueued, nil)
 	deliveryID := sourceDelivery.DeliveryID
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -1101,6 +1107,7 @@ func (f runForkReplaySettlementFixture) activate(t *testing.T, confirm bool) (ru
 	t.Helper()
 	return f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{
 		ForkRunID: f.forkRunID, AllowSourceFreeze: confirm,
+		OriginalLoopCarriage:              originalCarriageForRun(t, f.store, f.sourceRunID),
 		HistoricalReplayExecutionAdmitter: &fakeRunForkHistoricalReplayExecutionAdmitter{},
 	})
 }
@@ -2104,6 +2111,11 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
+	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, eventID, at)
+}
+
+func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (

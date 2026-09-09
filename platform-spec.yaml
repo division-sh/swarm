@@ -592,6 +592,26 @@ contract_formats:
         Projection leaves all source input unchanged on success or failure and
         detaches nested child values, including when no loop is present. Absence
         of a loop bucket cannot hide a nonempty dependent generation reference.
+        Ordinary payload carriage is admitted from the original source run's
+        immutable artifact, never the replacement selected artifact. The shared
+        declaration owner recognizes the required text revision property and
+        explicit loop.revision_id mapping used by verification. All applicable
+        original input and emission sites must agree on the property's loop
+        meaning; ambiguous evidence fails closed without reconstructing which
+        rule executed. An equal string value or familiar property name alone
+        cannot turn business data into generation lineage.
+        Selected preparation and supported historical delivery replay consume
+        that same artifact-bound declaration admission together with immutable
+        source event evidence and fixed-revision state. Historical activation
+        resolves its source run through canonical fork origin, then rechecks
+        the original artifact binding in the replay transaction. These checks
+        do not expand historical replay capability or current execution policy.
+        Fan-out loop context preserves all seven declared execution coordinates,
+        including cap and revision-field meaning; dependent barrier generation
+        must agree before translation. Frozen business values remain detached
+        and retain exact integer and double values through capsule persistence
+        and repeated materialization. Original trigger lineage remains evidence,
+        not a payload-wide instruction to replace matching values.
       expression_context: >
         `loop.id`, `loop.activation_id`, `loop.revision_id`, `loop.attempt`, and
         `loop.max_attempts` are available after loop admission. The CEL

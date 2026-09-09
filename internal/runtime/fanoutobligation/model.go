@@ -1,6 +1,7 @@
 package fanoutobligation
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,6 +102,30 @@ type Capsule struct {
 	StateFields      map[string]any            `json:"state_fields,omitempty"`
 	StateBookkeeping map[string]any            `json:"state_bookkeeping,omitempty"`
 	StateGates       map[string]bool           `json:"state_gates,omitempty"`
+}
+
+// Capsule business values are frozen JSON, not floating-point approximations.
+// Owning decoding here gives live, fixed-revision, and fork readers one law.
+func (c *Capsule) UnmarshalJSON(raw []byte) error {
+	type wire Capsule
+	var decoded wire
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = Capsule(decoded)
+	return nil
+}
+
+func (c Capsule) Equal(other Capsule) bool {
+	left, err := json.Marshal(c)
+	if err != nil {
+		return false
+	}
+	right, err := json.Marshal(other)
+	return err == nil && bytes.Equal(left, right)
 }
 
 func (c Capsule) Validate() error {

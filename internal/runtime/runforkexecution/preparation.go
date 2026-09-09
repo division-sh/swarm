@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +39,7 @@ type PreparedSelectedFork struct {
 	closed                bool
 	closeErr              error
 	loadedSource          LoadedSelectedContractSource
+	originalLoopCarriage  semanticview.OriginalLoopCarriage
 	plan                  runfork.RunForkPlan
 	frontier              runfork.RunForkContractFrontierAdmission
 	routeAdmission        runfork.RunForkSelectedContractRouteAdmission
@@ -111,6 +113,10 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 		return nil, fmt.Errorf("load selected semantic source for execution: %w", err)
 	}
 	owned.loadedSource = loadedSource
+	original, err := loadOriginalLoopCarriage(ctx, req.SourceLoader, req.SourceRunID)
+	if err != nil {
+		return nil, err
+	}
 	selection = loadedSource.Selection
 	if loadedSource.Module == nil {
 		return nil, fmt.Errorf("selected-contract execution requires executable selected workflow module")
@@ -211,6 +217,7 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	}
 
 	prepared.loadedSource, prepared.descriptorLease = loadedSource, descriptorLease
+	prepared.originalLoopCarriage = original
 	prepared.plan, prepared.frontier, prepared.routeAdmission = plan, frontier, routeAdmission
 	prepared.routeTopology, prepared.model = routeTopology, model
 	prepared.owner = o
@@ -254,7 +261,8 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 		return runforkreadiness.MaterializeRequest{}, err
 	}
 	return runforkreadiness.MaterializeRequest{
-		Preparation: p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.EventID,
+		OriginalLoopCarriage: p.originalLoopCarriage,
+		Preparation:          p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.EventID,
 		ContractSelection: p.loadedSource.Selection, SourceArtifactFact: p.loadedSource.SourceArtifactFact,
 		EffectiveSourceIdentity: p.loadedSource.EffectiveSourceIdentity, FrontierAdmission: detached.Frontier,
 		RouteTopology: detached.Routes, RecipientPlanning: detached.Recipients, Readiness: p.readiness,

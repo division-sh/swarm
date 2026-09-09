@@ -16,6 +16,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type SelectedContractExecutionRequest struct {
@@ -101,6 +102,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
+		OriginalLoopCarriage:  prepared.originalLoopCarriage,
 		Prepared:              prepared,
 		Operation:             operation,
 		Owner:                 req.Owner,
@@ -230,6 +232,7 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store Selected
 }
 
 type publishSelectedContractForkEventsRequest struct {
+	OriginalLoopCarriage  semanticview.OriginalLoopCarriage
 	Prepared              *PreparedSelectedFork
 	Operation             *selectedContractOperation
 	Owner                 SelectedContractExecutionOwner

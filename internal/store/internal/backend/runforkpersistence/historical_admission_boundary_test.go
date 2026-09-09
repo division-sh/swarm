@@ -59,7 +59,7 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier", "lockSQLiteRunForkSourceRevisionFrontier",
 		"RunForkPostgresOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers", "RunForkSQLiteOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers",
 		"RunForkPostgresOwner.PlanRunFork", "RunForkPostgresOwner.LoadRunForkSelectedContractSourceEvents",
-		"PrepareRunForkSelectedContractSourceEvent", "postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort",
+		"postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "exact shared contextual event-point consumer"}
 	}

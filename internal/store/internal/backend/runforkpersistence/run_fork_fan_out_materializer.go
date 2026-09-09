@@ -12,15 +12,17 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type runForkFanOutBarrierOwner interface {
-	MaterializeRunForkFanOutBarrierTx(context.Context, *sql.Tx, *runforkrevision.Effects, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, time.Time) error
+	MaterializeRunForkFanOutBarrierTx(context.Context, *sql.Tx, *runforkrevision.Effects, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
 }
 
-func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef) error {
+func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage) error {
 	var intentCount int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, forkRunID).Scan(&intentCount); err != nil {
 		return fmt.Errorf("count materialized fork fan-out intents: %w", err)
@@ -30,6 +32,10 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 	}
 	for _, obligation := range plan.FanOutObligations {
 		sourceIntent := obligation.Intent
+		projectedCapsule, _, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
+		if err != nil {
+			return err
+		}
 		planRef := planRefs[sourceIntent.Request.PlanRef.ElementRef]
 		var (
 			bundleHash, semanticDigest, sourceKind, sourceField, status, blockedReason string
@@ -85,7 +91,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			strings.TrimSpace(sourceMutation.String) != strings.TrimSpace(source.MutationID) || strings.TrimSpace(resourceFlowPath.String) != strings.TrimSpace(source.Declaration.FlowPath) ||
 			strings.TrimSpace(resourceEvent.String) != strings.TrimSpace(source.Declaration.EventName) || strings.TrimSpace(resourceVersion.String) != strings.TrimSpace(string(source.VersionID)) ||
 			cardinality != sourceIntent.Request.Cardinality || cursor != sourceIntent.Cursor || status != string(sourceIntent.Status) || nextChunk != fanoutobligation.InitialChunkSize ||
-			!reflect.DeepEqual(capsule, sourceIntent.Request.Capsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires != nil || lastServed != nil || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
+			!capsule.Equal(projectedCapsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires != nil || lastServed != nil || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
 			return fmt.Errorf("fork materialization %s fan-out intent conflicts with fixed plan", forkRunID)
 		}
 		outcomeQuery := `
@@ -208,6 +214,7 @@ func materializeRunForkFanOutObligations(
 	forkRunID string,
 	plan runfork.RunForkPlan,
 	planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef,
+	original semanticview.OriginalLoopCarriage,
 	now time.Time,
 ) (int, error) {
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
@@ -215,6 +222,11 @@ func materializeRunForkFanOutObligations(
 	}
 	for _, obligation := range plan.FanOutObligations {
 		intent := obligation.Intent
+		capsuleProjection, generation, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
+		if err != nil {
+			return 0, err
+		}
+		intent.Request.Capsule = capsuleProjection
 		planRef, ok := planRefs[intent.Request.PlanRef.ElementRef]
 		if !ok {
 			return 0, fmt.Errorf("fork fan-out plan proof missing for %s", intent.Request.Key.String())
@@ -293,7 +305,7 @@ func materializeRunForkFanOutObligations(
 			if barriers == nil {
 				return 0, fmt.Errorf("fork fan-out barrier requires selected-store pipeline owner")
 			}
-			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, tx, effects, forkRunID, *obligation.Barrier, planRef, now); err != nil {
+			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, tx, effects, forkRunID, *obligation.Barrier, planRef, generation, now); err != nil {
 				return 0, err
 			}
 		}

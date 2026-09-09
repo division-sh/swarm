@@ -68,7 +68,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return modes, err
 }
 
-func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string) (out []runfork.RunForkSelectedContractSourceEvent, err error) {
+func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) (out []runfork.RunForkSelectedContractSourceEvent, err error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite store is required")
 	}
@@ -110,6 +110,14 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 		if stateAdmission.snapshot.RunID != sourceRunID {
 			return fmt.Errorf("source event preparation run disagrees with selected fork binding")
 		}
+		fact, err := s.RunLifecycleSQLiteOwner.RequirePresentSourceTx(txctx, tx, sourceRunID)
+		if err != nil {
+			return err
+		}
+		if err := original.RequireSource(fact.BundleHash()); err != nil {
+			return err
+		}
+		stateAdmission.carriage = original
 		events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, ids)
 		if err != nil {
 			return fmt.Errorf("load selected-contract source events: %w", err)

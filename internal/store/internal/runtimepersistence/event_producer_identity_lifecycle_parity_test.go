@@ -352,9 +352,9 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("historical replay source producer = %q/%q, want %q/%q", loaded.ProducerType(), loaded.SourceAgent(), producer.Type(), producer.ID())
 	}
 	replayedEventID := uuid.NewString()
-	replayedProjection, err := projectRunForkReplayEvent(loaded, runForkActivationLineage{SourceRunID: sourceRunID, ForkRunID: forkRunID}, replayedEventID, createdAt.Add(2*time.Minute))
+	replayedProjection, err := admitDeliveryReplayFixture(loaded, runForkActivationLineage{SourceRunID: sourceRunID, ForkRunID: forkRunID}, replayedEventID, createdAt.Add(2*time.Minute))
 	if err != nil {
-		t.Fatalf("projectRunForkReplayEvent: %v", err)
+		t.Fatalf("admitDeliveryReplayFixture: %v", err)
 	}
 	sourceRoute := testAgentDeliveryRoute(t, sourceRunID, "replay-agent", "fixture/replay-agent")
 	forkRoute := testAgentDeliveryRoute(t, forkRunID, "replay-agent", "fixture/replay-agent")

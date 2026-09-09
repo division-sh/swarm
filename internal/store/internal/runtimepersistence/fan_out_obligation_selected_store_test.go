@@ -1121,9 +1121,8 @@ func TestFanOutClaimIsScopedToExactAdmittedBundleOnBothStores(t *testing.T) {
 func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	fixture := seedFanOutOwnerFixture(t, ctx, db, pg, true, 3, createdAt)
+	ctx, fixture := seedDeclaredForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 3, createdAt)
 
 	issuedEventID := uuid.NewString()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, issuedEventID, fixture.runID, "items.child", events.EventProducerPlatform, "fan-out-test", "", "", createdAt.Add(time.Second))
@@ -1148,7 +1147,7 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, "fork.point", events.EventProducerPlatform, "fork-test", "", "", createdAt.Add(2*time.Second))
 	captureRunForkTestRevision(t, db, fixture.runID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1279,11 +1278,10 @@ func TestRunForkFanOutMaterializationRetainsExactEntityRevisionSource(t *testing
 func TestRunForkFanOutTerminalStatesNeverReissueInChild(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
 	base := time.Now().UTC().Truncate(time.Microsecond)
 
 	t.Run("closed semantic rejection prefix", func(t *testing.T) {
-		fixture := seedFanOutOwnerFixture(t, ctx, db, pg, true, 3, base)
+		ctx, fixture := seedDeclaredForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 3, base)
 		_, claim, found, err := pg.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "close-before-fork", BundleHash: fixture.bundleHash, Now: base.Add(time.Second), Lease: time.Minute})
 		if err != nil || !found {
 			t.Fatalf("claim terminal fork source: found=%v err=%v", found, err)
@@ -1307,7 +1305,7 @@ func TestRunForkFanOutTerminalStatesNeverReissueInChild(t *testing.T) {
 	})
 
 	t.Run("canceled suffix", func(t *testing.T) {
-		fixture := seedFanOutOwnerFixture(t, ctx, db, pg, true, 3, base.Add(time.Minute))
+		ctx, fixture := seedDeclaredForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 3, base.Add(time.Minute))
 		if err := pg.CancelRunFanOut(ctx, fixture.runID, "canceled before fork", base.Add(time.Minute+time.Second)); err != nil {
 			t.Fatalf("cancel fan-out before fork: %v", err)
 		}
@@ -1637,7 +1635,7 @@ func materializeFanOutForkAtCurrentRevision(t *testing.T, ctx context.Context, d
 	forkPointEventID := uuid.NewString()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, events.EventType(eventName), events.EventProducerPlatform, "fork-test", "", "", at)
 	captureRunForkTestRevision(t, db, fixture.runID)
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 	if err != nil {
 		t.Fatalf("materialize %s fan-out fork: %v", eventName, err)
 	}

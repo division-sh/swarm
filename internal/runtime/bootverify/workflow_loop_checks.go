@@ -173,8 +173,7 @@ func validateLoopInputRevision(source semanticview.Source, plan runtimecontracts
 	if !proof.HasSchema {
 		return []Finding{loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s has no typed event schema for revision admission", operation.Node.Key(), operation.HandlerEvent))}
 	}
-	field, ok := proof.Entry.Payload.Properties[plan.RevisionField]
-	if !ok || !joinTextType(field.Type) || !containsString(proof.Entry.Payload.Required, plan.RevisionField) {
+	if !runtimecontracts.RequiresLoopRevision(proof.Entry.Payload, plan.RevisionField) {
 		return []Finding{loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s event must require text field %s", operation.Node.Key(), operation.HandlerEvent, plan.RevisionField))}
 	}
 	return nil
@@ -188,13 +187,12 @@ func validateLoopEmitCarriage(source semanticview.Source, plan runtimecontracts.
 			continue
 		}
 		proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, eventType)
-		field, declared := proof.Entry.Payload.Properties[plan.RevisionField]
-		if !proof.HasSchema || !declared || !joinTextType(field.Type) || !containsString(proof.Entry.Payload.Required, plan.RevisionField) {
+		if !proof.HasSchema || !runtimecontracts.RequiresLoopRevision(proof.Entry.Payload, plan.RevisionField) {
 			findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("%s from %s:%s must emit an event requiring text field %s", site.Source, operation.Node.Key(), operation.HandlerEvent, plan.RevisionField)))
 			continue
 		}
 		value, ok := site.Spec.Fields[plan.RevisionField]
-		if !ok || !loopRevisionExpression(value) {
+		if !ok || !runtimecontracts.CarriesLoopRevision(value) {
 			findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("%s from %s:%s must carry %s from loop.revision_id", site.Source, operation.Node.Key(), operation.HandlerEvent, plan.RevisionField)))
 		}
 	}
@@ -203,7 +201,7 @@ func validateLoopEmitCarriage(source semanticview.Source, plan runtimecontracts.
 			continue
 		}
 		value, ok := action.Mailbox.Payload[plan.RevisionField]
-		if !ok || !loopRevisionExpression(value) {
+		if !ok || !runtimecontracts.CarriesLoopRevision(value) {
 			findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("mailbox_write from %s:%s must carry %s from loop.revision_id in mailbox.payload", operation.Node.Key(), operation.HandlerEvent, plan.RevisionField)))
 		}
 	}
@@ -240,8 +238,7 @@ func validateLoopRegionHandlers(source semanticview.Source, plan runtimecontract
 			}
 			proof := semanticview.ResolveFlowEventProof(source, plan.FlowID, eventType)
 			if handler.Loop == nil {
-				field, carries := proof.Entry.Payload.Properties[plan.RevisionField]
-				typed := proof.HasSchema && carries && joinTextType(field.Type) && containsString(proof.Entry.Payload.Required, plan.RevisionField)
+				typed := proof.HasSchema && runtimecontracts.RequiresLoopRevision(proof.Entry.Payload, plan.RevisionField)
 				if typed {
 					findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("handler %s:%s may execute in the loop region but omits loop operation", nodeID, eventType)))
 				} else {
@@ -295,10 +292,9 @@ func validateLoopEscapeEmit(source semanticview.Source, plan runtimecontracts.Wo
 			findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s omits required payload field %s", eventType, field)))
 		}
 	}
-	revision, declaredRevision := proof.Entry.Payload.Properties[plan.RevisionField]
-	if !declaredRevision || !joinTextType(revision.Type) || !containsString(proof.Entry.Payload.Required, plan.RevisionField) {
+	if !runtimecontracts.RequiresLoopRevision(proof.Entry.Payload, plan.RevisionField) {
 		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s must require text field %s", eventType, plan.RevisionField)))
-	} else if value, ok := spec.Fields[plan.RevisionField]; !ok || !loopRevisionExpression(value) {
+	} else if value, ok := spec.Fields[plan.RevisionField]; !ok || !runtimecontracts.CarriesLoopRevision(value) {
 		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s must carry %s from loop.revision_id", eventType, plan.RevisionField)))
 	}
 	return findings
@@ -336,17 +332,6 @@ func validateLoopRecurringTimers(source semanticview.Source, plan runtimecontrac
 		}
 	}
 	return findings
-}
-
-func loopRevisionExpression(value runtimecontracts.ExpressionValue) bool {
-	switch value.Kind {
-	case runtimecontracts.ExpressionKindRef:
-		return strings.TrimSpace(value.Ref) == "loop.revision_id"
-	case runtimecontracts.ExpressionKindCEL:
-		return strings.TrimSpace(value.CEL) == "loop.revision_id"
-	default:
-		return false
-	}
 }
 
 func loopFlowMatches(source semanticview.Source, planFlow, ownerFlow string) bool {

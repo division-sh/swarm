@@ -1,6 +1,7 @@
 package loopruntime_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -8,6 +9,86 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
+
+func TestForkGenerationCorrespondenceContext(t *testing.T) {
+	source := correspondenceActivation(t, "nested/review", "start")
+	historical := source.Context()
+	if _, err := source.Repeat("draft", "repeat", time.Unix(101, 0)); err != nil {
+		t.Fatal(err)
+	}
+	c := correspondence(t, source)
+	for _, original := range []map[string]any{historical, source.Context()} {
+		raw, err := json.Marshal(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		for _, input := range []map[string]any{original, decoded} {
+			ref, err := c.AdmitSourceContext(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child, err := c.Bind(ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err := child.Context()
+			if err != nil || ctx["attempt"] != ref.Generation().Attempt || ctx["revision_id"] != child.Generation().RevisionID || ctx["max_attempts"] != source.MaxAttempts {
+				t.Fatalf("context lost exact historical reference: %#v %v", ctx, err)
+			}
+			if _, err := c.AdmitSourceContext(ctx); err == nil {
+				t.Fatal("child context admitted as source")
+			}
+			ctx["attempt"] = 999
+			again, err := child.Context()
+			if err != nil || again["attempt"] != ref.Generation().Attempt {
+				t.Fatal("context aliases owner")
+			}
+			if err := child.RequireDestination("child", "entity"); err != nil {
+				t.Fatal(err)
+			}
+			if child.RequireDestination("other", "entity") == nil || child.RequireDestination("child", "other") == nil {
+				t.Fatal("reference accepted wrong destination")
+			}
+		}
+	}
+	for _, field := range []string{"flow_id", "id", "activation_id", "revision_field", "revision_id", "attempt", "max_attempts"} {
+		t.Run(field, func(t *testing.T) {
+			ctx := source.Context()
+			delete(ctx, field)
+			if _, err := c.AdmitSourceContext(ctx); err == nil {
+				t.Fatal("missing context coordinate accepted")
+			}
+			ctx = source.Context()
+			ctx[field] = "wrong"
+			if _, err := c.AdmitSourceContext(ctx); err == nil {
+				t.Fatal("wrong context coordinate accepted")
+			}
+		})
+	}
+	for _, value := range []any{0, -1, 1.5, "2", 999} {
+		ctx := source.Context()
+		ctx["attempt"] = value
+		if _, err := c.AdmitSourceContext(ctx); err == nil {
+			t.Fatalf("bad attempt accepted: %v", value)
+		}
+	}
+	ctx := source.Context()
+	ctx["unknown"] = true
+	if _, err := c.AdmitSourceContext(ctx); err == nil {
+		t.Fatal("unknown context field accepted")
+	}
+	var zero loopruntime.ForkChildReference
+	if _, err := zero.Context(); err == nil {
+		t.Fatal("zero child reference yielded context")
+	}
+	if zero.RequireDestination("child", "entity") == nil {
+		t.Fatal("zero child reference has destination authority")
+	}
+}
 
 func correspondenceActivation(t *testing.T, flow, start string) loopruntime.Activation {
 	t.Helper()
@@ -25,6 +106,51 @@ func correspondence(t *testing.T, source ...loopruntime.Activation) *loopruntime
 		t.Fatal(err)
 	}
 	return c
+}
+
+func TestForkGenerationCorrespondenceDeclaredRevision(t *testing.T) {
+	source := correspondenceActivation(t, "review", "start")
+	first := source.Generation()
+	if _, err := source.Repeat("draft", "repeat", time.Unix(101, 0)); err != nil {
+		t.Fatal(err)
+	}
+	foreign := correspondenceActivation(t, "nested/review", "start")
+	for _, order := range [][]loopruntime.Activation{{source, foreign}, {foreign, source}} {
+		c := correspondence(t, order...)
+		for _, generation := range []attemptgeneration.Generation{first, source.Generation()} {
+			ref, err := c.AdmitSourceRevision(generation.FlowID, generation.LoopID, generation.RevisionField, generation.RevisionID)
+			if err != nil || ref.Generation() != generation {
+				t.Fatalf("owned revision lost: %+v %v", ref.Generation(), err)
+			}
+			child, err := c.Bind(ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if child.Generation().Attempt != generation.Attempt || child.Generation().RevisionID == generation.RevisionID {
+				t.Fatal("reference was not reminted at its exact attempt")
+			}
+			if _, err := c.AdmitSourceRevision(generation.FlowID, generation.LoopID, generation.RevisionField, child.Generation().RevisionID); err == nil {
+				t.Fatal("child revision accepted as source")
+			}
+		}
+		for _, coords := range [][4]string{
+			{"review", "review", "revision", "unknown"},
+			{"review", "review", "revision", foreign.RevisionID},
+			{"nested/review", "review", "revision", first.RevisionID},
+			{"review", "other", "revision", first.RevisionID},
+			{"review", "review", "business", first.RevisionID},
+			{"review", "review", "revision", first.RevisionID + " "},
+			{"review", "review", "revision", ""},
+		} {
+			if _, err := c.AdmitSourceRevision(coords[0], coords[1], coords[2], coords[3]); err == nil {
+				t.Fatalf("invalid declared revision accepted: %q", coords)
+			}
+		}
+	}
+	var zero *loopruntime.ForkCorrespondence
+	if _, err := zero.AdmitSourceRevision("review", "review", "revision", first.RevisionID); err == nil {
+		t.Fatal("zero correspondence accepted revision")
+	}
 }
 
 func bindCorrespondence(t *testing.T, c *loopruntime.ForkCorrespondence, g attemptgeneration.Generation) loopruntime.ForkChildReference {

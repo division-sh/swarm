@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
 
@@ -24,6 +23,18 @@ func TestRemintRunForkPayloadPreservesOrdinaryBusinessFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	correspondence, err := loopruntime.NewForkCorrespondence([]loopruntime.Activation{activation}, "child-run", "source-entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := correspondence.AdmitSource(activation.Generation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := correspondence.Bind(source)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, businessLoop := range []struct {
 		name string
 		raw  json.RawMessage
@@ -35,11 +46,17 @@ func TestRemintRunForkPayloadPreservesOrdinaryBusinessFields(t *testing.T) {
 			raw := businessLoop.raw
 			for _, state := range []string{"zero", "declared_revision"} {
 				t.Run(state, func(t *testing.T) {
-					var generations []attemptgeneration.Generation
+					var reference *loopruntime.ForkChildReference
+					input := raw
 					if state == "declared_revision" {
-						generations = []attemptgeneration.Generation{generation}
+						reference = &child
+						encoded, err := json.Marshal(activation.RevisionID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						input = bytes.Replace(raw, []byte(`"old"`), encoded, 1)
 					}
-					got, err := remintRunForkPayload(raw, generations)
+					got, err := projectForkRevisionPayload(input, reference)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -64,5 +81,8 @@ func TestRemintRunForkPayloadPreservesOrdinaryBusinessFields(t *testing.T) {
 				})
 			}
 		})
+	}
+	if _, err := projectForkRevisionPayload(raw, &child); err == nil {
+		t.Fatal("unknown business revision was overwritten into a valid child revision")
 	}
 }
