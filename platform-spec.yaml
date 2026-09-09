@@ -5352,6 +5352,11 @@ engine:
         selected persistence owners. Former schema-dependent or capability-gated entry points and owner-crossing event/fork
         mutation paths reject an unaccepted owner before SQL. Runtime methods otherwise issue fixed current SQL and do not
         inspect or infer schema state.
+      expected_shape_reuse: >
+        The schema owner may retain a bounded pure expected-platform-shape derivation for an identical complete DDL plan
+        and dialect, returning isolated projections to callers. This is not a selected-store compatibility verdict or
+        capability cache: every bootstrap still inspects the actual database and validates generated state plans before
+        marking that concrete store current. Changed or invalid plans cannot inherit an earlier derivation.
     split_boundaries:
     - "Core runtime store method portability is promoted by #1086."
     - "Explicit SQLite local-runtime session locking, event delivery/replay, and trace/read model semantics are promoted under #1087 child closeout."
