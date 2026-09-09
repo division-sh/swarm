@@ -1,5 +1,10 @@
 # Issue #2321 Implementation Progress
 
+Historical checkpoint. Current additive status and remaining acceptance work are
+recorded in `issue-2321-activation-progress.md`; the diagnostic class is now #2432,
+not an unclassified request. No historical failure below is erased or credited as
+a final-head pass.
+
 Agent: agent-g. Status: verification exposed an additional lifecycle diagnostic
 projection defect; awaiting lead classification, not review-ready.
 This is not a Post-Implementation Proof Audit or a first-slice

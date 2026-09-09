@@ -34,6 +34,7 @@ const (
 var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                                  ownerRuntimeDependency,
 	"internal/runtime/channelactivation/owner.go:Release:http_do:1":                                                                       ownerRuntimeDependency,
+	"internal/runtime/channelactivation/presentation.go:Acquire:http_do:1":                                                                ownerRuntimeDependency, // sync.Once request release, not HTTP.
 	"internal/runtime/bus/eventbus.go:acquire:http_do:1":                                                                                  ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus.go:Done:http_do:1":                                                                                     ownerRuntimeDependency,
 	"internal/runtime/deliverylifecycle/heartbeat.go:Finish:http_do:1":                                                                    ownerRuntimeDependency,

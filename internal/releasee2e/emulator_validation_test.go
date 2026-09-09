@@ -309,7 +309,7 @@ func TestReleaseEvidenceRejectsDuplicateClosureAttempts(t *testing.T) {
 				continue
 			}
 			records := append([]fakeDockerRecord(nil), base[:index]...)
-			records = append(records, fakeDockerRecord{Class: "container_remove"})
+			records = append(records, fakeDockerRecord{Class: "container_remove", Args: []string{"rm", "--force", releaseE2EFixtureAgent}})
 			records = append(records, base[index:]...)
 			if err := validateReleaseDockerEvidence(records); err == nil || !strings.Contains(err.Error(), "replaced a workspace container") {
 				t.Fatalf("workspace replacement before %s error = %v, want startup/live ownership rejection", record.Class, err)
@@ -317,9 +317,19 @@ func TestReleaseEvidenceRejectsDuplicateClosureAttempts(t *testing.T) {
 		}
 	})
 	t.Run("terminal projection cleanup", func(t *testing.T) {
-		records := append(append([]fakeDockerRecord(nil), base...), fakeDockerRecord{Class: "container_remove"})
+		records := append(append([]fakeDockerRecord(nil), base...), fakeDockerRecord{Class: "container_remove", Args: []string{"rm", "--force", releaseE2EFixtureAgent}})
 		if err := validateReleaseDockerEvidence(records); err != nil {
 			t.Fatalf("terminal projection cleanup rejected: %v", err)
+		}
+	})
+	t.Run("disposable provider cleanup", func(t *testing.T) {
+		for index := range base {
+			records := append([]fakeDockerRecord(nil), base[:index]...)
+			records = append(records, fakeDockerRecord{Class: "container_remove", Args: []string{"rm", "--force", releaseE2EFixtureAgent + "-claude-" + strings.Repeat("a", 24)}})
+			records = append(records, base[index:]...)
+			if err := validateReleaseDockerEvidence(records); err != nil {
+				t.Fatalf("isolated provider cleanup rejected: %v", err)
+			}
 		}
 	})
 	for name, mutate := range map[string]func(*fakeDockerRecord){

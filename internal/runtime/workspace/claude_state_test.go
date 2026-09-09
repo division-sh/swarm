@@ -123,13 +123,14 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	workKey := durableWorkspaceKeyForTest(t, first.BundleHash(), durableWorkspaceAgent, fingerprint)
+	volumes := []string{key, workKey}
 	t.Cleanup(func() {
 		for _, manager := range []*DockerManager{m1, m2} {
 			if err := manager.ReleaseSourceProjection(context.Background()); err != nil {
 				t.Error(err)
 			}
 		}
-		for _, volume := range []string{key, workKey} {
+		for _, volume := range volumes {
 			if _, err := m1.RunDocker(context.Background(), "volume", "rm", volume); err != nil {
 				t.Error(err)
 			}
@@ -147,14 +148,14 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 	if err := a.ClaudeState.CheckHead(ctx, head); err != nil {
 		t.Fatal(err)
 	}
-	resume := func(m *DockerManager, target *Target) {
+	resume := func(m *DockerManager, target *Target, head string) {
 		out, err := m.RunDocker(ctx, "exec", "-e", "CLAUDE_CONFIG_DIR="+ClaudeStateDirectory, "-w", target.Workdir, target.Container, "claude", "-p", "--resume", head, "--fork-session", "--session-id", uuid.NewString(), "--output-format", "stream-json", "--verbose", "offline probe")
 		result := strings.ToLower(fmt.Sprintf("%s %v", out, err))
 		if strings.Contains(result, "no conversation found") || (!strings.Contains(result, "login") && !strings.Contains(result, "authentication") && !strings.Contains(result, "api key")) {
 			t.Fatalf("expected recognized transcript then offline auth refusal: %s", result)
 		}
 	}
-	resume(m1, a)
+	resume(m1, a, head)
 	if err := m1.ReleaseSourceProjection(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 	if a.Container == b.Container {
 		t.Fatal("projection container was not replaced")
 	}
-	resume(m2, b)
+	resume(m2, b, head)
 	// Stopped-container replacement retains the same private backing.
 	if _, err := m2.RunDocker(ctx, "stop", b.Container); err != nil {
 		t.Fatal(err)
@@ -187,24 +188,39 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 	}
 	for _, kind := range []string{"invocation", "fork"} {
 		t.Run(kind, func(t *testing.T) {
-			ephemeral := request
-			ephemeral.session = uuid.NewString()
-			ephemeral.kind = kind
+			var ephemeral ClaudeStateRequest
+			var err error
+			if kind == "fork" {
+				ephemeral, err = ClaudeForkState(actor.Identity, uuid.NewString())
+			} else {
+				ephemeral, err = ClaudeSessionState(agentmemory.Authored(false), actor.Identity, uuid.NewString())
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			e, err := m2.ResolveClaudeWorkspace(ctx, actor, ephemeral, "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := m2.RunDocker(ctx, "exec", e.Container, "node", "-e", seed, ClaudeStateDirectory, e.Workdir, head); err != nil {
+			if err := e.ClaudeState.CheckHead(ctx, head); err == nil {
+				t.Fatal("temporary invocation inherited conversation files")
+			}
+			ephemeralHead := uuid.NewString()
+			if _, err := m2.RunDocker(ctx, "exec", e.Container, "node", "-e", seed, ClaudeStateDirectory, e.Workdir, ephemeralHead); err != nil {
 				t.Fatal(err)
 			}
-			e, err = m2.ResolveClaudeWorkspace(ctx, actor, ephemeral, head)
+			e, err = m2.ResolveClaudeWorkspace(ctx, actor, ephemeral, ephemeralHead)
 			if err != nil {
 				t.Fatal(err)
+			}
+			resume(m2, e, ephemeralHead)
+			if err := b.ClaudeState.CheckHead(ctx, ephemeralHead); err == nil {
+				t.Fatal("conversation inherited temporary invocation files")
 			}
 			if err := e.ClaudeState.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := m2.ResolveClaudeWorkspace(ctx, actor, ephemeral, head); err == nil {
+			if _, err := m2.ResolveClaudeWorkspace(ctx, actor, ephemeral, ephemeralHead); err == nil {
 				t.Fatal("terminated tmpfs survived")
 			}
 			key, _ := ephemeral.key(first.BundleHash())
@@ -212,6 +228,39 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 				t.Fatal("ephemeral invocation created reusable backing")
 			}
 		})
+	}
+	if err := m2.EnsureSystemWorkspaces(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []durableWorkspaceKind{durableWorkspaceScaffold, durableWorkspaceSystemEntity, durableWorkspaceSystemNginx, durableWorkspaceSystemSystemd} {
+		volumes = append(volumes, durableWorkspaceKeyForTest(t, first.BundleHash(), kind, ""))
+	}
+	probeRequest, err := ClaudeProbeState(uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe, err := m2.ResolveClaudeWorkspace(ctx, actor, probeRequest, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := probe.ClaudeState.CheckHead(ctx, head); err == nil {
+		t.Fatal("startup probe inherited conversation files")
+	}
+	probeHead := uuid.NewString()
+	if _, err := m2.RunDocker(ctx, "exec", probe.Container, "node", "-e", seed, ClaudeStateDirectory, probe.Workdir, probeHead); err != nil {
+		t.Fatal(err)
+	}
+	if err := probe.ClaudeState.CheckHead(ctx, probeHead); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ClaudeState.CheckHead(ctx, probeHead); err == nil {
+		t.Fatal("conversation inherited startup-probe files")
+	}
+	if err := probe.ClaudeState.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.ResolveClaudeWorkspace(ctx, actor, probeRequest, probeHead); err == nil {
+		t.Fatal("released probe artifacts survived")
 	}
 	// Corruption and absence are admission failures, not new conversations.
 	if _, err := m2.RunDocker(ctx, "exec", b.Container, "node", "-e", `const fs=require('fs');const [root,cwd,head]=process.argv.slice(1);fs.writeFileSync(root+'/projects/'+cwd.replace(/[^a-zA-Z0-9]/g,'-')+'/'+head+'.jsonl','not JSON\n');`, ClaudeStateDirectory, b.Workdir, head); err != nil {
@@ -228,6 +277,63 @@ func TestClaudeStateDockerRetentionAndRefusal(t *testing.T) {
 	missingKey, _ := missing.key(first.BundleHash())
 	if _, err := m2.RunDocker(ctx, "volume", "inspect", missingKey); err == nil {
 		t.Fatal("missing backing was created")
+	}
+
+	// A stateless delivery reclamation changes its claim/session attempt, not
+	// the exact invocation backing. No reusable conversation memory is granted.
+	deliveryID := uuid.NewString()
+	deliveryRequest := func(version int64) ClaudeStateRequest {
+		claim, err := deliverylifecycle.AdmitPersistedClaim(deliveryID, actor.Identity.RunID, "route", uuid.NewString(), version, deliverylifecycle.SubscriberAgent, actor.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := ClaudeDeliveryState(actor.Identity, claim)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return request
+	}
+	invocation := deliveryRequest(1)
+	invocationKey, err := invocation.key(first.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	volumes = append(volumes, invocationKey)
+	initial, err := m2.ResolveClaudeWorkspace(ctx, actor, invocation, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.RunDocker(ctx, "exec", initial.Container, "node", "-e", seed, ClaudeStateDirectory, initial.Workdir, head); err != nil {
+		t.Fatal(err)
+	}
+	if err := initial.ClaudeState.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if exists, _, err := m2.InspectContainer(ctx, initial.Container); err != nil || exists {
+		t.Fatalf("invocation container not disposed: exists=%v err=%v", exists, err)
+	}
+	reclaimed := deliveryRequest(2)
+	if reclaimed.Reusable() {
+		t.Fatal("stateless reclamation acquired conversation memory")
+	}
+	next, err := m2.ResolveClaudeWorkspace(ctx, actor, reclaimed, head)
+	if err != nil {
+		t.Fatalf("reclaimed invocation lost confirmed backing: %v", err)
+	}
+	if err := next.ClaudeState.CheckHead(ctx, head); err != nil {
+		t.Fatal(err)
+	}
+	resume(m2, next, head)
+	foreign := actor
+	foreign.Identity.RunID = uuid.NewString()
+	if _, err := m2.ResolveClaudeWorkspace(ctx, foreign, reclaimed, head); err == nil {
+		t.Fatal("foreign actor adopted invocation backing")
+	}
+	if _, err := m2.RunDocker(ctx, "exec", "--user", "0", next.Container, "node", "-e", `const fs=require('fs');const p=process.argv[1]+'/.swarm-authority';fs.chmodSync(p,0o600);fs.writeFileSync(p,'foreign');`, ClaudeStateDirectory); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.ResolveClaudeWorkspace(ctx, actor, reclaimed, head); err == nil {
+		t.Fatal("foreign durable marker authorized resume")
 	}
 }
 

@@ -318,7 +318,13 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			return fmt.Errorf("strict Docker emulator observed an unexpected command: %#v", record.Args)
 		}
 		if record.Class == "container_remove" && emitIndex < 0 {
-			return fmt.Errorf("release lifecycle replaced a workspace container between runless startup admission and live execution")
+			if len(record.Args) != 3 {
+				return fmt.Errorf("invalid container removal evidence")
+			}
+			name := record.Args[len(record.Args)-1]
+			if _, provider := releaseProviderContainerBase(name); !provider {
+				return fmt.Errorf("release lifecycle replaced a workspace container between runless startup admission and live execution")
+			}
 		}
 		if _, ok := required[record.Class]; ok {
 			required[record.Class]++
@@ -451,6 +457,7 @@ func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, record
 	}
 	created := map[string]string{}
 	createdCount := map[string]int{}
+	providerCreated := map[string]int{}
 	removed := map[string]int{}
 	processScope := ""
 	projectionRoot := ""
@@ -458,6 +465,10 @@ func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, record
 		switch record.Class {
 		case "container_create":
 			name := dockerOptionValue(record.Args, "--name")
+			if _, provider := releaseProviderContainerBase(name); provider {
+				providerCreated[name]++
+				continue
+			}
 			kind, scope, ok := releaseE2EContainerIdentity(name)
 			if !ok {
 				continue
@@ -501,6 +512,14 @@ func assertReleaseProjectionWorkspacesReleased(t *testing.T, root string, record
 		if removed[name] != createdCount[kind] {
 			t.Fatalf("projection workspace %q create/removal counts = %d/%d, want exact teardown after every lifecycle", name, createdCount[kind], removed[name])
 		}
+	}
+	for name, count := range providerCreated {
+		if removed[name] != count {
+			t.Fatalf("provider container %s create/removal=%d/%d", name, count, removed[name])
+		}
+	}
+	if len(providerCreated) != 2 {
+		t.Fatalf("provider startup/turn projections=%d, want two isolated containers", len(providerCreated))
 	}
 	if projectionRoot == "" {
 		t.Fatal("projection workspace records omitted the read-only source mount")

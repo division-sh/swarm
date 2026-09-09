@@ -9569,8 +9569,14 @@ tool_model:
         operation while replacement is fenced; this is not new admission, and the child clears the inherited authority
         before any later publication. Persisted replay or recovery without that live
         parent authority still requires current exact-generation acquisition and rejects stale generations or another
-        owner's lease. A model turn pins the publication that supplied its tools. Managed MCP tools/list acquires that same
-        exact activation-publication lease for catalog projection and capability filtering; an unleased actor catalog cannot
+        owner's lease. A model turn pins the publication that supplied its tools. Nested catalog acquisition and MCP
+        tools/list, tools/call, and direct tool requests inherit an owner-issued process-local binding from that turn
+        through the existing turn registry. Descendants validate the exact owner, publication, actor, source, and turn;
+        invalid, released, revoked, or foreign bindings fail closed without acquiring a successor. Admitted descendants
+        retain the predecessor while replacement fences unrelated admission. Parent completion or cancellation and token
+        unregister, expiry, or reset revoke new descendants and join already admitted descendants before predecessor
+        retirement. Authority is never serialized or reconstructed from generations, names, or durable rows. Catalog
+        projection and capability filtering consume this same exact activation-publication lease; an unleased actor catalog cannot
         publish activation tools, and replacement cannot substitute a successor while the request holds the lease. Durable private activities persist both
         activation-publication and plan generation and never substitute a same-name current target. Tool discovery,
         validation, authorization, agent-origin dispatch, private activity dispatch/recovery, registration selection,
@@ -9581,6 +9587,17 @@ tool_model:
         activation facts rather than rereading mutable current identity, so an activation remains reconstructable while a
         rebind advances identity and until the successor process publication is exact-current. Missing or contradictory
         activation-owned destination, coordinate, credential, or revision facts fail closed.
+        Serve prepares the exact runtime-context occurrence and required standing/topology facts before reconstructing
+        connected state and publishing the complete executable activation catalog. Destructive-effect reconciliation and
+        publication must succeed before recovered or new business work, delivery continuations, autonomous producers,
+        or ingress readiness are released. Full Runtime.Start is not preparation. Declared-only plans cannot replace this
+        executable barrier; partial preparation or publication failure unwinds prepared resources and preserves errors.
+        Runtime.PrepareStart performs existing lifecycle admission, managed preflight, and source-scoped topology
+        canonicalization without Manager.Run or replay. Standing preparation uses the existing activation transaction
+        and exact standing publication writer to establish target facts, including publication sequence, and reconstructs
+        process-only topology. It defers initial-entry finalization, timers, and creation-event publication. After the
+        executable catalog is installed, the single-use prepared start release admits Manager.Run, completes prepared
+        standing topology through the existing finalizer, and then releases the existing recovery and producer phases.
       registration_handoff_rule: >
         A pre-binding webhook intent carries only exact registration plan, target, credential epoch, and generation facts.
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external

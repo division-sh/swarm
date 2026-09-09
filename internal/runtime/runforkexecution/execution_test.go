@@ -2229,6 +2229,19 @@ func (s selectedForkWorkspaceLifecycle) ResolveWorkspaceForCapabilityAdmission(c
 	return s.target, nil
 }
 
+// Selected execution protocol proofs fake storage; real Docker tests prove its lifetime.
+type selectedForkClaudeState struct{}
+
+func (selectedForkClaudeState) Directory() string                       { return workspace.ClaudeStateDirectory }
+func (selectedForkClaudeState) CheckHead(context.Context, string) error { return nil }
+func (selectedForkClaudeState) Release(context.Context) error           { return nil }
+
+func (s selectedForkWorkspaceLifecycle) ResolveClaudeWorkspace(context.Context, runtimeactors.AgentConfig, workspace.ClaudeStateRequest, string) (*workspace.Target, error) {
+	target := *s.target
+	target.ClaudeState = selectedForkClaudeState{}
+	return &target, nil
+}
+
 func (selectedForkWorkspaceLifecycle) ValidateSource(context.Context, semanticview.Source) error {
 	return nil
 }
@@ -2573,6 +2586,7 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 		return nil, errors.New("selected-fork startup capability surface missing")
 	}
 	response := &runtimellm.Response{
+		CLIInventory:    runtimellm.CLIInventoryValid,
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: surface.PlannedBindingNames(managedcapabilities.BindingMCPProvider),
 	}

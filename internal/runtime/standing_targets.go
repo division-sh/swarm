@@ -489,25 +489,34 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 }
 
 func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
+	targets, activations, _, err := rt.standingTargetsMutation(ctx, serviceID, false)
+	return targets, activations, err
+}
+
+func (rt *Runtime) PrepareStandingTargets(ctx context.Context) ([]StandingTarget, []StandingActivation, func() error, error) {
+	return rt.standingTargetsMutation(ctx, "", true)
+}
+
+func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string, prepare bool) ([]StandingTarget, []StandingActivation, func() error, error) {
 	if rt == nil {
-		return nil, nil, fmt.Errorf("standing activation requires a runtime")
+		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime")
 	}
 	plans, err := rt.standingTargetPlans()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if len(plans) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if rt.workOccurrence == nil {
-		return nil, nil, fmt.Errorf("standing activation requires a runtime work occurrence")
+		return nil, nil, nil, fmt.Errorf("standing activation requires a runtime work occurrence")
 	}
 	ctx = rt.authorActivityContext(ctx)
 	if _, hasPreparedOwner := worklifetime.OccurrenceFromContext(ctx); !hasPreparedOwner {
 		ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
 	}
 	if rt.Pipeline == nil || rt.Manager == nil {
-		return nil, nil, fmt.Errorf("standing activation requires pipeline store, pipeline, and agent manager")
+		return nil, nil, nil, fmt.Errorf("standing activation requires pipeline store, pipeline, and agent manager")
 	}
 	fact := rt.Options.SourceArtifactFact
 	source := rt.Options.WorkflowModule.SemanticSource()
@@ -540,14 +549,19 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 			},
 		})
 	}
-	results, err := rt.Pipeline.CommitStandingTargets(ctx, runtimepipeline.StandingTargetMutationRequest{
-		Targets: mutations, ObservedAt: observedAt,
-	}, rt.Manager)
+	request := runtimepipeline.StandingTargetMutationRequest{Targets: mutations, ObservedAt: observedAt}
+	var results []runtimepipeline.StandingTargetMutationResult
+	var complete func() error
+	if prepare {
+		results, complete, err = rt.Pipeline.PrepareStandingTargets(ctx, request, rt.Manager)
+	} else {
+		results, err = rt.Pipeline.CommitStandingTargets(ctx, request, rt.Manager)
+	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("activate standing targets: %w", err)
+		return nil, nil, nil, fmt.Errorf("activate standing targets: %w", err)
 	}
 	if len(results) != len(selectedPlans) {
-		return nil, nil, fmt.Errorf("standing target mutation returned %d results for %d plans", len(results), len(selectedPlans))
+		return nil, nil, nil, fmt.Errorf("standing target mutation returned %d results for %d plans", len(results), len(selectedPlans))
 	}
 	targets := make([]StandingTarget, 0)
 	activations := make([]StandingActivation, 0, len(selectedPlans))
@@ -580,7 +594,16 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 			targets = append(targets, target.normalized())
 		}
 	}
-	return targets, activations, nil
+	if prepare {
+		finish := complete
+		complete = func() error {
+			if err := finish(); err != nil {
+				return err
+			}
+			return rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
+		}
+	}
+	return targets, activations, complete, nil
 }
 
 func (rt *Runtime) restoreAdoptedStandingWorkflowTimers(ctx context.Context, activations []StandingActivation) error {

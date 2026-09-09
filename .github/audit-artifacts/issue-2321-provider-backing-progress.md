@@ -3,6 +3,11 @@
 Agent G, 2026-09-09. This is not a final Post-Implementation Proof Audit.
 The approved provider-state patch is implemented; full class closure is withheld.
 
+Status supersession: the freeze requested below was superseded by the independent
+activation-lifetime gate in `issue-2321-activation-lifetime-amendment.md`.
+`issue-2321-activation-progress.md` records the ensuing implementation and its
+evidence. The historical live failure below is not reclassified as a pass.
+
 ## Implemented under the existing gate
 
 `workspace.ClaudeStateRequest` carries reusable session, exact stateless delivery,

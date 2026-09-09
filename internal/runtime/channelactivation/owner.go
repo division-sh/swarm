@@ -39,6 +39,11 @@ type Lease struct {
 
 type leaseAuthority struct {
 	released atomic.Bool
+	parent   *leaseAuthority
+	children int // guarded by Owner.mu
+	ctx      context.Context
+	cancel   context.CancelFunc
+	stop     func() bool
 }
 
 type executionLeaseContextKey struct{}
@@ -77,7 +82,8 @@ func newOwnedLease(owner *Owner, current *snapshot, operation Operation) *Lease 
 }
 
 func (l *Lease) live() bool {
-	return l != nil && l.snapshot != nil && l.authority != nil && !l.authority.released.Load()
+	return l != nil && l.snapshot != nil && l.authority != nil && !l.authority.released.Load() &&
+		(l.authority.ctx == nil || l.authority.ctx.Err() == nil)
 }
 
 func (l *Lease) Operation() Operation {
@@ -155,18 +161,32 @@ func (l *Lease) Release() {
 		if l.borrowed {
 			return
 		}
+		// Serialize revocation with descendant retention, not just the final
+		// decrement, so a completing parent cannot admit a late child.
+		if l.owner != nil {
+			l.owner.mu.Lock()
+			defer l.owner.mu.Unlock()
+		}
 		if l.authority != nil {
 			l.authority.released.Store(true)
+			if l.authority.cancel != nil {
+				l.authority.cancel()
+			}
+			if l.authority.stop != nil {
+				l.authority.stop()
+			}
 		}
 		if l.owner == nil || l.snapshot == nil {
 			return
 		}
-		l.owner.mu.Lock()
-		l.snapshot.leases--
-		if l.snapshot.leases == 0 {
-			l.owner.changed.Broadcast()
+		for l.authority.children > 0 {
+			l.owner.changed.Wait()
 		}
-		l.owner.mu.Unlock()
+		l.snapshot.leases--
+		if l.authority.parent != nil {
+			l.authority.parent.children--
+		}
+		l.owner.changed.Broadcast()
 	})
 }
 

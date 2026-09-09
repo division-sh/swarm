@@ -1555,6 +1555,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 	}
 	presenter.recordBootWarnings(bootReport)
+	var releaseRuntimeContexts func() error
 	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
 		apiServerLease, err := processWorkOwner.Begin(ctx)
 		if err != nil {
@@ -1573,7 +1574,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			defer func() { _ = mcpServerLease.Done() }()
 			serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)
 		}()
-		if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
+		releaseRuntimeContexts, err = prepareServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)
+		if err != nil {
 			return err
 		}
 		return reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive)
@@ -1581,11 +1583,15 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
-	if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
+	if err := channelActivationRefresher.publishChannelActivations(ctx); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
-	if err := channelActivationRefresher.publishChannelActivations(ctx); err != nil {
+	if err := releaseRuntimeContexts(); err != nil {
+		presenter.fail(22, "channel_onboarding", err)
+		return 1
+	}
+	if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
@@ -2353,13 +2359,13 @@ func runServeSourceArtifactStartupRecovery(
 	return 0
 }
 
-func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
+func prepareServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) (_ func() error, prepareErr error) {
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
 		}
 		if err := contextDef.runtime.PreflightDynamicTopologyStartup(ctx); err != nil {
-			return fmt.Errorf("preflight runtime dynamic topology: %w", err)
+			return nil, fmt.Errorf("preflight runtime dynamic topology: %w", err)
 		}
 	}
 	prepared := make([]*runtime.Runtime, 0, len(contexts))
@@ -2369,30 +2375,33 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 		}
 		if err := contextDef.runtime.PrepareAuthorActivityCatalog(); err != nil {
 			for _, rt := range prepared {
-				_ = rt.Shutdown()
+				err = errors.Join(err, rt.Shutdown())
 			}
-			return fmt.Errorf("prepare author activity catalog: %w", err)
+			return nil, fmt.Errorf("prepare author activity catalog: %w", err)
 		}
 		prepared = append(prepared, contextDef.runtime)
 	}
 	for _, rt := range prepared {
 		if err := rt.PrepareStartupLifecycle(ctx); err != nil {
 			for _, preparedRuntime := range prepared {
-				_ = preparedRuntime.Shutdown()
+				err = errors.Join(err, preparedRuntime.Shutdown())
 			}
-			return fmt.Errorf("prepare runtime lifecycle: %w", err)
+			return nil, fmt.Errorf("prepare runtime lifecycle: %w", err)
 		}
 	}
+	releases := make([]func() error, 0, len(contexts))
 	registered := make([]struct {
 		hash    string
 		runtime *runtime.Runtime
 	}, 0, len(contexts))
-	rollback := func() {
+	rollback := func() error {
+		var cleanupErr error
 		closedByManager := make(map[*runtime.Runtime]struct{}, len(registered))
 		for i := len(registered) - 1; i >= 0; i-- {
 			entry := registered[i]
 			if manager != nil {
 				result := manager.DeactivateBundleHash(entry.hash, runtime.RuntimeContextCauseUnavailable)
+				cleanupErr = errors.Join(cleanupErr, result.ShutdownErr)
 				if result.Found && result.ShutdownErr == nil {
 					closedByManager[entry.runtime] = struct{}{}
 				}
@@ -2401,9 +2410,10 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 		for i := len(prepared) - 1; i >= 0; i-- {
 			rt := prepared[i]
 			if _, closed := closedByManager[rt]; !closed {
-				_ = rt.Shutdown()
+				cleanupErr = errors.Join(cleanupErr, rt.Shutdown())
 			}
 		}
+		return cleanupErr
 	}
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
@@ -2415,25 +2425,23 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 			contextDef.startupStandingActivations,
 		)
 		if err != nil {
-			rollback()
-			return err
+			return nil, errors.Join(err, rollback())
 		}
 		if startupStandingOwner != nil {
 			if contextDef.runtime.Bus == nil {
-				rollback()
-				return errors.New("standing startup recovery requires event bus")
+				return nil, errors.Join(errors.New("standing startup recovery requires event bus"), rollback())
 			}
 			contextDef.runtime.Bus.SetStandingRunWorkOwner(startupStandingOwner)
 		}
-		if err := contextDef.runtime.Start(ctx); err != nil {
-			rollback()
-			return err
-		}
-		targets, activations, err := contextDef.runtime.EnsureStandingTargets(ctx)
+		release, err := contextDef.runtime.PrepareStart(ctx)
 		if err != nil {
-			rollback()
-			return err
+			return nil, errors.Join(err, rollback())
 		}
+		targets, activations, completeStanding, err := contextDef.runtime.PrepareStandingTargets(ctx)
+		if err != nil {
+			return nil, errors.Join(err, rollback())
+		}
+		releases = append(releases, func() error { return release(completeStanding) })
 		if manager != nil {
 			contextTargets := serveRuntimeContextStandingTargets(targets, contextDef.startupStandingTargets, activations)
 			for _, activation := range activations {
@@ -2441,8 +2449,7 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 					continue
 				}
 				if err := manager.SuppressStandingServiceTargets(activation.ServiceID); err != nil {
-					rollback()
-					return err
+					return nil, errors.Join(err, rollback())
 				}
 			}
 			if err := manager.Register(runtime.BundleContext{
@@ -2459,8 +2466,7 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				ChannelPlans:               contextDef.runtime.Options.ChannelPlans,
 				DeclaredChannelPublication: contextDef.runtime.Options.DeclaredChannelPublication,
 			}); err != nil {
-				rollback()
-				return err
+				return nil, errors.Join(err, rollback())
 			}
 			registered = append(registered, struct {
 				hash    string
@@ -2470,11 +2476,22 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				runtime: contextDef.runtime,
 			})
 		} else if len(targets) > 0 {
-			rollback()
-			return errors.New("standing targets require runtime context manager")
+			return nil, errors.Join(errors.New("standing targets require runtime context manager"), rollback())
 		}
 	}
-	return nil
+	return func() (releaseErr error) {
+		defer func() {
+			if releaseErr != nil {
+				releaseErr = errors.Join(releaseErr, rollback())
+			}
+		}()
+		for _, release := range releases {
+			if err := release(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
 }
 
 type serveStartupStandingRecoveryOwner struct {

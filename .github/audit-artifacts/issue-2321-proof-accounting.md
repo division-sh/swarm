@@ -1,5 +1,10 @@
 # Issue #2321 Verification Accounting
 
+Historical and cumulative accounting. The latest activation/startup implementation
+and outstanding checks are recorded in `issue-2321-activation-progress.md`.
+Earlier blocked live rows below remain observations of their named heads, not
+claims about the repaired final head.
+
 Agent: agent-g. Development checklist, not the final Post-Implementation Proof
 Audit. The cycle-2 gate and its full 29-manifestation denominator remain binding.
 No row below grants final-head closure. T = actual public fresh mock test;

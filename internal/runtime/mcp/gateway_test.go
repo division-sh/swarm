@@ -796,7 +796,8 @@ func TestGatewayHandleMCP_ManagedClaudeCLIChronologyNormalAndSelectedFork(t *tes
 				t.Fatalf("provider-call evidence = %#v, want exact MCP provider confirmation", settledEvidence)
 			}
 			if _, err := llm.ObserveCLIResponseCapabilitySurface(settledTurn.CapabilitySurface.Clone(), &llm.Response{
-				MCPServers: map[string]string{"runtime-tools": "connected"}, MCPVisibleTools: []string{"mcp__runtime-tools__write_file"},
+				CLIInventory: llm.CLIInventoryValid,
+				MCPServers:   map[string]string{"runtime-tools": "connected"}, MCPVisibleTools: []string{"mcp__runtime-tools__write_file"},
 			}); err != nil {
 				t.Fatalf("provider response could not confirm the call-settled canonical evidence: %v", err)
 			}
@@ -2491,7 +2492,7 @@ func TestGatewayHandleMCP_RejectsToolWhenContextTokenMisses(t *testing.T) {
 func TestGatewayMCPExecutionContext_RejectsPrefixedMutatingToolOnContextMiss(t *testing.T) {
 	g := NewGateway(nil, "", GatewayHooks{})
 	req := httptest.NewRequest(http.MethodPost, "/mcp?agent_id=analysis-agent&agent_role=analysis", nil)
-	if _, err := g.mcpExecutionContext(req, "mcp__runtime-tools__emit_score_dimension_complete"); err == nil {
+	if _, _, err := g.mcpExecutionContext(req, "mcp__runtime-tools__emit_score_dimension_complete"); err == nil {
 		t.Fatal("expected context miss error for prefixed mutating tool")
 	}
 }
@@ -2520,11 +2521,12 @@ func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t
 	})
 
 	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-trace")
-	ctx, err := g.mcpExecutionContext(req, "get_entity")
+	ctx, release, err := g.mcpExecutionContext(req, "get_entity")
 	if err != nil {
 		t.Fatalf("mcpExecutionContext: %v", err)
 	}
 	_ = ctx
+	release()
 }
 
 func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *testing.T) {
@@ -2558,11 +2560,12 @@ func TestGatewayExecutionContext_RestoresTypedRuntimeLineageOnResolvedTurn(t *te
 	})
 
 	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-lineage")
-	ctx, err := g.mcpExecutionContext(req, "get_entity")
+	ctx, release, err := g.mcpExecutionContext(req, "get_entity")
 	if err != nil {
 		t.Fatalf("mcpExecutionContext: %v", err)
 	}
 	lineage, ok := runtimecorrelation.RuntimeLineageFromContext(ctx)
+	defer release()
 	if !ok {
 		t.Fatal("runtime lineage missing from gateway execution context")
 	}
@@ -2597,10 +2600,11 @@ func TestGatewayMCPExecutionContext_KeepsOtherRegistryTokensValidAfterGlobalEpoc
 	runtimebus.ExitRuntimeResetMode()
 
 	req := withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-b")
-	ctx, err := gatewayB.mcpExecutionContext(req, "query_entities")
+	ctx, release, err := gatewayB.mcpExecutionContext(req, "query_entities")
 	if err != nil {
 		t.Fatalf("mcpExecutionContext after unrelated reset: %v", err)
 	}
+	defer release()
 	if epoch, ok := runtimebus.RuntimeEpochFromContext(ctx); !ok || epoch != runtimebus.CurrentRuntimeEpoch() {
 		t.Fatalf("context epoch = %d ok=%v, want current epoch %d", epoch, ok, runtimebus.CurrentRuntimeEpoch())
 	}

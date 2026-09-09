@@ -116,15 +116,16 @@ func TestStructuralReadersDoNotConstructChannelActivation(t *testing.T) {
 func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	checks := map[string][]string{
-		"internal/runtime/mcp/gateway.go":              {"AcquireToolDefinitionsForActorInContext"},
-		"internal/runtime/tools/channel_runtime.go":    {"channelActivationPresentationFromContext", "RuntimeOperation"},
+		"internal/runtime/mcp/gateway.go":              {"AcquireToolDefinitionsForActorInContext", "acquireTurnPresentation"},
+		"internal/runtime/mcp/context.go":              {"BindPresentation", "revokePresentation", "Presentation.Close"},
+		"internal/runtime/tools/channel_runtime.go":    {"PresentationFromContext", "ValidatePresentation", "BorrowRuntimeOperation"},
 		"internal/runtime/pipeline/coordinator.go":     {"AcquireActivityOperation", "BorrowActivityOperation"},
 		"internal/runtime/pipeline/activity_engine.go": {"ChannelActivationGeneration", "WithoutExecutionLease"},
-		"internal/runtime/tools/executor.go":           {"AcquireToolDefinitionsForActorInContext", "AcquirePresentation"},
+		"internal/runtime/tools/executor.go":           {"AcquireToolDefinitionsForActorInContext", "AcquirePresentationForContext"},
 		"internal/runtime/context_manager.go":          {"ReplaceChannelActivationsContext", "AcquireChannelActivationPublication"},
 		"internal/serveapp/public_ingress.go":          {"AcquireChannelActivationPublication"},
 		"internal/serveapp/channel_onboarding.go":      {"NewChannelActivationPublication", "AcquireChannelActivationPublication"},
-		"internal/serveapp/main.go":                    {"NewDeclaredOnlyChannelActivationPublication"},
+		"internal/serveapp/main.go":                    {"NewDeclaredOnlyChannelActivationPublication", "prepareServeRuntimeContexts", "releaseRuntimeContexts"},
 	}
 	for relative, required := range checks {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relative)))

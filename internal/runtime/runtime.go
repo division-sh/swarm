@@ -1492,19 +1492,30 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 }
 
 func (rt *Runtime) Start(ctx context.Context) error {
+	release, err := rt.PrepareStart(ctx)
+	if err != nil {
+		return err
+	}
+	return release(nil)
+}
+
+// PrepareStart performs startup admission and validation without starting manager
+// loops, delivery recovery, or autonomous producers. Serve publishes executable
+// channels between preparation and the returned single-use execution release.
+func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error, prepareErr error) {
 	if rt == nil {
-		return fmt.Errorf("runtime is nil")
+		return nil, fmt.Errorf("runtime is nil")
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
 	if err := rt.PreflightDynamicTopologyStartup(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := rt.PrepareStartupLifecycle(ctx); err != nil {
 		rt.releaseAuthorActivityCatalog()
-		return err
+		return nil, err
 	}
 	ctx = rt.authorActivityContext(ctx)
 	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
@@ -1513,12 +1524,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		bootStartedAt = time.Now().UTC()
 	}
 	if rt.shutdownAdmissionClosed() {
-		return fmt.Errorf("runtime shutdown already started")
+		return nil, fmt.Errorf("runtime shutdown already started")
 	}
 	rt.lifecycleMu.Lock()
 	if rt.cancelStart != nil {
 		rt.lifecycleMu.Unlock()
-		return fmt.Errorf("runtime already started")
+		return nil, fmt.Errorf("runtime already started")
 	}
 	startCtx, cancelStart := context.WithCancel(ctx)
 	grant := rt.startupGrant
@@ -1526,32 +1537,32 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		cancelStart()
 		rt.lifecycleMu.Unlock()
 		rt.releaseAuthorActivityCatalog()
-		return fmt.Errorf("runtime generation grant is required before start")
+		return nil, fmt.Errorf("runtime generation grant is required before start")
 	}
 	grantEvidence, grantErr := grant.Evidence()
 	if grantErr != nil {
 		cancelStart()
 		rt.lifecycleMu.Unlock()
 		rt.releaseAuthorActivityCatalog()
-		return grantErr
+		return nil, grantErr
 	}
 	if err := rt.Manager.HydrateStaticTopologyForStartup(ctx); err != nil {
 		cancelStart()
 		rt.lifecycleMu.Unlock()
 		rt.releaseAuthorActivityCatalog()
-		return fmt.Errorf("hydrate static declaration topology: %w", err)
+		return nil, fmt.Errorf("hydrate static declaration topology: %w", err)
 	}
 	rt.emitBootProgress(5, "startup_ownership_lease", "ok", "grant="+grantEvidence.GrantID)
 	rt.startCtx = startCtx
 	rt.cancelStart = cancelStart
 	rt.replacementQuiesced = false
 	rt.lifecycleMu.Unlock()
-	started := false
+	prepared := false
 	defer func() {
-		if started {
+		if prepared {
 			return
 		}
-		rt.cleanupStartFailure()
+		prepareErr = errors.Join(prepareErr, rt.stopWithOptions(DefaultShutdownOptions()))
 	}()
 	if rt.runLifecycleExecutor != nil {
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.SourceArtifactFact.BundleHash()}
@@ -1561,20 +1572,20 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			rt.runLifecycleExecutor,
 		)
 		if err != nil {
-			return fmt.Errorf("register run lifecycle completion executor: %w", err)
+			return nil, fmt.Errorf("register run lifecycle completion executor: %w", err)
 		}
 		rt.runLifecycleRegistration = registration
 	}
 	bindRuntimeStorePayloadValidator(rt.eventPayloadBinder, rt.inboundPayloadBinder, rt.payloadValidator)
 	if rt.RuntimeIngress != nil {
 		if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
-			return fmt.Errorf("sync runtime ingress state: %w", err)
+			return nil, fmt.Errorf("sync runtime ingress state: %w", err)
 		}
 	}
 
 	if rt.Manager != nil {
 		if err := rt.Manager.ReconcileDirectiveOperations(ctx); err != nil {
-			return fmt.Errorf("required directive operation reconciliation failed: %w", err)
+			return nil, fmt.Errorf("required directive operation reconciliation failed: %w", err)
 		}
 	}
 
@@ -1602,7 +1613,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	startupRecoveryDecision := newStartupRecoveryDecisionReport(startupRecoverySnapshot)
 	if err != nil && !startupRecoverySnapshot.RecoveryOnStartup {
-		return err
+		return nil, err
 	}
 	if err != nil {
 		startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
@@ -1614,7 +1625,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassSchemaInvalid, "startup_recovery_disabled_with_work", "admit_recovery", map[string]any{"work_classes": startupRecoveryDecision.Snapshot.StartupBlockingWorkClasses()}, denyErr)
 		rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
 		rt.emitBootProgress(7, "recovery_decision", "FAILED", denyErr.Error())
-		return denyErr
+		return nil, denyErr
 	}
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(7, "recovery_decision", string(startupRecoveryDecision.Outcome), string(startupRecoveryDecision.ReasonCode))
@@ -1625,7 +1636,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	systemNodeCount, err := rt.startSystemNodesAndWaitForSubscriptions(ctx, startCtx)
 	if err != nil {
 		rt.emitBootProgress(9, "system_nodes_start", "FAILED", err.Error())
-		return err
+		return nil, err
 	}
 	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes subscribed", systemNodeCount))
 	staticAgentIDs := []string{}
@@ -1644,41 +1655,41 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt.Options.LLMRuntime == nil {
 		if err := validateSelectedBackendCredentialForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
 			rt.emitBootProgress(14, "workspace_validation_and_system_containers", "FAILED", err.Error())
-			return fmt.Errorf("llm backend credential validation failed: %w", err)
+			return nil, fmt.Errorf("llm backend credential validation failed: %w", err)
 		}
 	}
 	if err := validateClaudeStartupConfigForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
 		rt.emitBootProgress(14, "workspace_validation_and_system_containers", "FAILED", err.Error())
-		return fmt.Errorf("claude runtime startup validation failed: %w", err)
+		return nil, fmt.Errorf("claude runtime startup validation failed: %w", err)
 	}
 	if err := validateClaudeManagedAgentWorkspaces(ctx, rt.Config, source, rt.Workspace, rt.Manager); err != nil {
 		rt.emitBootProgress(14, "workspace_validation_and_system_containers", "FAILED", err.Error())
-		return fmt.Errorf("claude runtime workspace validation failed: %w", err)
+		return nil, fmt.Errorf("claude runtime workspace validation failed: %w", err)
 	}
 	rt.emitBootProgress(14, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
 	startupAuthority, err := rt.currentStartupProbeAuthority()
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
-		return err
+		return nil, err
 	}
 	var preflightAuthority ManagedProviderPreflightAuthority
 	hasManagedAgents, err := workflowSourceOrManagerDeclaresAgents(source, rt.Manager)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if claudeEnabled, backendErr := isClaudeCLIBackend(rt.Config); backendErr != nil {
-		return backendErr
+		return nil, backendErr
 	} else if claudeEnabled && hasManagedAgents {
 		preflightAuthority, err = rt.managedProviderPreflightAuthority(startupAuthority)
 		if err != nil {
 			rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
-			return err
+			return nil, err
 		}
 	}
 	surfaceIDs, err := ValidateManagedProviderPreflight(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, rt.LLMRuntimes, rt.MCPTurns, rt.ToolExecutor, rt.Manager, preflightAuthority)
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
-		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
+		return nil, fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
 	rt.emitBootProgress(15, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
 	replayAllowed := rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery
@@ -1686,106 +1697,136 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt.Manager != nil {
 		startupTopology, err = rt.Manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, rt.Options.SourceArtifactFact, replayAllowed)
 		if err != nil {
-			return fmt.Errorf("canonicalize source-scoped dynamic topology before execution admission: %w", err)
+			return nil, fmt.Errorf("canonicalize source-scoped dynamic topology before execution admission: %w", err)
 		}
 	}
 	settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
-		return fmt.Errorf("settle managed startup preflight: %w", err)
+		return nil, fmt.Errorf("settle managed startup preflight: %w", err)
 	}
-	if rt.Manager != nil {
-		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority)
-		if activateErr != nil {
-			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", activateErr.Error())
-			return fmt.Errorf("activate managed execution: %w", activateErr)
+
+	prepared = true
+	var releaseMu sync.Mutex
+	released := false
+	return func(completePreparedTopology func() error) (releaseErr error) {
+		releaseMu.Lock()
+		if released {
+			releaseMu.Unlock()
+			return fmt.Errorf("prepared runtime start already released")
 		}
-		startCtx = managedexecution.WithAdmission(startCtx, activation.Admission)
-		if err := rt.Manager.Run(startCtx); err != nil {
-			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
-			return fmt.Errorf("start managed execution loops: %w", err)
-		}
-		if err := rt.Manager.CompleteDynamicFlowRuntimeStartupTopology(startCtx, startupTopology); err != nil {
-			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
-			return fmt.Errorf("complete source-scoped dynamic topology: %w", err)
-		}
-		if replayAllowed {
-			startupRecoveryDecision.ManagerRecoveryAttempted = true
-			if _, err := rt.Manager.HydrateForStartup(startCtx); err != nil {
-				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
-				rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
-				return fmt.Errorf("hydrate manager after dynamic topology completion: %w", err)
+		released = true
+		releaseMu.Unlock()
+		started := false
+		defer func() {
+			if !started {
+				releaseErr = errors.Join(releaseErr, rt.stopWithOptions(DefaultShutdownOptions()))
 			}
-			rt.emitBootProgress(10, "manager_recovery_if_enabled", "ok", "agent state hydrated after topology completion")
-		} else {
-			rt.emitBootProgress(10, "manager_recovery_if_enabled", "skipped", "startup recovery disabled")
-		}
-		recovery := rt.recoverManagedExecution(startCtx, replayAllowed)
-		startupRecoveryDecision.ManagerReplayCount = recovery.ReplaySummary.ReplayedCount
-		startupRecoveryDecision.ManagerSkipCount = recovery.ReplaySummary.SkippedCount
-		startupRecoveryDecision.ManagerDropCount = recovery.ReplaySummary.DroppedCount
-		if recovery.ReplayErr != nil {
-			rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, recovery.ReplayErr)
-			rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
-			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", recovery.ReplayErr.Error())
-			return fmt.Errorf("recover pipeline obligations before delivery enumeration: %w", recovery.ReplayErr)
-		}
-		if err := rt.startAndSynchronizeDeliveryContinuations(startCtx); err != nil {
-			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
-			return fmt.Errorf("start and converge delivery continuations after recovery: %w", err)
-		}
-		rt.emitBootProgress(16, "manager_event_loop_start", "ok", "")
-	} else {
-		rt.emitBootProgress(16, "manager_event_loop_start", "skipped", "manager unavailable")
-	}
-	if err := rt.releaseAutonomousStartupProducers(ctx, startCtx, skipPersistentStartupRecovery, &startupRecoveryDecision); err != nil {
-		return err
-	}
-	if rt.Bus != nil {
-		if err := rt.startOutboxSweeper(startCtx); err != nil {
-			rt.emitBootProgress(17, "outbox_sweeper", "FAILED", err.Error())
+		}()
+		if err := startCtx.Err(); err != nil {
 			return err
 		}
-		rt.emitBootProgress(17, "outbox_sweeper", "started", "")
-	} else {
-		rt.emitBootProgress(17, "outbox_sweeper", "skipped", "event bus unavailable")
-	}
-	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
-	var bootCheck <-chan *worklifetime.EventDelivery
-	var bootSubscription worklifetime.InternalSubscription
-	if rt.Options.SelfCheck && rt.Bus != nil {
-		bootSubscription, err = rt.Bus.SubscribeInternal(startCtx, bootstrapSelfCheckSubscriberID, events.EventType("platform.boot"))
+		if rt.shutdownAdmissionClosed() {
+			return fmt.Errorf("prepared runtime was shut down before release")
+		}
+		if rt.Manager != nil {
+			activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority)
+			if activateErr != nil {
+				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", activateErr.Error())
+				return fmt.Errorf("activate managed execution: %w", activateErr)
+			}
+			startCtx = managedexecution.WithAdmission(startCtx, activation.Admission)
+			if err := rt.Manager.Run(startCtx); err != nil {
+				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
+				return fmt.Errorf("start managed execution loops: %w", err)
+			}
+			if err := rt.Manager.CompleteDynamicFlowRuntimeStartupTopology(startCtx, startupTopology); err != nil {
+				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
+				return fmt.Errorf("complete source-scoped dynamic topology: %w", err)
+			}
+			if completePreparedTopology != nil {
+				if err := completePreparedTopology(); err != nil {
+					return fmt.Errorf("complete prepared standing topology after publication: %w", err)
+				}
+			}
+			if replayAllowed {
+				startupRecoveryDecision.ManagerRecoveryAttempted = true
+				if _, err := rt.Manager.HydrateForStartup(startCtx); err != nil {
+					rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
+					rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
+					return fmt.Errorf("hydrate manager after dynamic topology completion: %w", err)
+				}
+				rt.emitBootProgress(10, "manager_recovery_if_enabled", "ok", "agent state hydrated after topology completion")
+			} else {
+				rt.emitBootProgress(10, "manager_recovery_if_enabled", "skipped", "startup recovery disabled")
+			}
+			recovery := rt.recoverManagedExecution(startCtx, replayAllowed)
+			startupRecoveryDecision.ManagerReplayCount = recovery.ReplaySummary.ReplayedCount
+			startupRecoveryDecision.ManagerSkipCount = recovery.ReplaySummary.SkippedCount
+			startupRecoveryDecision.ManagerDropCount = recovery.ReplaySummary.DroppedCount
+			if recovery.ReplayErr != nil {
+				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, recovery.ReplayErr)
+				rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
+				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", recovery.ReplayErr.Error())
+				return fmt.Errorf("recover pipeline obligations before delivery enumeration: %w", recovery.ReplayErr)
+			}
+			if err := rt.startAndSynchronizeDeliveryContinuations(startCtx); err != nil {
+				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
+				return fmt.Errorf("start and converge delivery continuations after recovery: %w", err)
+			}
+			rt.emitBootProgress(16, "manager_event_loop_start", "ok", "")
+		} else {
+			rt.emitBootProgress(16, "manager_event_loop_start", "skipped", "manager unavailable")
+		}
+		if err := rt.releaseAutonomousStartupProducers(ctx, startCtx, skipPersistentStartupRecovery, &startupRecoveryDecision); err != nil {
+			return err
+		}
+		if rt.Bus != nil {
+			if err := rt.startOutboxSweeper(startCtx); err != nil {
+				rt.emitBootProgress(17, "outbox_sweeper", "FAILED", err.Error())
+				return err
+			}
+			rt.emitBootProgress(17, "outbox_sweeper", "started", "")
+		} else {
+			rt.emitBootProgress(17, "outbox_sweeper", "skipped", "event bus unavailable")
+		}
+		rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
+		var bootCheck <-chan *worklifetime.EventDelivery
+		var bootSubscription worklifetime.InternalSubscription
+		if rt.Options.SelfCheck && rt.Bus != nil {
+			bootSubscription, err = rt.Bus.SubscribeInternal(startCtx, bootstrapSelfCheckSubscriberID, events.EventType("platform.boot"))
+			if err != nil {
+				return fmt.Errorf("subscribe platform.boot self-check: %w", err)
+			}
+			bootSubscription.MarkReady()
+			bootCheck = bootSubscription.Deliveries()
+			defer func() { _ = bootSubscription.Complete(false) }()
+			rt.emitBootProgress(18, "boot_self_check_optional", "ok", "platform.boot self-check subscribed")
+		} else {
+			rt.emitBootProgress(18, "boot_self_check_optional", "skipped", "self-check disabled or event bus unavailable")
+		}
+		bootEventID, err := rt.publishBootCompleted(context.Background(), bootCompletedReport{
+			StartedAt:                 bootStartedAt,
+			RecoveryDecision:          startupRecoveryDecision,
+			StaticAgentsStarted:       staticAgentIDs,
+			FlowRequiredAgentsStarted: flowRequiredAgentIDs,
+			SystemContainersStarted:   rt.Options.SystemContainers,
+			SelfCheckRequired:         rt.Options.SelfCheck,
+		})
 		if err != nil {
-			return fmt.Errorf("subscribe platform.boot self-check: %w", err)
+			rt.emitBootProgress(19, "platform_boot_event_published", "FAILED", err.Error())
+			return fmt.Errorf("publish platform.boot: %w", err)
 		}
-		bootSubscription.MarkReady()
-		bootCheck = bootSubscription.Deliveries()
-		defer func() { _ = bootSubscription.Complete(false) }()
-		rt.emitBootProgress(18, "boot_self_check_optional", "ok", "platform.boot self-check subscribed")
-	} else {
-		rt.emitBootProgress(18, "boot_self_check_optional", "skipped", "self-check disabled or event bus unavailable")
-	}
-	bootEventID, err := rt.publishBootCompleted(context.Background(), bootCompletedReport{
-		StartedAt:                 bootStartedAt,
-		RecoveryDecision:          startupRecoveryDecision,
-		StaticAgentsStarted:       staticAgentIDs,
-		FlowRequiredAgentsStarted: flowRequiredAgentIDs,
-		SystemContainersStarted:   rt.Options.SystemContainers,
-		SelfCheckRequired:         rt.Options.SelfCheck,
-	})
-	if err != nil {
-		rt.emitBootProgress(19, "platform_boot_event_published", "FAILED", err.Error())
-		return fmt.Errorf("publish platform.boot: %w", err)
-	}
-	rt.emitBootProgress(19, "platform_boot_event_published", "ok", bootEventID)
-	if rt.Options.SelfCheck {
-		if err := rt.verifyBootPublished(bootCheck); err != nil {
-			rt.emitBootProgress(18, "boot_self_check_optional", "FAILED", err.Error())
-			return fmt.Errorf("self-check failed: %w", err)
+		rt.emitBootProgress(19, "platform_boot_event_published", "ok", bootEventID)
+		if rt.Options.SelfCheck {
+			if err := rt.verifyBootPublished(bootCheck); err != nil {
+				rt.emitBootProgress(18, "boot_self_check_optional", "FAILED", err.Error())
+				return fmt.Errorf("self-check failed: %w", err)
+			}
 		}
-	}
-	started = true
-	return nil
+		started = true
+		return nil
+	}, nil
 }
 
 func (rt *Runtime) releaseAutonomousStartupProducers(ctx, startCtx context.Context, skipPersistentStartupRecovery bool, decision *startupRecoveryDecisionReport) error {
@@ -2088,10 +2129,6 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	rt.lifecycleMu.Unlock()
 	rt.releaseAuthorActivityCatalog()
 	return shutdownErr
-}
-
-func (rt *Runtime) cleanupStartFailure() {
-	_ = rt.stopWithOptions(DefaultShutdownOptions())
 }
 
 func (rt *Runtime) Wait(ctx context.Context) {

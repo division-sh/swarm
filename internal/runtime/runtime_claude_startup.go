@@ -447,115 +447,122 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 	client := &http.Client{Timeout: 10 * time.Second}
 	surfaceIDs := make([]string, 0, len(targets))
 	for _, target := range targets {
-		agentCfg := target.config
-		modelRuntime := target.runtime
-		startupProbe := target.probe
-		agentID := strings.TrimSpace(agentCfg.ID)
-		if agentID == "" {
-			continue
-		}
-		agentCtx := runtimeactors.WithActor(ctx, agentCfg)
-		sessionTools, capabilities, err := startupToolPlan(agentCtx, agentCfg, modelRuntime, tools)
-		if err != nil {
-			return nil, fmt.Errorf("build managed capability startup inputs for agent %s: %w", agentID, err)
-		}
-		probeID := uuid.NewString()
-		capabilityAuthority := managedcapabilities.Authority{
-			Kind: managedcapabilities.AuthorityStartupProbe, ID: probeID,
-			ExecutionKind: authority.ExecutionKind, ExecutionAuthorityID: strings.TrimSpace(authority.ExecutionAuthorityID),
-			RunID: strings.TrimSpace(authority.RunID), StartupOwnerID: strings.TrimSpace(authority.StartupOwnerID), StartupGeneration: authority.StartupGeneration,
-		}
-		surface, err := llm.ManagedCapabilitySurfaceForStartup(agentCtx, target.plan, modelRuntime, sessionTools, capabilities, capabilityAuthority)
-		if err != nil {
-			return nil, fmt.Errorf("build managed capability startup surface for agent %s: %w", agentID, err)
-		}
-		if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, surface); err != nil {
-			return nil, fmt.Errorf("persist managed capability startup plan for agent %s: %w", agentID, err)
-		}
-		effectAuthority, err := authority.EffectAuthority(probeID, agentID)
-		if err != nil {
-			return nil, fmt.Errorf("build startup effect authority for agent %s: %w", agentID, err)
-		}
-		agentCtx = managedcapabilities.WithContext(agentCtx, surface)
-		agentCtx = runtimeeffects.WithAuthority(agentCtx, effectAuthority)
-		agentCtx = runtimeeffects.WithController(agentCtx, authority.EffectController)
-		providerPrompt, err := agentCfg.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
-		if err != nil {
-			return nil, fmt.Errorf("resolve startup prompt for agent %s: %w", agentID, err)
-		}
-		systemPrompt, err := providerPrompt.Text()
-		if err != nil {
-			return nil, fmt.Errorf("render startup prompt for agent %s: %w", agentID, err)
-		}
-		probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, systemPrompt, sessionTools)
-		if err != nil {
-			return nil, fmt.Errorf("claude cli startup probe failed for agent %s: %w", agentID, err)
-		}
-		if probeResp == nil || probeResp.CapabilitySurface == nil {
-			return nil, fmt.Errorf("claude cli startup probe omitted managed capability evidence for agent %s", agentID)
-		}
-		surface = probeResp.CapabilitySurface.Clone()
-		if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, surface); err != nil {
-			return nil, fmt.Errorf("persist managed capability provider evidence for agent %s: %w", agentID, err)
-		}
-		expectedNames := startupSurfaceCanonicalNames(surface, managedcapabilities.BindingMCPTool)
-		if len(expectedNames) == 0 {
-			if err := validateEffectiveManagedCapabilitySurface(surface); err != nil {
-				return nil, fmt.Errorf("managed capability startup surface is incomplete for agent %s: %w", agentID, err)
+		err := func() error {
+			agentCfg := target.config
+			modelRuntime := target.runtime
+			startupProbe := target.probe
+			agentID := strings.TrimSpace(agentCfg.ID)
+			if agentID == "" {
+				return nil
 			}
-			surfaceIDs = append(surfaceIDs, surface.ID)
-			continue
-		}
-		agentCtx = managedcapabilities.WithContext(agentCtx, surface)
-		binding, enabled, err := llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
-			AgentID: agentID,
-			Tools:   sessionTools,
-		}, gatewayBinding, llm.MCPGatewayHostEndpoint)
+			agentCtx := runtimeactors.WithActor(ctx, agentCfg)
+			agentCtx, sessionTools, capabilities, release, err := startupToolPlan(agentCtx, agentCfg, modelRuntime, tools)
+			if err != nil {
+				return fmt.Errorf("build managed capability startup inputs for agent %s: %w", agentID, err)
+			}
+			defer release()
+			probeID := uuid.NewString()
+			capabilityAuthority := managedcapabilities.Authority{
+				Kind: managedcapabilities.AuthorityStartupProbe, ID: probeID,
+				ExecutionKind: authority.ExecutionKind, ExecutionAuthorityID: strings.TrimSpace(authority.ExecutionAuthorityID),
+				RunID: strings.TrimSpace(authority.RunID), StartupOwnerID: strings.TrimSpace(authority.StartupOwnerID), StartupGeneration: authority.StartupGeneration,
+			}
+			surface, err := llm.ManagedCapabilitySurfaceForStartup(agentCtx, target.plan, modelRuntime, sessionTools, capabilities, capabilityAuthority)
+			if err != nil {
+				return fmt.Errorf("build managed capability startup surface for agent %s: %w", agentID, err)
+			}
+			if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, surface); err != nil {
+				return fmt.Errorf("persist managed capability startup plan for agent %s: %w", agentID, err)
+			}
+			effectAuthority, err := authority.EffectAuthority(probeID, agentID)
+			if err != nil {
+				return fmt.Errorf("build startup effect authority for agent %s: %w", agentID, err)
+			}
+			agentCtx = managedcapabilities.WithContext(agentCtx, surface)
+			agentCtx = runtimeeffects.WithAuthority(agentCtx, effectAuthority)
+			agentCtx = runtimeeffects.WithController(agentCtx, authority.EffectController)
+			providerPrompt, err := agentCfg.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
+			if err != nil {
+				return fmt.Errorf("resolve startup prompt for agent %s: %w", agentID, err)
+			}
+			systemPrompt, err := providerPrompt.Text()
+			if err != nil {
+				return fmt.Errorf("render startup prompt for agent %s: %w", agentID, err)
+			}
+			probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, systemPrompt, sessionTools)
+			if err != nil {
+				return fmt.Errorf("claude cli startup probe failed for agent %s: %w", agentID, err)
+			}
+			if probeResp == nil || probeResp.CapabilitySurface == nil {
+				return fmt.Errorf("claude cli startup probe omitted managed capability evidence for agent %s", agentID)
+			}
+			surface = probeResp.CapabilitySurface.Clone()
+			if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, surface); err != nil {
+				return fmt.Errorf("persist managed capability provider evidence for agent %s: %w", agentID, err)
+			}
+			expectedNames := startupSurfaceCanonicalNames(surface, managedcapabilities.BindingMCPTool)
+			if len(expectedNames) == 0 {
+				if err := validateEffectiveManagedCapabilitySurface(surface); err != nil {
+					return fmt.Errorf("managed capability startup surface is incomplete for agent %s: %w", agentID, err)
+				}
+				surfaceIDs = append(surfaceIDs, surface.ID)
+				return nil
+			}
+			agentCtx = managedcapabilities.WithContext(agentCtx, surface)
+			binding, enabled, err := llm.BuildMCPHTTPBinding(agentCtx, cfg, turnStore, &llm.Session{
+				AgentID: agentID,
+				Tools:   sessionTools,
+			}, gatewayBinding, llm.MCPGatewayHostEndpoint)
+			if err != nil {
+				return fmt.Errorf("build mcp startup probe transport for agent %s: %w", agentID, err)
+			}
+			if !enabled {
+				return fmt.Errorf("mcp startup probe transport is disabled for agent %s", agentID)
+			}
+			if strings.TrimSpace(binding.ContextToken) == "" {
+				return fmt.Errorf("mcp startup probe missing turn context token for agent %s", agentID)
+			}
+			actualTools, err := startupProbeMCPToolsList(agentCtx, client, binding)
+			if err != nil {
+				turnStore.UnregisterTurnContext(binding.ContextToken)
+				return fmt.Errorf("mcp tools/list startup probe failed for agent %s: %w", agentID, err)
+			}
+			actualNames := startupToolNames(actualTools)
+			if !equalSortedStrings(actualNames, expectedNames) {
+				turnStore.UnregisterTurnContext(binding.ContextToken)
+				return fmt.Errorf("mcp tools/list returned unexpected tool surface for agent %s: expected [%s], got [%s]", agentID, strings.Join(expectedNames, ", "), strings.Join(actualNames, ", "))
+			}
+			listedSurface, ok := turnStore.ResolveManagedCapabilitySurface(binding.ContextToken)
+			if !ok {
+				turnStore.UnregisterTurnContext(binding.ContextToken)
+				return fmt.Errorf("mcp tools/list did not settle capability evidence for agent %s", agentID)
+			}
+			if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, listedSurface); err != nil {
+				turnStore.UnregisterTurnContext(binding.ContextToken)
+				return fmt.Errorf("persist managed capability MCP evidence for agent %s: %w", agentID, err)
+			}
+			if err := validateEffectiveManagedCapabilitySurface(listedSurface); err != nil {
+				turnStore.UnregisterTurnContext(binding.ContextToken)
+				return fmt.Errorf("managed capability startup surface is incomplete for agent %s: %w", agentID, err)
+			}
+			probeName, ok, err := selectStartupCallableTool(actualTools, listedSurface.CapabilitySet())
+			if err != nil {
+				turnStore.UnregisterTurnContext(binding.ContextToken)
+				return fmt.Errorf("mcp startup probe select callable tool for agent %s: %w", agentID, err)
+			}
+			if ok {
+				err = startupProbeMCPToolsCall(agentCtx, client, binding, probeName)
+			}
+			turnStore.UnregisterTurnContext(binding.ContextToken)
+			if err != nil {
+				return fmt.Errorf("mcp tools/call startup probe failed for agent %s tool %s: %w", agentID, probeName, err)
+			}
+			surfaceIDs = append(surfaceIDs, listedSurface.ID)
+			return nil
+		}()
 		if err != nil {
-			return nil, fmt.Errorf("build mcp startup probe transport for agent %s: %w", agentID, err)
+			return nil, err
 		}
-		if !enabled {
-			return nil, fmt.Errorf("mcp startup probe transport is disabled for agent %s", agentID)
-		}
-		if strings.TrimSpace(binding.ContextToken) == "" {
-			return nil, fmt.Errorf("mcp startup probe missing turn context token for agent %s", agentID)
-		}
-		actualTools, err := startupProbeMCPToolsList(agentCtx, client, binding)
-		if err != nil {
-			turnStore.UnregisterTurnContext(binding.ContextToken)
-			return nil, fmt.Errorf("mcp tools/list startup probe failed for agent %s: %w", agentID, err)
-		}
-		actualNames := startupToolNames(actualTools)
-		if !equalSortedStrings(actualNames, expectedNames) {
-			turnStore.UnregisterTurnContext(binding.ContextToken)
-			return nil, fmt.Errorf("mcp tools/list returned unexpected tool surface for agent %s: expected [%s], got [%s]", agentID, strings.Join(expectedNames, ", "), strings.Join(actualNames, ", "))
-		}
-		listedSurface, ok := turnStore.ResolveManagedCapabilitySurface(binding.ContextToken)
-		if !ok {
-			turnStore.UnregisterTurnContext(binding.ContextToken)
-			return nil, fmt.Errorf("mcp tools/list did not settle capability evidence for agent %s", agentID)
-		}
-		if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, listedSurface); err != nil {
-			turnStore.UnregisterTurnContext(binding.ContextToken)
-			return nil, fmt.Errorf("persist managed capability MCP evidence for agent %s: %w", agentID, err)
-		}
-		if err := validateEffectiveManagedCapabilitySurface(listedSurface); err != nil {
-			turnStore.UnregisterTurnContext(binding.ContextToken)
-			return nil, fmt.Errorf("managed capability startup surface is incomplete for agent %s: %w", agentID, err)
-		}
-		probeName, ok, err := selectStartupCallableTool(actualTools, listedSurface.CapabilitySet())
-		if err != nil {
-			turnStore.UnregisterTurnContext(binding.ContextToken)
-			return nil, fmt.Errorf("mcp startup probe select callable tool for agent %s: %w", agentID, err)
-		}
-		if ok {
-			err = startupProbeMCPToolsCall(agentCtx, client, binding, probeName)
-		}
-		turnStore.UnregisterTurnContext(binding.ContextToken)
-		if err != nil {
-			return nil, fmt.Errorf("mcp tools/call startup probe failed for agent %s tool %s: %w", agentID, probeName, err)
-		}
-		surfaceIDs = append(surfaceIDs, listedSurface.ID)
 	}
 	sort.Strings(surfaceIDs)
 	return surfaceIDs, nil
@@ -587,15 +594,26 @@ func isClaudeCLIBackend(cfg *config.Config) (bool, error) {
 	return profile.ID == llmselection.BackendClaudeCLI, nil
 }
 
-func startupToolPlan(ctx context.Context, agentCfg runtimeactors.AgentConfig, modelRuntime llm.Runtime, tools claudeStartupToolSource) ([]llm.ToolDefinition, toolcapabilities.Set, error) {
-	concreteTools := tools.ToolDefinitionsForActor(agentCfg)
-	if contextAware, ok := tools.(claudeStartupContextAwareToolSource); ok {
-		concreteTools = contextAware.ToolDefinitionsForActorInContext(ctx, agentCfg)
-	}
+func startupToolPlan(ctx context.Context, agentCfg runtimeactors.AgentConfig, modelRuntime llm.Runtime, tools claudeStartupToolSource) (context.Context, []llm.ToolDefinition, toolcapabilities.Set, func(), error) {
+	release := func() {}
+	var concreteTools []llm.ToolDefinition
 	var err error
+	if leased, ok := tools.(interface {
+		AcquireToolDefinitionsForActorInContext(context.Context, runtimeactors.AgentConfig) (context.Context, []llm.ToolDefinition, func(), error)
+	}); ok {
+		ctx, concreteTools, release, err = leased.AcquireToolDefinitionsForActorInContext(ctx, agentCfg)
+		if err != nil {
+			return ctx, nil, toolcapabilities.Set{}, nil, err
+		}
+	} else if contextAware, ok := tools.(claudeStartupContextAwareToolSource); ok {
+		concreteTools = contextAware.ToolDefinitionsForActorInContext(ctx, agentCfg)
+	} else {
+		concreteTools = tools.ToolDefinitionsForActor(agentCfg)
+	}
 	concreteTools, err = llm.ConcreteManagedToolDefinitions(modelRuntime, agentCfg, concreteTools)
 	if err != nil {
-		return nil, toolcapabilities.Set{}, err
+		release()
+		return ctx, nil, toolcapabilities.Set{}, nil, err
 	}
 	concreteNames := startupSessionToolNames(concreteTools)
 	var concreteCaps toolcapabilities.Set
@@ -604,7 +622,7 @@ func startupToolPlan(ctx context.Context, agentCfg runtimeactors.AgentConfig, mo
 	} else {
 		concreteCaps = tools.ToolCapabilitiesForActor(agentCfg, concreteNames, nil)
 	}
-	return concreteTools, concreteCaps, nil
+	return ctx, concreteTools, concreteCaps, release, nil
 }
 
 func startupSurfaceCanonicalNames(surface managedcapabilities.Surface, kind managedcapabilities.BindingKind) []string {

@@ -32,6 +32,9 @@ type asyncSiteLedgerEntry struct {
 // a launch within a function can preserve the count: behavioral tests and review
 // must still establish cancellation, joining, and exactly-once settlement.
 var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
+	"after_func|internal/runtime/channelactivation/presentation.go|BindPresentation":                                {1, asyncSiteCanonicalOwner, "the existing activation owner revokes a transport binding on parent cancellation; binding close joins retained requests and the root joins their leases"},
+	"after_func|internal/runtime/channelactivation/presentation.go|Owner.retainPresentation":                        {1, asyncSiteCanonicalOwner, "an exact parent cancels the retained child; child release stops the bridge and parent release joins children before publication retirement"},
+	"after_func|internal/runtime/channelactivation/presentation.go|PresentationBinding.Acquire":                     {1, asyncSiteCanonicalOwner, "token revocation cancels each admitted request; request release stops the bridge and joins its lease before registry close can finish"},
 	"after_func|internal/apiv1/handler.go|webSocketSession.run":                                                     {1, asyncSiteCanonicalOwner, "session lease cancellation closes the socket and the owned subscription joins before release"},
 	"after_func|internal/runtime/channelactivation/owner.go|Owner.AcquirePresentationContext":                       {1, asyncSiteSynchronousJoin, "presentation acquisition stops the cancellation wakeup bridge before returning with an exact publication lease or error"},
 	"after_func|internal/runtime/channelactivation/owner.go|Owner.ReplaceContext":                                   {1, asyncSiteSynchronousJoin, "replacement stops the cancellation wakeup bridge before returning after the predecessor lease fence"},

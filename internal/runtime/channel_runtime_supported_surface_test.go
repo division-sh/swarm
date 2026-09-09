@@ -442,6 +442,10 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatalf("predecessor activity calls after replacement fence = %d, want three total distinct operations", calls.Load())
 			}
 			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 6, 3)
+			if err := fencedOwner.Replace(testChannelActivationPublication(t, binding)); err != nil {
+				t.Fatal(err)
+			}
+			proveRegisteredManagedChannelTransport(t, ctx, eventStore, fencedExecutor, fencedOwner, binding, actor, calls.Load)
 		})
 	}
 }

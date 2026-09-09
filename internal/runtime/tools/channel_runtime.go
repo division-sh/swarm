@@ -33,11 +33,6 @@ type channelOperation struct {
 }
 
 type channelRuntimeLeaseContextKey struct{}
-type channelActivationGenerationContextKey struct{}
-
-type channelActivationPresentation struct {
-	lease *runtimechannelactivation.Lease
-}
 
 type channelRuntimeExecutionLease struct {
 	toolID string
@@ -71,27 +66,29 @@ func channelRuntimeExecutionPublicationFromContext(ctx context.Context) (*runtim
 	return admission.lease, ok && admission.lease != nil
 }
 
-func withChannelActivationGeneration(ctx context.Context, lease *runtimechannelactivation.Lease) context.Context {
-	if ctx == nil || lease == nil || !lease.Generation().Valid() {
-		return ctx
+func channelPresentationScope(ctx context.Context, actor models.AgentConfig) runtimechannelactivation.PresentationScope {
+	source, _ := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	inbound, _ := runtimebus.InboundEventFromContext(ctx)
+	return runtimechannelactivation.PresentationScope{
+		Source: source.BundleHash(), Actor: actor.ID, Flow: actor.CanonicalFlowPath(),
+		Run: runtimecorrelation.RunIDFromContext(ctx), Entity: actor.EntityID, Input: inbound.ID(),
+		Identity: actor.Identity.Normalize(),
 	}
-	return context.WithValue(ctx, channelActivationGenerationContextKey{}, channelActivationPresentation{lease: lease})
-}
-
-func channelActivationPresentationFromContext(ctx context.Context) (*runtimechannelactivation.Lease, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	presentation, ok := ctx.Value(channelActivationGenerationContextKey{}).(channelActivationPresentation)
-	return presentation.lease, ok && presentation.lease != nil
 }
 
 func (e *Executor) admitChannelRuntimeExecution(ctx context.Context, toolID string) (context.Context, *runtimechannelactivation.Lease, error) {
 	if e == nil || e.channelActivations == nil {
+		if _, inherited := runtimechannelactivation.PresentationFromContext(ctx); inherited {
+			return ctx, nil, fmt.Errorf("inherited channel presentation has no matching executor owner")
+		}
 		return ctx, nil, nil
 	}
 	toolID = strings.TrimSpace(toolID)
-	if presentation, pinned := channelActivationPresentationFromContext(ctx); pinned {
+	if presentation, pinned := runtimechannelactivation.PresentationFromContext(ctx); pinned {
+		actor, _ := ActorFromContext(ctx)
+		if err := e.channelActivations.ValidatePresentation(ctx, channelPresentationScope(ctx, actor)); err != nil {
+			return ctx, nil, err
+		}
 		if operation, found := presentation.BorrowRuntimeOperation(toolID); found {
 			return withChannelRuntimeExecutionLease(ctx, toolID, operation), nil, nil
 		}
