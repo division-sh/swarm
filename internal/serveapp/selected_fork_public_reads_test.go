@@ -85,6 +85,9 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 	if turn.Turn.TurnID != turns.Turns[0].TurnID || turn.Session.RunID != runID || turn.Session.SessionID != conversation.SessionID || turn.Turn.Failure != nil || turn.Frame.FrameID == "" {
 		t.Fatalf("selected turn detail lost execution/frame evidence: %+v", turn)
 	}
+	if turn.Turn.Tokens == nil || turn.Turn.Tokens.Input != 1 || turn.Turn.Tokens.Output != 1 {
+		t.Fatalf("selected turn did not retain target mock usage: %+v", turn.Turn.Tokens)
+	}
 	var eventList operatorread.OperatorEventListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 1000}, &eventList)
 	if len(eventList.Events) == 0 || eventList.NextCursor != "" {
@@ -125,5 +128,10 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 		if log.RunID != runID {
 			t.Fatalf("selected log query borrowed another run: %+v", log)
 		}
+	}
+	var incidents operatorread.OperatorRuntimeIncidentListResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "runtime.incidents", map[string]any{"bundle_hash": hash, "limit": 500}, &incidents)
+	if len(incidents.Incidents) != 0 || incidents.NextCursor != "" {
+		t.Fatalf("successful selected execution borrowed an incident or failed: %+v", incidents)
 	}
 }

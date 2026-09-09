@@ -70,7 +70,8 @@ func (b *forkReceiverExecutionBarrier) NotifyLifecycle(ctx context.Context, sign
 // not discharge that path's post-frontier committed replay-scope refusal.
 func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		for _, name := range []string{"available_control", "declared_agent_control", "unavailable_after_commit", "newer_claim_store_fence"} {
+		for _, name := range []string{"available_control", "declared_agent_control", "same_name_agent_control", "unavailable_after_commit", "newer_claim_store_fence"} {
+			declaredAgent := name == "declared_agent_control" || name == "same_name_agent_control"
 			unavailable := name == "unavailable_after_commit" || name == "newer_claim_store_fence"
 			newerClaim := name == "newer_claim_store_fence"
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
@@ -85,32 +86,27 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				// a post-frontier publication crossing the replay-scope policy.
 				root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 				targetRoot := root
-				if name == "declared_agent_control" {
+				if name == "same_name_agent_control" {
+					writeSelectedForkAgentProofFixture(t, root, "loaded-decoy", "[receiver.closed]", "SOURCE CONFIGURATION MUST NOT EXECUTE IN THE FORK", "return {'text': 'Source-only delivery.', 'usage': {'input_tokens': 2, 'output_tokens': 2}}")
+				}
+				if declaredAgent {
 					targetRoot = canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
-					if err := os.MkdirAll(filepath.Join(targetRoot, "consumer", "prompts"), 0o755); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.MkdirAll(filepath.Join(targetRoot, "consumer", "mocks"), 0o755); err != nil {
-						t.Fatal(err)
-					}
-					for file, contents := range map[string]string{
-						"agents.yaml":         "same-name:\n  id: same-name\n  role: observer\n  model: regular\n  intent: prompts/observer.md\n  subscriptions: [work.ready]\n  emit_events: []\n  mock:\n    kind: python\n    module: mocks/observer.py\n",
-						"prompts/observer.md": "Observe the explicitly delivered closure event.\n",
-						"mocks/observer.py":   "def handle(input):\n    return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}\n",
-					} {
-						if err := os.WriteFile(filepath.Join(targetRoot, "consumer", file), []byte(contents), 0o644); err != nil {
-							t.Fatal(err)
-						}
-					}
+					writeSelectedForkAgentProofFixture(t, targetRoot, "observer", "[work.ready]", "Observe the explicitly delivered closure event.", "return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}")
 				}
 				checkBusiness := func(t *testing.T, rt servedControlProofRuntime, runID, eventID, entityID string) {
-					if name == "declared_agent_control" {
+					if declaredAgent {
 						requireSelectedForkMixedBusinessMutation(t, rt, runID, eventID, entityID)
 					} else {
 						requireForkReceiverBusinessMutation(t, rt, runID, eventID, entityID)
 					}
 				}
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+				if name == "same_name_agent_control" {
+					declarations := semanticview.AgentDeclarations(rt.Runtime.Options.WorkflowModule.SemanticSource())
+					if len(declarations) != 1 || declarations[0].OwnerFlowID != "consumer" || declarations[0].LocalID != "same-name" || declarations[0].Entry.Role != "loaded-decoy" {
+						t.Fatalf("loaded source lost the distinct same-name declaration: %+v", declarations)
+					}
+				}
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-settlement-seed",
@@ -143,7 +139,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 30*time.Second)
 				defer cancel()
 				forkOptions := rt.ForkRuntime
-				if name == "declared_agent_control" {
+				if declaredAgent {
 					manager := workspace.NewHostManager()
 					cfg := workspace.DefaultHostConfig()
 					cfg.WorkspaceRoot = t.TempDir()
@@ -159,7 +155,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
 					AgentRuntime:      forkOptions,
 				}
-				if name == "declared_agent_control" {
+				if declaredAgent {
 					target := loadWorkflowValidationBundleAt(t, targetRoot)
 					fact, err := prepareServeSourceArtifact(ctx, selected.SourceArtifactWriter(), target)
 					if err != nil || fact.BundleHash() == rt.BundleHash {
@@ -337,9 +333,27 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
 				if !unavailable {
-					requireSelectedForkPublicControlBoundary(t, rt, claim.RunID(), claimed.signal.EventID, name == "declared_agent_control")
+					requireSelectedForkPublicControlBoundary(t, rt, claim.RunID(), claimed.signal.EventID, declaredAgent)
 				}
 			})
+		}
+	}
+}
+
+func writeSelectedForkAgentProofFixture(t *testing.T, root, role, subscriptions, prompt, body string) {
+	t.Helper()
+	for _, dir := range []string{"prompts", "mocks"} {
+		if err := os.MkdirAll(filepath.Join(root, "consumer", dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for file, contents := range map[string]string{
+		"agents.yaml":         "same-name:\n  id: same-name\n  role: " + role + "\n  model: regular\n  intent: prompts/observer.md\n  subscriptions: " + subscriptions + "\n  emit_events: []\n  mock:\n    kind: python\n    module: mocks/observer.py\n",
+		"prompts/observer.md": prompt + "\n",
+		"mocks/observer.py":   "def handle(input):\n    " + body + "\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, "consumer", file), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
