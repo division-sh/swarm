@@ -389,6 +389,7 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > test-results/jobs.json
           go run ./cmd/swarm-test-timing -assert-execution-sha \
@@ -400,6 +401,7 @@ jobs:
             -evidence-root test-results/evidence \
             -jobs test-results/jobs.json \
             -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
+            -workflow-head-sha "$WORKFLOW_HEAD_SHA" \
             -result-json test-results/timing-budget-result.json \
             -markdown test-results/timing-budget-result.md
           cat test-results/timing-budget-result.md >> "$GITHUB_STEP_SUMMARY"

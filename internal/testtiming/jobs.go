@@ -46,6 +46,8 @@ type JobSummary struct {
 	Profile         string  `json:"profile"`
 	RunID           int64   `json:"run_id"`
 	RunAttempt      int     `json:"run_attempt"`
+	WorkflowHeadSHA string  `json:"workflow_head_sha"`
+	ExecutionSHA    string  `json:"execution_sha"`
 	UnitCount       int     `json:"unit_count"`
 	RunnerMinutes   float64 `json:"runner_minutes"`
 	StartLagSeconds float64 `json:"start_lag_seconds"`
@@ -76,13 +78,19 @@ func ReadActionJobs(r io.Reader) ([]ActionJob, error) {
 
 // AttachJobEvidence joins whole jobs to already plan-bound command evidence.
 // It does not infer a pass from a missing job or substitute another run attempt.
-func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID int64, attempt int, jobs []ActionJob) {
+// workflowHeadSHA comes from the triggering event, not the checkout: PR jobs
+// report the branch head even when the plan executes a synthetic merge commit.
+func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID int64, attempt int, workflowHeadSHA string, jobs []ActionJob) {
 	problem := func(message string) {
 		result.Problems = append(result.Problems, message)
 		result.Status = BudgetIncomplete
 	}
 	if runID <= 0 || attempt <= 0 {
 		problem("positive workflow run ID and attempt are required")
+		return
+	}
+	if strings.TrimSpace(workflowHeadSHA) == "" {
+		problem("workflow head SHA from the triggering event is required")
 		return
 	}
 	expected := map[string]int{}
@@ -97,7 +105,7 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 	}
 	var endpoints []endpoint
 	var first, last time.Time
-	summary := &JobSummary{Profile: plan.Profile, RunID: runID, RunAttempt: attempt}
+	summary := &JobSummary{Profile: plan.Profile, RunID: runID, RunAttempt: attempt, WorkflowHeadSHA: workflowHeadSHA, ExecutionSHA: plan.HeadSHA}
 	for _, job := range jobs {
 		if !strings.HasPrefix(job.Name, "Go proof ") {
 			continue
@@ -112,7 +120,7 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 			continue
 		}
 		seen[job.Name], ids[job.ID] = true, true
-		if job.RunID != runID || job.RunAttempt != attempt || job.HeadSHA != plan.HeadSHA {
+		if job.RunID != runID || job.RunAttempt != attempt || job.HeadSHA != workflowHeadSHA {
 			problem("wrong run/attempt/head for " + job.Name)
 			continue
 		}
