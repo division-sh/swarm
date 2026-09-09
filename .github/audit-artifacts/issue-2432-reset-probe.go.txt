@@ -1,0 +1,58 @@
+package runtimepersistence
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil"
+)
+
+func TestGDiagnosticAfterAdmittedResetProbe(t *testing.T) {
+	for _, sqlite := range []bool{true, false} {
+		for _, projected := range []bool{true, false} {
+			t.Run(fmt.Sprintf("sqlite=%t/projected=%t", sqlite, projected), func(t *testing.T) {
+				var selected diagnosticProjectionTestStore
+				var db *sql.DB
+				if sqlite {
+					s := newBootstrappedSQLiteRuntimeStoreForTest(t)
+					selected, db = s, s.backend.ConstructionHandle()
+				} else {
+					_, db, _ = testutil.StartPostgres(t)
+					selected = admitTestPostgresStore(t, db)
+				}
+				ctx := testAuthorActivityContext()
+				item := enqueueDiagnosticTestAgent(t, selected, "retained-diagnostic")
+				if projected {
+					if _, err := selected.ProjectAgentLifecycleDiagnostics(ctx, 100); err != nil {
+						t.Fatal(err)
+					}
+				}
+				capability, err := agentfixture.ProcessCapability(t, ctx, selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := admitRetainedResetCleanupProof(t, capability, selected.(destructivereset.QuiescenceStore), item.Identity.RunID, false)
+				if _, err := capability.ApplyDestructiveResetCleanup(ctx, request, nil); err != nil {
+					t.Fatal(err)
+				}
+				var runs, outbox int
+				if err := db.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id=$1", item.Identity.RunID).Scan(&runs); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.QueryRow("SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE outbox_id=$1", item.OutboxID).Scan(&outbox); err != nil {
+					t.Fatal(err)
+				}
+				if runs != 0 || outbox != 1 {
+					t.Fatalf("cleanup prerequisite runs=%d outbox=%d", runs, outbox)
+				}
+				if n, err := selected.ProjectAgentLifecycleDiagnostics(context.Background(), 100); err != nil {
+					t.Fatalf("admitted reset poisoned later projection: projected_before=%t projected_now=%d retained=%d run=%d err=%v", projected, n, outbox, runs, err)
+				}
+			})
+		}
+	}
+}
