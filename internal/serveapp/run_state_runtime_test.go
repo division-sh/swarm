@@ -22,6 +22,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -38,6 +40,23 @@ func runStatusSubscriptionSource() semanticview.Source {
 	return semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	})
+}
+
+func runStatusAgentConfig(t *testing.T, runID, agentID string) runtimeactors.AgentConfig {
+	t.Helper()
+	profile, err := llmselection.ResolveActiveBackend("anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(profile, llmselection.BuiltInModelAliases(), serveTestAgentConfig(runtimeactors.AgentConfig{
+		ID: agentID, Identity: servedRuntimeRootIdentityForRun(t, runID, agentID),
+		FlowID: ".", Role: "worker", Type: "stub", Model: "regular",
+		Subscriptions: []string{"scan.requested"},
+	}))
+	if err != nil {
+		t.Fatalf("resolve run-status agent before admitting its revision: %v", err)
+	}
+	return resolved.Actor
 }
 
 func runStatusAuthorActivityContext(source runtimecorrelation.SourceArtifactFact) context.Context {
@@ -278,6 +297,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		return testAgent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
+		LifecycleStore:   storetest.AgentLifecycleFixture(t, pg),
 		SemanticSource:   runStatusSubscriptionSource(),
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
@@ -285,16 +305,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	runID := uuid.NewString()
-	registerServeTestDurableAgent(t, pg, am, serveTestAgentConfig(runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            testAgent.id,
-		Identity:      servedRuntimeRootIdentityForRun(t, runID, testAgent.id),
-		FlowID:        ".",
-		Role:          "worker",
-		Type:          "stub",
-		Model:         "regular",
-		Subscriptions: []string{"scan.requested"},
-	}), source)
+	registerServeTestDurableAgent(t, pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext(source))); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
@@ -406,6 +417,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		return testAgent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
+		LifecycleStore:   storetest.AgentLifecycleFixture(t, pg),
 		SemanticSource:   runStatusSubscriptionSource(),
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
@@ -413,16 +425,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	runID := uuid.NewString()
-	registerServeTestDurableAgent(t, pg, am, serveTestAgentConfig(runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            testAgent.id,
-		Identity:      servedRuntimeRootIdentityForRun(t, runID, testAgent.id),
-		FlowID:        ".",
-		Role:          "worker",
-		Type:          "stub",
-		Model:         "regular",
-		Subscriptions: []string{"scan.requested"},
-	}), source)
+	registerServeTestDurableAgent(t, pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext(source))); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
