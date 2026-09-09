@@ -3704,6 +3704,13 @@ handler_specification:
           source keeps its exact ancestor run/entity/mutation reference; it is not renamed to the child execution
           entity. Reading it requires exact retained revision and ancestor-lineage proof. Same-run captures still
           require the executing entity. Repeat projection changes neither source history nor frozen business values.
+          Historical barrier materialization admits only the complete fixed-revision relation between the intent,
+          declaration/digest, typed handle, route/entity, summary, activation/key, due basis and lifecycle state.
+          Unmatched, additional or contradictory schedules remain unsupported; a timer label or terminal barrier
+          flag alone grants no exception. Materialization does not dispatch an occurrence. Closed-pending inheritance
+          creates exactly one fresh child-local activation and repeats create none; terminal inheritance creates no
+          activation. This historical materialization rule does not grant pending selected execution: the separate
+          3d_selected_contract_timer_route_policy still requires an admitted deferred-work owner under #642.
     join:
       field: join
       type: object
@@ -17000,13 +17007,16 @@ run_model:
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
         runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
-        declarations, timed-join declarations, connect-time resolution through the exhaustive six-mode matrix
+        declarations, timed-join and fan-out delivery-barrier declarations, connect-time resolution through the exhaustive six-mode matrix
         (`create` and `select-or-create` can create; `select`, `fan-in`, `fan-out`, and `reply` cannot), and authored
         create_flow_instance actions as
         unsupported while the ephemeral selected-fork container has no
         long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
         delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
-        carried through selected execution admission and every container construction. No rejected path may create
+        carried through selected execution admission and every container construction. Exact fan-out barrier historical
+        materialization is separately admitted by the fan_out fork contract; copying that family does not authorize
+        selected dispatch of pending schedules. The selected execution gate remains in force before selected mutations.
+        No rejected path may create
         executable event, delivery, workflow, join, generic schedule, timer, dynamic readiness, agent, materialized route,
         lineage, or runtime-execution state. Agent
         scheduling remains fail-closed without a selected scheduler; boot/global schedules are not executed by this

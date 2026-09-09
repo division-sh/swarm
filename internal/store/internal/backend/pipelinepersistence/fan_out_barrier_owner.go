@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -25,8 +23,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
-
-const fanOutBarrierScheduleOwner = "workflow-runtime"
 
 func foldFanOutIntentTerminalDispositions(
 	ctx context.Context,
@@ -340,33 +336,6 @@ func fanOutBarrierGenerationCurrent(ctx context.Context, tx *sql.Tx, registratio
 	return runtimepipeline.WorkflowLoopGenerationCurrent(fields, stateBuckets, generation, "")
 }
 
-func fanOutBarrierSchedule(registration fanoutbarrier.Registration, summary fanoutbarrier.Summary, selectedNow time.Time) (runtimegenericschedule.AdmissionCommand, error) {
-	payload := registration.Handle.PayloadMetadata()
-	payload["join"] = summary.Context()
-	semanticPayload, err := canonicaljson.FromGo(payload)
-	if err != nil {
-		return runtimegenericschedule.AdmissionCommand{}, err
-	}
-	flowInstance := ""
-	if registration.RoutingSource.Kind() == events.RoutingSourceFlowOwnedControl {
-		flowInstance = registration.RoutingSource.Route().Normalized().FlowInstance
-	}
-	return runtimegenericschedule.AdmissionCommand{
-		ScheduleKey:   registration.Handle.TaskID(),
-		RunID:         registration.IntentKey.RunID,
-		EntityID:      registration.EntityID,
-		FlowInstance:  flowInstance,
-		OwnerKind:     runtimegenericschedule.OwnerSystem,
-		OwnerID:       fanOutBarrierScheduleOwner,
-		EventType:     registration.Handle.EventType(),
-		Payload:       semanticPayload,
-		RoutingSource: registration.RoutingSource,
-		ExecutionMode: registration.ExecutionMode,
-		Due:           runtimegenericschedule.AbsoluteDue(selectedNow),
-		TaskID:        registration.Handle.TaskID(),
-	}, nil
-}
-
 func advanceFanOutDeliveryBarriersTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -405,7 +374,7 @@ func advanceFanOutDeliveryBarriersTx(
 		status := fanoutbarrier.StatusClosedPending
 		scheduleKey := any(nil)
 		scheduleActivationID := any(nil)
-		command, err := fanOutBarrierSchedule(registration, fold.Summary, selectedNow)
+		command, err := runtimegenericschedule.FanOutBarrierAdmission(registration, fold.Summary, selectedNow)
 		if err != nil {
 			return nil, err
 		}
@@ -555,19 +524,8 @@ func cancelSupersededFanOutBarrierScheduleTx(
 	if !found {
 		return fmt.Errorf("superseded fan-out barrier schedule activation %s is missing", barrier.ScheduleActivationID)
 	}
-	expected, err := fanOutBarrierSchedule(barrier.Registration, *barrier.Summary, activation.InitialDueAt)
-	if err != nil {
+	if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(barrier, activation); err != nil {
 		return err
-	}
-	expectedHash, err := expected.ImmutableHash()
-	if err != nil {
-		return err
-	}
-	if activation.ID != strings.TrimSpace(barrier.ScheduleActivationID) ||
-		activation.Command.ScheduleKey != strings.TrimSpace(barrier.ScheduleKey) ||
-		activation.Command.TaskID != barrier.Registration.Handle.TaskID() ||
-		activation.ImmutableHash != expectedHash {
-		return fmt.Errorf("superseded fan-out barrier schedule activation contradicts its exact barrier owner")
 	}
 	cancelled, err := genericSchedules.CancelActivationTx(ctx, tx, effects, runtimegenericschedule.CancelCommand{
 		ActivationID: activation.ID,
@@ -955,7 +913,7 @@ func materializeRunForkFanOutBarrierTx(
 		if genericSchedules == nil || source.Summary == nil {
 			return fmt.Errorf("closed fork fan-out barrier requires generic schedule owner and summary")
 		}
-		command, err := fanOutBarrierSchedule(registration, *source.Summary, at)
+		command, err := runtimegenericschedule.FanOutBarrierAdmission(registration, *source.Summary, at)
 		if err != nil {
 			return err
 		}

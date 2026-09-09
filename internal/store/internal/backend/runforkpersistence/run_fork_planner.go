@@ -164,7 +164,7 @@ func planRunForkSnapshot(
 	}
 	plan.FanOutObligations = fanOutObligations
 	plan.FanOutObligationCount = len(fanOutObligations)
-	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending)
+	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending, fanOutObligations)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
