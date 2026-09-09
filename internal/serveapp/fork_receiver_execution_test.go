@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -11,15 +12,18 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
@@ -36,7 +40,7 @@ type forkReceiverExecutionBarrier struct {
 }
 
 func (b *forkReceiverExecutionBarrier) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
-	if signal.Kind != lifecycleprobe.DeliveryStatusChanged || signal.EventType != "producer/work.ready" {
+	if signal.Kind != lifecycleprobe.DeliveryStatusChanged || signal.EventType != "producer/work.ready" || signal.SubscriberType != "node" {
 		return
 	}
 	observe := func(out chan forkReceiverExecutionObservation, resume chan struct{}) {
@@ -66,8 +70,8 @@ func (b *forkReceiverExecutionBarrier) NotifyLifecycle(ctx context.Context, sign
 // not discharge that path's post-frontier committed replay-scope refusal.
 func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		for _, name := range []string{"available_control", "unavailable_after_commit", "newer_claim_store_fence"} {
-			unavailable := name != "available_control"
+		for _, name := range []string{"available_control", "declared_agent_control", "unavailable_after_commit", "newer_claim_store_fence"} {
+			unavailable := name == "unavailable_after_commit" || name == "newer_claim_store_fence"
 			newerClaim := name == "newer_claim_store_fence"
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
 				var selected *selectedStoreOwner
@@ -80,6 +84,32 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				// Authored state mutation reaches the supported fork surface without
 				// a post-frontier publication crossing the replay-scope policy.
 				root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
+				targetRoot := root
+				if name == "declared_agent_control" {
+					targetRoot = canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
+					if err := os.MkdirAll(filepath.Join(targetRoot, "consumer", "prompts"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.MkdirAll(filepath.Join(targetRoot, "consumer", "mocks"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					for file, contents := range map[string]string{
+						"agents.yaml":         "same-name:\n  id: same-name\n  role: observer\n  model: regular\n  intent: prompts/observer.md\n  subscriptions: [work.ready]\n  emit_events: []\n  mock:\n    kind: python\n    module: mocks/observer.py\n",
+						"prompts/observer.md": "Observe the explicitly delivered closure event.\n",
+						"mocks/observer.py":   "def handle(input):\n    return {'text': 'Observed delivery.', 'usage': {'input_tokens': 1, 'output_tokens': 1}}\n",
+					} {
+						if err := os.WriteFile(filepath.Join(targetRoot, "consumer", file), []byte(contents), 0o644); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				checkBusiness := func(t *testing.T, rt servedControlProofRuntime, runID, eventID, entityID string) {
+					if name == "declared_agent_control" {
+						requireSelectedForkMixedBusinessMutation(t, rt, runID, eventID, entityID)
+					} else {
+						requireForkReceiverBusinessMutation(t, rt, runID, eventID, entityID)
+					}
+				}
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
@@ -113,6 +143,13 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 30*time.Second)
 				defer cancel()
 				forkOptions := rt.ForkRuntime
+				if name == "declared_agent_control" {
+					manager := workspace.NewHostManager()
+					cfg := workspace.DefaultHostConfig()
+					cfg.WorkspaceRoot = t.TempDir()
+					manager.SetConfig(cfg)
+					forkOptions.Workspace = manager
+				}
 				forkOptions.AgentManagerOptions = runtimemanager.AgentManagerOptions{TestLifecycleProbe: barrier}
 				request := runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
@@ -121,6 +158,15 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
 					AgentRuntime:      forkOptions,
+				}
+				if name == "declared_agent_control" {
+					target := loadWorkflowValidationBundleAt(t, targetRoot)
+					fact, err := prepareServeSourceArtifact(ctx, selected.SourceArtifactWriter(), target)
+					if err != nil || fact.BundleHash() == rt.BundleHash {
+						t.Fatalf("register distinct unloaded target: %v", err)
+					}
+					request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: fact.BundleHash()}
+					request.ExpectedBundleHash = fact.BundleHash()
 				}
 				type executionResult struct {
 					result runforkexecution.SelectedContractExecutionResult
@@ -285,36 +331,47 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 				}
 				if !unavailable {
-					requireForkReceiverBusinessMutation(t, rt, claim.RunID(), claimed.signal.EventID, receiver.ID)
+					checkBusiness(t, rt, claim.RunID(), claimed.signal.EventID, receiver.ID)
 				}
 				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
 					t.Fatal("fork receiver execution or settlement mutated source domain")
 				}
-				if name == "available_control" {
-					requireSelectedForkPublicControlBoundary(t, rt, claim.RunID(), claimed.signal.EventID)
+				if !unavailable {
+					requireSelectedForkPublicControlBoundary(t, rt, claim.RunID(), claimed.signal.EventID, name == "declared_agent_control")
 				}
 			})
 		}
 	}
 }
 
-func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, runID, eventID string) {
+func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, runID, eventID string, declaredAgent bool) {
 	t.Helper()
 	var bindingID string
 	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&bindingID); err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct {
+	type controlCase struct {
 		method string
 		params map[string]any
-	}{
+	}
+	cases := []controlCase{
 		{"run.pause", map[string]any{"run_id": runID}},
 		{"run.continue", map[string]any{"run_id": runID}},
 		{"agent.restart", map[string]any{"run_id": runID, "agent_id": "same-name"}},
 		{"agent.send_directive", map[string]any{"run_id": runID, "agent_id": "same-name", "directive": "must not execute"}},
 		{"event.publish", map[string]any{"run_id": runID, "event_name": "start.requested", "source_event_id": eventID, "payload": map[string]any{"token": "must-not-execute"}}},
 		{"event.replay", map[string]any{"event_id": eventID}},
-	} {
+	}
+	if declaredAgent {
+		var count int
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agents WHERE run_id=$1 AND agent_id='same-name'`, runID).Scan(&count); err != nil || count != 1 {
+			t.Logf("agent rows: %v", snapshotForkReceiverApplication(t, rt)["agents"])
+			t.Fatalf("selected declaration did not materialize the control target: count=%d err=%v", count, err)
+		}
+		cases = append(cases, controlCase{"agent.replay", map[string]any{"run_id": runID, "agent_id": "same-name", "event_id": eventID}})
+		requireSelectedForkDeclaredAgentReads(t, rt, runID)
+	}
+	for _, test := range cases {
 		t.Run(test.method, func(t *testing.T) {
 			before := snapshotForkReceiverApplication(t, rt)
 			err := requireServedJSONRPCError(t, rt.Endpoint, test.method, test.params)
@@ -351,6 +408,78 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": runID}, &terminal)
 	if terminal.Run.Status != "cancelled" {
 		t.Fatalf("public selected stop readback = %+v", terminal)
+	}
+}
+
+func requireSelectedForkDeclaredAgentReads(t *testing.T, rt servedControlProofRuntime, runID string) {
+	t.Helper()
+	before := snapshotForkReceiverApplication(t, rt)
+	params := map[string]any{"run_id": runID, "agent_id": "same-name", "flow_instance": "consumer"}
+	var detail operatorread.OperatorAgentDetail
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.get", params, &detail)
+	if detail.Agent.AgentID != "same-name" || detail.Agent.FlowInstance != "consumer" || detail.Agent.Role != "observer" || detail.Agent.ExecutionMode != "mock" {
+		t.Fatalf("selected agent read lost persisted target: %+v", detail)
+	}
+	var diagnosis operatorread.OperatorAgentDiagnosis
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.diagnose", params, &diagnosis)
+	if diagnosis.AgentID != "same-name" || diagnosis.Status != detail.Agent.Status || diagnosis.Queue.PendingCount != 0 {
+		t.Fatalf("selected agent diagnosis disagrees with settled target: %+v", diagnosis)
+	}
+	var diagnostics operatorread.OperatorAgentDeliveryDiagnostics
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.delivery_diagnostics", params, &diagnostics)
+	if diagnostics.AgentID != "same-name" || len(diagnostics.Failures) != 0 || len(diagnostics.DeadLetters) != 0 {
+		t.Fatalf("selected agent diagnostics include foreign or failed work: %+v", diagnostics)
+	}
+	var lifecycle operatorread.OperatorAgentDeliveryLifecycleList
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.delivery_lifecycle", params, &lifecycle)
+	if lifecycle.AgentID != "same-name" || len(lifecycle.Deliveries) != 1 {
+		t.Fatalf("selected agent lifecycle omitted its one execution: %+v", lifecycle)
+	}
+	if delivery := lifecycle.Deliveries[0]; delivery.RunID != runID || delivery.Status != "delivered" || delivery.EventName != "producer/work.ready" {
+		t.Fatalf("selected agent lifecycle borrowed another run: %+v", delivery)
+	}
+	var usage operatorread.OperatorAgentUsage
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.usage", params, &usage)
+	if usage.AgentID != "same-name" || usage.Usage.Estimated.LedgerEntries != 1 || usage.Usage.Exact.LedgerEntries != 0 {
+		t.Fatalf("selected agent usage lost its exact mock turn: %+v", usage)
+	}
+	requireSelectedForkDurablePublicReads(t, rt, runID)
+	if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+		t.Fatal("selected agent reads changed durable state")
+	}
+}
+
+func requireSelectedForkMixedBusinessMutation(t *testing.T, rt servedControlProofRuntime, runID, eventID, entityID string) {
+	t.Helper()
+	var event operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+	if event.RunID != runID || len(event.Deliveries) != 2 {
+		t.Fatalf("mixed frontier did not retain both recipients: %+v", event)
+	}
+	kinds := map[string]int{}
+	for _, delivery := range event.Deliveries {
+		kinds[delivery.SubscriberType]++
+		if delivery.Status != "delivered" || delivery.Failure != nil || delivery.RetryCount != 0 {
+			t.Fatalf("mixed frontier failed to settle: %+v", delivery)
+		}
+		if delivery.SubscriberType == "node" && delivery.Target != (operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}) {
+			t.Fatalf("mixed frontier borrowed another entity: %+v", delivery)
+		}
+		var outcomes int
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1 AND claim_version=1 AND outcome='delivered'`, delivery.DeliveryID).Scan(&outcomes); err != nil || outcomes != 1 {
+			t.Fatalf("mixed frontier missing exact settlement: count=%d err=%v", outcomes, err)
+		}
+	}
+	if kinds["node"] != 1 || kinds["agent"] != 1 {
+		t.Fatalf("mixed frontier recipient census: %v", kinds)
+	}
+	var raw string
+	if err := rt.DB.QueryRow(`SELECT CAST(new_value AS TEXT) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND domain='authored_field' AND path='processed_token' AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='mutate'`, runID, entityID, eventID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var value string
+	if err := json.Unmarshal([]byte(raw), &value); err != nil || value != "receiver-proof" {
+		t.Fatalf("mixed frontier lost authored mutation: %s %v", raw, err)
 	}
 }
 
