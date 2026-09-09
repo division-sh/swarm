@@ -2,6 +2,11 @@
 
 ## PR #2441 Review Pass 1 Repair
 
+**Current combined result: not review-ready.** New LSF-030 blocks qualification;
+see `issue-2321-pr2441-review1-escalation.md` and #2321 comment5609541948. It is a
+separate coordinator retirement race, not a diagnostic regression or a repaired
+historical PostgreSQL anomaly. No production fix is silently absorbed here.
+
 The table description and runtime-log encoding summary incorrectly contradicted
 the integrated settlement contract. They now reference the canonical
 `agent_lifecycle_authority.diagnostic_projection.projection` and
@@ -20,7 +25,8 @@ Both-store new matrix passes (1.434s); settlement/atomic controls pass three
 repetitions (17.323s); API-spec tests pass (1.499s). Source search checked all current
 outbox/encoding/projection summaries. Watchlist b1eff4d already records this
 integration defect; no additional writer, issue or architecture is introduced.
-Repaired-head full-profile qualification and required CI are pending. The earlier
+The additional identity/mode race matrix passes three repetitions (49.212s).
+Repaired-head full-profile qualification failed on LSF-030. The earlier
 closure statement is superseded until those checks complete, not retroactively
 credited from the preceding successful full-suite receipt.
 

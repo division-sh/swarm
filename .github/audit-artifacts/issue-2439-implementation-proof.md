@@ -2,6 +2,12 @@
 
 ## PR #2441 Review Pass 1 Accounting
 
+**Current combined result: not review-ready.** The full profile failed the API
+pin-page SQLite cell with a coordinator retirement error, now LSF-030 in #2353.
+A deterministic coordinator probe fails 3/3; isolated API count10 passes do not
+repair it. This is outside SQLite transaction exit ownership. See the separate
+`issue-2321-pr2441-review1-escalation.md`; no transaction/runtime fix was made.
+
 No new SQLite runtime finding or repair in this pass. The bounded #2321 CI
 consumer and #2432 spec corrections supersede the combined-head qualification
 claim until required CI and the new full profile finish. The existing #2439 proof

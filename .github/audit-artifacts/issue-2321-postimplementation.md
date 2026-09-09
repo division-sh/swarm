@@ -2,6 +2,23 @@
 
 ## PR #2441 Review Pass 1 Repair
 
+**Current result: not review-ready; no failure-class elimination claimed.**
+The full-profile attempt started at edb169908 has failed the API SQLite pin-page
+test with `delivery continuation coordinator is retired`. LSF-030 and the
+deterministic 3/3 runtime probe are recorded in #2353 and
+`issue-2321-pr2441-review1-escalation.md`; the requested absorb/split ruling is
+https://github.com/division-sh/swarm/issues/2321#issuecomment-5609541948.
+Ten isolated both-store passes are classification controls, not a repair.
+
+The actual required CI SQLite smoke passed at edb169908. CI also exposed the
+existing pack-config guard's assumption that the now-empty fixture directory
+exists in a fresh clone. The guard now starts at `.github` and inspects fixture
+and workflow files; clean-directory proof passes (0.045s). This is a bounded
+consumer-deletion repair, not a skipped guard or compatibility fixture. CI run
+34410900554 remains failed, with its summary/timing failures derivative of the
+pack guard. No production runtime patch was made for LSF-030. Final-head CI is
+separate from the failed full-profile attempt; no green isolated result waives it.
+
 The changes-needed review of cea51bf81 identified one missed CI consumer and two
 stale diagnostic spec summaries. The prior elimination claim is superseded pending
 repaired-head qualification and required CI. No runtime owner or product boundary
@@ -17,8 +34,9 @@ the actual compiled `swarm run start examples/routing/root-ingress --event
 item.received --payload <valid JSON file> --api-port 18091`, with the test DSN unset
 and a disposable unchanged source copy, exits 0: completed, event_count=3,
 entity_count=1. Receipt: `/tmp/agent-g-pr2441-sqlite-smoke.log`. No provider messages
-or settled delivery replays were performed. Required repaired-head CI and new
-full-profile qualification are pending; old successful receipts remain historical.
+or settled delivery replays were performed. The failed full-profile attempt and CI
+accounting above supersede the original pending status; old successful receipts
+remain historical.
 
 The diagnostic contract correction and exact dual-store proofs are recorded in
 the separate #2432 table. Watchlist decision: consume the reviewer's existing

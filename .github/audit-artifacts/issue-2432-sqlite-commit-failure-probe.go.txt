@@ -41,4 +41,3 @@ func TestCommitFailureReturnsCleanConnectionProbe(t *testing.T) {
 		})
 	}
 }
-
