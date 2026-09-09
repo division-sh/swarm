@@ -15,6 +15,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -145,7 +146,11 @@ func createLifecycleDiagnostic(t *testing.T, ctx context.Context, store lifecycl
 
 func createNamedLifecycleDiagnostic(t *testing.T, ctx context.Context, store lifecycleDiagnosticTestStore, name string) diaglog.LifecycleDiagnostic {
 	t.Helper()
-	identity := testAgentIdentity(t, name, "")
+	return createLifecycleDiagnosticWithIdentity(t, ctx, store, testAgentIdentity(t, name, ""))
+}
+
+func createLifecycleDiagnosticWithIdentity(t *testing.T, ctx context.Context, store lifecycleDiagnosticTestStore, identity agentidentity.Identity) diaglog.LifecycleDiagnostic {
+	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	record := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{

@@ -1,10 +1,12 @@
 package diaglog
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 // LifecycleDiagnostic carries the immutable producer identity, never the
@@ -17,6 +19,27 @@ type LifecycleDiagnostic struct {
 	EventName   string
 	Payload     map[string]any
 	CreatedAt   time.Time
+}
+
+// ProducerLineage decodes only the immutable producer snapshot, never the
+// context of whichever consumer settles the diagnostic.
+func (d LifecycleDiagnostic) ProducerLineage() (correlation.RuntimeLineage, error) {
+	var lineage correlation.RuntimeLineage
+	stored, ok := d.Payload["producer_lineage"]
+	if !ok {
+		return lineage, nil
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return lineage, err
+	}
+	if err := json.Unmarshal(raw, &lineage); err != nil {
+		return lineage, err
+	}
+	if lineage.RunID != d.Identity.RunID {
+		return lineage, fmt.Errorf("lifecycle diagnostic producer lineage differs from immutable run")
+	}
+	return lineage, nil
 }
 
 func (d LifecycleDiagnostic) Validate() error {

@@ -35988,7 +35988,12 @@ agent_lifecycle_authority:
       Later projection retains that lineage and cannot adopt a consuming runtime's lineage.
       PersistLifecycleDiagnostic validates the exact outbox snapshot and commits
       the admitted diagnostic-direct event with projected_at and its projection receipt in one selected-store
-      transaction. The receipt retains the event identity, admitted run-or-standalone disposition, canonical payload,
+      transaction. First settlement compiles the immutable producer's explicit ParentEventID, or SubjectEventID
+      when no explicit parent exists, into events.source_event_id through canonical same-run event-reference
+      admission. Missing, foreign or malformed causal references fail closed while the run exists; they must not
+      silently become parentless diagnostics. Genuinely parentless observations remain run-scoped.
+      The receipt retains the event identity, admitted parent_event_id and lineage_disposition
+      (causal_explicit, causal_subject, parentless or historical_cleanup), canonical payload,
       timestamp and execution mode. The diagnostic logger's root posture determines mode at first settlement; replay
       consumes the recorded receipt, never the retry caller's posture or lineage. This non-routed diagnostic mode is
       not executable authority. Concurrent consumers return the same committed outcome. Missing persistence, conflicting
@@ -35997,7 +36002,9 @@ agent_lifecycle_authority:
     diagnostic_history: >-
       Pending diagnostics retain original run coordinates as audit payload even when cleanup has deleted that run.
       Under the same transaction, existing runs are protected against concurrent deletion and receive ordinary
-      run-scoped diagnostics; absent runs receive standalone diagnostic-direct events. There is no failed-insert
+      causal or genuinely parentless diagnostics; absent runs receive standalone diagnostic-direct events with an
+      explicit historical_cleanup receipt and no live parent edge. Original producer coordinates remain immutable
+      audit evidence, not executable selected-fork lineage. There is no failed-insert
       fallback and no synthesized run. An acknowledged outbox replays its retained receipt without requiring the
       event to remain present, so later cleanup cannot cause log resurrection. Only newly committed projection
       publishes a process-local recorder notification; recorder notification is not durable acknowledgment authority.
