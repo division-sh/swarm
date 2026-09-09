@@ -184,9 +184,11 @@ func CopyNestedProducerTemplateSelectResolution(t testing.TB, opts TemplateSelec
 	if err := os.Rename(filepath.Join(root, "producer"), nestedProducer); err != nil {
 		t.Fatalf("move producer into nested flow: %v", err)
 	}
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
-		"  - event: account.ready\n    from: producer\n    to: account\n",
-		"  - event: account.ready\n    from: left/child/producer\n    to: account\n")
+	for _, event := range []string{"account.setup", "account.ready"} {
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+			"  - event: "+event+"\n    from: producer\n    to: account\n",
+			"  - event: "+event+"\n    from: left/child/producer\n    to: account\n")
+	}
 	return root
 }
 
