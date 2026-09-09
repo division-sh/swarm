@@ -126,7 +126,7 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					}
 					at := time.Now().UTC().Truncate(time.Microsecond)
 					event := eventtest.PersistedProjection(uuid.NewString(), "work.completed", "route-proof", "", []byte(`{"ok":true}`), 0,
-						runID, "", events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{target}), at)
+						runID, "", events.EnvelopeForTargetRoute(events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{target}), target), at)
 					beforeCommit := routeEvidenceHead(t, ctx, fixture.db, runID)
 					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{route}); err != nil {
 						t.Fatalf("canonical event/delivery writer: %v", err)
