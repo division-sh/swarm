@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -62,7 +63,7 @@ func loadLifecycleDiagnosticOccurrence(ctx context.Context, tx *sql.Tx, id strin
 		return o, errors.New("lifecycle diagnostic occurrence facts conflict")
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
+	if err := canonicaljson.DecodeInto(raw, &payload); err != nil {
 		return o, err
 	}
 	o.item = diaglog.LifecycleDiagnostic{OutboxID: id, OperationID: o.operationID, Identity: identity, AgentID: agentID, EventName: o.eventName, Payload: payload}
