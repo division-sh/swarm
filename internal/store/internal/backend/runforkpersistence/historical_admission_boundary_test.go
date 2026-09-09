@@ -39,21 +39,23 @@ type historicalBoundaryAllowance struct {
 // receiver variable spellings, or every method on an otherwise trusted type.
 func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed := map[string]historicalBoundaryAllowance{
-		historicalBoundaryOwner + "resolveRunForkRevisionPoint/ledger_sql":                                                           {1, "shared event-point read; contextual admission precedes cursor construction"},
-		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/ledger_sql":                                                           {1, "rank before filtering tombstones, admit surviving present facts"},
-		historicalBoundaryOwner + "collectRunForkSourceAdvancedFacts/ledger_sql":                                                     {1, "post-R family inventory, not payload decoding"},
-		historicalBoundaryOwner + "ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision/ledger_sql":                          {1, "post-R marker existence, not historical payload admission"},
-		historicalBoundaryOwner + "ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling/ledger_sql":                      {1, "current coupling revision safety, not historical payload admission"},
-		historicalBoundaryWriter + "postgresAdapter.latestFacts/ledger_sql":                                                          {1, "canonical latest equality owner"},
-		historicalBoundaryWriter + "sqliteAdapter.latestFacts/ledger_sql":                                                            {1, "canonical latest equality owner"},
-		historicalBoundaryWriter + "postgresAdapter.insertFact/ledger_sql":                                                           {1, "canonical ledger writer"},
-		historicalBoundaryWriter + "sqliteAdapter.insertFact/ledger_sql":                                                             {1, "canonical ledger writer"},
-		historicalBoundaryOwner + "appendRunForkHistoricalFact/raw_decode":                                                           {2, "embedded owning-run check and contextual family decoding closure"},
-		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:" + historicalBoundaryWriter + "FactKey":                    {1, "historical admission consumes the writer's exact key relation"},
-		historicalBoundaryWriter + "loadCanonicalProjection/reference:" + historicalBoundaryWriter + "FactKey":                       {1, "canonical writer consumes that same key relation"},
-		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":        {1, "typed historical delivery decoding under contextual admission"},
-		historicalBoundaryOwner + "resolveRunForkRevisionPoint/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact": {1, "event cursor uses the same contextual relation"},
-		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact": {1, "all present snapshot families use contextual admission"},
+		historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory/reference:runtime/runfork::NewTerminalBarrierHistory":                              {1, "only the complete fixed-revision barrier relation may mint terminal-history admission"},
+		historicalBoundaryOwner + "loadRunForkAdmissionEvidenceFromRevision/reference:" + historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory": {1, "all fixed-revision admission consumes the terminal relation"},
+		historicalBoundaryOwner + "resolveRunForkRevisionPoint/ledger_sql":                                                                               {1, "shared event-point read; contextual admission precedes cursor construction"},
+		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/ledger_sql":                                                                               {1, "rank before filtering tombstones, admit surviving present facts"},
+		historicalBoundaryOwner + "collectRunForkSourceAdvancedFacts/ledger_sql":                                                                         {1, "post-R family inventory, not payload decoding"},
+		historicalBoundaryOwner + "ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision/ledger_sql":                                              {1, "post-R marker existence, not historical payload admission"},
+		historicalBoundaryOwner + "ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling/ledger_sql":                                          {1, "current coupling revision safety, not historical payload admission"},
+		historicalBoundaryWriter + "postgresAdapter.latestFacts/ledger_sql":                                                                              {1, "canonical latest equality owner"},
+		historicalBoundaryWriter + "sqliteAdapter.latestFacts/ledger_sql":                                                                                {1, "canonical latest equality owner"},
+		historicalBoundaryWriter + "postgresAdapter.insertFact/ledger_sql":                                                                               {1, "canonical ledger writer"},
+		historicalBoundaryWriter + "sqliteAdapter.insertFact/ledger_sql":                                                                                 {1, "canonical ledger writer"},
+		historicalBoundaryOwner + "appendRunForkHistoricalFact/raw_decode":                                                                               {2, "embedded owning-run check and contextual family decoding closure"},
+		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:" + historicalBoundaryWriter + "FactKey":                                        {1, "historical admission consumes the writer's exact key relation"},
+		historicalBoundaryWriter + "loadCanonicalProjection/reference:" + historicalBoundaryWriter + "FactKey":                                           {1, "canonical writer consumes that same key relation"},
+		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":                            {1, "typed historical delivery decoding under contextual admission"},
+		historicalBoundaryOwner + "resolveRunForkRevisionPoint/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "event cursor uses the same contextual relation"},
+		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "all present snapshot families use contextual admission"},
 	}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier", "lockSQLiteRunForkSourceRevisionFrontier",
@@ -162,7 +164,7 @@ func historicalBoundaryPackages(root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if !bytes.Contains(raw, []byte("run_fork_fact_revisions")) && !bytes.Contains(raw, []byte("runforkpersistence")) && !bytes.Contains(raw, []byte("runforkrevision")) && !bytes.Contains(raw, []byte("DecodeHistoricalSnapshot")) {
+		if !bytes.Contains(raw, []byte("run_fork_fact_revisions")) && !bytes.Contains(raw, []byte("runforkpersistence")) && !bytes.Contains(raw, []byte("runforkrevision")) && !bytes.Contains(raw, []byte("DecodeHistoricalSnapshot")) && !bytes.Contains(raw, []byte("/runtime/runfork\"")) {
 			return nil
 		}
 		relative, err := filepath.Rel(root, filepath.Dir(path))
@@ -247,6 +249,7 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 				callee := historicalBoundaryFunction(fn)
 				switch callee {
 				case historicalBoundaryWriter + "FactKey", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
+					"runtime/runfork::NewTerminalBarrierHistory", historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory",
 					historicalBoundaryOwner + "resolveRunForkRevisionPoint", historicalBoundaryOwner + "resolveSQLiteRunForkRevisionPoint":
 					add(n, "reference:"+callee)
 				case historicalBoundaryOwner + "AppendRunForkRevisionFact", historicalBoundaryOwner + "appendRunForkRevisionFact":
@@ -483,11 +486,16 @@ import (
     codec "encoding/json"
     "bytes"
     delivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+    history "github.com/division-sh/swarm/internal/runtime/runfork"
 )
 type unexpectedReader struct{}
 // Private package-local stand-in: no exported historical compatibility seam.
 type runForkRevisionEvent struct { EventID string }
 type eventAlias = runForkRevisionEvent
+func (arbitrary *unexpectedReader) mintTerminalHistory() {
+    alias := history.NewTerminalBarrierHistory
+    _ = alias
+}
 func (arbitrary *unexpectedReader) decode(raw []byte) error {
     var fact eventAlias
     unmarshal := codec.Unmarshal
@@ -541,6 +549,7 @@ func ordinaryBusiness(raw []byte) error {
 	findings := historicalBoundaryCollect(pkg, info, fset, file)
 	got := historicalBoundaryProblems(findings, historicalBoundaryAllowances(), false)
 	want := []string{
+		historicalBoundaryOwner + "unexpectedReader.mintTerminalHistory/reference:runtime/runfork::NewTerminalBarrierHistory",
 		historicalBoundaryOwner + "unexpectedReader.decode/raw_decode",
 		historicalBoundaryOwner + "unexpectedReader.appendRunForkHistoricalFact/raw_decode",
 		historicalBoundaryOwner + "unexpectedReader.erased/raw_decode",

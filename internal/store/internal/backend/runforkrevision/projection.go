@@ -210,12 +210,13 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				CAST(e.entity_id AS TEXT), e.flow_instance, e.routing_source_kind, e.source_route,
 				COALESCE(e.routing_source_authority, ''), e.target_route, e.target_set, e.route_settlement, e.scope,
 				e.payload_bytes, e.chain_depth, e.produced_by, e.produced_by_type, e.handler_node,
-				e.idempotency_key, CAST(e.source_event_id AS TEXT), e.created_at
+				e.idempotency_key, CAST(e.source_event_id AS TEXT), e.created_at,
+				CAST(e.run_id AS TEXT), e.event_class, e.execution_mode, e.task_id
 			FROM events e WHERE e.run_id = $1`,
 			columns: typedColumns(map[string]valueKind{
 				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime,
-			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at"),
+			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at", "run_id", "event_class", "execution_mode", "task_id"),
 			build: func(values map[string]any) map[string]any {
 				values["routing_source"] = map[string]any{
 					"kind": values["routing_source_kind"], "route": values["source_route"], "authority": values["routing_source_authority"],
@@ -280,8 +281,12 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 	case FamilyDeadLetters:
 		spec = projectionSpec{
-			query:   `SELECT CAST(d.dead_letter_id AS TEXT), CAST(d.original_event_id AS TEXT), COALESCE(CAST(d.delivery_id AS TEXT), ''), d.handler_node, d.created_at FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1`,
-			columns: typedColumns(map[string]valueKind{"created_at": valueTime}, "dead_letter_id", "original_event_id", "delivery_id", "handler_node", "created_at"),
+			query: `SELECT CAST(d.dead_letter_id AS TEXT), CAST(d.original_event_id AS TEXT), COALESCE(CAST(d.delivery_id AS TEXT), ''), d.handler_node, d.created_at,
+				COALESCE(d.claim_version, 0), o.outcome, o.reason_code, o.failure, o.settled_at
+				FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id
+				LEFT JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id AND o.claim_version = d.claim_version
+				WHERE e.run_id = $1`,
+			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "outcome_settled_at": valueTime, "outcome_failure": valueJSON}, "dead_letter_id", "original_event_id", "delivery_id", "handler_node", "created_at", "claim_version", "outcome", "outcome_reason_code", "outcome_failure", "outcome_settled_at"),
 		}
 	case FamilyFanOutObligations:
 		names := []string{

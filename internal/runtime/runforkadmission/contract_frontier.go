@@ -184,7 +184,7 @@ func runForkFrontierEvents(pending []runfork.RunForkPendingWork) ([]runfork.RunF
 		if eventID == "" {
 			continue
 		}
-		if runfork.RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item) {
+		if runfork.RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item) || item.RetainsTerminalBarrierHistory() {
 			agg := lineageByEvent[eventID]
 			if agg == nil {
 				agg = &lineageAggregate{
@@ -201,6 +201,10 @@ func runForkFrontierEvents(pending []runfork.RunForkPendingWork) ([]runfork.RunF
 					subscriberIDs:   map[string]struct{}{},
 				}
 				lineageByEvent[eventID] = agg
+			}
+			if item.RetainsTerminalBarrierHistory() {
+				agg.event.Owner = "store.run_fork.terminal_barrier_history"
+				agg.event.Reason = "exact fixed-revision terminal barrier failure is retained without replay"
 			}
 			addString(agg.classifications, item.Classification)
 			addString(agg.flowInstances, item.RoutingSource.Route().FlowInstance)

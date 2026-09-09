@@ -694,6 +694,29 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 						}
 					}
 					before := snapshotForkHistoricalExecutionTables(t, db, postgres)
+					if tc.status == fanoutbarrier.StatusOutcomeDeadLettered {
+						plan, err := owner.(interface {
+							PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+						}).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: fixture.runID, At: forkPointID})
+						if err != nil {
+							t.Fatal(err)
+						}
+						retained := 0
+						for _, item := range plan.PendingWork {
+							if item.RetainsTerminalBarrierHistory() {
+								retained++
+								if item.Status != "dead_letter" || item.Classification != runfork.RunForkPendingClassificationDeadLetter || item.ClaimVersion <= 0 {
+									t.Fatalf("terminal readback lost failed claim: %+v", item)
+								}
+							}
+						}
+						if retained != 1 || plan.ReplayResumeAdmission.ReplayResumeFactsPresent || !plan.ReplayResumeAdmission.StateOnlyExecutionReady {
+							t.Fatalf("terminal failure became owed replay: retained=%d admission=%+v", retained, plan.ReplayResumeAdmission)
+						}
+						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, postgres)) {
+							t.Fatal("terminal readback changed database")
+						}
+					}
 					materialized, err := forkOwner.MaterializeRunFork(ctx, request)
 					if err != nil {
 						t.Fatalf("materialize %s barrier fork: %v", tc.name, err)

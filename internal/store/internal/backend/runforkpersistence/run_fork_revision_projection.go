@@ -34,6 +34,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 		key := runForkRevisionSubscriberKey(durable.EventID, string(durable.SubscriberClass), durable.SubscriberID)
 		deliveryKeys[key] = struct{}{}
 		item := runfork.RunForkPendingWork{
+			ClaimVersion: durable.ClaimVersion,
 			EventID:         strings.TrimSpace(durable.EventID),
 			EventName:       strings.TrimSpace(event.EventName),
 			FlowInstance:    strings.TrimSpace(event.FlowInstance),
@@ -117,6 +118,9 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	facts := loadRunForkSourceFactsFromRevision(snapshot, entities)
 	ownedSchedules, err := validateRunForkBarrierSchedules(snapshot, fanOut)
 	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	if err := admitRunForkTerminalBarrierHistory(snapshot, fanOut, pending); err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
 	relevantTimer := false
