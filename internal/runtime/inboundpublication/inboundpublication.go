@@ -445,30 +445,20 @@ func EventIntegrityFingerprint(evt events.Event, kind runtimeprovideroutput.Kind
 
 func CanonicalRecipientManifest(routes []events.DeliveryRoute) (json.RawMessage, string, int, error) {
 	routes = events.NormalizeDeliveryRoutes(routes)
-	if routes == nil {
-		routes = []events.DeliveryRoute{}
-	}
-	slices.SortFunc(routes, func(left, right events.DeliveryRoute) int {
-		left = left.Normalized()
-		right = right.Normalized()
-		leftTarget := left.Target.Route()
-		rightTarget := right.Target.Route()
-		for _, pair := range [][2]string{
-			{left.Recipient.Code(), right.Recipient.Code()},
-			{left.Recipient.ID(), right.Recipient.ID()},
-			{left.Target.Code(), right.Target.Code()},
-			{leftTarget.FlowID, rightTarget.FlowID},
-			{leftTarget.FlowInstance, rightTarget.FlowInstance},
-			{leftTarget.EntityID, rightTarget.EntityID},
-			{left.Context.ReplyContextID(), right.Context.ReplyContextID()},
-		} {
-			if compared := strings.Compare(pair[0], pair[1]); compared != 0 {
-				return compared
-			}
+	// Order the complete wire value, not a hand-maintained subset of route
+	// identity. Precompute it so sorting cannot hide a marshal failure.
+	encodedRoutes := make([]json.RawMessage, 0, len(routes))
+	for _, route := range routes {
+		encoded, err := json.Marshal(route)
+		if err != nil {
+			return nil, "", 0, fmt.Errorf("marshal inbound recipient manifest: %w", err)
 		}
-		return 0
+		encodedRoutes = append(encodedRoutes, encoded)
+	}
+	slices.SortFunc(encodedRoutes, func(left, right json.RawMessage) int {
+		return bytes.Compare(left, right)
 	})
-	encoded, err := json.Marshal(routes)
+	encoded, err := json.Marshal(encodedRoutes)
 	if err != nil {
 		return nil, "", 0, fmt.Errorf("marshal inbound recipient manifest: %w", err)
 	}
