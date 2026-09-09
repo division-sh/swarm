@@ -1323,9 +1323,10 @@ contract_formats:
             one generation-consistent selected-run projection classifies every node target as exactly one closed typed variant:
             existing_entity carries the exact selected entity owner; materializing_entity carries the exact future entity ID
             produced by the canonical materialization owner; entityless_receiver carries explicit entity absence only when no
-            admitted receiver-owner evidence exists. One closed compatibility policy has two independent axes. The handler
-            execution dependency is entity_optional, existing_required, or materializing. Receiver acquisition is none,
-            create, select, or select_or_create. Classification accounts for durable state buckets, lifecycle transitions and gates, guard kill,
+            admitted receiver-owner evidence exists. One closed compatibility policy classifies the handler execution
+            dependency as entity_optional, existing_required, or materializing. Flow instance keys and compiled input/edge
+            resolution select the receiving instance; handlers cannot acquire or select another receiver. Classification
+            accounts for durable state buckets, lifecycle transitions and gates, guard kill,
             approval lifecycle, persistent clears, evidence recording, accumulation, joins, and nested rule sites rather than
             inferring dependency only from authored entity references. Entity-optional means that execution can proceed without
             entity state; it does not forbid an exact existing or admitted materializing receiver owner. No supported handler
@@ -1333,17 +1334,14 @@ contract_formats:
             not ownership of the parent's state. References to persisted platform entity identity, state, or gates are existing-entity
             requirements; flow-instance platform metadata alone remains route metadata and does not invent entity ownership.
             An exact admitted same-plan materializing owner may satisfy an entity-optional or existing-required handler and a
-            later select handler in the same plan.
+            later existing-required handler in the same plan.
             Handler-derived materialization MUST agree with the canonical future identity. Routing, stamped validation,
-            and pipeline execution consume that same compatibility owner. External or admitted mixed-provenance handlers using
-            select or select_or_create resolve 0/1/N declared-key cardinality before publication; that acquisition result
-            produces the exact receiving route instead of consuming a source/path-derived preselection. Zero select matches and
-            multiple matches fail closed. Zero select_or_create matches stamp the deterministic future route; if that exact row
-            appears before execution it is accepted only when its identity and declared key agree, otherwise execution fails.
-            Declared-key acquisition is authorized only by explicit target absence. An event carrying an admitted exact target
-            consumes that target for select and select_or_create handlers; payload-key matches cannot redirect it to another owner.
-            Declared-key cardinality reads the run-scoped entity_state registry through one source-backed exact receiving-flow
-            owner. Every candidate route is classified against the complete admitted authored-flow set and is accepted only
+            and pipeline execution consume that same compatibility owner. External and mixed-provenance inputs use the same
+            composition-selected receiving instance. Missing required state fails before publication; explicit or implicit
+            initialization stamps only that instance's canonical future entity. If its row appears before execution, exact
+            ownership, type and state must agree. Business payload matches never redirect an admitted target, and an unavailable
+            exact owner is never treated as missing or recreated. Target evidence reads the run-scoped entity_state registry
+            through one source-backed exact receiving-flow owner. Every candidate route is classified against the complete admitted authored-flow set and is accepted only
             when exactly one authored flow grammar claims it and that flow is the receiver. Static and singleton flows admit
             only their exact authored scope. Template flows admit exactly one scalar concrete instance segment under their
             authored scope. The bundle root is owned by the closed coordinate consisting of the canonical authored root
@@ -1366,7 +1364,7 @@ contract_formats:
             presence value from independently timed reads that can fabricate absent, state-only, or lifecycle-only evidence.
             An overlap between a template instance spelling and an authored child scope is ambiguous and fails closed. A
             nested child row never becomes a parent candidate even when it shares the declared key and has no
-            lifecycle companion. Broad selection, exact select_or_create appearance, target application, and engine preparation
+            lifecycle companion. Composition resolution, exact state appearance, target application, and engine preparation
             all consume this same classifier before assigning workflow identity; caller relabeling is forbidden.
             A matching active state row remains selectable before its flow_instances lifecycle companion exists; when a
             companion exists, any non-active lifecycle (including draining or terminated) excludes that row. Joining through lifecycle as a prerequisite
@@ -1442,9 +1440,11 @@ contract_formats:
             Root route absence is represented by AgentIdentity route presence, never by a nullable or inferred
             identity. Duplicate, restart, selected-fork, historical replay, claim/scan, settlement, handler execution, and
             public observation preserve the originally stamped target variant and AgentIdentity without current-owner
-            re-resolution. Boot verification and runtime compile the same dependency/acquisition policy; unsupported explicit
-            static/default-static multi-row, template, stateless, and normal in-topology acquisition surfaces fail closed
-            before runtime.
+            re-resolution. Boot verification and runtime consume the same execution dependency policy. A noninitializing
+            input handler may use existing selected state or run without state when entity-optional; boot does not require
+            every handler to initialize it. Missing required state remains a runtime admission failure. Retired handler-side
+            receiver selection fails strict authoring admission in every flow mode and ingress context; static multi-row
+            ownership remains unsupported.
           no_delivery_postcondition: |
             Every admitted persisted event settles atomically to exactly one typed arm: one or more durable DeliveryRoute
             obligations, or one closed no-delivery disposition. The six exhaustive write classes are normal EventBus
