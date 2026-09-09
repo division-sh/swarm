@@ -2354,7 +2354,28 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 
 func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
+	return startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, sourceRoot, false, hooks...)
+}
+
+func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+	t.Helper()
 	forkOptions := captureServedForkRuntimeOptions(t)
+	configureWorkspace := func() {
+		if !realWorkspace {
+			return
+		}
+		previous := cliapp.ConfiguredWorkspaceLifecycleForServe
+		root := t.TempDir()
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, _ cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+			manager := workspace.NewHostManager()
+			cfg := workspace.DefaultHostConfig()
+			cfg.WorkspaceRoot, cfg.SourceProjection = root, projection
+			manager.SetConfig(cfg)
+			manager.SetSemanticSource(source)
+			return manager, nil
+		}
+		t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previous })
+	}
 	var handlerStart runtimepipeline.WorkflowNodeHandlerStartHook
 	if len(hooks) > 1 {
 		t.Fatal("at most one handler-start barrier is supported")
@@ -2366,14 +2387,19 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
+		configureWorkspace()
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		var servedDB *sql.DB
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 			servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 		})
+		configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
+		if realWorkspace {
+			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
+		}
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:                       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
@@ -2391,9 +2417,14 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
+		configureWorkspace()
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
+		configPath := writeServeRuntimeTestConfig(t)
+		if realWorkspace {
+			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
+		}
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:                       writeServeRuntimeTestConfig(t),
+			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),

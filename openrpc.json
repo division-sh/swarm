@@ -641,6 +641,72 @@
       },
       "errors": [
         {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32033,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
@@ -1047,6 +1113,72 @@
       },
       "errors": [
         {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
@@ -1234,6 +1366,72 @@
         }
       },
       "errors": [
+        {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
         {
           "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
@@ -4230,7 +4428,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32063,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4268,7 +4466,7 @@
           }
         },
         {
-          "code": -32064,
+          "code": -32065,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4808,7 +5006,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32063,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4846,7 +5044,7 @@
           }
         },
         {
-          "code": -32064,
+          "code": -32065,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4994,7 +5192,7 @@
       },
       "errors": [
         {
-          "code": -32062,
+          "code": -32063,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6396,6 +6594,72 @@
       },
       "errors": [
         {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32007,
           "message": "Application error: BUNDLE_MISMATCH",
           "data": {
@@ -6573,7 +6837,7 @@
           }
         },
         {
-          "code": -32065,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -7390,6 +7654,72 @@
       },
       "errors": [
         {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32033,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
@@ -8064,6 +8394,72 @@
       },
       "errors": [
         {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32047,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
@@ -8320,6 +8716,72 @@
       },
       "errors": [
         {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32047,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
@@ -8529,6 +8991,72 @@
         }
       },
       "errors": [
+        {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
         {
           "code": -32047,
           "message": "Application error: MAILBOX_NOT_FOUND",
@@ -8861,6 +9389,72 @@
         }
       },
       "errors": [
+        {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
         {
           "code": -32047,
           "message": "Application error: MAILBOX_NOT_FOUND",
@@ -9269,6 +9863,72 @@
       },
       "errors": [
         {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32060,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
@@ -9471,7 +10131,7 @@
     },
     {
       "name": "run.fork",
-      "description": "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. Before mutation, the method resolves the source run's canonical `runs.bundle_hash`, loads the immutable `source_artifacts` row for that hash, and verifies its exact logical blob against the hash. A missing artifact fails closed with BUNDLE_UNAVAILABLE; malformed bytes or a hash mismatch fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from nullable identity, compatibility aliases, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-artifact selected_contracts fork may proceed. The runtime projection is reconstructed only from the admitted immutable source artifact and must verify the resulting canonical bundle_hash before execution. Fork-created runs are stamped with that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A and the exact immutable source artifact for that hash. The method persists selected-contract ownership as mode=bundle_hash with the target hash, recovers routes against that same identity, executes against the target BundleContext runtime projection, and stamps fork-created runs with the target canonical bundle_hash. A target hash that is not loaded by this process or lacks its immutable source artifact fails closed with BUNDLE_UNAVAILABLE; malformed or hash-mismatched target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, ambient CLI bundle selection, or ambient filesystem source discovery. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n",
+      "description": "Public selected-contract run fork mutation. Before domain mutation, resolve the source run's canonical runs.bundle_hash and verify its immutable source artifact. Missing or invalid authority fails closed; nullable identities, compatibility aliases, loaded-runtime modules and ambient filesystem discovery cannot supply it.\nIf bundle_hash is omitted or equals the source hash, use selected_contracts against that exact artifact. A different hash selects the exact retained target artifact and persists mode=bundle_hash. The selected execution owner reconstructs the effective source and its non-executable preparation independently of RuntimeContextManager. A target need not be loaded by this process; missing target bytes fail with BUNDLE_UNAVAILABLE and corrupt or mismatched bytes with BUNDLE_DATA_INTEGRITY_ERROR.\nPreparation fixes source, frontier, declaration correspondence, provider configuration and catalog before domain mutation. Only exact post-materialization binding may issue selected execution authority. Process-owned work retains preparation and selected execution through activation and failure disposition. A same-hash loaded runtime is not authority and cannot supply configuration, module, grants or lifetime. This does not perform Dynamic Load or make the target available for ordinary ingress. Normal runtime admission and deferred-work replay refusals remain unchanged. The swarm run fork CLI consumes this method and cannot call runtime/store helpers directly.",
       "params": [
         {
           "name": "source_run_id",
@@ -9492,7 +10152,7 @@
         {
           "name": "bundle_hash",
           "required": false,
-          "description": "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects an already loaded/boot-pinned RuntimeContextManager BundleContext under #976; valid but unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR.",
+          "description": "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects the exact retained target artifact for independent process-owned selected preparation. Loaded normal runtime membership is irrelevant; missing target artifacts fail with BUNDLE_UNAVAILABLE and corrupt or mismatched artifact bytes fail with BUNDLE_DATA_INTEGRITY_ERROR.",
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
@@ -10126,6 +10786,72 @@
       },
       "errors": [
         {
+          "code": -32062,
+          "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "binding_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation": {
+                    "enum": [
+                      "run.pause",
+                      "run.continue",
+                      "agent.restart",
+                      "agent.send_directive",
+                      "agent.replay",
+                      "event.replay",
+                      "event.publish",
+                      "mailbox.decide",
+                      "mailbox.defer",
+                      "mailbox.begin_input",
+                      "mailbox.cancel_input"
+                    ],
+                    "type": "string"
+                  },
+                  "required_capability": {
+                    "enum": [
+                      "selected_fork_deferred_execution"
+                    ],
+                    "type": "string"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "run_id",
+                  "binding_id",
+                  "required_capability"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32060,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
@@ -10559,7 +11285,7 @@
           }
         },
         {
-          "code": -32065,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -12245,7 +12971,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12378,7 +13104,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12511,7 +13237,7 @@
       },
       "errors": [
         {
-          "code": -32063,
+          "code": -32064,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -12836,7 +13562,7 @@
           }
         },
         {
-          "code": -32065,
+          "code": -32066,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -24069,8 +24795,74 @@
           "type": "object"
         }
       },
-      "SESSION_NOT_FOUND": {
+      "SELECTED_FORK_CONTROL_UNSUPPORTED": {
         "code": -32062,
+        "message": "Application error: SELECTED_FORK_CONTROL_UNSUPPORTED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "SELECTED_FORK_CONTROL_UNSUPPORTED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "binding_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "operation": {
+                  "enum": [
+                    "run.pause",
+                    "run.continue",
+                    "agent.restart",
+                    "agent.send_directive",
+                    "agent.replay",
+                    "event.replay",
+                    "event.publish",
+                    "mailbox.decide",
+                    "mailbox.defer",
+                    "mailbox.begin_input",
+                    "mailbox.cancel_input"
+                  ],
+                  "type": "string"
+                },
+                "required_capability": {
+                  "enum": [
+                    "selected_fork_deferred_execution"
+                  ],
+                  "type": "string"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                }
+              },
+              "required": [
+                "operation",
+                "run_id",
+                "binding_id",
+                "required_capability"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "SESSION_NOT_FOUND": {
+        "code": -32063,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -24108,7 +24900,7 @@
         }
       },
       "STANDING_SERVICE_NOT_FOUND": {
-        "code": -32063,
+        "code": -32064,
         "message": "Application error: STANDING_SERVICE_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -24146,7 +24938,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32064,
+        "code": -32065,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -24188,7 +24980,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH": {
-        "code": -32065,
+        "code": -32066,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
         "data": {
           "additionalProperties": false,
@@ -24223,7 +25015,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH_FORK": {
-        "code": -32066,
+        "code": -32067,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH_FORK",
         "data": {
           "additionalProperties": false,

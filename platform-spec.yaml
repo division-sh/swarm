@@ -17522,6 +17522,11 @@ multi_bundle_persistence:
         - '#2376'
         - '#2322'
       rule: USTAR, coordinates, receipts, and catalog behavior begin after the logical source artifact.
+      fork_journey_proof: |
+        Fork ownership and public execution/readback consume an already canonically admitted exact source
+        artifact without requiring the target to be loaded. Private test artifact admission proves only
+        that fork-consumer boundary, never public publication. The complete user-facing publish-changed-workflow
+        then fork journey remains pending this publication work; no retired register command is restored.
   canonical_owner: platform-spec.yaml#filesystem_source_model
 platform_events:
   description: Events emitted by the platform engine itself. These are NOT product events — they are operational signals from
