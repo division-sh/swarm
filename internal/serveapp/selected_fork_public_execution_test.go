@@ -73,6 +73,12 @@ func TestSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T) {
 				t.Fatal("public selected execution changed source domain")
 			}
 			requireSelectedForkPublicControlBoundary(t, rt, fork.ForkRunID, childEvent, true)
+			t.Run("terminal_public_readback", func(t *testing.T) {
+				requireSelectedForkDeclaredAgentReads(t, rt, fork.ForkRunID)
+				if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
+					t.Fatal("terminal selected readback changed source domain")
+				}
+			})
 		})
 	}
 }
