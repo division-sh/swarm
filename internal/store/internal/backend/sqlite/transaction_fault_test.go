@@ -276,7 +276,8 @@ func TestTransactionCancellationCuts(t *testing.T) {
 					if !errors.Is(err, primary) {
 						t.Fatalf("lost callback error: %v", err)
 					}
-				} else if !errors.Is(err, context.Canceled) {
+				}
+				if !errors.Is(err, context.Canceled) {
 					t.Fatalf("lost cancellation: %v", err)
 				}
 				if entered != (cut == "callback_error" || cut == "before_commit") {
@@ -288,10 +289,9 @@ func TestTransactionCancellationCuts(t *testing.T) {
 					}
 				}
 				control.beforeBegin = nil
-				if db.Stats().InUse != 0 {
-					t.Fatalf("leaked connection: %+v", db.Stats())
-				}
-				if err := b.RunTransaction(context.Background(), "next after cancellation", func(ctx context.Context, tx *sql.Tx) error {
+				progressCtx, progressCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer progressCancel()
+				if err := b.RunTransaction(progressCtx, "next after cancellation", func(ctx context.Context, tx *sql.Tx) error {
 					var value int
 					if err := tx.QueryRowContext(ctx, "SELECT value FROM counter").Scan(&value); err != nil {
 						return err
@@ -302,6 +302,11 @@ func TestTransactionCancellationCuts(t *testing.T) {
 					return nil
 				}); err != nil {
 					t.Fatal(err)
+				}
+				// Pool accounting may lag an already-retired driver connection;
+				// single-connection progress above joins that disposal boundary.
+				if db.Stats().InUse != 0 {
+					t.Fatalf("leaked connection after subsequent progress: %+v", db.Stats())
 				}
 			})
 		}
