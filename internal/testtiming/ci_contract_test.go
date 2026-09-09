@@ -56,10 +56,32 @@ func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
 	if build == nil || saveBuild == nil || build.With["path"] != "~/.cache/go-build" || saveBuild.With["path"] != build.With["path"] || saveBuild.With["key"] != "${{ steps.go-cache-restore.outputs.cache-primary-key }}" {
 		t.Fatal("build cache must not duplicate modules or use a different save identity")
 	}
+	seed := findWorkflowStep(plan.Steps, "Restore exact-head production Go cache")
+	compile := findWorkflowStep(plan.Steps, "Compile production dependencies once")
+	saveSeed := findWorkflowStep(plan.Steps, "Save exact-head production Go cache")
+	if seed == nil || compile == nil || saveSeed == nil || seed.With["path"] != build.With["path"] || seed.With["restore-keys"] != nil || !strings.HasSuffix(seed.With["key"].(string), "-${{ github.sha }}") || saveSeed.With["key"] != "${{ steps.production-cache.outputs.cache-primary-key }}" || saveSeed.With["path"] != seed.With["path"] {
+		t.Fatal("production seed must be an exact-head Go cache, not another proof or stale seed")
+	}
+	for _, command := range []string{`test "$(git rev-parse HEAD)" = "$SOURCE_SHA"`, "go build ./...", `go build -race -o "$RUNNER_TEMP/swarm-ci-race" ./cmd/swarm`} {
+		if !strings.Contains(compile.Run, command) {
+			t.Fatalf("production seed omits exact-head compilation %q", command)
+		}
+	}
+	if strings.Contains(compile.Run, "go test") {
+		t.Fatal("cache preparation must not execute or replace a proof")
+	}
+	seedConsumed := false
 	for _, key := range strings.Split(build.With["key"].(string)+"\n"+build.With["restore-keys"].(string), "\n") {
+		if key == seed.With["key"] {
+			seedConsumed = true
+			continue
+		}
 		if strings.TrimSpace(key) != "" && (!strings.Contains(key, "matrix.unit") || !strings.Contains(key, "steps.go.outputs.go-version")) {
 			t.Fatalf("build fallback can select another proof/toolchain: %s", key)
 		}
+	}
+	if !seedConsumed {
+		t.Fatal("workers do not consume the exact production seed")
 	}
 	for _, step := range proof.Steps {
 		if step.Name == "Save shared Go modules" || (step.Name == "Run exact planned proof unit" && step.If != "") {
