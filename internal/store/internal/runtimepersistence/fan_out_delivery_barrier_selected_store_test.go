@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -628,6 +630,36 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 							sourceScheduleActivationID = mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 						}
 						if tc.status != fanoutbarrier.StatusClosedPending {
+							// This historical fixture represents an already accepted occurrence,
+							// not a test of scheduler execution. Stamp the complete activation
+							// evidence before making its barrier terminal.
+							activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
+							activation, found, err := owner.(runtimegenericschedule.Store).LoadGenericScheduleActivation(ctx, activationID)
+							if err != nil || !found {
+								t.Fatalf("load source barrier activation: found=%v err=%v", found, err)
+							}
+							payload, err := canonicaljson.Encode(activation.Command.Payload)
+							if err != nil {
+								t.Fatal(err)
+							}
+							occurrenceID := runtimegenericschedule.OccurrenceEventID(activationID, activation.CurrentDueAt)
+							occurrence := eventtest.RuntimeControlWithRoutingSource(occurrenceID, events.EventType(activation.Command.EventType), runtimegenericschedule.OccurrenceProducerID(), activation.Command.TaskID, payload, 0, fixture.runID, "",
+								events.EventEnvelope{EntityID: fixture.runID}, activation.Command.RoutingSource, activation.CurrentDueAt)
+							ref, _ := handle.JoinRef()
+							route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: fixture.runID, EntityID: fixture.runID})}
+							if err := commitSemanticEventFixtureWithRoutes(ctx, selected, occurrence, []events.DeliveryRoute{route}); err != nil {
+								t.Fatal(err)
+							}
+							markFanOutBarrierScheduleFired(t, ctx, db, activationID,
+								occurrenceID, activation.CurrentDueAt.Add(time.Second))
+							if tc.status == fanoutbarrier.StatusFired {
+								settleFanOutBarrierRouteSuccess(t, ctx, selected, occurrence, route)
+							} else {
+								settleFanOutBarrierRouteDeadLetter(t, ctx, selected, occurrence, route)
+							}
+							if _, found, err := owner.(runtimegenericschedule.Store).LoadGenericScheduleActivation(ctx, activationID); err != nil || !found {
+								t.Fatalf("terminal fixture failed canonical activation validation: found=%v err=%v", found, err)
+							}
 							if _, err := db.ExecContext(ctx, `UPDATE fan_out_obligation_barriers SET status=$1,updated_at=$2 WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family='fan_out' AND semantic_path=$6`, string(tc.status), at.Add(2*time.Second), fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath); err != nil {
 								t.Fatal(err)
 							}
@@ -661,13 +693,25 @@ func TestRunForkFanOutDeliveryBarrierFixedRevisionStateMatrixOnBothStores(t *tes
 							t.Fatalf("canonical barrier schedule ownership count=%d err=%v", ownedScheduleCount, err)
 						}
 					}
+					before := snapshotForkHistoricalExecutionTables(t, db, postgres)
 					materialized, err := forkOwner.MaterializeRunFork(ctx, request)
 					if err != nil {
 						t.Fatalf("materialize %s barrier fork: %v", tc.name, err)
 					}
+					after := snapshotForkHistoricalExecutionTables(t, db, postgres)
+					if !reflect.DeepEqual(forkContentionRowsForRun(t, before, fixture.runID), forkContentionRowsForRun(t, after, fixture.runID)) {
+						t.Fatal("barrier materialization changed source history")
+					}
 					repeated, err := forkOwner.MaterializeRunFork(ctx, request)
 					if err != nil || repeated.ForkRunID != materialized.ForkRunID {
 						t.Fatalf("repeat %s barrier fork = %#v err=%v, want %s", tc.name, repeated, err, materialized.ForkRunID)
+					}
+					if !reflect.DeepEqual(after, snapshotForkHistoricalExecutionTables(t, db, postgres)) {
+						t.Fatal("repeat barrier materialization changed persisted state")
+					}
+					var dispatched int
+					if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, materialized.ForkRunID).Scan(&dispatched); err != nil || dispatched != 0 {
+						t.Fatalf("barrier materialization dispatched child events: count=%d err=%v", dispatched, err)
 					}
 					assertFanOutBarrierState(t, ctx, db, materialized.ForkRunID, fixture.deliveryID, fixture.semanticPath, tc.status, summary, expectedForkBarrierSchedule(tc.status, handle.TaskID()))
 					assertForkBarrierScheduleState(t, ctx, db, materialized.ForkRunID, tc.status)

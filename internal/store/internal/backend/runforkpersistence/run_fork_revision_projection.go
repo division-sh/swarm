@@ -113,12 +113,23 @@ func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.Snapshot, deadLett
 	}
 }
 
-func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState, pending []runfork.RunForkPendingWork) (runForkAdmissionEvidence, error) {
+func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState, pending []runfork.RunForkPendingWork, fanOut []runfork.RunForkFanOutObligation) (runForkAdmissionEvidence, error) {
 	facts := loadRunForkSourceFactsFromRevision(snapshot, entities)
+	ownedSchedules, err := validateRunForkBarrierSchedules(snapshot, fanOut)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
 	relevantTimer := false
 	entityIDs := stringSliceSet(facts.EntityIDs)
 	flowInstances := stringSliceSet(facts.FlowInstances)
 	for _, timer := range snapshot.Timers {
+		if _, owned := ownedSchedules[timer.TimerID]; owned {
+			continue
+		}
+		if timer.RunID == snapshot.RunID {
+			relevantTimer = true
+			break
+		}
 		if _, ok := entityIDs[strings.TrimSpace(timer.EntityID)]; ok && strings.TrimSpace(timer.EntityID) != "" {
 			relevantTimer = true
 			break

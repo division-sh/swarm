@@ -21,6 +21,7 @@ const (
 	selectedContractDeferredWorkRevisionTimerHistory = "revision_timer_history"
 	selectedContractDeferredWorkWorkflowTimer        = "workflow_timer"
 	selectedContractDeferredWorkWorkflowJoinTimeout  = "workflow_join_timeout"
+	selectedContractDeferredWorkFanOutBarrier        = "fan_out_delivery_barrier"
 	selectedContractDeferredWorkDynamicFlowCreation  = "dynamic_flow_instance_creation"
 )
 
@@ -200,11 +201,20 @@ func selectedContractDeferredWorkCapabilities(plan runfork.RunForkPlan, source s
 		capabilities = append(capabilities, selectedContractDeferredWorkWorkflowTimer)
 	}
 	if source != nil {
+		hasTimedJoin, hasFanOutBarrier := false, false
 		for _, join := range source.WorkflowJoins() {
 			if join.Spec.TimeoutFound || strings.TrimSpace(join.Spec.Timeout.After) != "" {
-				capabilities = append(capabilities, selectedContractDeferredWorkWorkflowJoinTimeout)
-				break
+				hasTimedJoin = true
 			}
+			if join.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
+				hasFanOutBarrier = true
+			}
+		}
+		if hasTimedJoin {
+			capabilities = append(capabilities, selectedContractDeferredWorkWorkflowJoinTimeout)
+		}
+		if hasFanOutBarrier {
+			capabilities = append(capabilities, selectedContractDeferredWorkFanOutBarrier)
 		}
 		if selectedContractSourceCanCreateDynamicFlow(source) {
 			capabilities = append(capabilities, selectedContractDeferredWorkDynamicFlowCreation)
