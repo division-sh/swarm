@@ -7,12 +7,17 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/platformschema"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -92,28 +97,40 @@ func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *tes
 		t.Fatalf("open SQLite: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.Exec(`
-		CREATE TABLE runtime_startup_authority_facts (
-			fact_id TEXT PRIMARY KEY,
-			authority_id TEXT NOT NULL,
-			authority_generation INTEGER NOT NULL,
-			transition_ordinal INTEGER NOT NULL,
-			state_version INTEGER NOT NULL,
-			state TEXT NOT NULL,
-			owner_id TEXT NOT NULL,
-			boot_id TEXT NOT NULL,
-			runtime_instance_id TEXT NOT NULL,
-			backend TEXT NOT NULL,
-			acquisition_id TEXT NOT NULL,
-			acquisition_request_hash TEXT NOT NULL,
-			acquisition_kind TEXT NOT NULL,
-			predecessor_authority_id TEXT,
-			successor_authority_id TEXT,
-			snapshot TEXT NOT NULL,
-			created_at TEXT NOT NULL
-		);
-	`); err != nil {
-		t.Fatalf("create authority table: %v", err)
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve session fixture source")
+	}
+	source, err := yamlsource.LoadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := source.Decode(&spec); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := platformschema.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := 0
+	for _, plan := range plans {
+		if plan.TableName != "runtime_startup_authority_facts" && plan.TableName != "author_activity_order" {
+			continue
+		}
+		statements, err := schemastore.SQLiteStatementsForPlan(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, statement := range statements {
+			if _, err := db.Exec(statement); err != nil {
+				t.Fatalf("create canonical %s: %v", plan.TableName, err)
+			}
+		}
+		created++
+	}
+	if created != 2 {
+		t.Fatalf("session fixture requires authority and mutation-order tables: created=%d", created)
 	}
 	backend, err := sqlitebackend.New(db)
 	if err != nil {
