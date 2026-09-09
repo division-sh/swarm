@@ -9,7 +9,9 @@ That failing probe remains historical evidence, not the current runtime contract
 Agent-g; one combined #2321/#2432/#2439 PR, separate repair commits/proof tables.
 The branch was carefully rebased with merge resolutions reapplied; B's single
 eventpersistence settlement owner replaces G's agentpersistence projector. Final
-integrated suite, live-proof accounting and head binding remain outstanding.
+integrated suite, residual disposition and final head binding remain outstanding.
+Current-head live/restart has passed on both stores with distinct failed-attempt
+accounting in issue-2321-postimplementation.md; no old delivery was replayed.
 Approved original/amended gate:
 https://github.com/division-sh/swarm/issues/2432#issuecomment-5601046597.
 
@@ -97,8 +99,12 @@ earlier audit's proposed names. Execution logs and final suite must be bound bel
 
 Post-rebase checkpoint: TestLifecycleDiagnosticForkLifetime and actual
 TestLifecycleDiagnosticForkActivationBothStores pass on SQLite/PostgreSQL (13.299s
-and 14.816s). Full diagnostic race repetitions and integrated swarm-test are running;
-these candidate rows must receive final-head execution credit before review.
+and 14.816s). Managed diagnostic race count=3 passed (store 656.324s, actual
+catalog/fork 116.361s). The integrated swarm-test at 5426deb7b passed
+runtimepersistence (558.061s), catalog/fork (494.842s) and releasee2e (841.922s),
+but FAILED one unrelated rate-limit timing assertion. ae8bbb782 repairs only that
+test oracle; a fresh full-profile swarm-test is queued. These are not an overall
+green receipt; final combined acceptance remains required before review.
 SQLite exit/bootstrap race checks pass (16.971s/13.910s). Persistence inventory is
 regenerated with only exact moved/removed findings classified. API spec checks pass.
 

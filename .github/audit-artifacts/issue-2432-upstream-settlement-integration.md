@@ -57,8 +57,9 @@ These are local working-tree checkpoints. Final exact-head accounting remains du
 | API specification | PASS 1.873s; /tmp/agent-g-rebase-spec.log. That initial combined command also exposed a stale census location, repaired and executed in the consumer run. |
 | Persistence authority inventory | PASS 17.934s; /tmp/agent-g-rebase-inventory-v2.log. Every moved/removed private SQL and prepared-start callback finding classified; no blanket allowlist. |
 | New retained static-data invocation shard, SQLite/PostgreSQL | PASS 50.115s; /tmp/agent-g-rebase-release-v2.log. Earlier child rejection exposed the retired required MCP port in the test protocol; removed it rather than selecting a port. |
-| Broad diagnostic race count=3 with four-minute package budget | NOT PASS: both packages hit cumulative package timeout while progressing through individual tests; no reported assertion failure or data race. /tmp/agent-g-rebase-diagnostic-race.log is retained. Reissued through swarm-test with 15-minute package allowance; no scenario/workload assertion changed. |
+| Broad diagnostic race count=3 | Four-minute package attempt NOT PASS: cumulative timeout, no reported assertion failure/data race. Reissued through swarm-test with 15-minute allowance, no workload/assertion changes: PASS store 656.324s and catalog/fork 116.361s. /tmp/agent-g-rebase-diagnostic-race-managed.log. |
 | Whole full-profile suite | First integration run FAILED in four packages; /tmp/agent-g-rebase-integrated-full.log. CLI fixture failures were repaired in 15dfc47b2. Additional failures and repairs are recorded below; a new full run is required. |
+| Second full-profile suite, 5426deb7b | FAILED only TestExecutor_NativeWebSearchCustomProviderUsesRateLimit; all lifecycle/store/release packages passed. /tmp/agent-g-rebase-integrated-full-v2.log. ae8bbb782 repairs the test's downstream-arrival timing oracle, not the admission owner; 20 repetitions and focused race count=3 pass. Fresh full-profile suite queued in /tmp/agent-g-rebase-integrated-full-v3.log. |
 
 ## Remaining Acceptance
 
@@ -88,9 +89,12 @@ receipt. The completed run also identified these bounded integration debts:
   pending diagnostic reader. Exact fork history proofs pass in
   /tmp/agent-g-rebase-canonical-reader.log.
 
-Final full-profile and managed race results, current-head live/restart proof credit,
-and final PR proof audits are still required. No extra Claude/Telegram calls or
-settled-delivery replay occurred during rebase. The old PostgreSQL burst failure's
+Final full-profile result, residual disposition and final PR proof comments are
+still required. Managed diagnostic race passed as above. After explicit user
+authorization, current-head live/restart passed on SQLite and PostgreSQL using
+the supported host network (bridge egress failed independently). Twelve successful
+fresh replies, no settled-delivery replay. The complete failed/successful attempt
+accounting is in issue-2321-postimplementation.md. The old PostgreSQL burst failure's
 causal attribution remains unproven; its failure-only event/log evidence retention
 is preserved. Later green runs are not described as eliminating that old cause.
 
