@@ -952,6 +952,21 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 			return nil, err
 		}
 	}
+	for _, join := range source.WorkflowJoins() {
+		switch join.Mode {
+		case runtimecontracts.WorkflowJoinModeArrival, runtimecontracts.WorkflowJoinModeFanOutDelivery:
+		default:
+			return nil, fmt.Errorf("author activity join occurrence requires a compiled join mode")
+		}
+		if err := add("platform.join_complete", runtimecontracts.EventCatalogEntry{}, runtimeauthoractivity.StoryDifferent); err != nil {
+			return nil, err
+		}
+		if join.Spec.TimeoutFound || strings.TrimSpace(join.Spec.Timeout.After) != "" {
+			if err := add("platform.join_timeout", runtimecontracts.EventCatalogEntry{}, runtimeauthoractivity.StoryDifferent); err != nil {
+				return nil, err
+			}
+		}
+	}
 	for _, timer := range source.WorkflowTimers() {
 		if !timer.StageOwned || strings.TrimSpace(timer.Event) != runtimecontracts.WorkflowStageTimerInternalEvent {
 			continue
