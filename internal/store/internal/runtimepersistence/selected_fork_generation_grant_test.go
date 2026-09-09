@@ -82,6 +82,9 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 				{"declarations", func(r *startupownership.SelectedForkGrantRequest) {
 					r.Binding.DeclarationPlanFingerprint = "sha256:" + strings.Repeat("4", 64)
 				}},
+				{"preparation", func(r *startupownership.SelectedForkGrantRequest) {
+					r.Binding.PreparationFingerprint = "sha256:" + strings.Repeat("4", 64)
+				}},
 				{"bundle", func(r *startupownership.SelectedForkGrantRequest) {
 					r.BundleHash = "bundle-v2:sha256:" + strings.Repeat("4", 64)
 				}},
@@ -146,6 +149,7 @@ func TestSelectedForkGenerationGrantExactAuthorityBothStores(t *testing.T) {
 				{"actor_census_fingerprint", "sha256:" + strings.Repeat("7", 64)},
 				{"effective_config_fingerprint", "sha256:" + strings.Repeat("7", 64)},
 				{"declaration_plan_fingerprint", "sha256:" + strings.Repeat("7", 64)},
+				{"preparation_fingerprint", "sha256:" + strings.Repeat("7", 64)},
 				{"declaration_plan", `{}`},
 				{"lease_expires_at", time.Unix(1, 0).UTC()},
 				{"state", "prepared"},
