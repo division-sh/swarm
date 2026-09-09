@@ -1,5 +1,11 @@
 # Post-Implementation Proof Audit: #2432
 
+**Closure withheld:** admitted reset integration fails on both stores at 34d86df18.
+See issue-2432-reset-integration-escalation.md and its executable 12/12 failing
+probe. Generic reset/whole-parent cleanup alignment and zero-tail claims below
+are withdrawn pending reconciliation with the authoritative retained-audit policy
+and B's overlapping #2440 owner. This is not a final PR proof audit.
+
 Agent-g; candidate audit for the combined #2321/#2432/#2439 PR. Runtime repair
 commit 3dbd7a944; SQLite connection repair separately eb4c8c613. Final integrated
 suite/head binding is still pending; do not treat this candidate as review approval.
