@@ -1286,7 +1286,24 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
-	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	contractsRoot := t.TempDir()
+	if err := os.CopyFS(contractsRoot, os.DirFS(filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple"))); err != nil {
+		t.Fatal(err)
+	}
+	// This ordering proof needs two lawful deliveries to the same receiver.
+	// The shared fixture terminates it on the first delivery.
+	if err := os.WriteFile(filepath.Join(contractsRoot, "nodes.yaml"), []byte(`test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [item.processed]
+  event_handlers:
+    item.received:
+      emit:
+        event: item.processed
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
@@ -1338,6 +1355,10 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	}
 	if result.ForkEvents[0].SourceEventID != earlierEventID || result.ForkEvents[1].SourceEventID != laterEventID {
 		t.Fatalf("sequential fork execution order = %#v, want [%s %s]", result.ForkEvents, earlierEventID, laterEventID)
+	}
+	var outputs int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.processed'`, result.Materialization.ForkRunID).Scan(&outputs); err != nil || outputs != 2 {
+		t.Fatalf("chronological execution did not commit both handler outputs: count=%d err=%v", outputs, err)
 	}
 }
 
