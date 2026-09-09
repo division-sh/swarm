@@ -9,6 +9,33 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 )
 
+func selectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *store.SQLiteRuntimeStore) SelectedContractExecutionOwner {
+	t.Helper()
+	if selected == nil {
+		t.Fatal("selected sqlite store is required")
+	}
+	durable := runtimebus.DurableDependencies{
+		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, WorkflowInstances: selected, PreparedEvents: selected,
+		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+	}
+	roles := runtimemanager.PersistenceRoles{
+		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
+		DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
+		FlowRoutes: selected, StandingRestarts: selected,
+	}
+	owner, err := NewSelectedContractExecutionOwner(
+		runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
+		selected, durable, selected.PipelineObligations(), selected, roles,
+		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
+	}
+	return owner
+}
+
 func selectedContractExecutionOwnerForTest(t testing.TB, selected *store.PostgresStore) SelectedContractExecutionOwner {
 	t.Helper()
 	if selected == nil {
