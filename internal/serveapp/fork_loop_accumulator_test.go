@@ -89,7 +89,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 						t.Logf("fixed-R accumulator before fork: %#v", entity.Accumulator)
 					}
 				}
-				params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "confirm_source_freeze": true, "idempotency_key": "accumulator-fork"}
+				params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "accumulator-fork"}
 				var fork apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
