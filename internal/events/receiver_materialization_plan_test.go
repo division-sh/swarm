@@ -148,6 +148,10 @@ func receiverMaterializationFixture(t *testing.T) (Event, DeliveryRoute, []Deliv
 	}
 	node := identitytest.FlowNode(t, "consumer", "materializer")
 	materializer := DeliveryRoute{Recipient: MustNodeDeliveryRecipient(node), Target: target}
+	materializer.Initialization, err = AdmitNodeReceiverInitialization(event, target, node)
+	if err != nil {
+		t.Fatal(err)
+	}
 	pin := sha256.Sum256([]byte("exact-compiled-receiver-pin"))
 	materializer.ConnectClaim, err = AdmitConnectExecutionClaim(sha256.Sum256([]byte("node-edge-generation")), pin, materializer.Recipient, node, "item.received")
 	if err != nil {
@@ -168,6 +172,7 @@ func receiverMaterializationFixture(t *testing.T) (Event, DeliveryRoute, []Deliv
 			t.Fatal(err)
 		}
 		agent := DeliveryRoute{Recipient: MustAgentDeliveryRecipient(actor.AgentID()), AgentIdentity: actor, Target: target}
+		agent.Initialization = materializer.Initialization
 		agent.ConnectClaim, err = AdmitConnectExecutionClaim(sha256.Sum256([]byte(label)), pin, agent.Recipient, identity.ExecutableNode{}, "item.received")
 		if err != nil {
 			t.Fatal(err)
@@ -297,6 +302,11 @@ func TestReceiverMaterializationPlanRejectsHostileAdmission(t *testing.T) {
 				other.Recipient = MustNodeDeliveryRecipient(nodeID)
 				other.ConnectClaim.handlerNode = nodeID
 				other.ConnectClaim.recipientID = nodeID.Key()
+				supplier, supplierErr := AdmitNodeReceiverInitialization(event, other.Target, nodeID)
+				if supplierErr != nil {
+					t.Fatal(supplierErr)
+				}
+				other.Initialization = supplier
 				publication = append(publication, other)
 			case "same_node_different_projection":
 				other := node
@@ -330,6 +340,7 @@ func TestReceiverMaterializationPlanPreservesDistinctInstances(t *testing.T) {
 	route.FlowInstance = "consumer/other"
 	route.EntityID = uuid.NewString()
 	other.Target, _ = NewMaterializingEntityTarget(route)
+	other.Initialization, _ = AdmitNodeReceiverInitialization(event, other.Target, node.ConnectClaim.handlerNode)
 	publication = append(publication, other)
 	plan, err := AdmitReceiverMaterializationPlan(event, node, agents, publication)
 	if err != nil {

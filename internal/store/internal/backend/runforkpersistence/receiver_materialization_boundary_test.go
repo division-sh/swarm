@@ -11,15 +11,18 @@ func receiverMaterializationBoundaryAllowances() map[string]historicalBoundaryAl
 		"events::DeliveryRoute.UnmarshalJSON/reference:events::RestoreDeliveryMaterialization": {
 			1, "strict route wire codec; aggregate admission remains mandatory",
 		},
-		"store/internal/backend/delivery::decodeRoute/reference:events::RestoreDeliveryMaterialization": {
+		"store/internal/backend/delivery::decodeRoute/reference:events::RestoreReceiverMaterializationRecord": {
 			1, "canonical selected-store delivery hydration",
 		},
-		"runtime/deliverylifecycle::DecodeHistoricalSnapshot/reference:events::RestoreDeliveryMaterialization": {
+		"runtime/deliverylifecycle::DecodeHistoricalSnapshot/reference:events::RestoreReceiverMaterializationRecord": {
 			1, "historical delivery hydration retains exact dependency evidence",
 		},
+		"events::RestoreReceiverMaterializationRecord/reference:events::RestoreDeliveryMaterialization":                                {1, "the strict durable supplier record delegates dependency decoding to the existing owner"},
+		"runtime/bus::selectedRunTargetOwnerProjection.bindReceiverMaterializations/reference:events::AdmitNodeReceiverInitialization": {1, "canonical handler classification supplies the exact initializing node"},
+		"runtime/bus::flowReceiverInitialization/reference:events::AdmitFlowReceiverInitialization":                                    {1, "canonical activation plan supplies exact flow initialization"},
 	}
 }
 
 func receiverMaterializationBoundaryReference(callee string) bool {
-	return callee == "events::AdmitReceiverMaterializationPlan" || callee == "events::RestoreDeliveryMaterialization"
+	return callee == "events::AdmitReceiverMaterializationPlan" || callee == "events::RestoreDeliveryMaterialization" || callee == "events::RestoreReceiverMaterializationRecord" || callee == "events::AdmitNodeReceiverInitialization" || callee == "events::AdmitFlowReceiverInitialization"
 }

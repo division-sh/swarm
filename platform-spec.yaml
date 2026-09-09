@@ -1390,14 +1390,26 @@ contract_formats:
             publication is not ownership evidence. Node intents are classified
             independently against the selected-run snapshot. A node's speculative materialization result is not receiving
             activation evidence for an agent; only actual selected ownership or an admitted receiver activation plan supplies
-            that authority, so intent order cannot create it. The closed ReceiverMaterializationPlan binds the exact run,
+            that authority, so intent order cannot create it. Each future agent receiver carries closed ReceiverInitialization
+            evidence binding its publication run/event and exact future target to either flow_lifecycle or node_delivery.
+            A node_delivery supplier additionally identifies the exact executable initializer node. This evidence is projected
+            from the admitted flow activation or canonical handler classifier; equal pins or future targets never establish
+            initialization responsibility. An optional observer does not become another initializer. The evidence is part of
+            durable route identity and the full route wire, and shares the existing receiver_materialization_plan JSON record
+            with the optional node dependency. Missing, contradictory, old-form or crossed supplier records fail closed.
+            The closed ReceiverMaterializationPlan binds the exact run,
             publication, admitted RoutingSource, materializing target, materializer delivery route identity and complete
             dependent agent route identities. Dependent identities in this plan identify their pre-binding routes; each
             final durable agent route identity includes the complete plan. The materializer retains its ordinary route
             identity. Complete publication validation checks both directions of this relation, rejects ambiguous suppliers,
             and cannot accept a dropped dependent plan. The plan is committed with the publication and delivery obligations,
             never manufactured from current descriptors during recovery. It is future ownership, not evidence of execution.
-            Agent claims and continuation eligibility require the exact materializer's successful settlement and actual
+            A node-supplied agent cannot drop its dependency, including when every dependent plan is erased. A flow-lifecycle
+            supplier has no fictitious node dependency: its exact activation commits initialization, and claim/readiness
+            admission still requires the exact persisted state and admitted lifecycle. Ordinary and historical hydration
+            consume the same supplier/dependency record and validate its publication identity. Fork publication reprojects
+            supplier evidence for the child rather than copying source publication coordinates. Agent claims and continuation
+            eligibility for node-supplied state require the exact materializer's successful settlement and actual
             persisted target state admitted by the workflow target owner, the exact
             admitted agent lifecycle cell, and the matching live normal or selected generation grant. An agent descriptor
             with an explicit entity must agree; lawful descriptor absence does not erase the materializer's exact ownership.

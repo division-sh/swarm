@@ -673,6 +673,7 @@ type DeliveryRoute struct {
 	PayloadProjection DeliveryPayloadProjection   `json:"delivery_payload_projection,omitempty"`
 	ConnectClaim      ConnectExecutionClaim       `json:"connect_execution_claim,omitempty"`
 	Materialization   ReceiverMaterializationPlan `json:"-"`
+	Initialization    ReceiverInitialization      `json:"-"`
 }
 
 type deliveryRouteWire struct {
@@ -684,6 +685,7 @@ type deliveryRouteWire struct {
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
 	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
 	Materialization   json.RawMessage           `json:"receiver_materialization_plan,omitempty"`
+	Initialization    *ReceiverInitialization   `json:"receiver_initialization,omitempty"`
 }
 
 func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
@@ -692,6 +694,14 @@ func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	var materialization json.RawMessage
+	var initialization *ReceiverInitialization
+	if !r.Initialization.Empty() {
+		if err := r.Initialization.ValidateRoute(r); err != nil {
+			return nil, err
+		}
+		copy := r.Initialization
+		initialization = &copy
+	}
 	if !r.Materialization.Empty() {
 		if err := r.Materialization.validateDependent(r); err != nil {
 			return nil, err
@@ -704,7 +714,7 @@ func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(deliveryRouteWire{
 		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), AgentIdentity: r.AgentIdentity,
-		Target: r.Target, Context: r.Context, PayloadProjection: r.PayloadProjection, ConnectClaim: r.ConnectClaim, Materialization: materialization,
+		Target: r.Target, Context: r.Context, PayloadProjection: r.PayloadProjection, ConnectClaim: r.ConnectClaim, Materialization: materialization, Initialization: initialization,
 	})
 }
 
@@ -733,6 +743,12 @@ func (r *DeliveryRoute) UnmarshalJSON(raw []byte) error {
 		Recipient: recipient, AgentIdentity: wire.AgentIdentity, Target: wire.Target,
 		Context: wire.Context, PayloadProjection: wire.PayloadProjection, ConnectClaim: wire.ConnectClaim,
 	}.Normalized()
+	if wire.Initialization != nil {
+		r.Initialization = *wire.Initialization
+		if err := r.Initialization.ValidateRoute(*r); err != nil {
+			return err
+		}
+	}
 	*r, err = RestoreDeliveryMaterialization(*r, wire.Materialization)
 	return err
 }
@@ -992,6 +1008,14 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 // identities never omit execution facts and cannot carry a dependency.
 func (r DeliveryRoute) identity(includeMaterialization bool) (DeliveryRouteIdentity, error) {
 	r = r.Normalized()
+	var initialization *ReceiverInitialization
+	if !r.Initialization.Empty() {
+		if err := r.Initialization.ValidateRoute(r); err != nil {
+			return DeliveryRouteIdentity{}, err
+		}
+		copy := r.Initialization
+		initialization = &copy
+	}
 	if r.Recipient.Empty() {
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type and id are required")
 	}
@@ -1042,6 +1066,7 @@ func (r DeliveryRoute) identity(includeMaterialization bool) (DeliveryRouteIdent
 		Projection      map[string]string            `json:"projection"`
 		ConnectClaim    *ConnectExecutionClaim       `json:"connect_claim,omitempty"`
 		Materialization *ReceiverMaterializationPlan `json:"receiver_materialization_plan,omitempty"`
+		Initialization  *ReceiverInitialization      `json:"receiver_initialization,omitempty"`
 	}{
 		SubscriberType:  r.Recipient.Code(),
 		SubscriberID:    r.Recipient.ID(),
@@ -1051,6 +1076,7 @@ func (r DeliveryRoute) identity(includeMaterialization bool) (DeliveryRouteIdent
 		Projection:      projection.Fields(),
 		ConnectClaim:    connectClaim,
 		Materialization: materialization,
+		Initialization:  initialization,
 	})
 	if err != nil {
 		return DeliveryRouteIdentity{}, fmt.Errorf("encode delivery route identity: %w", err)
@@ -1931,6 +1957,7 @@ func (r DeliveryRoute) Normalized() DeliveryRoute {
 		PayloadProjection: r.PayloadProjection.Normalized(),
 		ConnectClaim:      r.ConnectClaim,
 		Materialization:   r.Materialization,
+		Initialization:    r.Initialization,
 	}
 }
 
@@ -1966,6 +1993,7 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 // execution classes.
 func ValidateDeliveryRoutes(in []DeliveryRoute) error {
 	owners := make(map[deliveryExecutionSlotKey]DeliveryTargetOwnership, len(in))
+	initializers := make(map[deliveryExecutionSlotKey]ReceiverInitialization, len(in))
 	for index, route := range in {
 		route = route.Normalized()
 		if !route.Recipient.IsAgent() && !route.Recipient.IsNode() {
@@ -1982,6 +2010,10 @@ func ValidateDeliveryRoutes(in []DeliveryRoute) error {
 			)
 		}
 		owners[key] = route.Target
+		if prior, found := initializers[key]; found && !prior.Equal(route.Initialization) {
+			return fmt.Errorf("delivery execution slot has conflicting initialization suppliers")
+		}
+		initializers[key] = route.Initialization
 	}
 	return ValidateDeliveryRouteProjections(in)
 }

@@ -41,6 +41,12 @@ func AdmitReceiverMaterializationPlan(event Event, materializer DeliveryRoute, d
 	}
 	publication = NormalizeDeliveryRoutes(publication)
 	materializer = materializer.Normalized()
+	if err := materializer.Initialization.ValidateEvent(event); err != nil {
+		return ReceiverMaterializationPlan{}, err
+	}
+	if !materializer.Initialization.IsInitializer(materializer) {
+		return ReceiverMaterializationPlan{}, fmt.Errorf("receiver materializer lacks canonical initialization evidence")
+	}
 	if !materializer.Recipient.IsNode() || !materializer.Target.MaterializingEntity() {
 		return ReceiverMaterializationPlan{}, fmt.Errorf("receiver materializer requires a node with exact future ownership")
 	}
@@ -67,7 +73,7 @@ func AdmitReceiverMaterializationPlan(event Event, materializer DeliveryRoute, d
 		}
 		available[id] = struct{}{}
 		otherPin, sameReceiver := route.ConnectClaim.ReceiverIdentity()
-		if route.Recipient.IsNode() && SameDeliveryTargetOwnership(route.Target, materializer.Target) && sameReceiver && otherPin == pin && id != materializerID {
+		if route.Initialization.IsInitializer(route) && SameDeliveryTargetOwnership(route.Target, materializer.Target) && sameReceiver && otherPin == pin && id != materializerID {
 			return ReceiverMaterializationPlan{}, fmt.Errorf("receiver materialization has ambiguous materializing node deliveries")
 		}
 	}
@@ -78,6 +84,9 @@ func AdmitReceiverMaterializationPlan(event Event, materializer DeliveryRoute, d
 	seen := make(map[DeliveryRouteIdentity]struct{}, len(dependents))
 	for _, dependent := range dependents {
 		dependent = dependent.Normalized()
+		if !dependent.Initialization.Equal(materializer.Initialization) {
+			return ReceiverMaterializationPlan{}, fmt.Errorf("receiver dependency initialization supplier disagrees")
+		}
 		id, err := dependent.identity(false)
 		if err != nil {
 			return ReceiverMaterializationPlan{}, err
@@ -224,19 +233,38 @@ func (p ReceiverMaterializationPlan) ValidateEvent(event Event) error {
 // ValidateReceiverMaterializations is the aggregate admission/readback owner.
 // Every dependent of a plan must retain it, not just the first matching agent.
 func ValidateReceiverMaterializations(event Event, routes []DeliveryRoute) error {
+	type receiverKey struct {
+		pin    ConnectReceiverIdentity
+		target DeliveryTargetOwnership
+	}
+	suppliers := map[receiverKey]ReceiverInitialization{}
 	for _, route := range routes {
+		if !route.Initialization.Empty() {
+			if err := route.Initialization.ValidateEvent(event); err != nil {
+				return err
+			}
+			if err := route.Initialization.ValidateRoute(route); err != nil {
+				return err
+			}
+			if pin, found := route.ConnectClaim.ReceiverIdentity(); found {
+				key := receiverKey{pin, route.Target}
+				if prior, exists := suppliers[key]; exists && !prior.Equal(route.Initialization) {
+					return fmt.Errorf("compiled receiver has conflicting initialization suppliers")
+				}
+				suppliers[key] = route.Initialization
+			}
+		} else if route.Target.MaterializingEntity() && route.Recipient.IsAgent() {
+			return fmt.Errorf("materializing agent omitted initialization supplier")
+		}
 		plan := route.Materialization
 		if plan.Empty() {
-			if route.Recipient.IsAgent() && route.Target.MaterializingEntity() {
-				pin, present := route.ConnectClaim.ReceiverIdentity()
-				for _, candidate := range routes {
-					otherPin, otherPresent := candidate.ConnectClaim.ReceiverIdentity()
-					if present && otherPresent && pin == otherPin && candidate.Recipient.IsNode() && SameDeliveryTargetOwnership(route.Target, candidate.Target) {
-						return fmt.Errorf("materializing agent omitted its publication dependency")
-					}
-				}
+			if route.Recipient.IsAgent() && route.Initialization.NodeDelivery() {
+				return fmt.Errorf("materializing agent omitted its publication dependency")
 			}
 			continue
+		}
+		if !route.Initialization.NodeDelivery() {
+			return fmt.Errorf("receiver dependency requires node initialization supplier")
 		}
 		if err := plan.ValidatePublication(event, routes); err != nil {
 			return err

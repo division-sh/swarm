@@ -284,6 +284,7 @@ type RoutePlanDeliveryIntent struct {
 	TargetBlueprint   events.RouteIdentity
 	TargetOwnership   events.DeliveryTargetOwnership
 	Materialization   events.ReceiverMaterializationPlan
+	Initialization    events.ReceiverInitialization
 	Handler           runtimepipeline.DeliveryTargetHandler
 	Context           events.DeliveryContext
 	PayloadProjection events.DeliveryPayloadProjection
@@ -690,6 +691,7 @@ func routePlanDeliveryIntentsFromAdmittedRoutes(routes []events.DeliveryRoute, p
 			TargetBlueprint:   route.Target.Route(),
 			TargetOwnership:   route.Target,
 			Materialization:   route.Materialization,
+			Initialization:    route.Initialization,
 			Context:           route.Context,
 			PayloadProjection: route.PayloadProjection,
 			ConnectClaim:      route.ConnectClaim,
@@ -882,6 +884,7 @@ type deliveryIntentKey struct {
 	agentLifecycle  agentLifecycleAdmission
 	connectPlan     events.ConnectPlanIdentity
 	materialization events.DeliveryRouteIdentity
+	initialization  events.ReceiverInitialization
 }
 
 func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlanDeliveryIntent {
@@ -924,6 +927,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 			connectClaim:   intent.ConnectClaim,
 			agentLifecycle: intent.AgentLifecycle,
 			connectPlan:    intent.ConnectPlan,
+			initialization: intent.Initialization,
 		}
 		if !intent.Materialization.Empty() {
 			var err error

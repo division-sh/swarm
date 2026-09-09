@@ -75,11 +75,6 @@ func (a *Adapter) materializationReady(ctx context.Context, q queryer, record de
 	if !record.Route.Recipient.IsAgent() || !record.Route.Target.MaterializingEntity() {
 		return true, nil
 	}
-	if plan.Empty() {
-		// Agent-only template activation is committed by its existing lifecycle
-		// owner. Unlike a node dependency, missing state has no owed materializer.
-		return a.materializedReceiverExecutionReady(ctx, q, record, claimTx)
-	}
 	event, err := a.materializationEvent(ctx, q, record.EventID)
 	if err != nil {
 		return false, err
@@ -98,6 +93,12 @@ func (a *Adapter) materializationReady(ctx context.Context, q queryer, record de
 	}
 	if err := events.ValidateReceiverMaterializations(event, routes); err != nil {
 		return false, err
+	}
+	if plan.Empty() {
+		if !record.Route.Initialization.FlowLifecycle() {
+			return false, fmt.Errorf("materializing agent has no admitted lifecycle supplier or node dependency")
+		}
+		return a.materializedReceiverExecutionReady(ctx, q, record, claimTx)
 	}
 	if err := validateMaterializerAuthority(materializer.Snapshot, record.Snapshot); err != nil {
 		return false, err
