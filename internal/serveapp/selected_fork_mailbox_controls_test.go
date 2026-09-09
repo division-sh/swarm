@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"gopkg.in/yaml.v3"
@@ -55,11 +54,10 @@ func TestSelectedForkMailboxControlRefusalsBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1`, seed.RunID).Scan(&sourceCard); err != nil {
 				t.Fatal(err)
 			}
-			var fork apiv1.RunForkExecutionResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
+			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
 				"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true,
 				"idempotency_key": "selected-card-fork",
-			}, &fork)
+			})
 			var cardID, contentHash, bindingID string
 			if err := rt.DB.QueryRow(`SELECT card_id,card_content_hash FROM decision_cards WHERE run_id=$1`, fork.ForkRunID).Scan(&cardID, &contentHash); err != nil || cardID == sourceCard {
 				t.Fatalf("fork did not own its distinct decision card: card=%q err=%v", cardID, err)

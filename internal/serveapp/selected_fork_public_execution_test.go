@@ -1,8 +1,10 @@
 package serveapp
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -51,11 +53,10 @@ func TestSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T) {
 			if err != nil || fact.BundleHash() == rt.BundleHash {
 				t.Fatalf("admit distinct target fixture: hash=%q err=%v", fact.BundleHash(), err)
 			}
-			var fork apiv1.RunForkExecutionResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
+			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, map[string]any{
 				"source_run_id": seed.RunID, "fork_event_id": frontier, "bundle_hash": fact.BundleHash(),
 				"allow_source_freeze": true, "idempotency_key": "public-selected-changed-target",
-			}, &fork)
+			})
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("public fork lost execution/source evidence: %+v", fork)
 			}
@@ -74,4 +75,21 @@ func TestSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T) {
 			requireSelectedForkPublicControlBoundary(t, rt, fork.ForkRunID, childEvent, true)
 		})
 	}
+}
+
+func requireSelectedForkExecutionRPCResult(t *testing.T, endpoint string, params map[string]any) apiv1.RunForkExecutionResult {
+	t.Helper()
+	// Full preparation/execution uses the same bounded operation budget as the
+	// dev-scratch and pre-audit fork controls, including under race instrumentation.
+	started := time.Now()
+	response := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", params, 30*time.Second)
+	t.Logf("run.fork preparation and execution completed in %s", time.Since(started))
+	if response.Error != nil {
+		t.Fatalf("run.fork error = %#v", response.Error)
+	}
+	var result apiv1.RunForkExecutionResult
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatalf("decode run.fork result: %v", err)
+	}
+	return result
 }
