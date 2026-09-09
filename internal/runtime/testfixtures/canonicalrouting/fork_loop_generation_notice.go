@@ -1,6 +1,24 @@
 package canonicalrouting
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+// CopyForkLoopAccumulator exercises generation-keyed state through ordinary
+// handlers. Explicit clear is a separate authored choice, not fork cleanup.
+func CopyForkLoopAccumulator(t testing.TB, clearOnAdmit bool) string {
+	t.Helper()
+	root := CopyForkLoopGenerationNotice(t)
+	nodes := filepath.Join(root, "review", "nodes.yaml")
+	applyClosedReplacement(t, nodes, "    review.requested:\n      loop:", "    review.requested:\n      accumulate:\n        into: reviews\n        from: payload\n        dedup_by: payload.token\n      loop:")
+	applyClosedReplacement(t, nodes, "  execution_type: system_node\n", "  execution_type: system_node\n  state_schema:\n    fields:\n      reviews: list<Review>\n")
+	if clearOnAdmit {
+		applyClosedReplacement(t, nodes, "    review.requested:\n      accumulate:", "    review.requested:\n      clear: {targets: [accumulator_state]}\n      accumulate:")
+	}
+	writeClosedVariantFile(t, root, "review/types.yaml", "types:\n  Review:\n    revision_id: text\n    token: text\n")
+	return root
+}
 
 // CopyForkLoopGenerationNotice keeps the fork frontier inside a static loop.
 // Its final consumer writes a business notice without creating post-R work.
