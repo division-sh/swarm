@@ -430,38 +430,6 @@ func TestPlatformSpecWorkspaceDataProjectionAuthorityPromoted(t *testing.T) {
 	}
 }
 
-func TestCloseServeRuntimeReleasesProjectionAfterShutdown(t *testing.T) {
-	shutdownErr := fmt.Errorf("shutdown timed out")
-	var order []string
-	supervisor := &processLifecycleSupervisor{
-		currentRT: &runtimepkg.Runtime{},
-	}
-	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
-		order = append(order, "shutdown")
-		return shutdownErr
-	}
-	workspaces := serveRuntimeWorkspaceStub{
-		release: func(context.Context) error {
-			order = append(order, "release_projection")
-			return nil
-		},
-	}
-
-	err := closeServeRuntime(context.Background(), supervisor, cliapp.ServeOptions{
-		Dev:           true,
-		ShutdownGrace: runtimepkg.DefaultShutdownGrace,
-	}, workspaces)
-	if err == nil || !strings.Contains(err.Error(), shutdownErr.Error()) {
-		t.Fatalf("closeServeRuntime err = %v, want shutdown error", err)
-	}
-	if got := strings.Join(order, ","); got != "shutdown,release_projection" {
-		t.Fatalf("order = %s, want shutdown,release_projection", got)
-	}
-	if got := supervisor.CurrentRuntime(); got != nil {
-		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
-	}
-}
-
 func TestServeRuntimeContextStandingTargetsPreservesNonExecutableDeclarations(t *testing.T) {
 	active := runtimepkg.StandingTarget{ServiceID: "active-service", RunID: "active-run", Provider: "telegram"}
 	stopped := runtimepkg.StandingTarget{ServiceID: "stopped-service", RunID: "stopped-run", Provider: "telegram"}
@@ -497,17 +465,27 @@ func (terminalSourceSetCapability) TerminalResult() (runtimestartupownership.Ter
 func TestProcessLifecycleShutdownContinuesAfterTerminalCapabilitySettlementFailure(t *testing.T) {
 	settlementErr := errors.New("ownership session is terminal")
 	stopped := false
+	rt := &runtimepkg.Runtime{Bus: &runtimebus.EventBus{}}
+	hash := runtimeContextTestHash("a")
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+		SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash),
+		Runtime:            rt, WorkOwner: newSupervisorTestRuntimeOccurrence(t, hash),
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	supervisor := &processLifecycleSupervisor{
 		processCapability: terminalSourceSetCapability{err: settlementErr},
-		runtimeContexts:   &runtimepkg.RuntimeContextManager{},
-		currentRT:         &runtimepkg.Runtime{},
+		runtimeContexts:   manager,
+		currentRT:         rt,
 		shutdownRuntime: func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
 			stopped = true
 			return nil
 		},
 	}
 
-	err := supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions())
+	err = supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions())
 	if !errors.Is(err, settlementErr) {
 		t.Fatalf("shutdown error = %v, want settlement error", err)
 	}
@@ -1126,18 +1104,88 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 
 func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
 	proof := startServedSessionCleanupProof(t)
+	use, lookup, err := proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
+	if err != nil || use == nil || !lookup.Loaded() {
+		t.Fatalf("acquire predecessor: %v %+v", err, lookup)
+	}
+	predecessor := use.Runtime()
+	predecessorGrant, err := predecessor.CurrentStartupGrantEvidence()
+	if err != nil {
+		_ = use.Done()
+		t.Fatal(err)
+	}
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	var artifactBefore string
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT row_to_json(source_artifacts)::text FROM source_artifacts WHERE bundle_hash = $1`, proof.BundleHash).Scan(&artifactBefore); err != nil {
+		t.Fatal(err)
+	}
+	// Reconstruction must consume admitted bytes, not the original directory.
+	if err := os.RemoveAll(proof.SourceRoot); err != nil {
+		t.Fatal(err)
+	}
 	var result struct {
 		OK                     bool   `json:"ok"`
 		Status                 string `json:"status"`
 		IncludeSourceArtifacts bool   `json:"include_source_artifacts"`
 	}
-	runServedSessionCleanupMutation(t, proof, "runtime.nuke", map[string]any{
-		"include_source_artifacts": false, "idempotency_key": "issue-1927-runtime-nuke-" + uuid.NewString(),
-	}, &result)
+	params := map[string]any{"include_source_artifacts": false, "idempotency_key": "issue-2388-retained-reset-" + uuid.NewString()}
+	runServedSessionCleanupMutation(t, proof, "runtime.nuke", params, &result)
 	if !result.OK || result.Status != "completed" || result.IncludeSourceArtifacts {
 		t.Fatalf("served runtime.nuke result = %#v", result)
 	}
 	assertServedSessionCleanupQuiesced(t, proof)
+	use, lookup, err = proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
+	if err != nil || use == nil || !lookup.Loaded() {
+		t.Fatalf("acquire reconstructed context: %v %+v", err, lookup)
+	}
+	successor := use.Runtime()
+	successorGrant, err := successor.CurrentStartupGrantEvidence()
+	if err != nil {
+		_ = use.Done()
+		t.Fatal(err)
+	}
+	if successor == predecessor || successor.WorkOccurrence() == predecessor.WorkOccurrence() || successorGrant.GrantID == predecessorGrant.GrantID || successorGrant.RuntimeGeneration <= predecessorGrant.RuntimeGeneration {
+		_ = use.Done()
+		t.Fatal("reset reused predecessor execution or authority")
+	}
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	var artifactAfter string
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT row_to_json(source_artifacts)::text FROM source_artifacts WHERE bundle_hash = $1`, proof.BundleHash).Scan(&artifactAfter); err != nil {
+		t.Fatal(err)
+	}
+	if artifactAfter != artifactBefore {
+		t.Fatal("retained reset mutated the admitted source artifact")
+	}
+	postReset := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
+		"event_name": "item.received", "bundle_hash": proof.BundleHash,
+		"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
+	})
+	if postReset.RunID == "" || postReset.RunID == proof.RunID {
+		t.Fatalf("post-reset admission did not create fresh work: %+v", postReset)
+	}
+	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, "postgres", postReset.RunID, postReset.EventID, proof.Probe)
+	if replay := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); replay.Error != nil {
+		t.Fatalf("completed reset replay failed: %+v", replay.Error)
+	}
+	var laterWorkExists bool
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, postReset.RunID).Scan(&laterWorkExists); err != nil {
+		t.Fatal(err)
+	}
+	if !laterWorkExists {
+		t.Fatal("completed reset replay destroyed later work")
+	}
+	use, _, err = proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
+	if err != nil || use == nil {
+		t.Fatalf("post-replay context unavailable: %v", err)
+	}
+	defer use.Done()
+	if use.Runtime() != successor {
+		t.Fatal("completed reset replay reconstructed execution again")
+	}
 }
 
 func TestRunServeRuntimeNukeWithSourceArtifactsClearsProcessTopologyBeforeCleanupPostgres(t *testing.T) {
@@ -1147,9 +1195,8 @@ func TestRunServeRuntimeNukeWithSourceArtifactsClearsProcessTopologyBeforeCleanu
 		Status                 string `json:"status"`
 		IncludeSourceArtifacts bool   `json:"include_source_artifacts"`
 	}
-	runServedSessionCleanupMutation(t, proof, "runtime.nuke", map[string]any{
-		"include_source_artifacts": true, "idempotency_key": "issue-2125-runtime-nuke-bundles-" + uuid.NewString(),
-	}, &result)
+	params := map[string]any{"include_source_artifacts": true, "idempotency_key": "issue-2388-deleted-reset-" + uuid.NewString()}
+	runServedSessionCleanupMutation(t, proof, "runtime.nuke", params, &result)
 	if !result.OK || result.Status != "completed" || !result.IncludeSourceArtifacts {
 		t.Fatalf("served runtime.nuke include_source_artifacts result = %#v", result)
 	}
@@ -1176,6 +1223,20 @@ func TestRunServeRuntimeNukeWithSourceArtifactsClearsProcessTopologyBeforeCleanu
 	if len(plan.Sources) != 0 || len(plan.Agents) != 0 {
 		t.Fatalf("process topology after runtime.nuke = %#v, want empty complete source set", plan)
 	}
+	if replay := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); replay.Error != nil {
+		t.Fatalf("unloaded process refused control API replay: %+v", replay.Error)
+	}
+	if lookup := proof.Contexts.LookupBundleHashStatus(proof.BundleHash); lookup.Loaded() {
+		t.Fatal("deleted-source reset replay restored executable context")
+	}
+	if next := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", map[string]any{
+		"include_source_artifacts": false, "idempotency_key": "issue-2388-retain-empty-" + uuid.NewString(),
+	}); next.Error != nil {
+		t.Fatalf("reset of an already empty source set attempted reconstruction: %+v", next.Error)
+	}
+	if lookup := proof.Contexts.LookupBundleHashStatus(proof.BundleHash); lookup.Loaded() {
+		t.Fatal("retained-source reset resurrected a previously deleted source")
+	}
 }
 
 type servedSessionCleanupProof struct {
@@ -1186,6 +1247,8 @@ type servedSessionCleanupProof struct {
 	SessionID  string
 	Contexts   *runtimepkg.RuntimeContextManager
 	Release    func()
+	SourceRoot string
+	Probe      *lifecycletest.Probe
 }
 
 func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
@@ -1250,11 +1313,22 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	}
 	return servedSessionCleanupProof{
 		Endpoint: endpoint, DB: db, BundleHash: bundleHash, RunID: initial.RunID,
-		SessionID: sessionID, Contexts: contexts, Release: releaseWriter,
+		SessionID: sessionID, Contexts: contexts, Release: releaseWriter, SourceRoot: sourceRoot, Probe: probe,
 	}
 }
 
 func runServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupProof, method string, params map[string]any, out any) {
+	t.Helper()
+	envelope := requestServedSessionCleanupMutation(t, proof, method, params)
+	if envelope.Error != nil {
+		t.Fatalf("%s error = %#v", method, envelope.Error)
+	}
+	if err := json.Unmarshal(envelope.Result, out); err != nil {
+		t.Fatalf("decode %s result: %v\n%s", method, err, string(envelope.Result))
+	}
+}
+
+func requestServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupProof, method string, params map[string]any) servedJSONRPCEnvelope {
 	t.Helper()
 	response := make(chan servedJSONRPCEnvelope, 1)
 	go func() {
@@ -1267,13 +1341,7 @@ func runServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupPro
 			proof.Release()
 			select {
 			case envelope := <-response:
-				if envelope.Error != nil {
-					t.Fatalf("%s error = %#v", method, envelope.Error)
-				}
-				if err := json.Unmarshal(envelope.Result, out); err != nil {
-					t.Fatalf("decode %s result: %v\n%s", method, err, string(envelope.Result))
-				}
-				return
+				return envelope
 			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 				t.Fatalf("timed out waiting for %s after runtime admission closed", method)
 			}
@@ -1282,6 +1350,7 @@ func runServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupPro
 	}
 	proof.Release()
 	t.Fatalf("timed out waiting for %s to close runtime admission", method)
+	return servedJSONRPCEnvelope{}
 }
 
 func assertServedSessionCleanupQuiesced(t *testing.T, proof servedSessionCleanupProof) {
@@ -1403,6 +1472,7 @@ type servedControlProofRuntime struct {
 	BundleHash string
 	Probe      *lifecycletest.Probe
 	Runtime    *runtimepkg.Runtime
+	Contexts   *runtimepkg.RuntimeContextManager
 	Postgres   *store.PostgresStore
 	SQLite     *store.SQLiteRuntimeStore
 }
@@ -1539,6 +1609,8 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 
 func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
+	var contexts *runtimepkg.RuntimeContextManager
+	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
@@ -1553,20 +1625,21 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			servedDB, _, servedSQLite = selectedRuntimeStoreForTest(t, persistence)
 		})
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestLifecycleProbe:      probe,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+			ConfigPath:                   writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+			TestRuntimeContextsReadyHook: captureContexts,
+			SourceRoot:                   sourceRoot,
+			PlatformSpecPath:             defaultPlatformSpecPath,
+			APIListenAddr:                "127.0.0.1:0",
+			MCPListenAddr:                "127.0.0.1:0",
+			SelfCheck:                    true,
+			Verbose:                      true,
+			TestLifecycleProbe:           probe,
+			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
 		})
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, SQLite: servedSQLite}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1575,19 +1648,20 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeServeRuntimeTestConfig(t),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			StoreMode:               "postgres",
-			StoreModeSet:            true,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestLifecycleProbe:      probe,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+			ConfigPath:                   writeServeRuntimeTestConfig(t),
+			TestRuntimeContextsReadyHook: captureContexts,
+			SourceRoot:                   sourceRoot,
+			PlatformSpecPath:             defaultPlatformSpecPath,
+			StoreMode:                    "postgres",
+			StoreModeSet:                 true,
+			APIListenAddr:                "127.0.0.1:0",
+			MCPListenAddr:                "127.0.0.1:0",
+			SelfCheck:                    true,
+			Verbose:                      true,
+			TestLifecycleProbe:           probe,
+			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Postgres: pg}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
@@ -7580,7 +7654,7 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	})
 	toolGateway := runtimemcp.NewGateway(nil, "", runtimemcp.GatewayHooks{})
 	apiHandlerMux := newAPIServer(&ready, apiHandler, inboundHandler).Handler
-	mcpHandlerMux := newMCPServer(toolGateway).Handler
+	mcpHandlerMux := toolGateway.Handler()
 
 	rec := httptest.NewRecorder()
 	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -8437,7 +8511,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("load bundle pack runtime for preflight proof: %v", err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), repoRootForTest(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels)
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), repoRootForTest(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels, semanticview.Wrap(bundle))
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
@@ -8709,9 +8783,13 @@ func (serveRuntimeWorkspaceStub) InspectManagedContainer(context.Context, string
 	return runtimedestructivereset.ManagedContainerInspection{}, nil
 }
 
-func (s serveRuntimeWorkspaceStub) StopManagedContainer(_ context.Context, name string) error {
+func (serveRuntimeWorkspaceStub) DisposeProjectionContainers(context.Context, sourceartifact.RuntimeProjectionCleanup) error {
+	return fmt.Errorf("inventory-only workspace fixture cannot dispose projection resources")
+}
+
+func (s serveRuntimeWorkspaceStub) StopManagedContainer(_ context.Context, target runtimedestructivereset.ContainerRef) error {
 	if s.stoppedContainers != nil {
-		*s.stoppedContainers = append(*s.stoppedContainers, name)
+		*s.stoppedContainers = append(*s.stoppedContainers, target.Name)
 	}
 	return nil
 }

@@ -1437,8 +1437,8 @@ func proposedEffectProofBundle(serverURL string) *runtimecontracts.WorkflowContr
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"support": {
-				ID: "support", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-				SubscribesTo: []string{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected"},
+				ExecutionType: runtimecontracts.SystemNodeExecutionType,
+				SubscribesTo:  []string{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"support.reply_drafted":                 handler,
 					"send_support_reply.revision_requested": {},

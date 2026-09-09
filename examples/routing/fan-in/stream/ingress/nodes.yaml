@@ -1,5 +1,4 @@
 ingress-node:
-  id: ingress-node
   execution_type: system_node
   subscribes_to: [operating.report.triggered]
   produces: [operating.report.requested]

@@ -369,7 +369,7 @@ func TestCheckedYAMLRejectsAllProducerRoutingAuthority(t *testing.T) {
 }
 
 func TestProducerRoutingRetirementGuardIgnoresNestedLiteralEmitMap(t *testing.T) {
-	raw := []byte("worker:\n  id: worker\n  event_handlers:\n    request:\n      emit:\n        event: task.done\n        fields:\n          config:\n            literal:\n              emit:\n                broadcast: true\n")
+	raw := []byte("worker:\n  event_handlers:\n    request:\n      emit:\n        event: task.done\n        fields:\n          config:\n            literal:\n              emit:\n                broadcast: true\n")
 	retired, err := hasRetiredProducerRoutingYAML(raw)
 	if err != nil {
 		t.Fatal(err)

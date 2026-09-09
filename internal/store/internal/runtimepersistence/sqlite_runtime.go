@@ -13,6 +13,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storeactivityresult "github.com/division-sh/swarm/internal/store/internal/backend/activityresult"
@@ -51,6 +52,7 @@ import (
 // file possession owner serializes process startup while persisted rows remain
 // the canonical state consumed by the runtime.
 type SQLiteRuntimeStore struct {
+	destructiveResetSQLiteOwner  *storeadmin.DestructiveResetSQLiteOwner
 	agentSQLiteOwner             *storeagent.AgentSQLiteOwner
 	activitySQLiteOwner          *storeactivityjournal.ActivitySQLiteOwner
 	activityResultSQLiteOwner    *storeactivityresult.ActivityResultSQLiteOwner

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -445,7 +446,7 @@ func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, in
 	if !containsCatalogString(policy.SpecialPackages, proof.Executor) {
 		return fmt.Errorf("external proof %s executor %s is not a special CI package", proof.Source, proof.Executor)
 	}
-	var selectedUnit string
+	var selectedUnits []string
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		profile := policy.Profiles[profileName]
 		owners := make([]string, 0, 1)
@@ -454,16 +455,22 @@ func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, in
 				owners = append(owners, unitID)
 			}
 		}
-		if len(owners) != 1 {
-			return fmt.Errorf("external proof %s executor %s has %d CI owners in profile %s, want exactly one", proof.Source, proof.Executor, len(owners), profileName)
+		sort.Strings(owners)
+		var runs []string
+		for _, owner := range owners {
+			unit := policy.Units[owner]
+			if unit.CountMode != "count-1" {
+				return fmt.Errorf("external proof %s CI owner %s requires count-1", proof.Source, owner)
+			}
+			runs = append(runs, unit.Run)
 		}
-		if run := policy.Units[owners[0]].Run; run != "" {
-			return fmt.Errorf("external proof %s executor %s has filtered CI owner %s in profile %s with run %q; external proofs require full-package execution", proof.Source, proof.Executor, owners[0], profileName, run)
+		if err := testplanning.ValidateGoProofPartition(filepath.Join(repoRoot, executorDir), runs); err != nil {
+			return fmt.Errorf("external proof %s executor %s profile %s: %w", proof.Source, proof.Executor, profileName, err)
 		}
-		if selectedUnit == "" {
-			selectedUnit = owners[0]
-		} else if selectedUnit != owners[0] {
-			return fmt.Errorf("external proof %s executor %s changes CI owner from %s to %s", proof.Source, proof.Executor, selectedUnit, owners[0])
+		if selectedUnits == nil {
+			selectedUnits = owners
+		} else if !slices.Equal(selectedUnits, owners) {
+			return fmt.Errorf("external proof %s executor %s changes CI owners from %v to %v", proof.Source, proof.Executor, selectedUnits, owners)
 		}
 	}
 	return nil

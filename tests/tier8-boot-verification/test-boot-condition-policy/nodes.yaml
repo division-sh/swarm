@@ -1,5 +1,4 @@
 policy-check-node:
-  id: policy-check-node
   execution_type: system_node
   subscribes_to: [check.requested]
   produces: []

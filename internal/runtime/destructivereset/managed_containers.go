@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
+	"github.com/division-sh/swarm/internal/runtime/containeridentity"
 )
 
 type ManagedContainerStopper struct {
@@ -49,6 +49,11 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 	if s.Runtime == nil {
 		return ContainerResetResult{}, fmt.Errorf("destructive reset managed container runtime is not configured")
 	}
+	for _, planned := range req.Result.Plan.ManagedContainers {
+		if strings.TrimSpace(planned.Name) == "" || strings.TrimSpace(planned.RuntimeID) == "" {
+			return ContainerResetResult{}, fmt.Errorf("%w: destructive reset container name and immutable runtime ID are required", ErrInvalidRequest)
+		}
+	}
 
 	result := ContainerResetResult{
 		OperationName: req.Result.OperationName,
@@ -56,10 +61,7 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 		AppliedAt:     req.RequestedAt,
 	}
 	for _, planned := range req.Result.Plan.ManagedContainers {
-		if strings.TrimSpace(planned.Name) == "" {
-			return ContainerResetResult{}, fmt.Errorf("%w: destructive reset container name is required", ErrInvalidRequest)
-		}
-		inspection, err := s.Runtime.InspectManagedContainer(ctx, planned.Name)
+		inspection, err := s.Runtime.InspectManagedContainer(ctx, planned.RuntimeID)
 		if err != nil {
 			result.Failed = append(result.Failed, ContainerStopFailure{
 				Container: withContainerAction(planned, ContainerActionFailed),
@@ -71,11 +73,19 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 			result.Missing = append(result.Missing, withContainerAction(planned, ContainerActionMissing))
 			continue
 		}
-		if !inspection.HasIdentity || !resetEligibleManagedIdentity(inspection.Identity) || strings.TrimSpace(inspection.Identity.ContainerName) != strings.TrimSpace(planned.Name) {
-			result.Preserved = append(result.Preserved, preservedContainerRef(planned, inspection.Identity))
+		if inspection.RuntimeID != planned.RuntimeID {
+			result.Failed = append(result.Failed, ContainerStopFailure{Container: withContainerAction(planned, ContainerActionFailed), Error: "container inspection differs from planned immutable runtime ID"})
 			continue
 		}
-		ref := containerRefFromIdentity(inspection.Identity, ContainerActionStop)
+		if !inspection.HasIdentity || inspection.Identity.BundleHash == "" || inspection.Identity.Validate() != nil || !inspection.Identity.ResetEligibleManaged() || !inspection.Identity.Equal(planned.Identity()) {
+			result.Preserved = append(result.Preserved, preservedContainerRef(planned, inspection.Identity))
+			result.Failed = append(result.Failed, ContainerStopFailure{
+				Container: withContainerAction(planned, ContainerActionFailed),
+				Error:     "container ownership differs from the exact planned source/projection identity",
+			})
+			continue
+		}
+		ref := ContainerRefFromIdentity(inspection.Identity, planned.RuntimeID, ContainerActionStop)
 		if !inspection.Running {
 			result.AlreadyStopped = append(result.AlreadyStopped, withContainerAction(ref, ContainerActionAlreadyStopped))
 			continue
@@ -84,7 +94,7 @@ func (s ManagedContainerStopper) Apply(ctx context.Context, req ContainerResetRe
 		if req.Result.DryRun {
 			continue
 		}
-		if err := s.Runtime.StopManagedContainer(ctx, ref.Name); err != nil {
+		if err := s.Runtime.StopManagedContainer(ctx, ref); err != nil {
 			result.Failed = append(result.Failed, ContainerStopFailure{
 				Container: withContainerAction(ref, ContainerActionFailed),
 				Error:     err.Error(),
@@ -103,47 +113,35 @@ func (s ManagedContainerStopper) now() time.Time {
 	return time.Now().UTC()
 }
 
-func resetEligibleManagedIdentity(identity ContainerIdentity) bool {
-	canonical := runtimecontaineridentity.Identity{
-		Owner: identity.Owner, Kind: identity.Kind, ResetEligible: identity.ResetEligible,
-		CreationSource: identity.CreationSource, ContainerName: identity.ContainerName,
-		WorkspaceScope: identity.WorkspaceScope, RunID: identity.RunID,
-		AgentIdentity: identity.AgentIdentity, FlowInstance: identity.FlowInstance,
-	}.Normalized()
-	return canonical.Validate() == nil && canonical.ResetEligibleManaged()
-}
-
-func containerRefFromIdentity(identity ContainerIdentity, action string) ContainerRef {
+func ContainerRefFromIdentity(identity containeridentity.Identity, runtimeID, action string) ContainerRef {
+	identity = identity.Normalized()
 	return ContainerRef{
-		Name:           strings.TrimSpace(identity.ContainerName),
-		Kind:           strings.TrimSpace(identity.Kind),
-		Action:         strings.TrimSpace(action),
-		ResetEligible:  identity.ResetEligible,
-		CreationSource: strings.TrimSpace(identity.CreationSource),
-		WorkspaceScope: strings.TrimSpace(identity.WorkspaceScope),
-		RunID:          strings.TrimSpace(identity.RunID),
-		AgentIdentity:  identity.AgentIdentity.Normalize(),
-		FlowInstance:   strings.Trim(strings.TrimSpace(identity.FlowInstance), "/"),
+		RuntimeID:        strings.TrimSpace(runtimeID),
+		Owner:            identity.Owner,
+		Name:             strings.TrimSpace(identity.ContainerName),
+		Kind:             strings.TrimSpace(identity.Kind),
+		Action:           strings.TrimSpace(action),
+		ResetEligible:    identity.ResetEligible,
+		CreationSource:   strings.TrimSpace(identity.CreationSource),
+		WorkspaceScope:   strings.TrimSpace(identity.WorkspaceScope),
+		RunID:            strings.TrimSpace(identity.RunID),
+		AgentIdentity:    identity.AgentIdentity.Normalize(),
+		FlowInstance:     strings.Trim(strings.TrimSpace(identity.FlowInstance), "/"),
+		BundleHash:       identity.BundleHash,
+		SourceProjection: identity.SourceProjection,
+		DataProjection:   identity.DataProjection,
 	}
 }
 
-func preservedContainerRef(planned ContainerRef, identity ContainerIdentity) ContainerRef {
+func preservedContainerRef(planned ContainerRef, identity containeridentity.Identity) ContainerRef {
 	if strings.TrimSpace(identity.ContainerName) == "" {
 		return withContainerAction(planned, ContainerActionUnowned)
 	}
-	return withContainerAction(containerRefFromIdentity(identity, ContainerActionUnowned), ContainerActionUnowned)
+	return ContainerRefFromIdentity(identity, planned.RuntimeID, ContainerActionUnowned)
 }
 
 func withContainerAction(ref ContainerRef, action string) ContainerRef {
-	ref.Name = strings.TrimSpace(ref.Name)
-	ref.Kind = strings.TrimSpace(ref.Kind)
-	ref.Action = strings.TrimSpace(action)
-	ref.CreationSource = strings.TrimSpace(ref.CreationSource)
-	ref.WorkspaceScope = strings.TrimSpace(ref.WorkspaceScope)
-	ref.RunID = strings.TrimSpace(ref.RunID)
-	ref.AgentIdentity = ref.AgentIdentity.Normalize()
-	ref.FlowInstance = strings.Trim(strings.TrimSpace(ref.FlowInstance), "/")
-	return ref
+	return ContainerRefFromIdentity(ref.Identity(), ref.RuntimeID, action)
 }
 
 func copyContainerResetResult(result ContainerResetResult) ContainerResetResult {
@@ -154,4 +152,56 @@ func copyContainerResetResult(result ContainerResetResult) ContainerResetResult 
 	result.Stopped = append([]ContainerRef(nil), result.Stopped...)
 	result.Failed = append([]ContainerStopFailure(nil), result.Failed...)
 	return result
+}
+
+// A successful receipt accounts for every immutable target once. Preserving a
+// changed object is safe, but is not proof that the planned resource settled.
+func validateContainerSettlement(planned []ContainerRef, result ContainerResetResult) error {
+	if len(result.Failed) != 0 || len(result.Preserved) != 0 {
+		return fmt.Errorf("reset container settlement retains unresolved ownership")
+	}
+	targets := make(map[string]ContainerRef, len(planned))
+	for _, target := range planned {
+		if _, duplicate := targets[target.RuntimeID]; duplicate || target.RuntimeID == "" {
+			return fmt.Errorf("reset container intent is missing or duplicates immutable identity %q", target.RuntimeID)
+		}
+		targets[target.RuntimeID] = target
+	}
+	settled := make(map[string]bool, len(targets))
+	for _, group := range []struct {
+		targets []ContainerRef
+		action  string
+	}{
+		{result.Stopped, ContainerActionStop},
+		{result.AlreadyStopped, ContainerActionAlreadyStopped},
+		{result.Missing, ContainerActionMissing},
+	} {
+		for _, target := range group.targets {
+			original, exists := targets[target.RuntimeID]
+			if !exists || settled[target.RuntimeID] || !original.Identity().Equal(target.Identity()) || target.Action != group.action {
+				return fmt.Errorf("reset container receipt contradicts planned target %q", target.RuntimeID)
+			}
+			settled[target.RuntimeID] = true
+		}
+	}
+	if len(settled) != len(targets) {
+		return fmt.Errorf("reset container receipt settled %d of %d planned targets", len(settled), len(targets))
+	}
+	selected := make(map[string]bool, len(result.Selected))
+	for _, target := range result.Selected {
+		original, exists := targets[target.RuntimeID]
+		if !exists || selected[target.RuntimeID] || !original.Identity().Equal(target.Identity()) || target.Action != ContainerActionStop {
+			return fmt.Errorf("reset container selection contradicts planned target %q", target.RuntimeID)
+		}
+		selected[target.RuntimeID] = true
+	}
+	if len(selected) != len(result.Stopped) {
+		return fmt.Errorf("reset container receipt did not stop its exact selected set")
+	}
+	for _, target := range result.Stopped {
+		if !selected[target.RuntimeID] {
+			return fmt.Errorf("reset container receipt stopped an unselected target %q", target.RuntimeID)
+		}
+	}
+	return nil
 }

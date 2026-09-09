@@ -1,5 +1,4 @@
 candidate-intake:
-  id: candidate-intake
   execution_type: system_node
   subscribes_to: [candidate.requested]
   produces: [candidate.work.requested]
@@ -17,7 +16,6 @@ candidate-intake:
           candidate_id: payload.candidate_id
 
 candidate-completion:
-  id: candidate-completion
   execution_type: system_node
   subscribes_to: [candidate.analyzed]
   produces: [candidate.completed]

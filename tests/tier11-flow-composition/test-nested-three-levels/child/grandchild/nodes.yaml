@@ -1,5 +1,4 @@
 grandchild-worker:
-  id: grandchild-worker
   execution_type: system_node
   subscribes_to: [micro.start]
   produces: [micro.done]

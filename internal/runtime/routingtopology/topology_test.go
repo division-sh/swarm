@@ -318,7 +318,7 @@ func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T
 func TestBuildDoesNotInventExternalConsumerForFreeFormMetadata(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"worker": {ID: "worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"worker": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"work.requested": {Emit: runtimecontracts.EmitSpec{Event: "external.received"}},
 			}},
 		},

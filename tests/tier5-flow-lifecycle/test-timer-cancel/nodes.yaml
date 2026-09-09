@@ -1,5 +1,4 @@
 timer-node:
-  id: timer-node
   execution_type: system_node
   subscribes_to: [timer.scheduled, timer.check]
   timers:
@@ -15,7 +14,6 @@ timer-node:
       advances_to: done
 
 cancel-node:
-  id: cancel-node
   execution_type: system_node
   subscribes_to: [timer.cancel_requested]
   produces: [timer.cancelled]

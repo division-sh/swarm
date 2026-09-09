@@ -1,0 +1,9 @@
+name: node-identity
+initial_state: pending
+terminal_states: [done]
+states: [pending, working, done]
+pins:
+  inputs:
+    events:
+      - {event: entry.left, source: external}
+      - work.routed

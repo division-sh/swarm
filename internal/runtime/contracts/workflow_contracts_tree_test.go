@@ -383,7 +383,6 @@ vertical.shortlisted:
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  id: scoring-node
   execution_type: system_node
   subscribes_to:
     - score.ready
@@ -413,7 +412,6 @@ validation.started:
 `)
 	writeFixtureFile(t, filepath.Join(root, "validation", "nodes.yaml"), `
 validation-orchestrator:
-  id: validation-orchestrator
   execution_type: system_node
   produces:
     - validation.started
@@ -465,7 +463,6 @@ vertical.shortlisted:
 `)
 	writeFixtureFile(t, filepath.Join(root, "scoring", "nodes.yaml"), `
 scoring-node:
-  id: scoring-node
   execution_type: system_node
   subscribes_to:
     - score.ready
@@ -498,7 +495,6 @@ validation.started:
 `)
 	writeFixtureFile(t, filepath.Join(root, "validation", "nodes.yaml"), `
 validation-orchestrator:
-  id: validation-orchestrator
   execution_type: system_node
   produces:
     - validation.rule
@@ -585,7 +581,6 @@ evidence.recorded:
 `)
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 audit-node:
-  id: audit-node
   execution_type: system_node
   subscribes_to:
     - item.created
@@ -621,7 +616,6 @@ mode: static
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "nodes.yaml"), `
 parent-node:
-  id: parent-node
   execution_type: system_node
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "events.yaml"), `
@@ -646,7 +640,6 @@ mode: static
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "nodes.yaml"), `
 child-node:
-  id: child-node
   execution_type: system_node
 `)
 	writeFixtureFile(t, filepath.Join(root, "parent", "child", "events.yaml"), `
@@ -812,7 +805,6 @@ lookup:
 func TestSystemNodeContract_GateStateSupportsShorthandMap(t *testing.T) {
 	var node SystemNodeContract
 	if err := loadYAMLBytes([]byte(`
-id: build-orchestrator
 gate_state:
   g_product_spec: PM completed product spec
   g_tech_spec: CTO completed tech spec
@@ -833,7 +825,6 @@ gate_state:
 func TestSystemNodeContract_GateStateSupportsStructuredForm(t *testing.T) {
 	var node SystemNodeContract
 	if err := loadYAMLBytes([]byte(`
-id: validation-orchestrator
 gate_state:
   description: Tracks 4 validation gates per vertical
   gates:

@@ -191,8 +191,8 @@ func TestCatalogExternalProofsFailClosed(t *testing.T) {
 		root := writeExternalProofInventory(t, valid, "")
 		writeCatalogTestFile(t, filepath.Join(root, ".github", "test-proof-plan.yaml"), externalProofPolicyWithRun("github.com/division-sh/swarm/internal/executor", "^TestUnrelated$"))
 		_, err := Load(root)
-		if err == nil || !strings.Contains(err.Error(), "filtered CI owner") {
-			t.Fatalf("Load error = %v, want filtered executor proof rejection", err)
+		if err == nil || !strings.Contains(err.Error(), "matches 0 execution units") {
+			t.Fatalf("Load error = %v, want incomplete executor proof rejection", err)
 		}
 	})
 
@@ -275,9 +275,40 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatalf("catalog-required-verify run filter = %q, want unfiltered full package", cliappUnit.Run)
 	}
 	requiredUnits := []string{"catalog-required-inventory", "catalog-required-verify"}
-	releaseUnit, ok := policy.Units["hitl-releasee2e-full"]
-	if !ok || len(releaseUnit.Packages) != 1 || releaseUnit.Packages[0] != releasePackage || strings.TrimSpace(releaseUnit.Run) != "" || releaseUnit.BudgetClass != "full" {
-		t.Fatalf("hitl-releasee2e-full = %#v, want one unfiltered releasee2e owner with the full timing budget", releaseUnit)
+	if !regexp.MustCompile(policy.Units["catalog-required-inventory"].Run).MatchString("TestCatalogExternalProofPartitionsThroughInventory") {
+		t.Fatal("required inventory unit omits the partition mutation proof")
+	}
+	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-burst", "hitl-releasee2e-invocation"}
+	var runs []string
+	for _, id := range releaseUnits {
+		unit, ok := policy.Units[id]
+		if !ok || len(unit.Packages) != 1 || unit.Packages[0] != releasePackage || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
+			t.Fatalf("%s = %#v, want count-1 release partition with unchanged full budget", id, unit)
+		}
+		runs = append(runs, unit.Run)
+	}
+	if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal/releasee2e"), runs); err != nil {
+		t.Fatal(err)
+	}
+	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-surfaces"}
+	catalogUnits := []string{"catalog-replay", "catalog-runtime"}
+	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
+		var selectors []string
+		for _, id := range ids {
+			unit, ok := policy.Units[id]
+			if !ok || len(unit.Packages) != 1 || unit.Packages[0] != "github.com/division-sh/swarm/internal/"+pkg || unit.CountMode != "count-1" || unit.BudgetClass != "full" {
+				t.Fatalf("invalid full-coverage partition %s: %+v", id, unit)
+			}
+			selectors = append(selectors, unit.Run)
+		}
+		if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal", pkg), selectors); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The standalone catalog command still selects the complete unfiltered
+	// package; only CI schedules its disjoint groups on independent workers.
+	if policy.Projections["catalog-full"].Unit != "catalog-full" || policy.Units["catalog-full"].Run != "" {
+		t.Fatal("standalone catalog projection no longer covers the full package")
 	}
 	planPackages := append([]string{"github.com/division-sh/swarm/internal/events"}, policy.SpecialPackages...)
 	model := testplanning.WeightModel{Version: 1, SourceRunID: "issue-2143-ci-owner-guard", Packages: map[string]float64{}}
@@ -293,15 +324,19 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 				t.Errorf("profile %s omits %s", profileName, unit)
 			}
 		}
-		if !containsString(profile.Units, "hitl-releasee2e-full") {
-			t.Errorf("profile %s omits hitl-releasee2e-full", profileName)
+		for _, id := range releaseUnits {
+			if !containsString(profile.Units, id) {
+				t.Errorf("profile %s omits %s", profileName, id)
+			}
 		}
-		catalogUnit := "catalog-full"
+		expectedCatalogUnits := catalogUnits
 		if profileName == testplanning.ProfilePRCommon {
-			catalogUnit = "catalog-required-smoke"
+			expectedCatalogUnits = []string{"catalog-required-smoke"}
 		}
-		if !containsString(profile.Units, catalogUnit) {
-			t.Errorf("profile %s omits %s", profileName, catalogUnit)
+		for _, id := range append(append([]string{}, serveUnits...), expectedCatalogUnits...) {
+			if !containsString(profile.Units, id) {
+				t.Errorf("profile %s omits %s", profileName, id)
+			}
 		}
 		plan, err := testplanning.BuildPlan(policy, model, planPackages, profileName, "catalog CI owner guard", "issue-2143")
 		if err != nil {
@@ -319,8 +354,8 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 					}
 				case releasePackage:
 					releaseOwners++
-					if unit.ID != "hitl-releasee2e-full" || strings.TrimSpace(unit.Run) != "" {
-						t.Errorf("profile %s releasee2e owner = %s run=%q, want hitl-releasee2e-full unfiltered", profileName, unit.ID, unit.Run)
+					if !containsString(releaseUnits, unit.ID) || unit.Run != policy.Units[unit.ID].Run {
+						t.Errorf("profile %s has unexpected releasee2e partition %s run=%q", profileName, unit.ID, unit.Run)
 					}
 				}
 			}
@@ -328,8 +363,8 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		if cliappOwners != 1 {
 			t.Errorf("profile %s cliapp owner count = %d, want 1", profileName, cliappOwners)
 		}
-		if releaseOwners != 1 {
-			t.Errorf("profile %s releasee2e owner count = %d, want 1", profileName, releaseOwners)
+		if releaseOwners != len(releaseUnits) {
+			t.Errorf("profile %s releasee2e unit count = %d, want %d", profileName, releaseOwners, len(releaseUnits))
 		}
 	}
 	for _, changedPath := range []string{
@@ -477,6 +512,7 @@ func writeExternalProofInventory(t *testing.T, proof, expected string) string {
 	if err := os.MkdirAll(filepath.Join(root, "internal", "executor"), 0o755); err != nil {
 		t.Fatalf("create executor package: %v", err)
 	}
+	writeCatalogTestFile(t, filepath.Join(root, "internal", "executor", "proof_test.go"), "package executor\nimport \"testing\"\nfunc TestProof(t *testing.T) {}\n")
 	writeCatalogTestFile(t, filepath.Join(root, ".github", "test-proof-plan.yaml"), externalProofPolicy("github.com/division-sh/swarm/internal/executor"))
 	return root
 }

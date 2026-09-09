@@ -1,5 +1,4 @@
 worker:
-  id: worker
   execution_type: system_node
   subscribes_to: [auto.started]
   produces: [auto.processed]
@@ -10,7 +9,6 @@ worker:
         event: auto.processed
 
 observer:
-  id: observer
   execution_type: system_node
   subscribes_to: [auto.processed]
   produces: []

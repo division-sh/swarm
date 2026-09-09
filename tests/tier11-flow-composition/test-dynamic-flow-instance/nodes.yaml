@@ -1,5 +1,4 @@
 orchestrator:
-  id: orchestrator
   execution_type: system_node
   subscribes_to: [spawn.requested]
   produces: []
@@ -14,7 +13,6 @@ orchestrator:
       advances_to: spawned
 
 assigner:
-  id: assigner
   execution_type: system_node
   subscribes_to: [assign.requested]
   produces: [work.assign]

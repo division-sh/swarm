@@ -1,0 +1,5 @@
+entry.right:
+  marker: text
+work.processed:
+  marker: text
+  origin: text

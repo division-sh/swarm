@@ -331,10 +331,11 @@ rows:
       choice: [wildcard_or_extra_runtime_subscription]
     spelling:
       canonical_candidate: omit_all_exact_projections
-      retired_duplicates: [id_equal_to_map_key, execution_type_system_node, subscribes_to_equal_to_handler_keys, produces_equal_to_emit_sites]
+      retired_duplicates: [node.id, execution_type_system_node, subscribes_to_equal_to_handler_keys, produces_equal_to_emit_sites]
       distinct_overrides: [wildcard_or_extra_subscription]
-    f2_bug: "a templated authored id may pass admission but EffectiveSystemNodeID discards it in favor of the map key"
-    corpus: {nodes: 24, redundant_id: 24, redundant_execution_type: 24, exact_subscriptions: 24, wildcard_or_extra_subscriptions: 0, exact_produces: 13, divergent_produces: 0}
+    identity_retirement: "#2308: node.id is rejected on presence; DeclarationIdentity and ExecutableNode own map-key/scoped identity. Other projections in this row remain open."
+    f2_bug: "authored node ID carrier and template/fallback interpreters removed by #2308"
+    corpus: {nodes: 24, redundant_id: 0, redundant_execution_type: 24, exact_subscriptions: 24, wildcard_or_extra_subscriptions: 0, exact_produces: 13, divergent_produces: 0}
 
   - id: node.state_schema
     ruled: mechanical-ratified

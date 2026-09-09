@@ -724,7 +724,6 @@ func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing
 						events: "ticket.ready: {}\n",
 						nodes: `
 support-node:
-  id: support-node
   execution_type: system_node
   subscribes_to:
     - start
@@ -744,7 +743,6 @@ support-node:
 				rootEvents: "ticket.ready: {}\n",
 				rootNodes: `
 root-node:
-  id: root-node
   execution_type: system_node
   subscribes_to:
     - ticket.ready
@@ -780,7 +778,6 @@ root-node:
 						events: "ticket.ready: {}\nstart.signal: {}\n",
 						nodes: `
 timer-owner:
-  id: timer-owner
   execution_type: system_node
   timers:
     - id: reminder
@@ -803,7 +800,6 @@ timer-owner:
 						events: "ticket.ready: {}\nstart:\n  items: '[json]'\n",
 						nodes: `
 fanout-node:
-  id: fanout-node
   execution_type: system_node
   subscribes_to:
     - start
@@ -871,7 +867,6 @@ func TestRun_DoesNotTreatCrossFlowQualifiedSubscriptionAsDeadEventLiveness(t *te
 			"consumer": {
 				nodes: `
 consumer-node:
-  id: consumer-node
   execution_type: system_node
   subscribes_to:
     - producer/ticket.ready
@@ -898,7 +893,6 @@ func TestRun_TreatsScopedLocalWildcardAsSameFlowDeadEventLiveness(t *testing.T) 
 				events: "ticket.ready: {}\n",
 				nodes: `
 consumer-node:
-  id: consumer-node
   execution_type: system_node
   subscribes_to:
     - ticket.*
@@ -934,7 +928,6 @@ func TestRun_DoesNotUseSameLocalNameAcrossFlowsByCoincidenceForDeadEventSchema(t
 				events: "task.completed: {}\n",
 				nodes: `
 beta-node:
-  id: beta-node
   execution_type: system_node
   subscribes_to:
     - task.completed
@@ -961,7 +954,6 @@ func TestRun_DoesNotUseRootLocalReferenceAsProofForChildFlowDeadEventSchema(t *t
 		name: "dead-event-schema-root-local-child-flow",
 		rootNodes: `
 root-node:
-  id: root-node
   execution_type: system_node
   subscribes_to:
     - ticket.ready
@@ -1108,7 +1100,6 @@ func TestRun_DoesNotWarnForPlatformEmittedEventCatalogSubscription(t *testing.T)
 			eventType: "mailbox.card_decided",
 			nodeID:    "approval-handler",
 			node: runtimecontracts.SystemNodeContract{
-				ID:           "approval-handler",
 				SubscribesTo: []string{"mailbox.card_decided"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"mailbox.card_decided": {},
@@ -1146,7 +1137,6 @@ required:
 			eventType: "platform.paused",
 			nodeID:    "pause-handler",
 			node: runtimecontracts.SystemNodeContract{
-				ID:           "pause-handler",
 				SubscribesTo: []string{"platform.paused"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"platform.paused": {},
@@ -1385,7 +1375,6 @@ evidence.requested:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 root-node:
-  id: root-node
   execution_type: system_node
   subscribes_to: [evidence.requested]
   event_handlers:
@@ -1405,7 +1394,6 @@ child.evidence:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 child-node:
-  id: child-node
   execution_type: system_node
   subscribes_to: [child.evidence]
   event_handlers:
@@ -2372,7 +2360,6 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 				},
 				Nodes: map[string]runtimecontracts.SystemNodeContract{
 					"complete-task": {
-						ID:            "complete-task",
 						ExecutionType: "system_node",
 						SubscribesTo:  []string{"task.requested"},
 						Produces:      []string{"task.completed"},
@@ -2413,7 +2400,6 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"complete-task": {
-				ID:            "complete-task",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"task.requested"},
 				Produces:      []string{"task.completed"},
@@ -2484,7 +2470,6 @@ func TestRun_MapsDataAccumulationSourcePayloadMismatchToNamedError(t *testing.T)
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-1": {
-				ID: "node-1",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -2523,7 +2508,6 @@ func TestRun_MapsEmptyDataAccumulationSourcePayloadSchemaToNamedError(t *testing
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-1": {
-				ID: "node-1",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -2568,7 +2552,6 @@ func TestRun_AllowsDeclaredDataAccumulationSourcePayloadField(t *testing.T) {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-1": {
-				ID: "node-1",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -2610,7 +2593,6 @@ func TestRun_MapsUndeclaredNestedEntityWriteTargetToEntityWriteTargetComplianceE
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-1": {
-				ID: "node-1",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.completed": {
 						Compute: &runtimecontracts.ComputeSpec{
@@ -3109,7 +3091,6 @@ func TestRun_MapsSelfEmitToEventCycleDetectionForFlowLocalHandlers(t *testing.T)
 func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"node-a": {
-			ID:           "node-a",
 			SubscribesTo: []string{"task.a"},
 			Produces:     []string{"task.b"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -3117,7 +3098,6 @@ func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
 			},
 		},
 		"node-b": {
-			ID:           "node-b",
 			SubscribesTo: []string{"task.b"},
 			Produces:     []string{"task.a"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -3154,7 +3134,6 @@ func TestRun_RejectsUnsupportedGuardOnFail(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Guard: &runtimecontracts.GuardSpec{
@@ -3178,7 +3157,6 @@ func TestRun_RejectsGuardEscalateObjectMissingEvent(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Guard: &runtimecontracts.GuardSpec{
@@ -3205,7 +3183,6 @@ func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Guard: &runtimecontracts.GuardSpec{Check: "_entity.id =="},
@@ -3226,7 +3203,6 @@ func TestRun_RejectsFanOutNamespaceInGuardConditions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Guard: &runtimecontracts.GuardSpec{Check: "fan_out.count > 0"},
@@ -3247,7 +3223,6 @@ func TestRun_RejectsItemNamespaceOutsideFilterConditions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -3277,7 +3252,6 @@ func TestRun_RejectsAccumulatedNamespaceInDataAccumulationExpressions(t *testing
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -3302,7 +3276,6 @@ func TestRun_RejectsRetiredFanOutTargetInDataAccumulationExpressions(t *testing.
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -3328,7 +3301,6 @@ func TestRun_RejectsAccumulatedNamespaceInEmitFieldExpressions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Emit: runtimecontracts.EmitSpec{
@@ -3354,7 +3326,6 @@ func TestRun_RejectsRetiredFanOutTargetInFanOutEmitFieldExpressions(t *testing.T
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						FanOut: &runtimecontracts.FanOutSpec{
@@ -3387,7 +3358,6 @@ func TestRun_RejectsDisallowedRefNamespaceInEmitFieldExpressions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Emit: runtimecontracts.EmitSpec{
@@ -3422,7 +3392,6 @@ emit:
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": handler,
 				},
@@ -3465,7 +3434,6 @@ fan_out:
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
-				ID: "scan-orchestrator",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.requested": handler,
 				},
@@ -3493,7 +3461,6 @@ emit:
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": handler,
 				},
@@ -3512,7 +3479,6 @@ func TestRun_RejectsBareItemInDataAccumulationExpressions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"test-node": {
-				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -4815,7 +4781,7 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 					}
 					switch kind {
 					case "node":
-						listener := runtimecontracts.SystemNodeContract{ID: "listener", SubscribesTo: []string{authored}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}, ProducesDeclared: true}
+						listener := runtimecontracts.SystemNodeContract{SubscribesTo: []string{authored}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}, ProducesDeclared: true}
 						bundle.Nodes["listener"] = listener
 						bundle.FlowTree.Root.Nodes["listener"] = listener
 					case "agent":
@@ -4853,7 +4819,6 @@ func TestRun_RejectsAbsoluteSiblingQualifiedSubscription(t *testing.T) {
 		Path:  "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
-				ID:               "listener",
 				SubscribesTo:     []string{"producer/task.done"},
 				EventHandlers:    map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}},
 				ProducesDeclared: true,
@@ -4899,11 +4864,11 @@ func TestRun_ExactSubscriptionAdmissionPreservesOnlySameScopeAgentException(t *t
 			switch tc.kind {
 			case "node":
 				child.Nodes = map[string]runtimecontracts.SystemNodeContract{
-					"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{tc.authored: {}}},
+					"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{tc.authored: {}}},
 				}
 			case "generated":
 				child.Nodes = map[string]runtimecontracts.SystemNodeContract{
-					"listener": {ID: "listener", SubscribesTo: []string{tc.authored}},
+					"listener": {SubscribesTo: []string{tc.authored}},
 				}
 			case "agent":
 				child.Agents = map[string]runtimecontracts.AgentRegistryEntry{
@@ -6083,7 +6048,6 @@ func TestRun_RejectsCallerSelectedEntityIDForRootNormalInputPinMaterializers(t *
 func TestRun_RejectsImplicitMaterializationForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6157,7 +6121,6 @@ func TestRun_RejectsRootDefaultStaticInputPinMaterializationWithRequiredEntityID
 func TestRun_RejectsSelectEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6182,7 +6145,6 @@ treasury-node:
 func TestRun_RejectsSelectOrCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6207,7 +6169,6 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithSourceEnvelopeAuthority(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6228,7 +6189,6 @@ treasury-node:
 func TestRun_RejectsSelectOrCreateEntityWithSourceEnvelopeAuthority(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6249,7 +6209,6 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithEnvelopeTargetField(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6334,7 +6293,6 @@ func TestRun_RejectsPlatformEntityStoreAsWriteTarget(t *testing.T) {
 func TestRun_RejectsSelectOrCreateEntityWithUndeclaredPayloadRef(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6355,7 +6313,6 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithUndeclaredPayloadRef(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6376,7 +6333,6 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithCreateEntity(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6398,7 +6354,6 @@ treasury-node:
 func TestRun_RejectsSelectOrCreateEntityWithCreateEntity(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6420,7 +6375,6 @@ treasury-node:
 func TestRun_RejectsSelectEntityWithSelectOrCreateEntity(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
-  id: treasury-node
   execution_type: system_node
   subscribes_to: [opco.spend_requested]
   event_handlers:
@@ -6735,7 +6689,7 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 	if !ok || root == nil {
 		t.Fatal("root flow missing")
 	}
-	root.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{ID: "idle-owner"}
+	root.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{}
 	event := bootverifyFlowEvent(t, bundle, ".", "ticket.audit")
 	event.RuntimeHandling = "projection"
 	event.OwningNode = "idle-owner"
@@ -7064,7 +7018,6 @@ func TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult(t *testing.
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"artifact-node": {
-				ID: "artifact-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"artifact.commit_requested": artifactHandler,
 					"timer.reminder":            timerHandler,
@@ -7566,7 +7519,6 @@ consumer.started:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "consumer", "nodes.yaml"), `
 consumer-node:
-  id: consumer-node
   execution_type: system_node
   subscribes_to:
     - `+subscription+`
@@ -7617,7 +7569,6 @@ ticket.closed:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), fmt.Sprintf(`
 support-node:
-  id: support-node
   execution_type: system_node
   subscribes_to:
     - ticket.opened
@@ -7664,7 +7615,6 @@ ticket.closed:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), `
 support-node:
-  id: support-node
   execution_type: system_node
   subscribes_to:
     - ticket.opened
@@ -7736,7 +7686,6 @@ task.result: {}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 worker:
-  id: worker
   execution_type: system_node
   subscribes_to: [task.assigned, task.feedback]
   produces: [task.result]
@@ -7787,7 +7736,6 @@ task.assigned:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 reader:
-  id: reader
   execution_type: system_node
   subscribes_to: [task.assigned]
   event_handlers:
@@ -7872,14 +7820,12 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 	}
 	nodes := map[string]runtimecontracts.SystemNodeContract{
 		"dispatcher": {
-			ID:               "dispatcher",
 			OwnedTransitions: []string{"ticket-open"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"ticket.created": {},
 			},
 		},
 		"projector": {
-			ID: "projector",
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"ticket.opened": {},
 			},
@@ -8129,7 +8075,6 @@ func gateSchemaValidationBundle(t testing.TB, gateState runtimecontracts.NodeGat
 		eventType = "task.requested"
 	)
 	node := runtimecontracts.SystemNodeContract{
-		ID:            nodeID,
 		ExecutionType: "system_node",
 		SubscribesTo:  []string{eventType},
 		GateState:     gateState,
@@ -8550,7 +8495,6 @@ func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBu
 	t.Helper()
 	if bundle.FlowTree.Root == nil {
 		node := runtimecontracts.SystemNodeContract{}
-		node.ID = nodeID
 		node.ExecutionType = "system_node"
 		node.SubscribesTo = []string{eventType}
 		if node.EventHandlers == nil {
@@ -8567,7 +8511,6 @@ func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBu
 		bundle.FlowTree.Root.Nodes = map[string]runtimecontracts.SystemNodeContract{}
 	}
 	node := bundle.FlowTree.Root.Nodes[nodeID]
-	node.ID = nodeID
 	node.ExecutionType = "system_node"
 	node.SubscribesTo = append(node.SubscribesTo, eventType)
 	if node.EventHandlers == nil {

@@ -1,5 +1,4 @@
 phase-one:
-  id: phase-one
   execution_type: system_node
   subscribes_to: [task.started]
   produces: [phase.advanced]
@@ -13,7 +12,6 @@ phase-one:
           advances_to: processing
           emit: phase.advanced
 phase-two:
-  id: phase-two
   execution_type: system_node
   subscribes_to: [phase.advanced]
   produces: [task.done]

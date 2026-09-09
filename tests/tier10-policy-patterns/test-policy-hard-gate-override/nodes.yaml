@@ -1,5 +1,4 @@
 evaluator:
-  id: evaluator
   execution_type: system_node
   subscribes_to: [score.final]
   produces: [result.demoted]

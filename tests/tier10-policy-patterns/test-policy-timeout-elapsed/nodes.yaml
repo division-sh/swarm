@@ -1,5 +1,4 @@
 monitor:
-  id: monitor
   execution_type: system_node
   subscribes_to: [task.done, timer.check]
   produces: [task.timed_out]

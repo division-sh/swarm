@@ -172,26 +172,23 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 			t.Fatalf("%s rebind retained predecessor activation generation %q", backend, reconnected.Readiness.ActivationGeneration)
 		}
 	})
-	t.Run("E2E-11_unbind_retires_activation_before_identity", func(t *testing.T) {
-		runChannelOnboardingUnbindJourney(t, opts.ConfigPath, endpoint, shared.Identity.Interface.Selector)
-		unbound := readChannelOnboardingRow(t, opts.ConfigPath, endpoint, "unbound")
-		if unbound.Identity.ProofID != shared.Identity.ProofID || unbound.Identity.ProofRevision != shared.Identity.ProofRevision || unbound.Identity.ProofStatus != "active" {
-			t.Fatalf("%s unbound proof readback = %#v, want retained active proof %#v", backend, unbound.Identity, shared.Identity)
-		}
-		assertChannelOnboardingCredentialStoreEmpty(t, credentialPath, string(backend)+" unbind")
-	})
 	if code := process.stop(); code != 0 {
 		t.Fatalf("%s pre-reset serve exit = %d", backend, code)
 	}
 	assertChannelOnboardingProjectClaimsReleased(t, string(backend)+" graceful shutdown")
 	resetSelectedStore()
 	crashProcess := startChannelOnboardingCrashServeProcess(t, opts, telegram.URL)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("channel onboarding crash-process diagnostics:\n%s", crashProcess.output.String())
+		}
+	})
 	endpoint = crashProcess.endpoint(t)
 	restartedIdentity := readCurrentChannelOnboardingJourney(t, opts.ConfigPath, endpoint)
 	if restartedIdentity.Identity.ConversationScope != shared.Identity.ConversationScope || restartedIdentity.Activation != nil || restartedIdentity.Readiness != nil ||
 		restartedIdentity.Recovery == nil || restartedIdentity.Recovery.Reason != "activation_not_current" || restartedIdentity.Recovery.Provider != "telegram" ||
 		len(restartedIdentity.Recovery.Commands) != 1 || restartedIdentity.Recovery.Commands[0] != "swarm channel reconnect telegram" {
-		t.Fatalf("%s restarted reset readback = %#v, want proof-restored identity without activation/readiness", backend, restartedIdentity)
+		t.Fatalf("%s restarted reset readback = %#v, want current-evidence proof-restored identity without activation/readiness", backend, restartedIdentity)
 	}
 	listOut, listErr := &lockedBuffer{}, &lockedBuffer{}
 	if code := executeCLI(context.Background(), []string{"--config", opts.ConfigPath, "channel", "list", "--api-server", endpoint}, listOut, listErr, nil); code != 0 {
@@ -200,6 +197,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if !strings.Contains(listOut.String(), "channel telegram: identity verified, activation lost with store - run swarm channel reconnect telegram") {
 		t.Fatalf("%s reset channel list lacks reconnect teaching:\n%s", backend, listOut.String())
 	}
+	deleteAllChannelOnboardingCredentials(t, credentialPath, string(backend)+" credential loss after proof restore")
 	registrationsBeforeBlock, deliveriesBeforeBlock := provider.Counts()
 	blockedOut, blockedErr := &lockedBuffer{}, &lockedBuffer{}
 	blockedCode := executeCLI(context.Background(), []string{
@@ -211,7 +209,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if blockedCode == 0 || !strings.Contains(blockedSurface, "CHANNEL_CREDENTIAL_REQUIRED") || blockedOperationID == "" || !strings.Contains(blockedSurface, blockedResumeCommand) {
 		t.Fatalf("%s E2E-04 credential-required result code=%d\nstdout:\n%s\nstderr:\n%s", backend, blockedCode, blockedOut.String(), blockedErr.String())
 	}
-	blockedRow := readCurrentChannelOnboardingJourney(t, opts.ConfigPath, endpoint)
+	blockedRow := readChannelOnboardingOperationRow(t, opts.ConfigPath, endpoint, blockedOperationID)
 	if blockedRow.Operation == nil || blockedRow.Operation.OperationID != blockedOperationID || blockedRow.Operation.Phase != "preparing" || blockedRow.Activation != nil || blockedRow.Recovery == nil ||
 		blockedRow.Operation.Coordinate.RuntimeInstanceID == "" || len(blockedRow.Recovery.Commands) != 1 || blockedRow.Recovery.Commands[0] != blockedResumeCommand {
 		t.Fatalf("%s E2E-04 blocked readback = %#v", backend, blockedRow)
@@ -236,7 +234,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	}
 	crashProcess = startChannelOnboardingCrashServeProcess(t, opts, telegram.URL)
 	endpoint = crashProcess.endpoint(t)
-	restartedBlockedRow := readCurrentChannelOnboardingJourney(t, opts.ConfigPath, endpoint)
+	restartedBlockedRow := readChannelOnboardingOperationRow(t, opts.ConfigPath, endpoint, blockedOperationID)
 	if restartedBlockedRow.Operation == nil || restartedBlockedRow.Operation.OperationID != blockedOperationID || restartedBlockedRow.Operation.Phase != "preparing" || restartedBlockedRow.Recovery == nil ||
 		len(restartedBlockedRow.Recovery.Commands) != 1 || restartedBlockedRow.Recovery.Commands[0] != blockedResumeCommand {
 		t.Fatalf("%s E2E-06 restarted blocked readback = %#v\nstored operation: %s\nchild output:\n%s", backend, restartedBlockedRow,
@@ -403,23 +401,35 @@ type channelOnboardingCrashServeProcess struct {
 
 func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOptions, telegramBaseURL string) *channelOnboardingCrashServeProcess {
 	t.Helper()
+	return startServedCrashProcess(t, "TestChannelOnboardingCrashServeProcessHelper", []string{
+		channelOnboardingCrashServeHelperEnv + "=1",
+		"TEST_CHANNEL_ONBOARDING_CONFIG=" + opts.ConfigPath,
+		"TEST_CHANNEL_ONBOARDING_CONTRACTS=" + opts.SourceRoot,
+		"TEST_CHANNEL_ONBOARDING_PLATFORM_SPEC=" + opts.PlatformSpecPath,
+		"TEST_CHANNEL_ONBOARDING_STORE=" + opts.StoreMode,
+		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN=" + opts.PublicWebhookBaseURL,
+		"TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN=" + opts.PublicWebhookListen,
+		"TEST_CHANNEL_ONBOARDING_TELEGRAM_BASE=" + telegramBaseURL,
+	})
+}
+
+func startServedCrashProcess(t *testing.T, helper string, environment []string) *channelOnboardingCrashServeProcess {
+	t.Helper()
+	process := startServedCrashProcessBeforeReadiness(t, helper, environment)
+	process.endpoint(t)
+	return process
+}
+
+func startServedCrashProcessBeforeReadiness(t *testing.T, helper string, environment []string) *channelOnboardingCrashServeProcess {
+	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	output := &lockedBuffer{}
-	cmd := exec.Command(executable, "-test.run=^TestChannelOnboardingCrashServeProcessHelper$", "-test.v")
+	cmd := exec.Command(executable, "-test.run=^"+helper+"$", "-test.v")
 	cmd.Dir = repoRootForTest()
-	cmd.Env = append(os.Environ(),
-		channelOnboardingCrashServeHelperEnv+"=1",
-		"TEST_CHANNEL_ONBOARDING_CONFIG="+opts.ConfigPath,
-		"TEST_CHANNEL_ONBOARDING_CONTRACTS="+opts.SourceRoot,
-		"TEST_CHANNEL_ONBOARDING_PLATFORM_SPEC="+opts.PlatformSpecPath,
-		"TEST_CHANNEL_ONBOARDING_STORE="+opts.StoreMode,
-		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN="+opts.PublicWebhookBaseURL,
-		"TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN="+opts.PublicWebhookListen,
-		"TEST_CHANNEL_ONBOARDING_TELEGRAM_BASE="+telegramBaseURL,
-	)
+	cmd.Env = append(os.Environ(), environment...)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Start(); err != nil {
@@ -434,7 +444,6 @@ func startChannelOnboardingCrashServeProcess(t *testing.T, opts cliapp.ServeOpti
 		close(process.exited)
 	}()
 	t.Cleanup(func() { _ = process.stop() })
-	process.endpoint(t)
 	return process
 }
 
@@ -700,31 +709,18 @@ func runRejectedChannelOnboardingReplacement(t *testing.T, configPath, endpoint,
 
 func runChannelOnboardingResumeJourney(t *testing.T, configPath, endpoint string, provider *channelOnboardingTelegramProvider, operationID string, deliveryIndex int, credential string) channelOnboardingJourneyReadback {
 	t.Helper()
-	stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-	priorStdin := os.Stdin
-	input, err := os.CreateTemp(t.TempDir(), "channel-resume-input-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		os.Stdin = priorStdin
-		_ = input.Close()
-	}()
-	if _, err := input.WriteString(credential + "\n"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := input.Seek(0, 0); err != nil {
-		t.Fatal(err)
-	}
-	os.Stdin = input
-	code := executeCLI(context.Background(), []string{
-		"--config", configPath, "channel", "resume", operationID, "--yes", "--credential-stdin", "--api-server", endpoint,
-	}, stdout, stderr, nil)
-	if code != 0 {
-		t.Fatalf("channel resume exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
-	}
-	surface := stdout.String() + "\n" + stderr.String()
-	if !strings.Contains(surface, "READY") || strings.Contains(surface, credential) || channelOnboardingChallengePattern.MatchString(surface) {
+	registrationsBefore, _ := provider.Counts()
+	command := startChannelOnboardingCLICommand(t, configPath, endpoint, []string{
+		"channel", "resume", operationID, "--yes", "--credential-stdin",
+	}, credential+"\n")
+	challenge := waitChannelOnboardingChallenge(t, command.stdout, command.stderr, command.done)
+	callbackURL, signingSecret := waitChannelOnboardingRegistrationForCredential(t, provider, credential, registrationsBefore+1, command)
+	requireChannelClaimDisposition(t, "resumed provider credential identity",
+		submitChannelOnboardingClaimWithChatType(t, callbackURL, signingSecret, challenge, 3000+int64(deliveryIndex), 7002, -2001, "group", "replacement_operator"),
+		"consumed_by_binding")
+	requireChannelOnboardingCommandSuccess(t, command)
+	surface := command.stdout.String() + "\n" + command.stderr.String()
+	if !strings.Contains(surface, "READY") || strings.Contains(surface, credential) {
 		t.Fatalf("channel resume readiness/secret/ceremony contract violated\n%s", surface)
 	}
 	delivery := waitChannelOnboardingDelivery(t, provider, deliveryIndex)
@@ -768,6 +764,23 @@ func assertChannelOnboardingCredentialStoreEmpty(t *testing.T, credentialPath, l
 	}
 	if len(keys) != 0 {
 		t.Fatalf("%s retained channel credentials: %v", label, keys)
+	}
+}
+
+func deleteAllChannelOnboardingCredentials(t *testing.T, credentialPath, label string) {
+	t.Helper()
+	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatalf("%s open credential store: %v", label, err)
+	}
+	keys, err := credentialStore.List(context.Background())
+	if err != nil {
+		t.Fatalf("%s list credential store: %v", label, err)
+	}
+	for _, key := range keys {
+		if err := credentialStore.Delete(context.Background(), key); err != nil {
+			t.Fatalf("%s delete credential %q: %v", label, key, err)
+		}
 	}
 }
 
@@ -870,12 +883,13 @@ func runChannelOnboardingCLIJourney(t *testing.T, configPath, endpoint string, p
 
 func readCurrentChannelOnboardingJourney(t *testing.T, configPath, endpoint string) channelOnboardingJourneyReadback {
 	t.Helper()
-	for _, row := range readChannelOnboardingRows(t, configPath, endpoint) {
+	rows := readChannelOnboardingRows(t, configPath, endpoint)
+	for _, row := range rows {
 		if row.Identity.Status == "current" {
 			return row
 		}
 	}
-	t.Fatal("channel list has no current row")
+	t.Fatalf("channel list has no current row: %#v", rows)
 	return channelOnboardingJourneyReadback{}
 }
 
@@ -888,6 +902,18 @@ func readChannelOnboardingRow(t *testing.T, configPath, endpoint, status string)
 		}
 	}
 	t.Fatalf("channel list has no %s row: %#v", status, rows)
+	return channelOnboardingJourneyReadback{}
+}
+
+func readChannelOnboardingOperationRow(t *testing.T, configPath, endpoint, operationID string) channelOnboardingJourneyReadback {
+	t.Helper()
+	rows := readChannelOnboardingRows(t, configPath, endpoint)
+	for _, row := range rows {
+		if row.Operation != nil && row.Operation.OperationID == operationID {
+			return row
+		}
+	}
+	t.Fatalf("channel list has no operation %s: %#v", operationID, rows)
 	return channelOnboardingJourneyReadback{}
 }
 

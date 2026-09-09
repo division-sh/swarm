@@ -916,6 +916,13 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 			logCounts[fmt.Sprintf("%v/%v", log["component"], log["action"])]++
 		}
 		completion, completionErr := readGoldenCompletionCandidate(diagnosticCtx, store.diagnosticDB, runID)
+		// Preserve exact public facts before the disposable store is removed. Counts
+		// alone cannot distinguish a dropped node transition from a delayed one.
+		if evidence, encodeErr := json.Marshal(map[string]any{"events": events, "runtime_logs": logs.Logs}); encodeErr == nil {
+			t.Logf("golden completion failure public evidence: %s", evidence)
+		} else {
+			t.Logf("encode golden completion failure evidence: %v", encodeErr)
+		}
 		t.Fatalf("wait for golden run completion: %v; last run=%#v; completion=%#v completion_err=%v; diagnosis=%#v diagnosis_err=%v; event_counts=%#v delivery_counts=%#v events_err=%v; entities=%#v; runtime_log_counts=%#v logs_err=%v\nserve output:\n%s", err, last, completion, completionErr, diagnosis, diagnosisErr, eventCounts, deliveryCounts, eventsErr, entities, logCounts, logsErr, process.output.String())
 	}
 }

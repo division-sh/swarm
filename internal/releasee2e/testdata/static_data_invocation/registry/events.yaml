@@ -1,0 +1,5 @@
+child.work:
+  request_key: text
+child.completed:
+  static_id: text
+  content: text

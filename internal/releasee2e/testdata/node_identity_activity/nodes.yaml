@@ -1,0 +1,16 @@
+activity-node:
+  event_handlers:
+    request:
+      activity:
+        id: send
+        tool: send
+        input:
+          message: payload.message
+    send.succeeded:
+      rules:
+        - id: observe_success
+          condition: payload.result != null
+    send.failed:
+      rules:
+        - id: observe_failure
+          condition: payload.failure != null

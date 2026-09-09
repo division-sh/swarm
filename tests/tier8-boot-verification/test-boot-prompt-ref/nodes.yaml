@@ -1,5 +1,4 @@
 prompt-ref-node:
-  id: prompt-ref-node
   execution_type: system_node
   subscribes_to: [task.requested]
   produces: [task.completed]

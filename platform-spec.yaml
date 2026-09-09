@@ -1419,11 +1419,12 @@ contract_formats:
             sole source-side admission fact: target routes, EventEnvelope fields, FlowInstance/EntityID shape, qualified suffix,
             and leaf equivalence cannot repair absent or contradictory source provenance.
         executable_node_identity: |
-          Every executable workflow-node declaration has one opaque immutable identity consisting of its exact flow_path,
-          owning flow_id, and local node_id. A root declaration carries flow_path "." and an explicitly empty flow_id;
-          that declaration coordinate is distinct from the selected run or execution-flow route. Local node_id, runtime
+          Every executable workflow-node declaration consumes DeclarationIdentity with its exact flow_path, family=node,
+          and semantic_path equal to the node map key. ExecutableNode is its strict {flow_path, node_id} projection;
+          a root declaration carries flow_path ".". There is no additional flow_id coordinate. This declaration
+          coordinate is distinct from the selected run or execution-flow route. A bare local node_id, runtime
           naming, source-event scope, flow-instance text, and descriptor lookup are never executable-node authority. Contract
-          loading mints this identity once, and routing, delivery, handler execution, joins, timers, activities, replay,
+          loading admits this identity, and routing, delivery, handler execution, joins, timers, activities, replay,
           selected-contract fork, recovery, and readback preserve it without reconstruction. Node subscriber_id and other
           durable compact forms are strict canonical codecs of the complete tuple: missing coordinates, alternate spellings,
           unknown fields, malformed keys, or disagreement with the selected declaration fail before mutation. Existing
@@ -4221,9 +4222,6 @@ handler_specification:
       required:
         event_handlers: map of event_name → handler declaration
       optional:
-        id: string — migration spelling for the node identifier; if omitted, the YAML map key is the effective node id.
-          If present as a plain value, it must exactly match the YAML map key. Existing rendered runtime-id templates such
-          as node-key-{instance_id} are subscriber naming templates, not a separate semantic node identity owner.
         execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
         subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
           event_handlers keys when omitted. Join timeout delivery is platform-owned and derived from effective join plans.
@@ -4239,8 +4237,10 @@ handler_specification:
           timer authoring for flows using `stages:` is owned by
           `stages.<stage>.timers`, not node-level state timers.
         gate_state: map — gate field definitions for this node (boolean flags on entity)
+      retired:
+        id: 'Any node-level id presence is rejected before value decoding: node.id is retired; the map key is the identity.'
       effective_semantics:
-        id: YAML map key, with same-value explicit id accepted during migration
+        id: YAML map key only, scoped by the existing declaration identity. No authored override or template spelling.
         execution_type: system_node
         runtime_subscriptions: union of explicit subscribes_to entries, event_handlers keys, and intrinsic platform runtime
           events required by declared handler primitives such as platform.join_timeout
@@ -5542,10 +5542,9 @@ engine:
             - Dashboard constructors accept typed projections only. Missing owners and read or stream failures are explicit errors; empty-success, fabricated not-found, loose Details reconstruction, and silent SSE continuation are forbidden.
             - The retired internal/digest SQL source and runtime digest persistence contract have no replacement because no supported production consumer exists.
         administrative_operation_contract:
-          bundle_delete_owner: internal/runtime/bundledelete Coordinator with internal/store/internal/adminpersistence.BundleDeletePostgresOwner
-          destructive_reset_owner: internal/runtime/destructivereset Coordinator with internal/store/internal/adminpersistence.DestructiveResetPostgresOwner
+          destructive_reset_owner: internal/runtime/destructivereset Coordinator with private adminpersistence DestructiveResetPostgresOwner and DestructiveResetSQLiteOwner adapters
           rules:
-            - Each operation acquires its operation-specific opaque advisory lease on a dedicated PostgreSQL connection before planning.
+            - Each operation acquires its operation-specific opaque lease before planning. PostgreSQL uses a dedicated advisory-lock connection; SQLite uses the selected owner's nonblocking process-local lease under retained process possession. The SQLite lease is not a transaction held across planning or external work.
             - API idempotency and the administrative lease own independent exact sessions. Construction reserves sufficient connection capacity so layered ownership cannot exhaust a one-connection configured pool.
             - The lease spans planning and external quiescence/container work, but every named persistence mutation owns and settles one short transaction.
             - Context values cannot carry connection, transaction, advisory-lock, lease, or reentrancy authority.
@@ -5876,8 +5875,8 @@ engine:
       runtime_nuke:
         method: runtime.nuke
         selected_capability: apiv1.DestructiveResetCoordinator
-        postgres_support: supported through one Postgres destructive reset coordinator, operation-specific lease, and named short-transaction persistence owners
-        sqlite_support: unsupported; SQLite omits destructive reset cleanup/quiescence capabilities and must fail closed
+        postgres_support: supported through the backend-neutral destructive reset coordinator, operation-specific advisory lease, and named short-transaction persistence owners
+        sqlite_support: supported through the same destructive reset coordinator, cleanup catalog, durable operation contract, and retained process capability; the private SQLite adapter owns a nonblocking operation lease and short atomic cleanup transactions
       conversation_fork:
         method: conversation.fork
         selected_capability: ConversationForkLifecycle
@@ -7985,7 +7984,7 @@ engine:
       severity: error
       scope: contract
       trigger: A declaration uses an unsupported or malformed field in a fail-closed contract surface. This includes node
-        top-level fields outside the defined node_fields set (id, execution_type, description, subscribes_to, event_handlers,
+        top-level fields outside the defined node_fields set (execution_type, description, subscribes_to, event_handlers,
         state_schema, state_table, timers, gate_state, produces) and malformed external tool-provider dispatch
         rate-limit declarations on HTTP tools, MCP servers, or policy.web_search_provider.
       when: boot-only
@@ -9418,7 +9417,7 @@ tool_model:
         claim_settlement: selected-store inbound publication transaction plus operator_channel_claim_receipts
         machine_proof: resolved Swarm state directory operator-channel-proofs.json
         provider_fact: current packs.SatisfactionPlan text projection from satisfier-authenticated normalized v2 output
-        api: /v1/rpc channel.connect|reconnect|rebind|confirm|unbind|proof_revoke|list
+        api: /v1/rpc channel.onboarding_start|onboarding_get|onboarding_retry|confirm|unbind|proof_revoke|list
         cli: swarm channel connect|list|unbind
       principal_rule: >
         One selected store owns one deployment operator principal. A successfully authenticated bearer token resolves to
@@ -9438,13 +9437,51 @@ tool_model:
         must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
-        return the original outcome while changed input conflicts. After same-request replay handling, an unresolved
+        return the original outcome while changed input conflicts. An exact selected-store begin replay is classified
+        before credential currentness, active-interface resolution, proof planning, revision admission, fresh challenge
+        generation, or any other mutable new-ceremony precondition; a replay recheck precedes return from a failed
+        currentness gate so a racing exact commit cannot be hidden. Credential currentness gates only a genuinely new
+        ceremony or a pending approved
+        mutation after terminal replay classification. Only a successful currentness observation whose value does not match
+        proves staleness; an observation error propagates without changing the pending ceremony, proof responsibility,
+        trusted binding projection, readback, or onboarding readiness. A stale provider credential terminally settles that
+        pending identity ceremony as credential_stale; its parent onboarding responsibility releases the old admissions,
+        resets to preparing, and accepts replacement hidden input into a fresh identity ceremony. One selected-store
+        pending-reset decision serves public confirmation, live retry, and local recovery, admitting either
+        awaiting_external_identity or awaiting_operator_confirmation only for the parent's exact durably stale child.
+        It verifies child back-reference, principal, interface, and admitted credential evidence before cleanup and again
+        under the same parent revision before reset commits; admissions remain durable until cleanup completes.
+        An inherited bound-reset revision must match that stale reconnect child's expected predecessor and the exact
+        current binding, and survives every repeated pending reset. Without an inherited obligation the revision remains
+        zero. A pending stale child never creates a bound revision or proof, and cannot authorize a publishing-phase reset.
+        Missing, contradictory, retired, or superseded ownership fails closed; an old stale replay cannot reset a new child.
+        Generic advance/clear flags do not authorize this reset. If currentness changes
+        after the child commits bound but before its parent publishes activation, the parent likewise releases the old
+        admissions and resets while retaining the exact bound revision; fresh evidence may then create only an exact
+        reconnect ceremony for that current claimant, irrespective of the parent's original whole-journey verb.
+        Live drive and local recovery consume one confirmed-child reconciliation decision, including an existing child
+        confirmed before its parent's awaiting_external_identity phase advances, irrespective of the journey verb.
+        The selected-store owner
+        admits its checkpoint or reset only under the exact active parent revision, validating the child's parent,
+        principal, interface, committed binding, and predecessor revision against the current binding in the same
+        parent-locked transaction. A zero parent binding revision is a valid uncheckpointed handoff, not evidence that
+        no binding committed; after a fresh reconnect the parent may likewise still carry that exact child's predecessor
+        revision. Unrelated child/binding revisions and retired parents cannot authorize reconciliation. Cleanup retains
+        checkpointed admissions until completion and revalidates the same selected-store handoff before reset commits.
+        The retained revision requires a fresh claimant and operator confirmation whether its old credential evidence
+        now compares current or successfully stale, including original-value restoration at the same key. Observation
+        errors do not authorize reset. Pending or failed proof responsibility prevents activation publication and remains
+        a new-ceremony fence after reset; exact terminal confirmation replay may complete it. After
+        same-request replay handling, an unresolved
         pending or failed proof responsibility blocks every new same-interface connect, reconnect, or rebind regardless
         of whether the new operation would save a proof; replaying the original confirmation is the recovery path.
         Unbind remains available and atomically marks every same-interface unresolved responsibility revoked before its
         fence commits, so no later boot can recover it against the fence. The selected-store identity owner
         revision-fences and durably expires an overdue awaiting-claim or awaiting-confirmation operation when its parent
-        responsibility is driven or recovered. An expired confirmation returns CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
+        responsibility is driven or recovered. The selected-store confirmation transaction must admit any nonterminal
+        identity child only while its onboarding parent remains nonterminal and names that exact child; it serializes
+        against parent retirement, which fences new child mutation, while exact terminal child replay remains available.
+        An expired confirmation returns CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
         without an invented empty binding. Optional operation timestamps and inapplicable binding fields are absent from
         API results rather than serialized as year-one timestamps or empty enum values.
       challenge_storage_rationale: >
@@ -9455,17 +9492,27 @@ tool_model:
       proof_rule: >
         Operator-confirmed success may project one structured machine-local verified-account proof for the exact interface
         identity. The proof contains opaque provider references, provider-neutral scope, original challenge/operation,
-        minting store/deployment, confirmation, consent scope, stable proof identity, and monotonic revision; it contains
-        no provider secret or independently validatable credential. Database claim/binding settlement commits first and
-        one durable proof responsibility makes file materialization idempotently recoverable. --no-save suppresses the
-        projection. Boot may create a missing local binding from an exact active proof and must announce that source.
+        minting store/deployment, confirmation, consent scope, stable proof identity, monotonic revision, and private exact
+        provider-credential value evidence; it contains no provider secret or reusable secret digest. Every live binding,
+        including --no-save bindings, owns the same private provider evidence through the selected-store operation that
+        confirmation consumes. Database claim/binding settlement commits first and one durable proof responsibility carries
+        an exact projection of the committed binding evidence, making file materialization idempotently recoverable without
+        rereading credentials. --no-save suppresses only that proof projection. Boot may create a missing local binding from
+        an exact active v2 proof whose evidence is still current and must announce that source.
         Explicit local unbind blocks boot reuse; machine proof revocation immediately makes every exact derived binding
         non-authoritative, and re-verification creates the next proof revision. Exact confirmation replay retries either
         pending or failed proof materialization responsibility without repeating claim or binding mutation. When the
         exact planned proof ID and revision already exist after a file-success/store-completion failure, recovery must
         validate every immutable responsibility fact, preserve the original non-empty minting deployment occurrence,
-        and complete the selected-store responsibility without rewriting the proof; any mismatch fails closed. A retained
-        interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation.
+        and complete the selected-store responsibility without rewriting the proof or consulting later credential
+        currentness; currentness gates only a new proof-file write. A successful mismatch terminally fails that new write,
+        while a currentness observation error leaves the durable proof responsibility pending for retry. Any immutable
+        responsibility mismatch fails closed. A retained
+        interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation. V1 or digest-less proof
+        documents are unsupported stale material: they may be classified and quarantined, but no identity fact is decoded,
+        copied, adapted, migrated, or rewritten into v2 authority. Fresh v2 evidence requires a new confirmation ceremony.
+        An independently retained active proof remains exactly revocable after its provider credential becomes stale or
+        unavailable; revocation resolves that active proof record without treating it as current identity authority.
       readback_rule: >
         Generation-aware readback is the only operator-channel authority consumed downstream. It reports current, stale,
         unbound, or revoked from one exact retained lifecycle projection: the union of current admitted interfaces, local
@@ -9540,24 +9587,40 @@ tool_model:
         confirmation delivery owns the next step.
       credential_rule: >
         Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
-        values and reusable digests are forbidden in semantic request hashes, API idempotency rows, selected-store rows,
-        logs, traces, progress, errors, and readback. The operation first reserves exact credential roles and keys, then
-        stores only non-secret receipt and epoch evidence. Every newly written value is staged under an
+        values and reusable or unkeyed secret digests are forbidden in semantic request hashes, API idempotency rows,
+        selected-store rows, logs, traces, progress, errors, and readback. The credential subsystem alone may create and
+        compare a versioned, domain-separated keyed value seal over the exact credential key and raw value. Its random
+        seal key is durable root metadata in the writable credential file, never a credential entry; it is created only by
+        the first explicit sealing operation. Validation never creates a missing key. The normal environment/file overlay
+        seals the effective environment value through that writable key home. A standalone environment-only store rejects
+        connect, with or without --no-save, before selected-store or provider mutation and teaches configuration of a writable
+        credential file tier. Process-random seal keys and per-boot durable currentness are forbidden. Plain pre-seal
+        credential files remain ordinary key/value stores and require no migration or backfill.
+        The operation first reserves exact credential roles and keys, then privately persists role, key, admission kind,
+        keyed value seal, and a receipt only for operation-written values. The credential subsystem's one usability rule
+        runs before every receipt-writing caller and store mutation. Empty or whitespace-only input creates no value,
+        receipt, or seal authority, so corrected bytes may use the same deterministic operation receipt without migration
+        or correction-in-place behavior. Every newly written value is staged under an
         operation-owned store occurrence; replacement never overwrites the credential occurrence referenced by the
         current predecessor activation. A deterministic operation-owned write is recovered by observing its exact receipt
-        and epoch, never by rewriting or guessing the secret, and the complete admission set commits in a
+        and resealing its current exact value, never by rewriting or guessing the secret, and the complete admission set commits in a
         credentials_admitted checkpoint before provider preflight. Provider activation preflight validates the staged
         candidate's exact credential occurrence and provider identity without changing registration selection or launching
-        a registration effect. A present file-store credential without a persisted occurrence epoch fails closed at snapshot
-        admission; runtime never assigns a process-local epoch, backfills the file, or migrates that unsupported occurrence.
+        a registration effect. The admitted provider key and seal are persisted into the nested identity operation before
+        claim or confirmation; the selected-store binding commits that exact evidence in proof-backed and proofless modes.
+        Any requested v2 proof and proof responsibility carry byte-identical evidence and cannot mint from a later credential read.
         Rejection compare-deletes operation-written candidate occurrences and returns the operation
         to preparing, so resume can admit a different credential while the predecessor activation and registration remain
         current. Fresh webhook connect generates a missing signing value;
-        replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch. Reconnect,
+        replay, reconnect, and rebind do not rotate credentials without an explicitly admitted replacement value. Reconnect,
         rebind, and resume accept explicit hidden replacement credential input when the exact reserved occurrence is no
-        longer current. Every operation-written credential occurrence is owned by its receipt and epoch: terminal
-        onboarding failure and destructive teardown compare-delete only that exact occurrence after executable authority
-        retires. Durable successor activation publication, exact process publication, and activation-backed registration
+        longer current. Provider-value rotation invalidates binding and optional-proof identity evidence and requires fresh
+        same-identity reconnect confirmation; a different claimant teaches rebind. Signing-only rotation invalidates
+        activation, registration, and readiness without invalidating provider identity. Every operation-written credential
+        cleanup identity is its exact store key, deterministic retry receipt, and admitted keyed value seal. The receipt
+        alone identifies a retry, not the current value occurrence. Terminal onboarding failure and destructive teardown
+        atomically compare-delete all three facts against the current writable value after executable authority retires.
+        Durable successor activation publication, exact process publication, and activation-backed registration
         promotion each commit before predecessor occurrence retirement; nonterminal recovery resumes from the last durable
         checkpoint and derives any still-pending predecessor cleanup from retained operation evidence. A successor
         occurrence and an observed pre-existing credential are never deleted by stale cleanup.
@@ -9568,7 +9631,7 @@ tool_model:
         collision and any generation, credential-role, destination, or identity contradiction fail before publication.
         One process-local owner publishes the complete current canonical activation records. Its deterministic typed
         generation includes source variant, exact runtime-context coordinate, activation revision, complete executable
-        plan canonical value, and non-secret credential admission/epoch facts; secret values and reusable secret digests
+        plan canonical value, and private non-secret credential admission/value-seal facts; secret values and reusable secret digests
         are excluded. Before a runtime-context occurrence exists, verify, preflight, test, and serve admission use the same
         publication carrier in an explicit declared-only mode containing only configured binding plans. Declared-only
         publications cannot grant execution and cannot synthesize learned state; executable owners reject them. Replacement
@@ -9602,14 +9665,16 @@ tool_model:
         publication must succeed before recovered or new business work, delivery continuations, autonomous producers,
         or ingress readiness are released. Full Runtime.Start is not preparation. Declared-only plans cannot replace this
         executable barrier; partial preparation or publication failure unwinds prepared resources and preserves errors.
-        Runtime.PrepareStart performs existing lifecycle admission, managed preflight, and source-scoped topology
+        Runtime.PrepareStart performs existing lifecycle preparation, managed preflight, and source-scoped topology
         canonicalization without Manager.Run or replay. Standing preparation uses the existing activation transaction
         and exact standing publication writer to establish target facts, including publication sequence, and reconstructs
         process-only topology. It defers initial-entry finalization, timers, and creation-event publication. After the
-        executable catalog is installed, the single-use prepared start release admits Manager.Run, completes prepared
-        standing topology through the existing finalizer, and then releases the existing recovery and producer phases.
+        executable catalog is installed, the existing single-use PreparedStartup owner settles grant admission, admits
+        Manager.Run, completes prepared standing topology through the existing finalizer, and then releases the existing
+        recovery and producer phases. Reset uses this same preparation/release path and retains its exact complete-set
+        publication and consumer-convergence fence; preparing one candidate cannot admit it while a sibling is unfinished.
       registration_handoff_rule: >
-        A pre-binding webhook intent carries only exact registration plan, target, credential epoch, and generation facts.
+        A pre-binding webhook intent carries only exact registration plan, target, validated credential observation, and generation facts.
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external
         identity, selected-store activation publication revision-fences handoff to the current registration selection.
         Candidate credential/provider-identity admission completes before registration selection changes; failed admission
@@ -9631,6 +9696,8 @@ tool_model:
         and the existing one-attempt provider effect journal. It fabricates no workflow run, event, entity, agent, or
         inbound context. Durable dispatch acceptance is insufficient: terminal provider success for the exact activation
         and binding revisions is required, while failure or acknowledgment uncertainty remains non-successful and NOT_READY.
+        Each dispatched credential value is the exact single observation validated against the activation's durable value
+        seal; validate-then-reread and any other split currentness/value path are forbidden.
         The journal retains the authorizing onboarding revision and complete durable/live context coordinate. A proven
         prelaunch failure may clear and remint the confirmation operation only in the successor-coordinate CAS; terminal
         success retains its operation identity, and launched, response-observed, or uncertain work is never redispatched.
@@ -9639,8 +9706,11 @@ tool_model:
         reserve selected-store teardown responsibility and retire every matching pending operation and learned activation
         before identity mutation, proof-file revocation, source removal, or successor authority. Runtime refresh then fences
         registration, public runtime tools, and private activity routes. Only after that retirement, teardown removes each
-        exact operation-written credential occurrence through its receipt/epoch fence. Recovery resumes every reserved or
-        authority-retired teardown idempotently, including credential cleanup. Runtime-context shutdown performs this
+        exact operation-written credential occurrence through its key/receipt fence. Explicit interface teardown removes
+        every matching operation-owned credential. Runtime-context unload or activation supersession instead preserves only
+        the exact provider key/value-seal evidence still referenced by a current retained binding, while deleting signing
+        and every other matching operation-owned occurrence. Recovery resumes every reserved or authority-retired teardown
+        idempotently, including credential cleanup. Runtime-context shutdown performs this
         retirement while the exact context and public-ingress owner remain current, and aborts withdrawal if retirement
         fails. Authoritative bundle deletion and explicit runtime-context unload/source removal are semantic retirement;
         ordinary serve process shutdown only quiesces process work and withdraws the live occurrence, and must not invoke
@@ -9652,7 +9722,7 @@ tool_model:
         ConnectedChannelReadiness is derived, never persisted as a boolean, and reports the exact activation-publication
         generation used by API/CLI readback. READY requires one exact current coordinate,
         available channel plan, current activation and binding revisions, current proof when the binding is proof-backed,
-        current credential epochs, terminal-success confirmation for the same activation/binding, and posture-specific
+        current exact credential value seals, terminal-success confirmation for the same activation/binding, and posture-specific
         target evidence. Webhook posture additionally joins exact ingress/signing, exposure, callback, and provider
         registration generations from that same activation publication. The current activation publication, not authored
         standing-target configuration, supplies the webhook signing credential identity used by the registration/readiness
@@ -9689,7 +9759,8 @@ tool_model:
         active proof identity after unbind so the public proof-revocation route remains reachable, and every operation,
         transition, and boot presentation uses the same masked claimant fallback as canonical channel readback. When startup
         finds a nonterminal onboarding operation whose exact runtime-context coordinate is no longer present, it records a
-        runtime_context_retired terminal failure, compare-deletes only that operation's receipt/epoch-owned credentials,
+        runtime_context_retired terminal failure, atomically compare-deletes only credentials matching that operation's
+        exact store key, write receipt, and admitted keyed value seal,
         refreshes activation authority, and continues; catalog construction or contradiction errors still fail startup closed.
         Graceful process restart preserves each nonterminal operation and semantic current activation, resolves them by
         durable identity without registration-order or primary-context inference, reconciles admitted predecessor effects,
@@ -9862,15 +9933,15 @@ tool_model:
       semantic_identity: >
         One fresh intent binds exposure generation and public origin, exact binding and target generations, compiled plan
         generation, callback route and random token, stable provider slot, and atomic provider/signing credential snapshot
-        identities. Snapshot identity is source plus store key plus a process-random epoch that changes whenever the value
-        or metadata changes; secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
+        identities. Snapshot identity is source plus store key plus a private process observation token that changes whenever
+        the value or metadata changes; it is never serialized or used as durable channel identity. Secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
         and output. The exact currently admitted runtime-generation grant fences execution and handler/readiness use but is
         deliberately excluded from semantic request identity, so an unchanged startup handoff performs no provider apply.
       callback: >
         `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits
         only a pair selected in the same immutable registration snapshot, with the exact verified token. Admission consumes
         the same Snapshot(now) currentness predicate as readiness, including current exposure generation and nonce evidence,
-        explicit exposure revocation, evidence expiry, startup authority, effect authority, credential epochs, selected pair,
+        explicit exposure revocation, evidence expiry, startup authority, effect authority, credential observations, selected pair,
         and token. Unregistered, stale-generation, expired, observation-failed, and revoked routes return not found.
       apply: >
         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
@@ -12787,6 +12858,13 @@ platform_tables:
       - Schema, auth/idempotency-like, operator/system, authored product config/topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
       - 'Admitted source retention is request-scoped by `runtime.nuke.include_source_artifacts`: `false` preserves `source_artifacts`; `true` deletes `source_artifacts` only inside the destructive-reset cleanup transaction after serializing persisted run creation and failing closed if any persisted-source run remains outside the cleanup plan.'
       - Apply executes in one database transaction, reports per-table dry-run/apply counts, rolls back on any SQL/FK/order error, and produces no successful result unless the transaction commits.
+      - runtime_reset_operations survives cleanup. The retained process capability owns reset admission and immutable phase receipts independently of the API completion cache. Keyed retries bind the original actor, key and request hash; unkeyed admission has a fresh UUID. Conflicts and completed-result replay precede context withdrawal or fresh inventory.
+      - Reset quiescence commits its exact previous-status outcome with cancellation in the existing run-lifecycle transaction. Cleanup commits its receipt with deletion and any empty-source-topology mutation in the retained process transaction. Callers cannot advance either effect phase through a separate journal save.
+      - A failed effect acknowledgment is not evidence of rollback. The reset coordinator reads the exact durable successor receipt under a bounded cancellation-independent context before proceeding; missing, contradictory, or unreadable evidence leaves execution fenced. Receipt reconciliation never repeats the effect or compensates an uncertain transaction.
+      - PostgreSQL and SQLite cleanup consume the same closed cleanup catalog, scope predicates, preserved-reference severing, and retained-authority guards. Only run-set binding, timestamp comparison, and transaction locking differ privately. SQLite cleanup, topology mutation, and the cleanup receipt commit in one selected write transaction; no write transaction spans runtime quiescence or external container effects.
+      - Reset admission captures the canonical source-set plan, or its explicit absence, in the same retained transaction as operation identity. Historical identity lookup precedes reading current topology. This snapshot is immutable through every later phase. Cleanup validates the current source set against the recorded snapshot inside its transaction; source deletion requires the matching empty-topology mutation when admitted sources exist.
+      - Pending phase continuation consumes the recorded plan and every committed receipt rather than collecting fresh inventory or repeating completed quiescence, cleanup, or container settlement. A recorded partial response remains immutable even when pending resource recovery subsequently succeeds. Recovery that still has unsettled resources fails closed before startup admission.
+      - Process-local reset convergence is bound to the durable operation UUID. Retrying an uncertain final journal acknowledgment for that same converged operation cannot withdraw, reconstruct, or release its successor runtime or projections. A pending planning failure remains fenced until the operation can settle; planning errors alone do not authorize reconstruction and later re-planning over live execution.
     classifications:
       delete_by_event_join:
         - event_receipts
@@ -12850,6 +12928,7 @@ platform_tables:
         - standing_services
         - runs
       preserve:
+        - runtime_reset_operations
         - runtime_store_metadata
         - resource_declarations
         - resource_bundle_declarations
@@ -13419,7 +13498,8 @@ platform_tables:
       description: >-
         Durable owner of one connect, reconnect, rebind, or unbind operation. It owns exact request replay,
         challenge lifecycle, provider-authenticated claimant, operator confirmation, binding revision, and
-        the bounded proof-file projection responsibility. A challenge cannot be terminally consumed without
+        the exact private provider-credential key/value-seal evidence from onboarding plus the bounded optional proof-file
+        projection responsibility. A challenge cannot be terminally consumed without
         either a bound result or the explicit rejected/expired terminal disposition.
       ddl: |
         CREATE TABLE operator_channel_operations (
@@ -13432,11 +13512,14 @@ platform_tables:
             channel_pack_version TEXT NOT NULL,
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
+            provider_credential_key TEXT,
+            provider_credential_value_seal TEXT,
+            onboarding_operation_id UUID,
             request_key_hash TEXT NOT NULL UNIQUE,
             request_hash TEXT NOT NULL,
             expected_binding_revision BIGINT NOT NULL CHECK (expected_binding_revision >= 0),
             challenge TEXT UNIQUE,
-            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','expired','unbound')),
+            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','credential_stale','expired','unbound')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             binding_revision BIGINT CHECK (binding_revision > 0),
             external_account_reference TEXT,
@@ -13461,7 +13544,8 @@ platform_tables:
             completed_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL,
             CHECK ((operation_kind = 'unbind' AND challenge IS NULL AND state = 'unbound') OR (operation_kind <> 'unbind' AND challenge IS NOT NULL)),
-            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
+            CHECK ((operation_kind = 'unbind' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL) OR (operation_kind <> 'unbind' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL)),
+            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected','credential_stale') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
             CHECK ((state IN ('bound','unbound')) = (binding_revision IS NOT NULL)),
             CHECK ((save_proof AND planned_proof_id IS NOT NULL AND planned_proof_revision IS NOT NULL) OR (NOT save_proof AND planned_proof_id IS NULL AND planned_proof_revision IS NULL)),
             CHECK ((proof_status IN ('pending','active','failed','revoked') AND proof_id IS NOT NULL AND proof_revision IS NOT NULL) OR (proof_status = 'skipped' AND proof_id IS NULL AND proof_revision IS NULL)),
@@ -13472,8 +13556,10 @@ platform_tables:
     operator_channel_bindings:
       description: >-
         Current selected-store local binding or explicit unbind fence for one exact pack-qualified interface.
-        A bound row is authoritative only when its semantic generation is current and any referenced machine-local
-        proof identity/revision remains active. Unbind is persisted state, never inferred from row absence.
+        Every current binding owns the provider-credential key/value-seal evidence established by its confirmation,
+        independently of whether a machine proof was requested. A bound row is authoritative only when that evidence and
+        semantic generation are current and any referenced machine-local proof identity/revision remains active. Unbind is
+        persisted state, never inferred from row absence.
       ddl: |
         CREATE TABLE operator_channel_bindings (
             interface_key TEXT PRIMARY KEY,
@@ -13483,6 +13569,8 @@ platform_tables:
             channel_pack_version TEXT NOT NULL,
             channel_manifest_hash TEXT NOT NULL,
             semantic_generation TEXT NOT NULL,
+            provider_credential_key TEXT,
+            provider_credential_value_seal TEXT,
             external_account_reference TEXT,
             conversation_reference TEXT,
             conversation_scope TEXT CHECK (conversation_scope IS NULL OR conversation_scope IN ('direct','shared')),
@@ -13494,7 +13582,7 @@ platform_tables:
             proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
             operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
             updated_at TIMESTAMPTZ NOT NULL,
-            CHECK ((status = 'current' AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
+            CHECK ((status = 'current' AND provider_credential_key IS NOT NULL AND provider_credential_value_seal IS NOT NULL AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND provider_credential_key IS NULL AND provider_credential_value_seal IS NULL AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
             CHECK (source <> 'local_proof' OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
             INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
             INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
@@ -13503,7 +13591,8 @@ platform_tables:
       description: >-
         Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
         reconnect, or rebind operation. Secret values and reusable secret digests are forbidden;
-        only admitted credential key, receipt, and epoch metadata may be stored. Request-key replay,
+        only private admitted credential key, keyed value seal, admission kind, and operation-write receipt may be stored.
+        Public DTOs omit value seals, and observed credentials own no receipt. Request-key replay,
         target-slot exclusion, phase transitions, selected-store activation publication, exact process
         publication, registration promotion, and predecessor cleanup are revision fenced.
       ddl: |
@@ -13716,6 +13805,28 @@ platform_tables:
             reason TEXT NOT NULL,
             recorded_at TIMESTAMPTZ NOT NULL,
             UNIQUE (provider, provider_event_id, interface_key)
+        );
+    runtime_reset_operations:
+      description: >-
+        Reset-family durable identity, immutable plan and exact phase outcomes, independent of
+        the API idempotency cache. Keyed admission binds actor and key permanently; unkeyed
+        admission uses a fresh operation UUID. At most one unfinished reset owns active_slot.
+        Cleanup evidence commits in the same retained-process transaction as cleanup and topology.
+        The record includes the immutable admitted source-set plan, with null denoting no installed topology.
+        Admission also captures each exact predecessor projection disposal identity and whether its workspace
+        can create managed containers, so death before plan persistence does not erase resource scope.
+        Historical completed outcomes never confer current-process runtime availability.
+      ddl: |
+        CREATE TABLE runtime_reset_operations (
+            operation_id UUID PRIMARY KEY,
+            actor_token_id TEXT NOT NULL,
+            idempotency_key TEXT,
+            revision BIGINT NOT NULL CHECK (revision > 0),
+            phase TEXT NOT NULL CHECK (phase IN ('admitted','planned','quiesced','cleanup_committed','containers_settled','completed')),
+            active_slot INTEGER UNIQUE CHECK (active_slot = 1),
+            record JSONB NOT NULL,
+            UNIQUE (actor_token_id, idempotency_key),
+            CHECK ((phase = 'completed' AND active_slot IS NULL) OR (phase <> 'completed' AND active_slot IS NOT NULL AND active_slot = 1))
         );
     agent_topology_source_set_head:
       description: >-
@@ -19516,7 +19627,10 @@ workspace_model:
     reset_policy:
     - Destructive reset may stop only containers whose typed identity proves owner=runtime, reset_eligible=true, and kind
       is agent or flow.
-    - scaffold and system containers are platform-created but reset_eligible=false and must be preserved by destructive reset.
+    - scaffold and system containers are platform-created but reset_eligible=false, so the reset stop selector excludes them.
+      Retiring a source projection separately removes every container proven to belong to that exact projection, including
+      scaffold and system containers, before releasing its source files. Durable writable workspace backing identities and
+      data survive; preservation is not a promise to keep retired projection containers alive.
     - Unlabeled, unregistered, operator-managed, postgres/tool-gateway, name-only, and ambiguous containers are preserved
       fail-closed. A Swarm-looking container name is not ownership proof.
     - Destructive reset planning captures managed container refs before run-scoped DB cleanup can remove supporting runtime
@@ -20218,9 +20332,17 @@ test_specification:
         an unknown or duplicate claim, an unproved active claim, or companion
         metadata that disagrees with the filesystem is a test failure. External
         proof records additionally fail on missing or duplicate sources, missing
-        executor packages, absence of exactly one unfiltered package owner in
-        every required CI profile, unknown or multiply credited claims, and
-        malformed repository-relative paths. The required verify/boot gate runs
+        executor packages, incomplete or overlapping package execution in
+        any required CI profile, unknown or multiply credited claims, and
+        malformed repository-relative paths. The executor package remains the
+        semantic proof owner. Every required profile selects the identical set of
+        count-1 execution units: either one unfiltered unit or exhaustive disjoint
+        top-level partitions. The repository Go test/example/fuzz declaration census
+        must match each proof exactly once and every unit must match a proof.
+        Subtest filters are forbidden: all subtests and backend cases remain selected.
+        Additions, omissions, overlaps, empty units and profile drift fail closed.
+        Existing per-unit budgets and required-summary enforcement remain binding.
+        The required verify/boot gate runs
         every classified tier fixture, discovered example package, and admitted
         archetype through the supported verifier, reports every failing bundle in
         one pass, and is mutation-proven through live recursive discovery to name
@@ -20296,7 +20418,7 @@ test_specification:
       promoted_by: '#2168, #2321'
       source: internal/releasee2e/testdata/golden_agent_workload
       executor: github.com/division-sh/swarm/internal/releasee2e
-      ci_owner: hitl-releasee2e-full
+      ci_owner: hitl-releasee2e-rest
       process_boundary: >
         The executor builds the current swarm binary for public structural commands and a separate go test -c
         serveapp binary with TestOwnedMockLifecycleProcessEntry for retained mock execution (H). The child uses
@@ -20337,7 +20459,7 @@ test_specification:
       promoted_by: '#2008, #2321'
       source: internal/releasee2e/testdata/full_lifecycle/standing_telegram
       executor: github.com/division-sh/swarm/internal/releasee2e
-      ci_owner: hitl-releasee2e-full
+      ci_owner: hitl-releasee2e-rest
       purpose: >
         Own one production-shaped compiled-process conformance profile that crosses cold authored source admission,
         standing activation, provider ingress, template routing, mock agent execution, workflow timer and decision-card
@@ -20410,7 +20532,7 @@ test_specification:
         M21: Dev restart exposes a strictly later public started_at and none of the predecessor exact event, delivery, or card facts; deterministic service, run, generation, and standing ingress entity IDs may recur.
         M22: Fresh dev ingress converges exactly once from the empty public history after epoch replacement.
         M23: The release fixture's finite-source guard and canonical-routing overlay independently prove the same explicit source root without introducing a second topology owner.
-        M24: The mandatory unfiltered CI owner executes smoke in PR profiles and all five journeys in full/nightly profiles.
+        M24: The mandatory top-level CI partition executes this complete proof, including smoke in PR profiles and all five journeys in full/nightly profiles; the package census proves exhaustive disjoint coverage across required units.
       supported_surfaces:
       - compiled swarm verify --json
       - compiled swarm test admission (T) and internal retained mock lifecycle child (H)
@@ -20745,7 +20867,7 @@ test_specification:
           generation. Missing required schemas or external provenance fails closed. Mutable declared/learned deployment
           activations are a separate ChannelActivationGeneration and do not alter historical workflow/source identity.
         excluded: >-
-          channel deployment destinations, activation runtime tools and private targets, activation credential references/epochs,
+          channel deployment destinations, activation runtime tools and private targets, activation credential references/value seals,
           readiness, scenario assertions, response values, mutable runtime state, and unrelated source internals
       execution_profile:
         owner: internal/runtime/scenarioexecution
@@ -24207,8 +24329,9 @@ cli_specification:
       behavior: >
         API-only complete connected-channel lifecycle. `connect <provider>`, `reconnect <provider>`, and
         `rebind <provider>` select one exact bundle/interface/target candidate and consume the durable onboarding
-        operation through start/get/retry. The nested satisfier-authenticated identity ceremony remains owned by
-        channel.connect|reconnect|rebind plus channel.confirm, but those lower RPCs are not a second whole-journey CLI.
+        operation through start/get/retry. The onboarding owner persists the exact admitted provider-credential evidence
+        into the nested satisfier-authenticated identity ceremony; channel.confirm remains the only lower-level public
+        mutation because explicit operator confirmation is a separate user step.
         Provider credentials enter only through hidden TTY input or stdin and are never accepted in argv. `list`
         consumes the composed identity/activation/readiness projection. `status` selects one activation by exact
         interface/bundle/target coordinate. `unbind` durably retires selected-store
@@ -27066,9 +27189,6 @@ api_specification:
         - conversation.fork_delete
         - channel.onboarding_start
         - channel.onboarding_retry
-        - channel.connect
-        - channel.reconnect
-        - channel.rebind
         - channel.unbind
         - channel.confirm
         - channel.proof_revoke
@@ -30590,11 +30710,12 @@ api_specification:
         required: [operation_id, kind, principal_id, interface, state, revision, save_proof, proof_status, requested_at]
         properties:
           operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          onboarding_operation_id: {$ref: '#/components/schemas/OpaqueId'}
           kind: {type: string, enum: [connect, reconnect, rebind, unbind]}
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
           interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
           challenge: {type: string, pattern: '^SWARM-[A-Z2-7]{16}$'}
-          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, expired, unbound]}
+          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, credential_stale, expired, unbound]}
           revision: {type: integer, minimum: 1}
           binding_revision: {type: integer, minimum: 1}
           external_account_reference: {type: string}
@@ -30633,7 +30754,7 @@ api_specification:
         additionalProperties: false
         required: [format, proof_id, revision, status, interface, external_account_reference, conversation_reference, conversation_scope, method, challenge, original_operation_id, minting_store_id, minting_deployment_id, verified_at, operator_confirmed, consent_scopes]
         properties:
-          format: {type: string, const: swarm-verified-account-proof-v1}
+          format: {type: string, const: swarm-verified-account-proof-v2}
           proof_id: {$ref: '#/components/schemas/OpaqueId'}
           revision: {type: integer, minimum: 1}
           status: {type: string, enum: [active, revoked]}
@@ -30701,13 +30822,12 @@ api_specification:
       ChannelCredentialAdmission:
         type: object
         additionalProperties: false
-        required: [role, store_key, kind, receipt, epoch]
+        required: [role, store_key, kind]
         properties:
           role: {type: string, minLength: 1}
           store_key: {type: string, minLength: 1}
           kind: {type: string, enum: [written, observed]}
           receipt: {type: string, minLength: 1}
-          epoch: {type: string, minLength: 1}
       ChannelOnboardingOperation:
         type: object
         additionalProperties: false
@@ -35001,42 +35121,6 @@ api_specification:
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]
-    channel.connect:
-      tier: must_have
-      description: Begin an exact revision-fenced binding for an unbound v2 channel interface. The returned short-lived challenge is not a credential; only a current satisfier-authenticated text fact followed by operator confirmation can bind it.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 0}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
-    channel.reconnect:
-      tier: must_have
-      description: Re-verify the same authenticated account and conversation against the current exact binding revision and active interface generation.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
-    channel.rebind:
-      tier: must_have
-      description: Replace a current binding with a different satisfier-authenticated claimant after explicit operator confirmation; it never silently selects or overwrites an account.
-      scope: {required: [control:channels]}
-      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
-      params:
-      - {name: interface, required: true, schema: {type: string, minLength: 1}}
-      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
-      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
-      - {name: idempotency_key, required: false, schema: {type: string}}
-      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
     channel.confirm:
       tier: must_have
       description: Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome and retries pending or failed proof projection without repeating claim or binding mutation; rejection omits binding.
@@ -35048,7 +35132,7 @@ api_specification:
       - {name: approve, required: true, schema: {type: boolean}}
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
-      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED, IDEMPOTENCY_CONFLICT]
     channel.unbind:
       tier: must_have
       description: Persist an explicit revision-fenced local unbind for a current or retained listed interface so an available machine proof cannot silently recreate the deployment binding.
@@ -35125,7 +35209,7 @@ api_specification:
       description: |
         Public destructive runtime reset wrapper. The API layer owns only the v1 request/response/auth/idempotency contract and MUST consume the destructive-reset owner chain for execution: plan/result/lock, active-run and delivery quiescence, run-scoped cleanup/preservation, and managed workspace-container selection/stop. It MUST NOT directly truncate tables, call raw Docker stop/list helpers, call AgentManager.ResetRuntimeStateWithSource, or migrate dashboard/Builder/CLI reset seams in this method implementation.
 
-        `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences plan -> quiescence -> cleanup -> managed-container stop. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner; false preserves source artifact rows. In DB-loaded RuntimeContextManager mode, successful or partial apply-mode runtime.nuke requests with `include_source_artifacts=true` also mark loaded BundleContext entries unavailable/unloaded so later supported admissions fail closed with BUNDLE_UNAVAILABLE; `include_source_artifacts=false` must not deactivate loaded contexts. Public final-response idempotency follows the v1 API idempotency convention.
+        `dry_run=true` returns the same top-level shape with side-effect-free previews from each owner. Apply mode sequences durable operation admission/replay -> complete-context admission withdrawal and join -> persisted plan -> persisted-work quiescence -> cleanup -> managed-container settlement -> context convergence. Managed-container stop failures are represented as `status=partial_failure`, `ok=false`, and explicit `errors`; they must not masquerade as complete success. `include_source_artifacts` defaults true and is the only runtime.nuke control for whether server-wide admitted source artifacts are deleted with the cleanup owner. True atomically commits empty source topology with cleanup and leaves contexts unavailable, including on partial container failure. False preserves the identical admitted artifact set and source topology, temporarily withdraws execution for cleanup, then reconstructs fresh runtime generations and workspace projections before republishing the complete set. It must not leave successfully reconstructed retained contexts terminally unloaded. No original source directory is reread and no changed source is admitted. Public final-response idempotency follows the v1 API convention; it is only a response cache, not authority to repeat domain cleanup or to skip process-local reconstruction after a crash.
       scope:
         required:
         - control:runtime
@@ -36074,7 +36158,20 @@ agent_lifecycle_authority:
       retain explicit diagnostic-error attribution without reversing committed lifecycle outcomes. Joined work and store teardown ordering
       remain unchanged; no detached worker, retry framework or error suppression is introduced.
   destructive_cleanup_quiescence:
-    runtime_nuke: Apply-mode runtime.nuke closes admission and awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
+    runtime_nuke: Apply-mode runtime.nuke withdraws the complete affected context set and fences every runtime and standing occurrence before waiting for any predecessor to drain. It awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
+    reset_reconstruction: The existing process lifecycle supervisor owns reset reconstruction and final shutdown; RuntimeContextManager owns complete-set withdrawal, staged installation, and publication. When include_source_artifacts is false, retain the identical admitted source set and allocate fresh runtime occurrences, generation grants, source projections, and workspace lifecycles. Rebind all execution handlers, fork consumers, MCP, standing and channel publication, monitoring, and final-close records before reopening admission. Original directories are not reread, and already retired runtime or workspace lifecycles cannot be reopened. Reconstruction failure leaves the entire set unavailable rather than publishing a partial set.
+    reset_execution_convergence: Runtime.PrepareStart uses the ordinary startup interpreter through subscription readiness, integrity checks, provider preflight, and topology preparation without admitting managed execution or starting delivery recovery and autonomous producers. Every reset candidate must prepare successfully before complete-set publication. Publication exposes metadata for consumer refresh but does not release execution; RuntimeContextManager fences bundle, run, channel, standing-service, and standing-recovery acquisition until the supervisor releases the exact complete published set after consumer convergence. Prepared execution release is single-use and rejects cancellation or retirement. API and MCP dispatch remain fenced until execution startup completes.
+    reset_startup_mcp_transport: The execution fence does not prohibit the current prepared generation grant's MCP capability preflight. The existing MCP gateway authenticates and resolves the registered typed startup probe authority; the runtime matches the exact grant, state version, process owner, and generation and admits the request under its own Runtime.WorkOccurrence. Startup requests are joined before grant retirement. Request method, probe-shaped payload, or bearer authentication alone cannot exempt application execution. Unknown, expired, unregistered, foreign, settled, admitted, or retired startup authority cannot use this pre-execution path. Ordinary MCP execution remains subject to RuntimeContextManager acquisition and complete-set convergence. The existing unsupported multi-context Claude CLI posture is unchanged.
+    reset_resource_lifetimes: Runtime and standing work must join before workspace ReleaseSourceProjection or caller projection release. A request that selected a generation-specific handler or gateway retains that exact runtime occurrence through handler settlement. The process-owned reset request never holds the runtime lease it must drain. The already-booted control API remains available for state readback and outcome replay while executable readiness and public ingress are withdrawn.
+    reset_historical_lookup: Under the operation lease and retained possession, the reset owner looks up the exact operation identity before reading current source topology or process-local projection inventory. Recorded responses and request conflicts cannot depend on the availability of later projections. Only a genuinely new admission captures current projection disposal identities; admission still checks keyed identity and snapshots source topology atomically.
+    reset_startup_continuation: Under retained process authority and before source loading or ingestion, the existing reset coordinator resumes only uncommitted effects from the exact pending receipt. Its owned continuation retains reset serialization through process-local startup convergence; closing or cancelling an interrupted startup does not complete the receipt. Reconstruction selects only the recorded retained source set, validates identical admitted artifacts, and uses complete-set prepared startup. A source-clearing reset reconstructs no runtime and exposes only unloaded control-plane behavior and outcome replay. Only successful reconstruction and exact execution-authority convergence complete the durable operation before readiness. Historical completed outcomes never reenter startup reconstruction or destructive effects.
+    reset_container_identity: Reset inventory, durable plans, and serialized outcomes retain the immutable Docker object ID together with the complete canonical container identity, including admitted bundle hash, source projection, and data projection. The ID is recorded before cleanup and external effects. Settlement inspects and stops only that recorded object ID; it never resolves a durable target by its reusable name, even when a replacement has identical labels. Missing recorded objects are settled without affecting a successor. Missing IDs fail closed rather than falling back to name lookup. Settlement also compares the exact planned source/projection identity. A lost acknowledgment is reconciled against that exact object; a still-running, foreign, or uninspectable target remains a failure. Retired entity containers are not reset targets.
+    reset_projection_identity: Reset admission records exact source projection cleanup coordinates from the existing sourceartifact owner before any predecessor is withdrawn. Each disposable projection has an immutable ownership marker outside its mounted admitted-source tree. Crash recovery inventories only managed-container scopes belonging to those recorded source/projection identities, never all containers sharing a bundle hash. After exact container settlement and before source reconstruction, sourceartifact removes only the recorded projection directory whose marker still matches; missing directories are settled, changed or symlinked ownership fails closed, and successor projections remain untouched. Disposal identities survive released handles but cannot reopen source access. Content-addressed shared data projections are not disposable runtime source projections; their exact identities remain attached to container settlement.
+    reset_projection_settlement: Live release and crash cleanup use the same sourceartifact disposal owner. Recursive source deletion retains the ownership marker through every retryable failure. Marker removal occurs only after the source tree is absent; the final empty envelope is removed non-recursively. An interrupted final unlink may leave an empty envelope, which is settled without inferring source ownership or recursively deleting unmarked contents. Unknown envelope entries, nonempty unmarked roots, and changed directory identities fail closed.
+    reset_projection_resource_disposal: Projection disposal is broader than the reset-eligible container stop catalog. After predecessor work joins, both live release and startup recovery use the existing Docker workspace owner to enumerate all runtime-owned objects with the exact admitted bundle and projection identity, including scaffold, system, agent, flow, stopped and partially created objects. Every selected object is inspected and removed by immutable Docker ID before source files are removed. Unresolved removal retains the source tree and fence; acknowledgment uncertainty is reconciled by exact-ID inspection. Foreign projections, successor projections and durable workspace volumes are never disposal targets.
+    reset_reconstruction_allocations: Before creating a reconstruction projection directory or any container, the existing reset operation journal durably appends its exact planned sourceartifact cleanup identity and managed-workspace disposition. Allocation intents are append-only evidence separate from the immutable admitted request and committed effect receipts. Both live reconstruction and startup continuation consume this same owner. An interrupted continuation settles all recorded abandoned allocations before allocating another successor, including after repeated recovery crashes. Final convergence reads the advanced journal revision and cannot erase allocation evidence. Same-process converged retries do not destroy their current successor.
+    reset_cleanup_attempt_clock: RequestedAt remains immutable admission evidence. Every uncommitted cleanup attempt evaluates directive expiry and other current-time authority gates using the current attempt time, including same-key continuation and startup recovery. No retry may waive an unexpired authority gate or rewrite a committed cleanup receipt.
+    reset_empty_topology: Successfully recovered source-clearing reset leaves a valid zero-context source set, not an incomplete constructor. New keyed or unkeyed resets with either source-retention mode must complete over that empty set without synthesizing runtimes or restoring source. Exact outcome replay and conflicting-key rejection remain authoritative, and a successful empty reset releases its active operation slot.
     other_ordering: Manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Selected-store compatibility migration and backfill paths do not exist.
     diagnostic_lifetime: >-
       Ordinary selected execution close retains diagnostic occurrences for delayed projection. Admitted destructive
@@ -36407,6 +36504,10 @@ filesystem_source_model:
   local_root_selection:
     default: the captured invocation directory
     current_directory_spelling: omission or dot (`.`)
+    selected_root_aliases: |
+      ResolveSourceRoot requires a nonempty absolute invocation coordinate already owned by the CLI; it never consults ambient cwd. Relative operands are projected from that coordinate without lexically collapsing parent traversals before resolving symlinks. The selected root is canonicalized once, resolving symlink aliases (including ancestor aliases), and must be an existing directory. Missing, broken, cyclic, or file-valued selections fail closed. Omission and dot retain the captured invocation-directory authority. This selection rule does not relax included-member no-follow admission or promise transactional filesystem selection.
+    invocation_invariance: |
+      With effective config and platform inputs fixed, relative/absolute operands under or outside cwd, omission/dot, explicit root aliases, and symlinked invocation directories selecting the same tree have identical verification outcomes, bundle hashes, catalog labels, static-data IDs, and static content. Host paths in diagnostics are not semantic identity. Catalog reconstruction and runtime read_flow_data consume admitted bytes, not the original directory.
     rule: |
       Omission and `.` select exactly the captured invocation directory. One positional root is the only alternate. There is no ancestor, repository, manifest, package, config, environment, selected-context, or inferred-project fallback. For `swarm test`, the first positional slot is always the root; targeting one scenario from cwd therefore uses `swarm test . <scenario-label>`.
     source_aware_commands:
@@ -36526,6 +36627,10 @@ filesystem_source_model:
       Persisted boot, recovery, replay, and fork decode the selected-store blob and compile only the reconstructed artifact. They never require or inspect the original filesystem. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
     process_epoch_rule: |
       Serve admits its complete source set once before runtime publication and keeps it fixed for the process epoch. Editing the original directory cannot replace a live runtime source. A different local artifact or persisted hash requires a new serve process; project reload and dynamic project replacement are retired rather than emulated.
+      Retained-source destructive reset is an execution-lifetime reconstruction of that identical admitted set, not source replacement. It consumes the already admitted artifact bytes and canonical serve construction inputs to mint fresh runtime and projection lifetimes. It does not restore retired bundle-management helpers or admit edited source bytes.
+  startup_integrity:
+    owner: internal/runtime/startuprecovery.Recover
+    rule: Both selected stores expose the read-only StartupRecovery availability product. Before runtime startup or readiness, serve checks all active non-standing run source references, then reads each distinct available source artifact through the selected artifact reader and validates canonical bytes and exact requested hash with sourceartifact.Persisted.Validate. Row presence alone is not integrity. Missing, corrupt, mismatched, or unreadable artifacts fail closed with the affected run and hash; this path never deletes or terminalizes run history, removes containers, or restores source files. Pending destructive-reset recovery is a separate operation and must settle before ordinary startup.
   runtime_projection:
     owner: internal/sourceartifact projection lifecycle
     mount: /opt/swarm/source
@@ -36535,8 +36640,12 @@ filesystem_source_model:
       The source mount is mandatory, not best-effort. Docker eager scaffold/system creation and lazy scaffold/system/per-agent/per-flow resolution require a live lifecycle binding and successful source-projection validation before container creation or start. A missing or released projection fails closed; no consumer may suppress the error, omit the mount, and advertise /opt/swarm/source as available. Host and Docker reject an unavailable projection even when earlier boot validation succeeded. Host target construction propagates final mount-descriptor validation errors instead of returning an empty source backing path.
     host_release: |
       Host release installs a permanent admission fence before waiting for admitted workspace operations to finish. New prerequisite, validation, system-workspace, execution-resolution, capability-resolution, and binding operations are rejected after the fence. Release then clears the Host binding and relinquishes its retained projection handle. A caller retaining another handle cannot reopen the released lifecycle; repeated release is harmless.
+    release_retry: |
+      A released projection handle cannot be retained or used again. Failed filesystem removal retains the exact private cleanup target until deletion succeeds; retry never decrements the handle reference twice or reopens execution. Host and Docker lifecycle owners retain that cleanup handle across release failures, even though the workspace lifecycle remains permanently fenced.
+    docker_release: |
+      Docker release retains each creation intent's complete canonical container identity. After fencing and joining admitted workspace operations, it inspects the named target and requires exact identity equality before removing the immutable inspected Docker object ID, never the reusable name. Missing targets are settled; changed, foreign, malformed, or uninspectable identities fail closed. An uncertain removal acknowledgment is reconciled against the exact object ID. Any unresolved target retains the source filesystem and keeps the lifecycle permanently fenced. Runtime reset inventory is restricted to the process supervisor's exact admitted source/projection lifetimes; global runtime labels alone do not authorize another process's containers.
     rule: |
-      Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one freshly minted process-local projection identity. Retained handles preserve that identity; separate materializations mint different identities even for the same bundle_hash. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the exact projection binding before prerequisite or system-workspace creation, including single- and multi-context serve and selected-source rebind. Docker container names and runtime labels include both bundle and projection identity, so neither running nor stopped containers from another process projection can be reused. After runtime drain, the lifecycle removes every container it created for that projection, including partially launched containers, before the projection filesystem is released; acknowledgment loss is reconciled by exact owned-name removal and a released lifecycle cannot restart. Process projection identity is never writable-workspace identity: one canonical owner derives every Docker named volume and Host workspace directory from a length-framed `(full validated bundle_hash, closed workspace kind, exact typed semantic identity)` tuple. The derived key is backend-neutral and injective for the platform contract: bundle digests are never truncated, and flow identities are never passed through display-slug normalization. Per-agent and per-flow-instance backings therefore attach to fresh process containers under the same durable names. Scaffold and system support volumes are bundle-owned operational state, are retained across process replacement, and are excluded from source-projection teardown; projection teardown removes containers only. The retired entity-container workspace and selected-store slug lookup do not exist. Hash-only container identity, fixed-name compatibility, hash-keyed queues, and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
+      Host and Docker workspaces receive a disposable, read-only projection of the exact admitted artifact bound to bundle_hash and to one freshly minted process-local projection identity. Retained handles preserve that identity; separate materializations mint different identities even for the same bundle_hash. Native file operations and container mounts consume that projection. Every workspace lifecycle receives the exact projection binding before prerequisite or system-workspace creation, including single- and multi-context serve and selected-source rebind. Docker container names and runtime labels include both bundle and projection identity, so neither running nor stopped containers from another process projection can be reused. After runtime drain, the lifecycle removes every container it created for that projection, including partially launched containers, before the projection filesystem is released; acknowledgment loss is reconciled by readback of the exact inspected Docker object ID and a released lifecycle cannot restart. Process projection identity is never writable-workspace identity: one canonical owner derives every Docker named volume and Host workspace directory from a length-framed `(full validated bundle_hash, closed workspace kind, exact typed semantic identity)` tuple. The derived key is backend-neutral and injective for the platform contract: bundle digests are never truncated, and flow identities are never passed through display-slug normalization. Per-agent and per-flow-instance backings therefore attach to fresh process containers under the same durable names. Scaffold and system support volumes are bundle-owned operational state, are retained across process replacement, and are excluded from source-projection teardown; projection teardown removes containers only. The retired entity-container workspace and selected-store slug lookup do not exist. Hash-only container identity, fixed-name compatibility, hash-keyed queues, and dynamic replacement are never lifecycle authority. The original authored root, cwd, package checks, and mutable host paths are never execution authority.
   retired_surface:
     behavior: fail_closed_with_teaching_error_or_absent_public_surface
     no_compatibility: true

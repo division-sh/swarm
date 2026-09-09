@@ -71,7 +71,6 @@ func TestResolveAllowsTypedSameFlowConsumerWithoutInventingRoute(t *testing.T) {
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"consumer": {
-			ID:            "consumer",
 			ExecutionType: "system_node",
 			SubscribesTo:  []string{"root.ready"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"root.ready": {}},
@@ -112,7 +111,7 @@ func TestAdmitNodeExecutionRoutingSourcePreservesEntitylessSelectedRun(t *testin
 	root := runtimecontracts.FlowContractView{
 		Path:  ".",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{"root-node": {ID: "root-node"}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"root-node": {}},
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
 		Root: &root, ByPath: map[string]*runtimecontracts.FlowContractView{".": &root}, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
@@ -137,7 +136,7 @@ func TestAdmitNodeExecutionRoutingSourceUsesSelectedRootEntityAuthority(t *testi
 	root := runtimecontracts.FlowContractView{
 		Path:  ".",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{"root-node": {ID: "root-node"}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"root-node": {}},
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
 		Root: &root, ByPath: map[string]*runtimecontracts.FlowContractView{".": &root}, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
@@ -156,7 +155,7 @@ func TestAdmitNodeExecutionRoutingSourceUsesNestedFilesystemFlowOwner(t *testing
 	flow := runtimecontracts.FlowContractView{
 		Path: "orders/reconciliation", Paths: runtimecontracts.FlowContractPaths{FlowPath: "orders/reconciliation", NodesFile: "orders/reconciliation/nodes.yaml"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{"shared": {ID: "shared"}},
+		Nodes:  map[string]runtimecontracts.SystemNodeContract{"shared": {}},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{

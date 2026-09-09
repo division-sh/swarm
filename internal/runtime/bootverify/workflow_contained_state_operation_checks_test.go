@@ -164,7 +164,6 @@ func containedStateOperationBundle(write runtimecontracts.WorkflowDataWrite) *ru
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-1": {
-				ID: "node-1",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"job.received": {
 						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{

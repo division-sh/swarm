@@ -395,6 +395,7 @@ type SessionTerminalOwner interface {
 // RetainedSession is implemented only by private selected-store adapters. It
 // never crosses process composition; callers receive ProcessCapability.
 type RetainedSession interface {
+	runtimedestructivereset.OperationStore
 	Authority() (Authority, error)
 	ProveCurrent(context.Context) error
 	MonitorProveCurrent(context.Context, time.Duration) error

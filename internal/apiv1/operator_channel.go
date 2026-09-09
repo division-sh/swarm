@@ -16,11 +16,16 @@ import (
 const operatorChannelIdempotencyTTL = 24 * time.Hour
 
 type OperatorChannelHandlerOptions struct {
-	Channels    *operatorchannel.Service
-	Destructive ChannelDestructiveLifecycle
-	Readback    ConnectedChannelReadbackLifecycle
-	Idempotency APIIdempotencyStore
-	Now         func() time.Time
+	Channels     *operatorchannel.Service
+	Confirmation ChannelIdentityConfirmationLifecycle
+	Destructive  ChannelDestructiveLifecycle
+	Readback     ConnectedChannelReadbackLifecycle
+	Idempotency  APIIdempotencyStore
+	Now          func() time.Time
+}
+
+type ChannelIdentityConfirmationLifecycle interface {
+	ConfirmIdentity(context.Context, string, int64, bool, time.Time) (operatorchannel.Operation, operatorchannel.Binding, error)
 }
 
 type ConnectedChannelReadbackLifecycle interface {
@@ -41,70 +46,36 @@ func OperatorChannelHandlers(opts OperatorChannelHandlerOptions) map[string]Meth
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	handlers := map[string]MethodHandler{}
-	for method, kind := range map[string]operatorchannel.OperationKind{
-		"channel.connect":   operatorchannel.OperationConnect,
-		"channel.reconnect": operatorchannel.OperationReconnect,
-		"channel.rebind":    operatorchannel.OperationRebind,
-	} {
-		method, kind := method, kind
-		handlers[method] = func(ctx context.Context, req Request) (any, error) {
+	if opts.Confirmation != nil {
+		handlers["channel.confirm"] = func(ctx context.Context, req Request) (any, error) {
 			if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
 				return nil, err
 			}
-			selector, err := requiredStringParam(req.Params, "interface")
+			operationID, err := requiredStringParam(req.Params, "operation_id")
 			if err != nil {
 				return nil, err
 			}
-			revision, err := channelRevisionParam(req.Params, "expected_revision", kind == operatorchannel.OperationConnect)
+			revision, err := channelRevisionParam(req.Params, "expected_revision", false)
 			if err != nil {
 				return nil, err
 			}
-			saveProof, err := optionalBoolParam(req.Params, "save_proof", true)
-			if err != nil {
-				return nil, err
+			approveValue, present := req.Params["approve"]
+			approve, valid := approveValue.(bool)
+			if !present || !valid {
+				return nil, NewInvalidParamsError(map[string]any{"field": "approve", "reason": "is required and must be a boolean"})
 			}
 			idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 			if err != nil {
 				return nil, err
 			}
-			requestKey, requestHash := operatorchannel.RequestIdentity(method, req.OperatorPrincipalID, idempotencyKey, req.RequestHash)
-			return executeOperatorChannelIdempotent(ctx, req, opts, selector, idempotencyKey, now().UTC(), func(ctx context.Context) (any, error) {
-				op, err := opts.Channels.Begin(ctx, selector, kind, revision, requestKey, requestHash, saveProof, now().UTC())
+			return executeOperatorChannelIdempotent(ctx, req, opts, operationID, idempotencyKey, now().UTC(), func(ctx context.Context) (any, error) {
+				op, binding, err := opts.Confirmation.ConfirmIdentity(ctx, operationID, revision, approve, now().UTC())
 				if err != nil {
 					return nil, operatorChannelError(err)
 				}
-				return map[string]any{"operation": op}, nil
+				return operatorChannelOperationResult(op, binding), nil
 			})
 		}
-	}
-	handlers["channel.confirm"] = func(ctx context.Context, req Request) (any, error) {
-		if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
-			return nil, err
-		}
-		operationID, err := requiredStringParam(req.Params, "operation_id")
-		if err != nil {
-			return nil, err
-		}
-		revision, err := channelRevisionParam(req.Params, "expected_revision", false)
-		if err != nil {
-			return nil, err
-		}
-		approveValue, present := req.Params["approve"]
-		approve, valid := approveValue.(bool)
-		if !present || !valid {
-			return nil, NewInvalidParamsError(map[string]any{"field": "approve", "reason": "is required and must be a boolean"})
-		}
-		idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
-		if err != nil {
-			return nil, err
-		}
-		return executeOperatorChannelIdempotent(ctx, req, opts, operationID, idempotencyKey, now().UTC(), func(ctx context.Context) (any, error) {
-			op, binding, err := opts.Channels.Confirm(ctx, operationID, revision, approve, now().UTC())
-			if err != nil {
-				return nil, operatorChannelError(err)
-			}
-			return operatorChannelOperationResult(op, binding), nil
-		})
 	}
 	if opts.Destructive != nil {
 		handlers["channel.unbind"] = func(ctx context.Context, req Request) (any, error) {
@@ -232,7 +203,14 @@ func channelRevisionParam(params map[string]any, name string, allowZero bool) (i
 
 func operatorChannelError(err error) error {
 	details := map[string]any{"reason": err.Error()}
+	var credentialRequired *channelonboarding.CredentialRequiredError
 	switch {
+	case errors.As(err, &credentialRequired):
+		return NewApplicationError(ChannelCredentialRequiredCode, false, map[string]any{
+			"reason": err.Error(), "operation_id": credentialRequired.OperationID,
+			"role": credentialRequired.Role, "store_key": credentialRequired.StoreKey,
+			"remediation": credentialRequired.ResumeCommand(),
+		})
 	case errors.Is(err, operatorchannel.ErrNotFound):
 		if strings.Contains(err.Error(), "interface") {
 			return NewApplicationError(ChannelInterfaceNotFoundCode, false, details)

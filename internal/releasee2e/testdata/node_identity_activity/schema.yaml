@@ -1,0 +1,6 @@
+name: activity-identity-control
+stages: []
+pins:
+  inputs:
+    events:
+      - {event: request, source: external}

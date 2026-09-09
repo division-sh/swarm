@@ -1492,17 +1492,40 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 }
 
 func (rt *Runtime) Start(ctx context.Context) error {
-	release, err := rt.PrepareStart(ctx)
+	prepared, err := rt.PrepareStart(ctx)
 	if err != nil {
 		return err
 	}
-	return release(nil)
+	return prepared.Start(nil)
 }
 
-// PrepareStart performs startup admission and validation without starting manager
-// loops, delivery recovery, or autonomous producers. Serve publishes executable
-// channels between preparation and the returned single-use execution release.
-func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error, prepareErr error) {
+// PreparedStartup owns a single prepared runtime's execution release. Preparation
+// installs subscriptions and validates startup, but does not admit managed
+// execution, recover deliveries, or release autonomous producers.
+type PreparedStartup struct {
+	mu      sync.Mutex
+	runtime *Runtime
+	start   func(func() error) error
+}
+
+func (s *PreparedStartup) Start(completePreparedTopology func() error) error {
+	if s == nil {
+		return errors.New("prepared runtime startup is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.start == nil {
+		return errors.New("prepared runtime startup already consumed")
+	}
+	start := s.start
+	s.start = nil
+	if s.runtime.shutdownAdmissionClosed() {
+		return errors.New("prepared runtime was retired before execution release")
+	}
+	return start(completePreparedTopology)
+}
+
+func (rt *Runtime) PrepareStart(ctx context.Context) (_ *PreparedStartup, prepareErr error) {
 	if rt == nil {
 		return nil, fmt.Errorf("runtime is nil")
 	}
@@ -1700,23 +1723,8 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error
 			return nil, fmt.Errorf("canonicalize source-scoped dynamic topology before execution admission: %w", err)
 		}
 	}
-	settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
-	if err != nil {
-		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
-		return nil, fmt.Errorf("settle managed startup preflight: %w", err)
-	}
-
 	prepared = true
-	var releaseMu sync.Mutex
-	released := false
-	return func(completePreparedTopology func() error) (releaseErr error) {
-		releaseMu.Lock()
-		if released {
-			releaseMu.Unlock()
-			return fmt.Errorf("prepared runtime start already released")
-		}
-		released = true
-		releaseMu.Unlock()
+	return &PreparedStartup{runtime: rt, start: func(completePreparedTopology func() error) (releaseErr error) {
 		started := false
 		defer func() {
 			if !started {
@@ -1728,6 +1736,11 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error
 		}
 		if rt.shutdownAdmissionClosed() {
 			return fmt.Errorf("prepared runtime was shut down before release")
+		}
+		settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
+		if err != nil {
+			rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
+			return fmt.Errorf("settle managed startup preflight: %w", err)
 		}
 		if rt.Manager != nil {
 			activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority)
@@ -1826,9 +1839,8 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (_ func(func() error) error
 		}
 		started = true
 		return nil
-	}, nil
+	}}, nil
 }
-
 func (rt *Runtime) releaseAutonomousStartupProducers(ctx, startCtx context.Context, skipPersistentStartupRecovery bool, decision *startupRecoveryDecisionReport) error {
 	if skipPersistentStartupRecovery {
 		rt.emitBootProgress(11, "schedule_restoration", "skipped", "persistent startup recovery disabled")

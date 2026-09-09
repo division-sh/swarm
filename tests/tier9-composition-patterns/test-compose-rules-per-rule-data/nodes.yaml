@@ -1,5 +1,4 @@
 resolver:
-  id: resolver
   execution_type: system_node
   subscribes_to: [conflict.submitted]
   produces: [conflict.resolved]

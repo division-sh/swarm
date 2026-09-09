@@ -1,5 +1,4 @@
 pipeline:
-  id: pipeline
   execution_type: system_node
   subscribes_to: [stage.one_done, stage.two_done]
   produces: [stage.two_start, stage.complete]

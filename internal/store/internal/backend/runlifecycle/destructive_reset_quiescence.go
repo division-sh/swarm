@@ -1,4 +1,4 @@
-package runtimepersistence
+package runlifecycle
 
 import (
 	"context"
@@ -9,7 +9,23 @@ import (
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 )
 
-func (s *PostgresStore) ApplyDestructiveResetQuiescence(ctx context.Context, req destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error) {
+func (s *RunLifecyclePostgresOwner) ApplyDestructiveResetQuiescence(ctx context.Context, req destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error) {
+	result, err := s.applyActiveRunQuiescence(ctx, resetActiveRunQuiescenceRequest(req), &req)
+	if err != nil {
+		return destructivereset.QuiescenceResult{}, err
+	}
+	return destructiveResetQuiescenceResult(result), nil
+}
+
+func (s *RunLifecycleSQLiteOwner) ApplyDestructiveResetQuiescence(ctx context.Context, req destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error) {
+	result, err := s.applyActiveRunQuiescence(ctx, resetActiveRunQuiescenceRequest(req), &req)
+	if err != nil {
+		return destructivereset.QuiescenceResult{}, err
+	}
+	return destructiveResetQuiescenceResult(result), nil
+}
+
+func resetActiveRunQuiescenceRequest(req destructivereset.QuiescenceRequest) runtimerunquiescence.Request {
 	requestedAt := req.RequestedAt.UTC()
 	if requestedAt.IsZero() {
 		requestedAt = time.Now().UTC()
@@ -18,19 +34,12 @@ func (s *PostgresStore) ApplyDestructiveResetQuiescence(ctx context.Context, req
 	if operationName == "" {
 		operationName = destructivereset.DefaultOperationName
 	}
-	result, err := s.ApplyActiveRunQuiescence(ctx, runtimerunquiescence.Request{
-		OperationName: operationName,
-		DryRun:        req.Result.DryRun,
-		RequestedAt:   requestedAt,
-		RunIDs:        activeRunIDsFromResetPlan(req.Result.Plan),
-		ReasonCode:    destructivereset.QuiescenceReasonCode,
-		ControlledBy:  destructivereset.QuiescenceControlledBy,
-		DeliveryNote:  destructivereset.QuiescenceDeliveryNote,
-	})
-	if err != nil {
-		return destructivereset.QuiescenceResult{}, err
+	return runtimerunquiescence.Request{
+		OperationName: operationName, DryRun: req.Result.DryRun, RequestedAt: requestedAt,
+		RunIDs:     activeRunIDsFromResetPlan(req.Result.Plan),
+		ReasonCode: destructivereset.QuiescenceReasonCode, ControlledBy: destructivereset.QuiescenceControlledBy,
+		DeliveryNote: destructivereset.QuiescenceDeliveryNote,
 	}
-	return destructiveResetQuiescenceResult(result), nil
 }
 
 func activeRunIDsFromResetPlan(plan destructivereset.Plan) []string {

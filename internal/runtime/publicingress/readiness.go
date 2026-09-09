@@ -254,13 +254,13 @@ func cloneRegistrationProcessSnapshot(source registrationProcessSnapshot) regist
 }
 
 type ReadinessOwner struct {
-	mu                      sync.RWMutex
-	runtimeReady            bool
-	enabled                 bool
-	registration            *RegistrationSnapshotOwner
-	startupCurrent          func(context.Context, string) (bool, error)
-	credentialEpochsCurrent func(context.Context, map[string]string) (bool, error)
-	effectAuthorityCurrent  func(context.Context, runtimeeffects.Authority) (bool, error)
+	mu                                 sync.RWMutex
+	runtimeReady                       bool
+	enabled                            bool
+	registration                       *RegistrationSnapshotOwner
+	startupCurrent                     func(context.Context, string) (bool, error)
+	credentialObservationTokensCurrent func(context.Context, map[string]string) (bool, error)
+	effectAuthorityCurrent             func(context.Context, runtimeeffects.Authority) (bool, error)
 }
 
 func NewReadinessOwner(enabled bool) *ReadinessOwner {
@@ -303,7 +303,7 @@ func (o *ReadinessOwner) SetCurrentnessChecks(
 	}
 	o.mu.Lock()
 	o.startupCurrent = startup
-	o.credentialEpochsCurrent = credentials
+	o.credentialObservationTokensCurrent = credentials
 	o.effectAuthorityCurrent = effect
 	o.mu.Unlock()
 }
@@ -334,7 +334,7 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	o.mu.RLock()
 	output := Snapshot{RuntimeReady: o.runtimeReady, PublicIngressEnabled: o.enabled}
 	startupCurrent := o.startupCurrent
-	credentialsCurrent := o.credentialEpochsCurrent
+	credentialsCurrent := o.credentialObservationTokensCurrent
 	effectCurrent := o.effectAuthorityCurrent
 	o.mu.RUnlock()
 
@@ -420,7 +420,7 @@ func registrationStateCurrent(
 		return false, "provider registration evidence expired"
 	}
 	if credentialsCurrent != nil {
-		current, err := credentialsCurrent(ctx, intent.CredentialEpochs)
+		current, err := credentialsCurrent(ctx, intent.CredentialObservationTokens)
 		if err != nil {
 			return false, err.Error()
 		}

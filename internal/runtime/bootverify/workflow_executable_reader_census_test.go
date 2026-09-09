@@ -307,7 +307,6 @@ func TestRun_ExpressionValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
 	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "nodes.yaml"), `
 shared-node:
-  id: shared-node
   execution_type: system_node
   subscribes_to: [item.received]
   event_handlers:
@@ -374,7 +373,6 @@ func handBuiltScopedReaderBundle(handler runtimecontracts.SystemNodeEventHandler
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: ".", NodesFile: "root/nodes.yaml"},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"root-reader": {
-				ID:            "embedded-id-is-not-authority",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.received": handler},
 			},
 		},

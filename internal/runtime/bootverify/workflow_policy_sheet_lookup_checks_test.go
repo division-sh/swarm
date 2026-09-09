@@ -130,7 +130,6 @@ func bootverifyLookupFindings(handler runtimecontracts.SystemNodeEventHandler) [
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"repo_scaffold": {
-				ID: "repo_scaffold",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"repo.scaffold_requested": handler,
 				},

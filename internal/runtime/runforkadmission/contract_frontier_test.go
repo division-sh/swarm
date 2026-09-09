@@ -625,7 +625,6 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 		Path: "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			nodeID: {
-				ID:           nodeID,
 				SubscribesTo: []string{"scan.requested"},
 			},
 		},
@@ -671,7 +670,6 @@ func testContractFrontierTemplateSource() semanticview.Source {
 		Path: "review",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"reviewer": {
-				ID:           "reviewer-{instance_id}",
 				SubscribesTo: []string{"task.started"},
 				Produces:     []string{"task.started"},
 			},
@@ -753,7 +751,6 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 		Path: "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
-				ID:           "consumer-node",
 				SubscribesTo: []string{"scan.requested"},
 			},
 		},

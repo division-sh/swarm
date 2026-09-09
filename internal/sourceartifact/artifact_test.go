@@ -123,6 +123,47 @@ func TestAdmitDirectoryRejectsIncludedSymlinkBeforeClassification(t *testing.T) 
 	}
 }
 
+func TestAdmissionLinksDoNotChangeWithSelectedRootSpelling(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "schema.yaml", "name: root\n")
+	alias := filepath.Join(t.TempDir(), "selected")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := filepath.EvalSymlinks(alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := AdmitDirectory(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{".git", "swarm.yaml"} {
+		if err := os.Symlink("missing", filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ignored, err := AdmitDirectory(selected)
+	if err != nil || ignored.BundleHash() != baseline.BundleHash() {
+		t.Fatalf("excluded links changed admission: %v", err)
+	}
+	for _, name := range []string{"data/escape.md", "child"} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(t.TempDir(), path); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := AdmitDirectory(selected); err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
+			t.Fatalf("included link %s: %v", name, err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestManifestIsExactArtifactDataButNotSemanticYAML(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "schema.yaml", "name: root\n")

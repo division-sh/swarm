@@ -216,6 +216,13 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 			}
 			return admissions[i].StoreKey < admissions[j].StoreKey
 		})
+		admissionValues := make([]any, 0, len(admissions))
+		for _, admission := range admissions {
+			admissionValues = append(admissionValues, map[string]any{
+				"role": admission.Role, "store_key": admission.StoreKey, "kind": admission.Kind,
+				"receipt": admission.Receipt, "value_seal": admission.ValueSeal.String(),
+			})
+		}
 		values = append(values, map[string]any{
 			"source":                  activation.Source,
 			"onboarding_operation_id": activation.OnboardingOperationID,
@@ -223,7 +230,7 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 			"coordinate":              coordinate,
 			"activation_revision":     activation.ActivationRevision,
 			"plan":                    planValue,
-			"credential_admissions":   admissions,
+			"credential_admissions":   admissionValues,
 		})
 	}
 	return canonicalPublication{activations: ordered, value: []any{string(ChannelActivationPublicationExecutable), values}}, nil

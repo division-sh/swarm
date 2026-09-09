@@ -225,11 +225,8 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if apiCaps.RunForkAvailability == nil || apiCaps.RunFork == nil || apiCaps.RunForkSelector == nil {
 		t.Fatal("sqlite apiCapabilities missing complete run-fork capability family")
 	}
-	classifiedOut := map[string]any{"ResetCoordinator": apiCaps.ResetCoordinator}
-	for name, capability := range classifiedOut {
-		if capability != nil {
-			t.Fatalf("sqlite optional capability %s = %T, want nil classified split/postgres-only capability", name, capability)
-		}
+	if apiCaps.ResetCoordinator == nil {
+		t.Fatal("sqlite apiCapabilities missing the shared destructive reset coordinator")
 	}
 	if apiCaps.RuntimeContexts != nil {
 		t.Fatalf("sqlite optional capability RuntimeContexts = %T, want nil classified split/postgres-only capability", apiCaps.RuntimeContexts)
@@ -373,6 +370,7 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 		"sqlite conversation lifecycle":      sqliteCaps.ConversationForkLifecycle != nil,
 		"sqlite run fork":                    sqliteCaps.RunFork != nil,
 		"sqlite run fork selector":           sqliteCaps.RunForkSelector != nil,
+		"sqlite reset":                       sqliteCaps.ResetCoordinator != nil,
 		"postgres source artifact writer":    postgres.SourceArtifactWriter() != nil,
 		"postgres source artifact store":     postgres.SourceArtifactStore() != nil,
 		"postgres required run availability": postgres.RunBundleAvailability() != nil,
@@ -382,11 +380,6 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 	} {
 		if !available {
 			t.Fatalf("%s capability is unavailable", name)
-		}
-	}
-	for name, available := range map[string]bool{"sqlite reset": sqliteCaps.ResetCoordinator != nil} {
-		if available {
-			t.Fatalf("%s capability unexpectedly available", name)
 		}
 	}
 	if err := sqlite.Pinger().Ping(ctx); err != nil {

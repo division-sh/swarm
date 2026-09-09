@@ -67,7 +67,7 @@ func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContra
 	}
 	nodes := make(map[string]runtimecontracts.SystemNodeContract, len(nodeIDs))
 	for _, nodeID := range nodeIDs {
-		node := runtimecontracts.SystemNodeContract{ID: nodeID}
+		node := runtimecontracts.SystemNodeContract{}
 		if bundle != nil {
 			if authored, ok := bundle.Nodes[nodeID]; ok {
 				node = authored
@@ -146,7 +146,7 @@ func handlerEngineProjectNodeModule() *previewWorkflowModule {
 		Semantics:    runtimecontracts.WorkflowSemanticView{Name: "handler-engine-test"},
 		RootEntities: testEntityContractsForType("test_entity"),
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 	}, "handler-engine-test", "node-a").(*previewWorkflowModule)
 }
@@ -513,7 +513,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 		Schema: runtimecontracts.FlowSchemaDocument{Name: "render", Mode: runtimecontracts.FlowModeStatic},
 		Path:   ".",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a"},
+			"node-a": {},
 		},
 		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
 			"structured_renderer": module,
@@ -669,7 +669,6 @@ subject:
 `,
 		"scoring/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -860,7 +859,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
 			RootEntities: testEntityContractsForType("test_entity"),
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
-				"node-a": {ID: "node-a", ExecutionType: "system_node"},
+				"node-a": {ExecutionType: "system_node"},
 			},
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -938,7 +937,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
 			RootEntities: testEntityContractsForType("test_entity"),
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
-				"node-a": {ID: "node-a", ExecutionType: "system_node"},
+				"node-a": {ExecutionType: "system_node"},
 			},
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -1010,7 +1009,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
 			RootEntities: testEntityContractsForType("test_entity"),
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
-				"node-a": {ID: "node-a", ExecutionType: "system_node"},
+				"node-a": {ExecutionType: "system_node"},
 			},
 			Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:    "validation",
@@ -1127,7 +1126,7 @@ func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recor
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: testEntityContractsForType("test_entity"),
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "validation",
@@ -1499,7 +1498,6 @@ validation_entity:
 `,
 		"validation/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -1621,7 +1619,6 @@ validation_request:
 `,
 		"validation/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -1734,7 +1731,6 @@ review_entity:
 `,
 		"review/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -1853,7 +1849,6 @@ validation_entity:
 `,
 		"validation/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 	})
@@ -1965,7 +1960,6 @@ entity.created: {}
 `,
 		"validation/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
   event_handlers:
     candidate.discovered:
@@ -2186,7 +2180,6 @@ subject:
 `,
 					"scoring/nodes.yaml": `
 node-a:
-  id: node-a
   execution_type: system_node
 `,
 				})
@@ -2602,7 +2595,7 @@ func declarativeEmitContractTestBundle(eventType string) *runtimecontracts.Workf
 func additiveOnSuccessContractBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test",
@@ -2618,7 +2611,7 @@ func additiveOnSuccessContractBundle() *runtimecontracts.WorkflowContractBundle 
 func rulesEmitTemplateContractBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test",
@@ -2652,7 +2645,7 @@ func declarativeEmitContractTestBundleWithEntry(eventType string, entry runtimec
 	eventType = strings.TrimSpace(eventType)
 	return &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+			"node-a": {ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test",

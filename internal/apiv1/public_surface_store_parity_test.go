@@ -298,7 +298,8 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 			name: "teaching proof",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				claim := storeParityClaimByID(t, matrix, "destructive_reset")
-				claim.Evidence = storeParityEvidenceExceptRole(claim.Evidence, "teaching_failure")
+				claim.BackendDispositions["default_sqlite"] = "unsupported_with_exact_spec_and_teaching_proof"
+				claim.Evidence = storeParityEvidenceExceptRole(claim.Evidence, "backend_support")
 			},
 			want: "store parity claim destructive_reset default_sqlite disposition requires exactly one teaching_failure evidence record, got 0",
 		},

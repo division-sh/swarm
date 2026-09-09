@@ -273,7 +273,7 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 		Activity: runtimecontracts.ActivitySpec{ID: "connector", Tool: "provider.connector"},
 	}
 	node := runtimecontracts.SystemNodeContract{
-		ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+		ExecutionType: runtimecontracts.SystemNodeExecutionType,
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": handler},
 	}
 	flow := runtimecontracts.FlowContractView{
