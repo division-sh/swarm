@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +13,21 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
+
+type crossedSelectedProcessCapability struct {
+	startupownership.ProcessCapability
+	cross func(*startupownership.Authority)
+}
+
+func (c crossedSelectedProcessCapability) Evidence() (startupownership.Authority, error) {
+	evidence, err := c.ProcessCapability.Evidence()
+	if err == nil {
+		c.cross(&evidence)
+	}
+	return evidence, err
+}
 
 func TestSelectedForkProcessAdmissionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -67,6 +82,49 @@ func TestSelectedForkProcessAdmissionBothStores(t *testing.T) {
 			}
 			if process.ActiveCount() != baseline {
 				t.Fatal("accepted preparation did not release exact process possession")
+			}
+			if err := owner.requirePreparationProcess(ctx, capability); err != nil {
+				t.Fatalf("exact bound capability: %v", err)
+			}
+			if err := owner.requirePreparationProcess(ctx, nil); err == nil {
+				t.Fatal("missing supplied capability admitted")
+			}
+			for _, axis := range []struct {
+				name  string
+				cross func(*startupownership.Authority)
+			}{
+				{"authority", func(a *startupownership.Authority) { a.AuthorityID = uuid.NewString() }},
+				{"generation", func(a *startupownership.Authority) { a.AuthorityGeneration++ }},
+				{"acquisition", func(a *startupownership.Authority) { a.AcquisitionID = uuid.NewString() }},
+				{"owner", func(a *startupownership.Authority) { a.OwnerID += "-foreign" }},
+				{"boot", func(a *startupownership.Authority) { a.BootID = uuid.NewString() }},
+				{"runtime", func(a *startupownership.Authority) { a.RuntimeInstanceID = uuid.NewString() }},
+				{"backend", func(a *startupownership.Authority) { a.Backend += "-foreign" }},
+			} {
+				t.Run(axis.name, func(t *testing.T) {
+					err := owner.requirePreparationProcess(ctx, crossedSelectedProcessCapability{ProcessCapability: capability, cross: axis.cross})
+					if err == nil || !strings.Contains(err.Error(), "differs from its bound owner") {
+						t.Fatalf("crossed %s accepted: %v", axis.name, err)
+					}
+				})
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			if err := owner.requirePreparationProcess(cancelled, capability); !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled process validation: %v", err)
+			}
+			if err := capability.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			successor := selectedContractTestProcessCapability(t, ctx, selected)
+			if err := owner.requirePreparationProcess(ctx, successor); err == nil {
+				t.Fatal("successor capability revived predecessor selected owner")
+			}
+			if err := successor.ProveCurrent(ctx); err != nil {
+				t.Fatalf("predecessor refusal invalidated successor: %v", err)
+			}
+			if process.ActiveCount() != baseline {
+				t.Fatal("capability refusals leaked process work")
 			}
 		})
 	}

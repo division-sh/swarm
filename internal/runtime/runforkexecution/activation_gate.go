@@ -252,6 +252,9 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if !plan.ExecutionReady {
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
+	if err := req.ExecutionOwner.requirePreparationProcess(ctx, req.AgentRuntime.ProcessCapability); err != nil {
+		return result, err
+	}
 	if plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 		executionPorts, err := req.ExecutionOwner.require()
 		if err != nil {
@@ -276,12 +279,6 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			return result, err
 		}
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
-		if req.AgentRuntime.ProcessCapability == nil {
-			return result, errors.New("selected-contract activation requires process capability before readiness binding")
-		}
-		if err := req.AgentRuntime.ProcessCapability.ProveCurrent(ctx); err != nil {
-			return result, fmt.Errorf("prove selected-contract process before readiness binding: %w", err)
-		}
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
 		agentRuntime, readiness, err := prepareSelectedContractWorkflowReadiness(
 			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, plan, frontier, sourceEventIDs, req.AgentRuntime,

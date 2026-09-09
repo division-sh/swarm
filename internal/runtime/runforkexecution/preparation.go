@@ -202,11 +202,8 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 		return nil, err
 	}
 	owned.agentRuntime = agentRuntime
-	if req.AgentRuntime.ProcessCapability == nil {
-		return nil, errors.New("selected-contract execution requires process capability before materialization")
-	}
-	if err := req.AgentRuntime.ProcessCapability.ProveCurrent(ctx); err != nil {
-		return nil, fmt.Errorf("prove selected-contract process before materialization: %w", err)
+	if err := o.requirePreparationProcess(ctx, req.AgentRuntime.ProcessCapability); err != nil {
+		return nil, err
 	}
 	prepared, err := prepareSelectedFork(ctx, operation, ports, loadedSource, plan, frontier, *model.RecipientPlanning, agentRuntime)
 	if err != nil {

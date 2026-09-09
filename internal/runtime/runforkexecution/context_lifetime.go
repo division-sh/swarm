@@ -84,6 +84,41 @@ func (o SelectedContractExecutionOwner) materializePrepared(ctx context.Context,
 	return result, err
 }
 
+func (o SelectedContractExecutionOwner) requirePreparationProcess(ctx context.Context, supplied startupownership.ProcessCapability) error {
+	ports, err := o.require()
+	if err != nil {
+		return err
+	}
+	contexts := ports.contexts
+	contexts.mu.Lock()
+	bound := contexts.capability
+	admitted := contexts.recovered && !contexts.retired
+	contexts.mu.Unlock()
+	if !admitted || bound == nil || supplied == nil {
+		return errors.New("selected preparation requires its bound process capability")
+	}
+	if err := bound.ProveCurrent(ctx); err != nil {
+		return fmt.Errorf("prove selected owner's process capability: %w", err)
+	}
+	want, err := bound.Evidence()
+	if err != nil {
+		return err
+	}
+	if err := supplied.ProveCurrent(ctx); err != nil {
+		return err
+	}
+	got, err := supplied.Evidence()
+	if err != nil {
+		return err
+	}
+	if got.AuthorityID != want.AuthorityID || got.AuthorityGeneration != want.AuthorityGeneration ||
+		got.OwnerID != want.OwnerID || got.BootID != want.BootID || got.RuntimeInstanceID != want.RuntimeInstanceID ||
+		got.AcquisitionID != want.AcquisitionID || got.Backend != want.Backend {
+		return errors.New("selected preparation process capability differs from its bound owner")
+	}
+	return nil
+}
+
 func (o SelectedContractExecutionOwner) bindStagedPreparation(op *selectedContractOperation, binding runfork.RunForkSelectedContractBinding) error {
 	if err := validateSelectedContractExecutionBinding(binding.ForkRunID, binding); err != nil {
 		return err
