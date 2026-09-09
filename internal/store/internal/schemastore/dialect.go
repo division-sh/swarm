@@ -448,30 +448,30 @@ func sqliteRenderCheckConstraint(line string) (string, error) {
 	return fmt.Sprintf("CHECK (%s)", rendered), nil
 }
 
-func sqliteRenderPredicate(raw string) (string, error) {
-	predicate := strings.TrimSpace(raw)
-	if predicate == "" {
-		return "", fmt.Errorf("predicate is required")
+var sqlitePredicateReplacements = func() [][2]string {
+	var replacements [][2]string
+	add := func(from, to string) {
+		replacements = append(replacements, [2]string{from, to})
 	}
 	// Render longer bundle-hash column names before the generic bundle_hash
 	// spelling so a suffix match cannot leave an invalid identifier prefix.
-	predicate = strings.ReplaceAll(predicate,
+	add(
 		"lifecycle_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("lifecycle_bundle_hash"),
 	)
-	predicate = strings.ReplaceAll(predicate,
+	add(
 		"current_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("current_bundle_hash"),
 	)
-	predicate = strings.ReplaceAll(predicate,
+	add(
 		"authority_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("authority_bundle_hash"),
 	)
-	predicate = strings.ReplaceAll(predicate,
+	add(
 		"bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("bundle_hash"),
 	)
-	predicate = strings.ReplaceAll(predicate,
+	add(
 		"route_identity ~ '^delivery-route-v2:sha256:[0-9a-f]{64}$'",
 		sqliteDeliveryRouteIdentityPredicate("route_identity"),
 	)
@@ -488,20 +488,31 @@ func sqliteRenderPredicate(raw string) (string, error) {
 		{"static_id", "static-data-v1:sha256:"},
 		{"content_digest", "static-content-v1:sha256:"},
 	} {
-		predicate = strings.ReplaceAll(predicate,
+		add(
 			digest.column+" ~ '^"+digest.prefix+"[0-9a-f]{64}$'",
 			sqlitePrefixedSHA256Predicate(digest.column, digest.prefix),
 		)
 	}
 	for _, column := range []string{"profile_digest", "effective_source_digest", "request_hash", "findings_digest"} {
-		predicate = strings.ReplaceAll(predicate,
+		add(
 			column+" ~ '^sha256:[0-9a-f]{64}$'",
 			sqliteSHA256Predicate(column),
 		)
 	}
-	predicate = strings.ReplaceAll(predicate, "source_route <> '{}'::jsonb", "source_route <> '{}'")
-	predicate = strings.ReplaceAll(predicate, "target_route <> '{}'::jsonb", "target_route <> '{}'")
-	predicate = strings.ReplaceAll(predicate, "routing_source->>'kind'", "json_extract(routing_source, '$.kind')")
+	add("source_route <> '{}'::jsonb", "source_route <> '{}'")
+	add("target_route <> '{}'::jsonb", "target_route <> '{}'")
+	add("routing_source->>'kind'", "json_extract(routing_source, '$.kind')")
+	return replacements
+}()
+
+func sqliteRenderPredicate(raw string) (string, error) {
+	predicate := strings.TrimSpace(raw)
+	if predicate == "" {
+		return "", fmt.Errorf("predicate is required")
+	}
+	for _, replacement := range sqlitePredicateReplacements {
+		predicate = strings.ReplaceAll(predicate, replacement[0], replacement[1])
+	}
 	if err := rejectSQLiteUnsupportedConstructs(predicate); err != nil {
 		return "", err
 	}

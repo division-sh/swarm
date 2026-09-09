@@ -16,7 +16,7 @@ func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapReq
 	if err := request.validate(); err != nil {
 		return err
 	}
-	expected, err := expectedSchemaShape(request.PlatformPlans, SchemaDialectSQLite)
+	expected, err := sqlitePlatformShape.expected(request.PlatformPlans)
 	if err != nil {
 		return err
 	}

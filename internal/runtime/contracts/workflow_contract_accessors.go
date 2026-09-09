@@ -166,7 +166,7 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 		return nil
 	}
 	if b.FlowTree.Root != nil {
-		return scopedNodeRecordsFromExportedTree(b.FlowTree.Root)
+		return scopedNodeRecordsFromExportedTree(b.FlowTree.Root, "")
 	}
 	if len(b.scopedNodes) > 0 {
 		keys := make([]string, 0, len(b.scopedNodes))
@@ -219,7 +219,13 @@ func (b *WorkflowContractBundle) ExecutableNode(ref runtimeidentity.ExecutableNo
 	if b == nil || !ref.Valid() {
 		return ScopedNodeRecord{}, false
 	}
-	for _, record := range b.ScopedNodeRecords() {
+	var records []ScopedNodeRecord
+	if b.FlowTree.Root != nil {
+		records = scopedNodeRecordsFromExportedTree(b.FlowTree.Root, ref.NodeID())
+	} else {
+		records = b.ScopedNodeRecords()
+	}
+	for _, record := range records {
 		candidate, err := record.Identity()
 		if err == nil && candidate.Equal(ref) {
 			return record, true
@@ -457,7 +463,7 @@ func (b *WorkflowContractBundle) ExternalizeExecutableNodeHandler(ref runtimeide
 	return handler
 }
 
-func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecord {
+func scopedNodeRecordsFromExportedTree(root *FlowContractView, selectedNodeID string) []ScopedNodeRecord {
 	if root == nil {
 		return nil
 	}
@@ -468,8 +474,15 @@ func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecor
 			return
 		}
 		flowPath := strings.TrimSpace(view.Paths.FlowPath)
-		nodeIDs := make([]string, 0, len(view.Nodes))
+		capacity := len(view.Nodes)
+		if selectedNodeID != "" {
+			capacity = 1
+		}
+		nodeIDs := make([]string, 0, capacity)
 		for nodeID := range view.Nodes {
+			if selectedNodeID != "" && strings.TrimSpace(nodeID) != selectedNodeID {
+				continue
+			}
 			nodeIDs = append(nodeIDs, nodeID)
 		}
 		sort.Strings(nodeIDs)

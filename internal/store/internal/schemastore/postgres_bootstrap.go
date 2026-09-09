@@ -26,7 +26,7 @@ func (s *Postgres) BootstrapSchema(ctx context.Context, request SchemaBootstrapR
 	if err := request.validate(); err != nil {
 		return err
 	}
-	expected, err := expectedSchemaShape(request.PlatformPlans, SchemaDialectPostgres)
+	expected, err := postgresPlatformShape.expected(request.PlatformPlans)
 	if err != nil {
 		return err
 	}
