@@ -42,6 +42,13 @@ func checkJoinValidation(c *checkerContext) []Finding {
 				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, "join has incomplete executable node identity: "+nodeErr.Error()))
 				continue
 			}
+			if handler.Loop == nil {
+				for _, expression := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
+					if expression.AllowJoin && workflowexpr.ExpressionReferencesRoot(expression.Expression, "loop") {
+						findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, expression.Kind+" requires a loop-owned join for captured loop.* context"))
+					}
+				}
+			}
 			compiledPlan, found := semanticview.WorkflowJoinPlanForExecutionHandler(c.source, nodeRef, eventType, *handler.Join)
 			if !found {
 				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, "join has no effective WorkflowJoinPlan; reload the workflow contract and declare exactly one canonical join row"))
