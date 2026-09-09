@@ -358,6 +358,15 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	if handlerFact.Empty() {
 		return fmt.Errorf("receiver %s requires an admitted target handler", recipient.ID())
 	}
+	if isJoinLifecycleEvent(evt.Type()) {
+		declaredRecipient, target, declaredHandler, found, err := ResolveWorkflowJoinOccurrenceDeliveryTarget(source, evt)
+		if err != nil {
+			return err
+		}
+		if !found || recipient != declaredRecipient || !handlerFact.Node().Equal(declaredHandler.Node()) || handlerFact.eventType != declaredHandler.eventType || owner.Route() != target {
+			return fmt.Errorf("stamped join lifecycle ownership contradicts its exact declaration occurrence")
+		}
+	}
 	flowID := handlerFact.ExecutionFlowID(source)
 	route := owner.Route()
 	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
