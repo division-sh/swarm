@@ -1,6 +1,32 @@
 package canonicalrouting
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// CopyForkFanOutConsumer retains the carrier and adds an actual authored receiver.
+func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
+	t.Helper()
+	root := CopyForkFanOutCarrier(t, loop, barrier)
+	nodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+`item-consumer:
+  id: item-consumer
+  execution_type: system_node
+  subscribes_to: [items.child]
+  event_handlers:
+    items.child:
+      data_accumulation:
+        writes:
+          - {target_field: processed_value, expression: payload.value}
+`)
+	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  processed_value: text\n")
+	return root
+}
 
 // CopyForkFanOutCarrier declares the immutable source used by fork fan-out
 // projection/evaluator proofs. Loop and finite-barrier variants share its site.

@@ -44,7 +44,7 @@ func TestForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T) {
 			}{{"current", true, false}, {"historical", true, true}, {"no_loop", false, false}} {
 				t.Run(cell.name, func(t *testing.T) {
 					repo := canonicalrouting.RepoRoot(t)
-					bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutCarrier(t, cell.loop, true), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+					bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutConsumer(t, cell.loop, true), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -204,6 +204,7 @@ func TestForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					var emissions []engine.EmitIntent
 					for i, value := range input.Items {
 						emit, err := executor.EvaluateFanOutOrdinal(ctx, copied, input.Trigger, value, input.StartOrdinal+i)
 						if err != nil {
@@ -219,7 +220,9 @@ func TestForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T) {
 						if emit.Event.RunID() != child.ForkRunID || emit.Event.RoutingSource().Route().EntityID != child.ForkRunID {
 							t.Fatalf("emission generation is child-bound but producer ownership is not: run=%s source=%#v", emit.Event.RunID(), emit.Event.RoutingSource())
 						}
+						emissions = append(emissions, emit)
 					}
+					consumeForkFanOutEmissions(t, fixture, backend.name, source, ctx, copied, claim, emissions)
 				})
 			}
 		})
