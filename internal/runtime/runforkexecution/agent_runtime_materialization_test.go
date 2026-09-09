@@ -485,13 +485,8 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	if err != nil {
 		t.Fatalf("selected-contract declarations: %v", err)
 	}
-	processCapability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "selected-contract-cancellation-test", BootID: uuid.NewString(), RuntimeInstanceID: wantScope.RuntimeInstanceID,
-	})
-	if err != nil {
-		t.Fatalf("acquire selected-contract process capability: %v", err)
-	}
-	t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
+	processCapability := selectedContractTestProcessCapability(t, ctx, selected)
+	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
 	topology, err := runtimeagenttopology.SelectedDeclarationAdmission(forkRunID, declarations)
 	if err != nil {
 		t.Fatalf("construct selected-contract static topology: %v", err)
@@ -531,7 +526,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 
 	agents.Options.AgentManagerOptions = runtimemanager.AgentManagerOptions{WorkOwner: owner, ReceiverExecution: receiverExecution}
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Owner: selectedContractExecutionOwnerForTest(t, selected), LoadedSource: loaded,
+		Owner: executionOwner, LoadedSource: loaded,
 		Prepared: prepared, AgentRuntime: agents,
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})
 	if err != nil {

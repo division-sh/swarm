@@ -421,14 +421,7 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	// This backend history refusal must precede readiness admission.
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err == nil || (!strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) && !strings.Contains(err.Error(), runfork.RunForkBlockerActiveTurnHistoryUnproven)) {
 		t.Fatalf("materialization error = %v, want active session/turn blocker", err)
 	}
@@ -517,7 +510,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	forkAt := at.Add(30 * time.Second)
 	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "item.received",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
 	unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
@@ -527,14 +520,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	// This backend history refusal must precede readiness admission.
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          forkPointEventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want conversation history blocked by unrelated active delivery", err)
 	}
@@ -560,7 +546,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	at := time.Unix(1700002428, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
+	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "item.received",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
 	unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("unrelated-agent")}
 	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
@@ -569,14 +555,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	// This backend history refusal must precede readiness admission.
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          forkPointEventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerDeliveryHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want unrelated active delivery blocker", err)
 	}
@@ -700,19 +679,13 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 		t.Fatalf("seed timer: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	// This backend history refusal must precede readiness admission.
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
+	// Timer ownership is rejected before preparation can authorize materialization.
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution result=%#v error=%v, want timer blocker", materialized, err)
+		t.Fatalf("preparation error=%v, want timer blocker", err)
 	}
-	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized timer-bearing fork: %#v", materialized)
+	if prepared != nil {
+		t.Fatal("prepared timer-bearing fork")
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 	assertNoForkTimerCopiesForSource(t, db, sourceRunID)
@@ -761,19 +734,12 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 			}
 			captureRunForkTestRevision(t, db, sourceRunID)
 
-			// This backend history refusal must precede readiness admission.
-			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-				SourceRunID: sourceRunID,
-				At:          eventID,
-				ContractSelection: runfork.RunForkContractSelection{
-					Mode: "selected_contracts",
-				},
-			})
+			prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
 				t.Fatalf("materialization error = %v, want %s", err, runfork.RunForkBlockerTimerHistoryUnproven)
 			}
-			if materialized.ForkRunID != "" {
-				t.Fatalf("materialized fork despite unsupported timer history: %#v", materialized)
+			if prepared != nil {
+				t.Fatal("prepared fork despite unsupported timer history")
 			}
 			assertNoSelectedContractForkRows(t, db, sourceRunID)
 			assertNoForkTimerCopiesForSource(t, db, sourceRunID)
@@ -813,16 +779,9 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	if !runForkTestHasPlanBlocker(repeatedPlan, runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("repeated fixed-revision plan lost timer blocker: %#v", repeatedPlan.ReplayResumeAdmission)
 	}
-	// This backend history refusal must precede readiness admission.
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) || materialized.ForkRunID != "" {
-		t.Fatalf("fixed timer blocker materialization result=%#v error=%v", materialized, err)
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) || prepared != nil {
+		t.Fatalf("fixed timer blocker preparation=%v error=%v", prepared, err)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
@@ -1672,7 +1631,7 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
 }
 
-func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocker(t *testing.T) {
+func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRemoval(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -1689,22 +1648,25 @@ func TestSelectedContractExecutionMaterializationPreservesUnversionedRouteBlocke
 		t.Fatalf("seed selected event route identity: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	// This backend history refusal must precede readiness admission.
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runforkreadiness.MaterializeRequest{
-		SourceRunID: sourceRunID,
-		At:          eventID,
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode: "selected_contracts",
-		},
-	})
-	blocker, fact, ok := runForkReplayResumeBlockerFromError(err)
-	if err == nil || !ok || blocker.Code != runfork.RunForkBlockerFlowRouteHistoryUnproven || fact != runfork.RunForkReplayResumeFactRouteHistory {
-		t.Fatalf("materialization error = %v blocker=%#v fact=%q, want typed route blocker", err, blocker, fact)
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	if err != nil || plan.RouteHistory.State != runfork.RunForkRouteHistoryUnknownUnversioned {
+		t.Fatalf("route fixture must require selected resolution: state=%q err=%v", plan.RouteHistory.State, err)
+	}
+	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+	// Even with valid preparation, unversioned routes require their own proof.
+	request.FrontierAdmission = runfork.RunForkContractFrontierAdmission{}
+	before := snapshotForkHistoricalExecutionTables(t, db, true)
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
+	if err == nil || !strings.Contains(err.Error(), "selected preparation differs from transaction's fixed admitted plan") {
+		t.Fatalf("materialization error = %v, want exact prepared route proof refusal", err)
 	}
 	if materialized.ForkRunID != "" {
 		t.Fatalf("materialized fork despite route blocker: %#v", materialized)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
+	if after := snapshotForkHistoricalExecutionTables(t, db, true); !reflect.DeepEqual(before, after) {
+		t.Fatal("rejected route proof removal changed the database")
+	}
 }
 
 // Preparation uses the actual persisted selected artifact and event modes.

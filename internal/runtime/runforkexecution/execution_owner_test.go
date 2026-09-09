@@ -20,6 +20,13 @@ func selectedContractExecutionOwnerForTest(t testing.TB, selected *store.Postgre
 	})
 }
 
+func selectedContractExecutionOwnerWithProcessForTest(t testing.TB, selected *store.PostgresStore, capability startupownership.ProcessCapability) SelectedContractExecutionOwner {
+	t.Helper()
+	return selectedForkBoundOwnerWithProcessForTest(t, selected, capability, func() SelectedContractExecutionOwner {
+		return newSelectedContractExecutionOwnerForTest(t, selected)
+	})
+}
+
 func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.PostgresStore) SelectedContractExecutionOwner {
 	t.Helper()
 	_ = runForkTestContext(t)
@@ -93,6 +100,12 @@ func selectedForkBoundOwnerForTest(t testing.TB, selected startupownership.Store
 	t.Helper()
 	ctx := runForkTestContext(t)
 	capability := selectedContractTestProcessCapability(t, ctx, selected)
+	return selectedForkBoundOwnerWithProcessForTest(t, selected, capability, construct)
+}
+
+func selectedForkBoundOwnerWithProcessForTest(t testing.TB, selected startupownership.Store, capability startupownership.ProcessCapability, construct func() SelectedContractExecutionOwner) SelectedContractExecutionOwner {
+	t.Helper()
+	ctx := runForkTestContext(t)
 	value, _ := runForkTestWorkFixtures.Load(t)
 	fixture := value.(*runForkTestWorkFixture)
 	fixture.mu.Lock()

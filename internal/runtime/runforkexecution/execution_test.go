@@ -3082,7 +3082,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	for _, contender := range contenders {
 		contender := contender
 		operation := selectedContractOperationForTest(t, ctx)
-		owner := selectedContractExecutionOwnerForTest(t, contender.store)
+		owner := selectedContractExecutionOwnerWithProcessForTest(t, contender.store, processCapability)
 		prepared, err := prepareSelectedFork(ctx, operation, owner.ports, baseRequest.LoadedSource, fixedPlan, runfork.RunForkContractFrontierAdmission{}, planning, baseRequest.AgentRuntime)
 		if err != nil {
 			t.Fatal(err)
@@ -3120,7 +3120,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	authority := winner.container.authority
 	grantRequest := baseRequest
 	grantRequest.Prepared = winner.prepared
-	grantRequest.Owner = selectedContractExecutionOwnerForTest(t, winner.store)
+	grantRequest.Owner = selectedContractExecutionOwnerWithProcessForTest(t, winner.store, processCapability)
 	grantRequest.AgentRuntime.Options.ProcessCapability = processCapability
 	grant, err := issueSelectedContractAgentRuntimeGenerationGrant(ctx, grantRequest, authority)
 	if err != nil {
@@ -3400,13 +3400,8 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	processCapability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "selected-contract-cleanup-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	})
-	if err != nil {
-		t.Fatalf("acquire selected-contract cleanup capability: %v", err)
-	}
-	t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
+	processCapability := selectedContractTestProcessCapability(t, ctx, selected)
+	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
 	loaded := LoadedSelectedContractSource{SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
 	preparedAgents := selectedContractAgentRuntimePlan{Declarations: declarations, Options: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability}}
 	authority, prepared := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, forkRunID, preparedAgents)
@@ -3414,7 +3409,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	badIdentity := selectedContractTestAgentIdentityForRun(t, authority.SelectedFork.ForkRunID, "bad-agent", "")
 
 	_, _, err = startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Owner:        selectedContractExecutionOwnerForTest(t, selected),
+		Owner:        executionOwner,
 		Prepared:     prepared,
 		LoadedSource: LoadedSelectedContractSource{SourceArtifactFact: sourceFact},
 		AgentRuntime: selectedContractAgentRuntimePlan{
@@ -3788,7 +3783,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 		SourceRunID:       sourceRunID,
 		At:                sourceEventID,
 		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
+		Owner:             selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
 		SourceLoader:      loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -3905,7 +3900,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		SourceRunID:       sourceRunID,
 		At:                forkPointEventID,
 		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
+		Owner:             selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
 		SourceLoader:      loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -4029,7 +4024,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 		SourceRunID:       sourceRunID,
 		At:                sourceEventID,
 		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
+		Owner:             selectedContractExecutionOwnerWithProcessForTest(t, pg, processCapability),
 		SourceLoader:      loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,

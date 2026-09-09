@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -41,6 +42,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
@@ -459,18 +461,20 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(sqliteStore.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle(t)
+	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        ctx,
-		SourceArtifactFact: mustStoreTestSourceArtifactFact(authorActivityTestBundleHash),
+		SourceArtifactFact: fact,
 		SemanticSource:     semanticview.Wrap(bundle),
 		WorkflowInstances:  workflowStore,
 		LLMBackend:         "anthropic",
-		LifecycleStore:     agentfixture.Lifecycle(t, sqliteStore),
 		DeliveryStore:      sqliteStore,
 		WorkOwner:          storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
@@ -482,6 +486,54 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 			RouteRetirer:   bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	desired, err := manager.CompileStaticTopologyDesiredAgents(semanticview.Wrap(bundle), coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := sqliteStore.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "sqlite-flow-activation-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var grant runtimestartupownership.LiveGenerationGrant
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Error(err)
+			return
+		}
+		if grant != nil {
+			if err := grant.Retire(context.Background()); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		t.Fatal(err)
+	}
+	grant, err = capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: fact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, fact.BundleHash(), runtimeagenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
+		t.Fatal(err)
+	}
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
 	if err := manager.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance through closed SQLite owner: %v", err)

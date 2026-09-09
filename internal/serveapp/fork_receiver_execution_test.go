@@ -326,13 +326,13 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProo
 				t.Fatalf("selected refusal lost exact binding: %+v", err)
 			}
 			after := snapshotForkReceiverApplication(t, rt)
-			for _, table := range []string{"runs", "entity_state", "entity_mutations", "event_deliveries", "event_delivery_attempts", "event_delivery_outcomes", "run_control_state", "api_idempotency"} {
-				if _, ok := before[table]; !ok {
-					t.Fatalf("missing mutation oracle table %s", table)
+			if !reflect.DeepEqual(before, after) {
+				for table, rows := range before {
+					if !reflect.DeepEqual(rows, after[table]) {
+						t.Errorf("refused %s changed %s: before=%v after=%v", test.method, table, rows, after[table])
+					}
 				}
-				if !reflect.DeepEqual(before[table], after[table]) {
-					t.Fatalf("refused %s changed %s: before=%v after=%v", test.method, table, before[table], after[table])
-				}
+				t.Fatal("refused selected control changed the database")
 			}
 		})
 	}

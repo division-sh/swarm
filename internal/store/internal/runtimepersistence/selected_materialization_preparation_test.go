@@ -24,6 +24,19 @@ import (
 // They still invoke the named materialization separately to inject SQL faults.
 func prepareSelectedStoreMaterializationForTest(t *testing.T, ctx context.Context, selected any, sourceRun, at string, selection runfork.RunForkContractSelection, targetHash ...string) runforkreadiness.MaterializeRequest {
 	t.Helper()
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, selected, sourceRun, at, selection, targetHash...)
+	if err != nil {
+		t.Fatalf("prepare selected-store materialization: %v", err)
+	}
+	request, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
+func prepareSelectedStoreForkForTest(t *testing.T, ctx context.Context, selected any, sourceRun, at string, selection runfork.RunForkContractSelection, targetHash ...string) (*runforkexecution.PreparedSelectedFork, error) {
+	t.Helper()
 	storeTestWorkOwner(t)
 	value, _ := storeTestWorkFixtures.Load(t)
 	work := value.(*storeTestWorkFixture)
@@ -38,6 +51,11 @@ func prepareSelectedStoreMaterializationForTest(t *testing.T, ctx context.Contex
 	if err := owner.BindSelectedProcess(ctx, work.process, capability); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
 	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
 		t.Fatal(err)
 	}
@@ -54,18 +72,14 @@ func prepareSelectedStoreMaterializationForTest(t *testing.T, ctx context.Contex
 		},
 	})
 	if err != nil {
-		t.Fatalf("prepare selected-store materialization: %v", err)
+		return nil, err
 	}
 	t.Cleanup(func() {
 		if err := prepared.Close(); err != nil {
 			t.Error(err)
 		}
 	})
-	request, err := prepared.MaterializationRequest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return request
+	return prepared, nil
 }
 
 func selectedStorePreparationOwnerForTest(t testing.TB, selected any) runforkexecution.SelectedContractExecutionOwner {
