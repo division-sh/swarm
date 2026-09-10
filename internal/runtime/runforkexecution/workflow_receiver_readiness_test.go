@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -51,7 +52,7 @@ func TestSelectedContractReceiverReadinessDoesNotTransferProducerState(t *testin
 		t.Fatal(err)
 	}
 	prepared, err := runforkreadiness.Project(plan, loaded.Source, planning,
-		map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{})
+		map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,7 @@ func TestSelectedContractReceiverReadinessPreservesIndependentExistingOwnerWitho
 		plan, planning := selectedContractReceiverReadinessPlan(receiver)
 		plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
 		prepared, err := runforkreadiness.Project(plan, loaded.Source, planning,
-			map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{})
+			map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +87,7 @@ func TestSelectedContractReceiverReadinessRejectsMissingRequiredAndContradictory
 	producer := selectedContractReadinessTestEntity("producer-entity", "producer", "work")
 	plan, planning := selectedContractReceiverReadinessPlan(producer)
 	if _, err := runforkreadiness.Project(plan, loaded.Source, planning,
-		map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{}); err == nil || !strings.Contains(err.Error(), "owner is missing") {
+		map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live}); err == nil || !strings.Contains(err.Error(), "owner is missing") {
 		t.Fatalf("missing required receiver borrowed producer: %v", err)
 	}
 	for _, name := range []string{"missing metadata", "event metadata", "wrong type", "blank type", "duplicate owner", "duplicate contradictory owner", "ambiguous receiver"} {
@@ -111,7 +112,7 @@ func TestSelectedContractReceiverReadinessRejectsMissingRequiredAndContradictory
 			}
 			plan, planning := selectedContractReceiverReadinessPlan(entities...)
 			if _, err := runforkreadiness.Project(plan, loaded.Source, planning,
-				map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{}); err == nil {
+				map[string]executionmode.Mode{"source-event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live}); err == nil {
 				t.Fatal("contradictory fixed ownership admitted")
 			}
 		})
@@ -125,7 +126,7 @@ func TestSelectedContractReceiverReadinessRetainsEveryEventAssociation(t *testin
 	first.SourceEventID = "another-event"
 	planning.RecipientPlanEvents = append(planning.RecipientPlanEvents, first)
 	modes := map[string]executionmode.Mode{"source-event": executionmode.Mock, "another-event": executionmode.Mock}
-	left, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{})
+	left, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,19 +134,19 @@ func TestSelectedContractReceiverReadinessRetainsEveryEventAssociation(t *testin
 		t.Fatalf("event association lost: %#v", left.States)
 	}
 	planning.RecipientPlanEvents[0], planning.RecipientPlanEvents[1] = planning.RecipientPlanEvents[1], planning.RecipientPlanEvents[0]
-	right, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{})
+	right, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 	if err != nil || !reflect.DeepEqual(left.States, right.States) {
 		t.Fatalf("recipient order chose a different state owner: %#v, %v", right, err)
 	}
 	modes["another-event"] = executionmode.Live
-	mixed, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{})
+	mixed, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 	if err != nil || len(mixed.States) != 1 || len(mixed.States[0].SourceEvents) != 2 ||
 		mixed.States[0].ExecutionMode.Valid() || mixed.States[0].SourceEvents[0].ExecutionMode != executionmode.Live || mixed.States[0].SourceEvents[1].ExecutionMode != executionmode.Mock {
 		t.Fatalf("static state lost exact per-event modes: %#v, %v", mixed, err)
 	}
 	planning.RecipientPlanEvents[0], planning.RecipientPlanEvents[1] = planning.RecipientPlanEvents[1], planning.RecipientPlanEvents[0]
 	planning.RecipientPlanEvents = append(planning.RecipientPlanEvents, planning.RecipientPlanEvents[0])
-	repeated, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{})
+	repeated, err := runforkreadiness.Project(plan, loaded.Source, planning, modes, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 	if err != nil || !reflect.DeepEqual(mixed.States, repeated.States) {
 		t.Fatalf("mixed-mode order or repeated recipient changed associations: %#v, %v", repeated, err)
 	}
@@ -175,14 +176,14 @@ func TestSelectedContractReceiverReadinessTemplateAgentDoesNotElectFromHistory(t
 			Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker-flow", FlowInstance: "worker-flow/one", EntityID: "historical-only-entity"}),
 		}}}
 		prepared, err := runforkreadiness.Project(plan, loaded.Source, planning,
-			map[string]executionmode.Mode{"event": executionmode.Mock}, runtimemanager.AgentManagerOptions{})
+			map[string]executionmode.Mode{"event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 		if err != nil || len(prepared.States) != 1 || prepared.States[0].EntityID != "selected-entity" {
 			t.Fatalf("historical target elected selected readiness: %#v, %v", prepared, err)
 		}
 	}
 	plan.Entities = nil
 	if _, err := runforkreadiness.Project(plan, loaded.Source, planning,
-		map[string]executionmode.Mode{"event": executionmode.Mock}, runtimemanager.AgentManagerOptions{}); err == nil {
+		map[string]executionmode.Mode{"event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live}); err == nil {
 		t.Fatal("historical target supplied missing selected receiver state")
 	}
 }
@@ -210,7 +211,7 @@ func TestSelectedContractReceiverReadinessTemplateRequiresOneGenerationMode(t *t
 				planning.RecipientPlanEvents[0], planning.RecipientPlanEvents[1] = planning.RecipientPlanEvents[1], planning.RecipientPlanEvents[0]
 			}
 			prepared, err := runforkreadiness.Project(plan, loaded.Source, planning,
-				map[string]executionmode.Mode{"node-event": executionmode.Mock, "agent-event": secondMode}, runtimemanager.AgentManagerOptions{})
+				map[string]executionmode.Mode{"node-event": executionmode.Mock, "agent-event": secondMode}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 			if secondMode != executionmode.Mock {
 				if err == nil || prepared != nil {
 					t.Fatalf("mixed template modes elected a generation (reversed=%t): %#v, %v", reversed, prepared, err)
@@ -264,7 +265,7 @@ func TestSelectedContractReceiverReadinessTemplateConsumesExactPlanRoute(t *test
 				SourceEventID: "event", EventName: "worker.ready", Recipients: []runfork.RunForkContractFrontierRecipient{recipient},
 			}}}
 			prepared, err := runforkreadiness.Project(currentPlan, loaded.Source, planning,
-				map[string]executionmode.Mode{"event": executionmode.Mock}, runtimemanager.AgentManagerOptions{})
+				map[string]executionmode.Mode{"event": executionmode.Mock}, runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 			if name == "exact" {
 				if err != nil || len(prepared.States) != 1 || prepared.States[0].EntityID != "receiver-entity" || prepared.States[0].Route.InstancePath != path {
 					t.Fatalf("exact plan lost owner: %#v, %v", prepared, err)

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -51,7 +52,7 @@ func TestSelectedForkWorkflowOwnerAssociations(t *testing.T) {
 					case "missing_event_mode":
 						delete(modes, "event-b")
 					}
-					got, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{})
+					got, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 					wantOK := change == "exact" || change == "mixed_static_associations" || change == "reordered_associations"
 					if (err == nil) != wantOK {
 						t.Fatalf("canonical owner projection: %v, want acceptance %t", err, wantOK)
@@ -78,7 +79,7 @@ func TestSelectedForkTemplateGenerationAssociations(t *testing.T) {
 			case "missing_generation":
 				delete(modes, "event-b")
 			}
-			got, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{})
+			got, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 			wantOK := change == "live" || change == "mock"
 			if (err == nil) != wantOK {
 				t.Fatalf("canonical template generation: %v, want acceptance %t", err, wantOK)
@@ -114,7 +115,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 					if len(state.Agents) == 0 {
 						t.Fatal("fixture did not produce a declaration-owned agent")
 					}
-					prepared, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{})
+					prepared, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 					if err != nil {
 						t.Fatal(err)
 					}
