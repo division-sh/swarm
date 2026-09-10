@@ -126,32 +126,51 @@ func testServedJoinWriterForkRetainedGenerations(t *testing.T, separateCheckpoin
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='join.observed' AND CAST(payload AS TEXT) LIKE $2`, started.RunID, "%"+current.RevisionID+"%").Scan(&frontier); err != nil {
 				t.Fatal(err)
 			}
-			before := snapshotForkReceiverApplication(t, rt)
+			before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
 			owner, ok := selected.RunFork()
 			if !ok {
 				t.Fatal("missing fork owner")
 			}
 			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
-			// #642 owns future successful materialization of this history. The
-			// original success assertions remain replayable in testdata/issue642.
-			for attempt := 0; attempt < 2; attempt++ {
-				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
-				const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven, flow_route_history_unproven"
-				if err == nil || err.Error() != refusal {
-					t.Fatalf("want exact completed-join history refusal, got %v", err)
+			child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
+			if err != nil {
+				if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
+					t.Fatal("refused join-history materialization changed source state")
 				}
-				codes := make([]string, 0, len(child.UnsupportedBlockers))
-				for _, blocker := range child.UnsupportedBlockers {
-					codes = append(codes, blocker.Code)
+				t.Fatalf("materialize real completed join history: %v", err)
+			}
+			childLoop, childJoins := readRetainedRootJoins(t, rt, child.ForkRunID)
+			wantLoop, err := loopruntime.Fork(current, child.ForkRunID, child.ForkRunID)
+			if err != nil || !reflect.DeepEqual(childLoop, wantLoop) || childLoop.Attempt != 2 || len(childJoins) != len(sourceJoins) {
+				t.Fatalf("materialized join/loop ownership: loop=%+v joins=%+v", childLoop, childJoins)
+			}
+			for _, source := range sourceJoins {
+				want, err := loopruntime.ForkGeneration(source.JoinRef().Generation(), child.ForkRunID, child.ForkRunID)
+				if err != nil {
+					t.Fatal(err)
 				}
-				if !reflect.DeepEqual(codes, []string{runfork.RunForkBlockerTimerHistoryUnproven, runfork.RunForkBlockerFlowRouteHistoryUnproven}) ||
-					child.SourceRunID != started.RunID || child.ForkPoint.EventID != frontier || child.ForkPoint.Revision <= 0 ||
-					child.ForkRunID != "" || child.ExecutionReady || !child.DeliveryResumeBlocked || child.MaterializedEntityCount != 0 {
-					t.Fatalf("refusal lost exact authority or reported child materialization: %+v", child)
+				matched := false
+				for _, projected := range childJoins {
+					if projected.JoinRef().Generation() != want {
+						continue
+					}
+					matched = true
+					if projected.JoinRef().Node() != source.JoinRef().Node() || projected.Key() == source.Key() ||
+						!reflect.DeepEqual(projected.Members, source.Members) || !reflect.DeepEqual(projected.Outputs, source.Outputs) ||
+						projected.Status != source.Status || projected.CloseReason != source.CloseReason || projected.TimerCancelled != source.TimerCancelled ||
+						projected.OutcomePending != source.OutcomePending || projected.OutcomeFired != source.OutcomeFired ||
+						projected.CompletionEvent != source.CompletionEvent || !projected.ArmedAt.Equal(source.ArmedAt) || !projected.FireAt.Equal(source.FireAt) {
+						t.Fatalf("retained join evidence changed: source=%+v child=%+v", source, projected)
+					}
 				}
-				if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
-					t.Fatal("refused join-history materialization changed application facts")
+				if !matched {
+					t.Fatalf("missing exact historical child generation %+v", want)
 				}
+			}
+			again, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
+			_, repeated := readRetainedRootJoins(t, rt, child.ForkRunID)
+			if err != nil || again.ForkRunID != child.ForkRunID || !reflect.DeepEqual(childJoins, repeated) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
+				t.Fatalf("repeated materialization changed child/source history: %v", err)
 			}
 		})
 	}
