@@ -184,8 +184,8 @@ func (o SelectedContractExecutionOwner) recordPreparationClosed(operation *selec
 	}
 }
 
-// RetireSelectedContexts rejects further preparation and joins every admitted
-// operation or retained context before process/store retirement can proceed.
+// FenceSelectedContexts withdraws admission and cancels accepted operations
+// before the supervisor joins any dependent normal runtime.
 func (o SelectedContractExecutionOwner) FenceSelectedContexts() error {
 	ports, err := o.require()
 	if err != nil {
@@ -230,6 +230,8 @@ func (o SelectedContractExecutionOwner) RequireResetPredecessor(ctx context.Cont
 	return o.RetireSelectedContexts(ctx)
 }
 
+// RetireSelectedContexts rejects further preparation and joins every admitted
+// operation or retained context before process/store retirement can proceed.
 func (o SelectedContractExecutionOwner) RetireSelectedContexts(ctx context.Context) error {
 	ports, err := o.require()
 	if err != nil {

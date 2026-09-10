@@ -28,6 +28,7 @@ func TestJoinCapturedLoopRequiresDeclaredLoopOwner(t *testing.T) {
 }
 
 func TestJoinCapturedLoopOutcomeValidation(t *testing.T) {
+	source := semanticviewtest.WrapRootAgents(joinValidationBundle())
 	for _, outcome := range []string{"on_complete", "timeout"} {
 		for _, field := range []string{"id", "activation_id", "revision_id", "attempt", "max_attempts"} {
 			for _, ref := range []bool{false, true} {
@@ -39,7 +40,7 @@ func TestJoinCapturedLoopOutcomeValidation(t *testing.T) {
 					Emit:             runtimecontracts.EmitSpec{Event: "result", Fields: map[string]runtimecontracts.ExpressionValue{"captured": expr}},
 					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "captured", Value: expr}}},
 				}
-				if findings := validateJoinOutcome("test", ".", "join", "arrival", outcome, rule, []string{"waiting"}, runtimecontracts.CatalogTypeReference{}, false); len(findings) != 0 {
+				if findings := validateJoinOutcome(source, "test", ".", "join", "arrival", outcome, rule, []string{"waiting"}, runtimecontracts.CatalogTypeReference{}, false); len(findings) != 0 {
 					t.Fatalf("%s %s ref=%v: %#v", outcome, field, ref, findings)
 				}
 			}
@@ -48,11 +49,11 @@ func TestJoinCapturedLoopOutcomeValidation(t *testing.T) {
 			rule := runtimecontracts.HandlerRuleEntry{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "captured", Value: runtimecontracts.RefExpression(expression)}},
 			}}
-			if findings := validateJoinOutcome("test", ".", "join", "arrival", outcome, rule, nil, runtimecontracts.CatalogTypeReference{}, false); len(findings) == 0 {
+			if findings := validateJoinOutcome(source, "test", ".", "join", "arrival", outcome, rule, nil, runtimecontracts.CatalogTypeReference{}, false); len(findings) == 0 {
 				t.Fatalf("%s accepted %s", outcome, expression)
 			}
 		}
-		if findings := validateJoinOutcome("test", ".", "join", "arrival", outcome, runtimecontracts.HandlerRuleEntry{AdvancesTo: "missing"}, []string{"waiting"}, runtimecontracts.CatalogTypeReference{}, false); len(findings) == 0 {
+		if findings := validateJoinOutcome(source, "test", ".", "join", "arrival", outcome, runtimecontracts.HandlerRuleEntry{AdvancesTo: "missing"}, []string{"waiting"}, runtimecontracts.CatalogTypeReference{}, false); len(findings) == 0 {
 			t.Fatalf("%s lost actual target validation", outcome)
 		}
 	}
