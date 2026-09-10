@@ -99,6 +99,31 @@ type ciWorkflowJob struct {
 	Steps       []ciWorkflowStep `yaml:"steps"`
 }
 
+func TestCIRequiresPinnedNativeScopeProof(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(testTimingRepoRoot(t), ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			If              string           `yaml:"if"`
+			ContinueOnError bool             `yaml:"continue-on-error"`
+			Steps           []ciWorkflowStep `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	job, ok := workflow.Jobs["static-checks"]
+	if !ok || job.If != "" || job.ContinueOnError {
+		t.Fatal("native proof must run in the unconditional required static checks job")
+	}
+	step := findWorkflowStep(job.Steps, "Prove pinned native PostgreSQL scope")
+	if step == nil || step.If != "" || step.ContinueOnError || step.Run != "go test -race github.com/lib/pq -run '^TestNativeScope' -count=1" {
+		t.Fatal("root ./... cannot discover nested pq tests; explicit native scope proof is required")
+	}
+}
+
 func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 	root := testTimingRepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))

@@ -2,6 +2,8 @@ module github.com/division-sh/swarm
 
 go 1.25.0
 
+replace github.com/lib/pq => ./third_party/pq
+
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Masterminds/semver/v3 v3.3.1

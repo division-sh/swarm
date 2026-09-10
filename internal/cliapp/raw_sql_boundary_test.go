@@ -90,6 +90,47 @@ func unclassifiedConcreteStoreProducer(pg *store.PostgresStore) *pipeline.Pipeli
 
 func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 	return map[string]rawSQLBoundaryEntry{
+		"third_party/pq/conn.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary, Issue: 2442,
+			SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.backend_neutral_runtime_mutation_write_boundary",
+			Reason:  "pinned native driver transaction/protocol owner records exact-operation failures before database/sql loses them; not a runtime producer escape",
+		},
+		"third_party/pq/conn_go18.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary, Issue: 2442,
+			Reason: "native context query, exec, prepared and BEGIN cancellation gate consumed by private selected-store operation scopes",
+		},
+		"third_party/pq/stmt.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary, Issue: 2442,
+			Reason: "native prepared-statement execution and cleanup delegate to the same operation gate; no independent selected-store transaction authority",
+		},
+		"third_party/pq/array.go": {
+			Classification: rawSQLConstructionBoundary, Issue: 2442,
+			Reason: "unchanged pinned dependency value/scan codec imports database/sql but does not produce selected-store SQL",
+		},
+		"third_party/pq/encode.go": {
+			Classification: rawSQLConstructionBoundary, Issue: 2442,
+			Reason: "unchanged pinned native parameter/value codec, not a selected runtime producer",
+		},
+		"third_party/pq/hstore/hstore.go": {
+			Classification: rawSQLConstructionBoundary, Issue: 2442,
+			Reason: "unchanged dependency hstore value codec; no selected-store read or mutation owner",
+		},
+		"third_party/pq/doc.go": {
+			Classification: rawSQLTestSupportBoundary, Issue: 2442,
+			Reason: "upstream dependency documentation contains SQL examples, not executable Swarm production paths",
+		},
+		"third_party/pq/cmd/pqlisten/main.go": {
+			Classification: rawSQLTestSupportBoundary, Issue: 2442,
+			Reason: "upstream standalone notification example in the nested dependency module; not mounted or imported by Swarm",
+		},
+		"third_party/pq/internal/pqtest/pqtest.go": {
+			Classification: rawSQLTestSupportBoundary, Issue: 2442,
+			Reason: "upstream dependency test fixture owner, used only by its tests and not by selected runtime construction",
+		},
+		"third_party/pq/oid/gen.go": {
+			Classification: rawSQLTestSupportBoundary, Issue: 2442,
+			Reason: "upstream build-ignored OID source generator; the textual boundary match is not selected-store authority",
+		},
 		"internal/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2148,
