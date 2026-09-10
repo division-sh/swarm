@@ -16464,12 +16464,13 @@ run_model:
         Generic materialization and activation preserve flow_route_history_unproven. Selected execution may discharge
         unknown_unversioned only with matching selected binding, frontier, static/dynamic topology, and recipient proof;
         activation revalidates the persisted selected route recovery and never queries current routing_rules.
-        Completed ordinary arrival-join history with retained timer and unproven root-route facts remains outside
-        current generic materialization support: timer_history_unproven and flow_route_history_unproven refuse before
-        child or source mutation. Closed joins, cancelled timers, and run-ID-shaped flow text do not discharge these
-        blockers. Future classification of this inert history is tracked by #642, separately from selected pending
-        timer/join/fan-out execution. Already-admitted ordinary fan-out generation correspondence and child completion
-        remain supported; this boundary does not waive source-history preservation.
+      completed_arrival_join_history_scope: >-
+        Completed ordinary arrival-join history does not establish generic fork execution readiness merely because
+        its timers are cancelled and its outcomes are complete. When the fixed-revision planner reports
+        timer_history_unproven and flow_route_history_unproven, materialization preserves both blockers and refuses
+        without source or child mutation. Future admission of this inert history is tracked under #642, separately
+        from selected pending timer, join, and fan-out execution. This scope does not narrow already-supported
+        ordinary fan-out child/fork-of-fork completion or permit deriving authority from status or root-shaped path text.
       distinct_current_evidence: >-
         activity_attempts are post-frontier selected-execution evidence, not a historical family. Source
         preparation reads the immutable selected request event and current terminal attempt in one source/fork

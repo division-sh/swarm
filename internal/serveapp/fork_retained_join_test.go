@@ -14,15 +14,18 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
-func TestServedJoinWriterForkRetainedGenerationsBothStores(t *testing.T) {
-	testServedJoinWriterForkRetainedGenerations(t, false)
+// #642 owns future completed-history fork admission. Its original success oracle
+// is preserved verbatim in testdata/future_capabilities; these tests prove current
+// source completion and the exact fail-closed policy without mutation.
+func TestServedJoinWriterCompletedHistoryRefusalBothStores(t *testing.T) {
+	testServedJoinWriterCompletedHistoryRefusal(t, false)
 }
 
-func TestServedJoinWriterForkRetainedGenerationsSeparateCheckpointBothStores(t *testing.T) {
-	testServedJoinWriterForkRetainedGenerations(t, true)
+func TestServedJoinWriterCompletedHistoryRefusalSeparateCheckpointBothStores(t *testing.T) {
+	testServedJoinWriterCompletedHistoryRefusal(t, true)
 }
 
-func testServedJoinWriterForkRetainedGenerations(t *testing.T, separateCheckpoint bool) {
+func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint bool) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			var selected *selectedStoreOwner
@@ -126,31 +129,42 @@ func testServedJoinWriterForkRetainedGenerations(t *testing.T, separateCheckpoin
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='join.observed' AND CAST(payload AS TEXT) LIKE $2`, started.RunID, "%"+current.RevisionID+"%").Scan(&frontier); err != nil {
 				t.Fatal(err)
 			}
+			var frontierRevision int64
+			if err := rt.DB.QueryRow(`SELECT MIN(revision) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present`, started.RunID, frontier).Scan(&frontierRevision); err != nil || frontierRevision <= 0 {
+				t.Fatalf("missing fixed-revision frontier: revision=%d err=%v", frontierRevision, err)
+			}
 			before := snapshotForkReceiverApplication(t, rt)
 			owner, ok := selected.RunFork()
 			if !ok {
 				t.Fatal("missing fork owner")
 			}
 			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
-			// #642 owns future successful materialization of this history. The
-			// original success assertions remain replayable in testdata/issue642.
+			const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven, flow_route_history_unproven"
 			for attempt := 0; attempt < 2; attempt++ {
 				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
-				const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven, flow_route_history_unproven"
 				if err == nil || err.Error() != refusal {
-					t.Fatalf("want exact completed-join history refusal, got %v", err)
+					t.Fatalf("completed ordinary join history must retain both exact policy blockers: result=%+v err=%v", child, err)
 				}
-				codes := make([]string, 0, len(child.UnsupportedBlockers))
+				if child.ForkRunID != "" || child.MaterializedEntityCount != 0 {
+					t.Fatalf("refused materialization returned child work: %+v", child)
+				}
+				if child.SourceRunID != started.RunID || child.ForkPoint.EventID != frontier || child.ForkPoint.Revision != frontierRevision || child.ExecutionReady || !child.DeliveryResumeBlocked {
+					t.Fatalf("refusal lost exact selected-revision admission: %+v", child)
+				}
+				var codes []string
 				for _, blocker := range child.UnsupportedBlockers {
 					codes = append(codes, blocker.Code)
 				}
-				if !reflect.DeepEqual(codes, []string{runfork.RunForkBlockerTimerHistoryUnproven, runfork.RunForkBlockerFlowRouteHistoryUnproven}) ||
-					child.SourceRunID != started.RunID || child.ForkPoint.EventID != frontier || child.ForkPoint.Revision <= 0 ||
-					child.ForkRunID != "" || child.ExecutionReady || !child.DeliveryResumeBlocked || child.MaterializedEntityCount != 0 {
-					t.Fatalf("refusal lost exact authority or reported child materialization: %+v", child)
+				if !reflect.DeepEqual(codes, []string{runfork.RunForkBlockerTimerHistoryUnproven, runfork.RunForkBlockerFlowRouteHistoryUnproven}) {
+					t.Fatalf("refusal lost canonical blocker evidence: %+v", child.UnsupportedBlockers)
 				}
-				if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
-					t.Fatal("refused join-history materialization changed application facts")
+				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+					for table, rows := range after {
+						if !reflect.DeepEqual(before[table], rows) {
+							t.Errorf("refused join-history materialization changed table %s", table)
+						}
+					}
+					t.Fatal("refused join-history materialization changed application state")
 				}
 			}
 		})

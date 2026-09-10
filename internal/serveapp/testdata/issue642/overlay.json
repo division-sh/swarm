@@ -1,5 +1,0 @@
-{
-  "Replace": {
-    "internal/serveapp/fork_retained_join_test.go": "internal/serveapp/testdata/issue642/fork_retained_join_future_success.go.txt"
-  }
-}

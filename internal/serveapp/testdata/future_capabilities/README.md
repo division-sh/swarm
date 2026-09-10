@@ -1,5 +1,9 @@
 # Receiver Post-Revision Future Capability
 
+Completed ordinary arrival-join history is a separate #642 capability. Its exact
+G19 success oracle and reproduction instructions are documented in
+[fork_retained_join_README.md](fork_retained_join_README.md).
+
 Binding disposition: https://github.com/division-sh/swarm/issues/2167#issuecomment-5588834719 D3.
 
 These are explicitly unsupported future success oracles, not passing tests,
