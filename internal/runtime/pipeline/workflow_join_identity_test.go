@@ -1116,7 +1116,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			h.restart()
 			_, staleErr := h.fire(h.scheduleEvent(firstSchedule, "stale-first-generation"))
 			if envelope, ok := runtimefailures.EnvelopeFromError(staleErr); !ok || envelope.Class != runtimefailures.ClassStaleArrival || envelope.Detail.Code != "loop_revision_stale" {
-				t.Fatalf("stale generation result = %v envelope=%#v", staleErr, envelope)
+				t.Errorf("stale generation result = %v envelope=%#v", staleErr, envelope)
 			}
 			afterStale := h.instance()
 			if !exactJoinSemanticStateEqual(beforeStale, afterStale) {
