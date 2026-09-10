@@ -35,8 +35,8 @@ type scriptedWorkflowNodeAuthority struct {
 func (s *scriptedWorkflowNodeAuthority) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
 	return s.authority, nil
 }
-func (s *scriptedWorkflowNodeAuthority) AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error) {
-	return s.continuation, nil
+func (s *scriptedWorkflowNodeAuthority) AcquireDeliveryContinuation(string) (worklifetime.DeliveryAcquisition, error) {
+	return worklifetime.AcquiredDelivery(s.continuation), nil
 }
 func (s *scriptedWorkflowNodeAuthority) ReleaseDeliveryContinuation(string) error {
 	s.releases.Add(1)
@@ -54,7 +54,7 @@ type scriptedWorkflowNodeContinuation struct {
 
 func (c *scriptedWorkflowNodeContinuation) DeliveryID() string { return c.deliveryID }
 func (c *scriptedWorkflowNodeContinuation) Resolve(_ context.Context, intent worklifetime.DeliveryContinuationIntent) (worklifetime.DeliveryContinuationResolution, error) {
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent == worklifetime.DeliveryContinuationReturn || intent == worklifetime.DeliveryContinuationReturnUnqueued {
 		c.returns.Add(1)
 		if c.returnErrs.Add(-1) >= 0 {
 			return 0, errors.New("injected workflow-node continuation return failure")

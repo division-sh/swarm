@@ -415,6 +415,11 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
+	ctx, _, closeDispatch, err := d.bus.beginDeliveryDispatch(ctx, intent.Event, deliveryRoutes)
+	if err != nil {
+		return false, runtimepipelineobligation.Continue(), err
+	}
+	defer func() { err = errors.Join(err, closeDispatch()) }()
 	nodePassthrough := true
 	if intent.Recipients == nil {
 		interception, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
@@ -472,14 +477,19 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		return false, runtimepipelineobligation.Continue(), nil
 	}
-	if err := d.bus.deliverToRecipientsWithRoutes(ctx, intent.Event, liveRecipients, deliveryRoutes); err != nil {
+	dispatch, err := d.bus.deliverToRecipientsWithRoutes(ctx, intent.Event, liveRecipients, deliveryRoutes)
+	if err != nil {
 		return false, runtimepipelineobligation.Continue(), err
 	}
 	d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
+	if len(dispatch.delivered) == 0 {
+		return false, runtimepipelineobligation.Continue(), nil
+	}
 	d.bus.logRuntime(ctx, "debug", "Persisted event intent was delivered", "eventbus", "delivered", intent.Event.ID(), string(intent.Event.Type()), "", intent.Event.EntityID(), "", nil, map[string]any{
 		"direct":                     true,
 		"delivery_manifest_owner":    "event_deliveries+in_memory_internal",
-		"recipients_count":           len(liveRecipients),
+		"recipients_count":           len(dispatch.delivered),
+		"already_owned_count":        len(dispatch.alreadyOwned),
 		"parent_event_id":            intent.Event.ParentEventID(),
 		"requested_recipients":       append([]string(nil), liveRecipients...),
 		"requested_recipients_count": len(liveRecipients),

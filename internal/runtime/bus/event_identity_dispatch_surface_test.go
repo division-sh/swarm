@@ -254,9 +254,13 @@ func TestNormalDeliveryContinuationAcceptCommittedIsAtomicOnSQLiteAndPostgres(t 
 			if err := coordinator.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
 				t.Fatalf("accept valid normal handoff: %v", err)
 			}
-			capability, err := coordinator.Acquire(proof.DeliveryID())
+			acquisition, err := coordinator.Acquire(proof.DeliveryID())
 			if err != nil {
 				t.Fatalf("acquire accepted normal continuation: %v", err)
+			}
+			capability, acquired := acquisition.Acquired()
+			if !acquired {
+				t.Fatal("accepted continuation was not acquired")
 			}
 			if resolution, err := capability.Resolve(fixture.ctx, worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
 				t.Fatalf("return accepted normal continuation: %v", err)

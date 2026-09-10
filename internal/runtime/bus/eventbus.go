@@ -152,7 +152,7 @@ func (d DurableDependencies) validate() error {
 // publication, the normal generation coordinator, carriers, and attempts.
 type DeliveryContinuationOwner interface {
 	AcceptCommitted([]runtimedelivery.DurableHandoffProof) error
-	Acquire(string) (worklifetime.DeliveryContinuation, error)
+	Acquire(string) (worklifetime.DeliveryAcquisition, error)
 	Retain(runtimedelivery.Snapshot) error
 	Release(string) error
 	OwnsPersistedRecovery() bool
@@ -432,10 +432,10 @@ func (eb *EventBus) DeliveryContinuationOwner() DeliveryContinuationOwner {
 	return eb.deliveryContinuations
 }
 
-func (eb *EventBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (eb *EventBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	owner := eb.DeliveryContinuationOwner()
 	if owner == nil {
-		return nil, errors.New("delivery continuation owner is required")
+		return worklifetime.DeliveryAcquisition{}, errors.New("delivery continuation owner is required")
 	}
 	return owner.Acquire(deliveryID)
 }

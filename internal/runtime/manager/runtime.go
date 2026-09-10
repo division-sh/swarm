@@ -1824,11 +1824,11 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
 								return false
 							case runtimedelivery.ClaimTerminal:
-								if _, completionErr := carrier.Complete(reportCarrierFailure); completionErr != nil {
-									return true
-								}
 								releaser := am.roles.DeliveryRuntime
 								if releaser == nil || releaser.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID) != nil {
+									return true
+								}
+								if _, completionErr := carrier.Complete(reportCarrierFailure); completionErr != nil {
 									return true
 								}
 								return false

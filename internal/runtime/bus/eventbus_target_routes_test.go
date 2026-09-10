@@ -1354,7 +1354,7 @@ func TestEventBusAgentDispatchDoesNotCrossSameIDNodeRouteTargets(t *testing.T) {
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		events.EventType("review/inst-1/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"shared-subscriber"}, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "shared-subscriber")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+	_, err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"shared-subscriber"}, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "shared-subscriber")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 		FlowInstance: "review/inst-1",
 	}),
 	}})
@@ -1380,7 +1380,7 @@ func TestEventBusWorkflowRuntimeCarrierPrefersConcreteNodeRouteOverPlaceholder(t
 		},
 		{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, workflowRuntimeInternalCarrierID)), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "review/inst-1"})},
 	}
-	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{workflowRuntimeInternalCarrierID}, routes); err != nil {
+	if _, err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{workflowRuntimeInternalCarrierID}, routes); err != nil {
 		t.Fatalf("deliverToRecipientsWithRoutes: %v", err)
 	}
 	got := requireBusEvent(t, ch, "workflow runtime concrete route delivery")

@@ -320,7 +320,8 @@ func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, rout
 
 func deliverToTestAgent(ctx context.Context, eb *EventBus, evt events.Event, identity agentidentity.Identity) error {
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
-	return eb.deliverToRecipientsWithRoutes(ctx, evt, []string{identity.AgentID()}, []events.DeliveryRoute{route})
+	_, err := eb.deliverToRecipientsWithRoutes(ctx, evt, []string{identity.AgentID()}, []events.DeliveryRoute{route})
+	return err
 }
 
 func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
@@ -360,14 +361,14 @@ func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
 	if err := owner.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
 		t.Fatalf("accept selected committed handoff: %v", err)
 	}
-	capability, err := owner.Acquire(proof.DeliveryID())
+	capability, err := acquireTestDeliveryCapability(owner, proof.DeliveryID())
 	if err != nil {
 		t.Fatalf("acquire selected delivery carrier: %v", err)
 	}
 	if resolution, err := capability.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
 		t.Fatalf("return selected delivery carrier: %v", err)
 	}
-	reacquired, err := owner.Acquire(proof.DeliveryID())
+	reacquired, err := acquireTestDeliveryCapability(owner, proof.DeliveryID())
 	if err != nil {
 		t.Fatalf("reacquire returned selected delivery: %v", err)
 	}
@@ -383,7 +384,7 @@ func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
 	if err := owner.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
 		t.Fatalf("reaccept selected delivery for terminal race: %v", err)
 	}
-	terminalCarrier, err := owner.Acquire(proof.DeliveryID())
+	terminalCarrier, err := acquireTestDeliveryCapability(owner, proof.DeliveryID())
 	if err != nil {
 		t.Fatalf("acquire selected terminal-race carrier: %v", err)
 	}
@@ -591,7 +592,7 @@ func TestInternalSubscriptionInactiveSendReturnsExactContinuation(t *testing.T) 
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			owner := &controlledTestDeliveryOwner{}
-			continuation, err := owner.Acquire("delivery-" + strings.ReplaceAll(test.name, " ", "-"))
+			continuation, err := acquireTestDeliveryCapability(owner, "delivery-"+strings.ReplaceAll(test.name, " ", "-"))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -233,7 +233,7 @@ type DecisionCardDraftExpiry interface {
 
 type WorkflowDeliveryRuntime interface {
 	DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
-	AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error)
+	AcquireDeliveryContinuation(string) (worklifetime.DeliveryAcquisition, error)
 	ReleaseDeliveryContinuation(string) error
 	RetainDeliveryContinuation(runtimedelivery.Snapshot) error
 }
@@ -837,7 +837,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 
 type workflowNodeDeliveryAuthority interface {
 	DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
-	AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error)
+	AcquireDeliveryContinuation(string) (worklifetime.DeliveryAcquisition, error)
 	ReleaseDeliveryContinuation(string) error
 }
 
@@ -862,13 +862,26 @@ func admitWorkflowNodeDelivery(
 	if err != nil {
 		return workflowNodeDeliveryAdmission{}, err
 	}
-	continuation, err := authorityProvider.AcquireDeliveryContinuation(deliveryID)
+	carrier, borrowed, err := worklifetime.DirectDeliveryCarrier(ctx, deliveryID)
 	if err != nil {
 		return workflowNodeDeliveryAdmission{}, err
 	}
-	carrier, err := worklifetime.NewDeliveryContinuationGuard(ctx, continuation)
-	if err != nil {
-		return workflowNodeDeliveryAdmission{}, err
+	if !borrowed {
+		acquisition, err := authorityProvider.AcquireDeliveryContinuation(deliveryID)
+		if err != nil {
+			return workflowNodeDeliveryAdmission{}, err
+		}
+		if err := acquisition.Validate(deliveryID); err != nil {
+			return workflowNodeDeliveryAdmission{}, err
+		}
+		continuation, acquired := acquisition.Acquired()
+		if !acquired {
+			return workflowNodeDeliveryAdmission{handled: true}, nil
+		}
+		carrier, err = worklifetime.NewDeliveryContinuationGuard(ctx, continuation)
+		if err != nil {
+			return workflowNodeDeliveryAdmission{}, err
+		}
 	}
 	returnCarrier := func(primary error) error {
 		_, completionErr := carrier.Complete(reportCarrierFailure)
@@ -885,10 +898,10 @@ func admitWorkflowNodeDelivery(
 		}
 		return workflowNodeDeliveryAdmission{handled: true}, nil
 	case runtimedelivery.ClaimTerminal:
-		if err := returnCarrier(nil); err != nil {
-			return workflowNodeDeliveryAdmission{}, err
-		}
 		if err := authorityProvider.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID); err != nil {
+			return workflowNodeDeliveryAdmission{}, returnCarrier(err)
+		}
+		if err := returnCarrier(nil); err != nil {
 			return workflowNodeDeliveryAdmission{}, err
 		}
 		return workflowNodeDeliveryAdmission{handled: true}, nil

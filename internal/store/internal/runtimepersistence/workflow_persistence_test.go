@@ -50,8 +50,8 @@ func (workflowTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher    
 func (workflowTestBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
 	return runtimedelivery.ExecutionAuthority{}, nil
 }
-func (workflowTestBus) AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error) {
-	return nil, nil
+func (workflowTestBus) AcquireDeliveryContinuation(string) (worklifetime.DeliveryAcquisition, error) {
+	return worklifetime.DeliveryAcquisition{}, nil
 }
 func (workflowTestBus) ReleaseDeliveryContinuation(string) error                  { return nil }
 func (workflowTestBus) RetainDeliveryContinuation(runtimedelivery.Snapshot) error { return nil }

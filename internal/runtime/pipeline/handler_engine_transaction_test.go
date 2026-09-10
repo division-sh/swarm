@@ -168,12 +168,12 @@ func (b *recordingPipelineBus) DeliveryAuthority() (runtimedelivery.ExecutionAut
 	return owner.activeExecutionAuthority(context.Background())
 }
 
-func (b *recordingPipelineBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (b *recordingPipelineBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	b.mu.Lock()
 	owner := b.deliveryContinuations
 	b.mu.Unlock()
 	if owner == nil {
-		return nil, errors.New("pipeline test delivery continuation owner is not configured")
+		return worklifetime.DeliveryAcquisition{}, errors.New("pipeline test delivery continuation owner is not configured")
 	}
 	return owner.Acquire(deliveryID)
 }

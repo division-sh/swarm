@@ -157,7 +157,7 @@ func (b *projectionTestBus) SetDeliveryContinuationOwner(owner runtimebus.Delive
 	b.continuations = owner
 	return nil
 }
-func (b *projectionTestBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (b *projectionTestBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	return b.continuations.Acquire(deliveryID)
 }
 func (b *projectionTestBus) RetainDeliveryContinuation(snapshot runtimedelivery.Snapshot) error {
@@ -247,9 +247,13 @@ func (b *projectionTestBus) send(agentID string, event events.Event) error {
 		if err != nil {
 			return err
 		}
-		continuation, err := b.continuations.Acquire(deliveryID)
+		acquisition, err := b.continuations.Acquire(deliveryID)
 		if err != nil {
-			return err
+			return errors.Join(err, delivery.Complete())
+		}
+		continuation, acquired := acquisition.Acquired()
+		if !acquired {
+			return delivery.Complete()
 		}
 		if err := delivery.AttachContinuation(continuation); err != nil {
 			return err
@@ -889,8 +893,8 @@ type projectionResolutionOwner struct {
 func (*projectionResolutionOwner) AcceptCommitted([]runtimedelivery.DurableHandoffProof) error {
 	return nil
 }
-func (o *projectionResolutionOwner) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
-	return &projectionResolutionContinuation{owner: o, deliveryID: deliveryID}, nil
+func (o *projectionResolutionOwner) Acquire(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
+	return worklifetime.AcquiredDelivery(&projectionResolutionContinuation{owner: o, deliveryID: deliveryID}), nil
 }
 func (*projectionResolutionOwner) Retain(runtimedelivery.Snapshot) error { return nil }
 func (o *projectionResolutionOwner) Release(string) error {
@@ -1170,9 +1174,13 @@ func TestAgentManagerFenceWinsDequeuedDeliveryAdmissionReturnsContinuationOnce(t
 		t.Fatalf("construct dequeued carrier: %v", err)
 	}
 	owner := &projectionResolutionOwner{resolved: make(chan projectionCarrierResolution, 1), released: make(chan struct{}, 1)}
-	continuation, err := owner.Acquire(eventtest.UUID("fenced-dequeued-delivery"))
+	acquisition, err := owner.Acquire(eventtest.UUID("fenced-dequeued-delivery"))
 	if err != nil {
 		t.Fatalf("acquire continuation: %v", err)
+	}
+	continuation, acquired := acquisition.Acquired()
+	if !acquired {
+		t.Fatal("test continuation was not acquired")
 	}
 	if err := delivery.AttachContinuation(continuation); err != nil {
 		t.Fatalf("attach continuation: %v", err)

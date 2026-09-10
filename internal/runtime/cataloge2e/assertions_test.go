@@ -38,8 +38,8 @@ func (catalogPersistenceBus) EngineDispatcher() runtimeengine.PostCommitDispatch
 func (catalogPersistenceBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
 	return runtimedelivery.ExecutionAuthority{}, nil
 }
-func (catalogPersistenceBus) AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error) {
-	return nil, nil
+func (catalogPersistenceBus) AcquireDeliveryContinuation(string) (worklifetime.DeliveryAcquisition, error) {
+	return worklifetime.DeliveryAcquisition{}, nil
 }
 func (catalogPersistenceBus) ReleaseDeliveryContinuation(string) error { return nil }
 func (catalogPersistenceBus) RetainDeliveryContinuation(runtimedelivery.Snapshot) error {

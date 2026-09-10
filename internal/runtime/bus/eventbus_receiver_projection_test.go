@@ -92,11 +92,26 @@ func (continuationCommittedDeferredInterceptor) Intercept(context.Context, event
 	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
-func (i continuationCommittedDeferredInterceptor) InterceptDeliveryRoute(_ context.Context, delivery events.DeliveryEvent, _ events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+func (i continuationCommittedDeferredInterceptor) InterceptDeliveryRoute(ctx context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if i.triggerEventID != "" && delivery.Event().ID() != i.triggerEventID {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	return false, []events.Event{i.event}, runtimepipelineobligation.Continue(), nil
+	return false, []events.Event{i.event}, runtimepipelineobligation.Continue(), consumeReceiverProjectionTestCarrier(ctx, delivery.Event(), route)
+}
+
+// These receiver-context fixtures model synchronous execution, not SQL claims.
+// The real runtime startup parity test supplies the durable-claim proof.
+func consumeReceiverProjectionTestCarrier(ctx context.Context, evt events.Event, route events.DeliveryRoute) error {
+	id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+	if err != nil {
+		return err
+	}
+	guard, present, err := worklifetime.DirectDeliveryCarrier(ctx, id)
+	if err != nil || !present {
+		return err
+	}
+	_, err = guard.Consume(nil)
+	return err
 }
 
 func TestEventBusWithOptionsRejectsUnconfiguredReceiverExecution(t *testing.T) {
@@ -218,6 +233,9 @@ func (i *receiverProjectionInterceptor) InterceptDeliveryRoute(ctx context.Conte
 		if !ok || !sameReceiverRoute(got, route) {
 			i.routeErr = fmt.Errorf("receiver route = %#v, %v; want %#v", got, ok, route.Normalized())
 		}
+	}
+	if i.routeErr == nil {
+		i.routeErr = consumeReceiverProjectionTestCarrier(ctx, evt.Event(), route)
 	}
 	return false, nil, runtimepipelineobligation.Continue(), i.routeErr
 }
@@ -586,7 +604,7 @@ func TestInternalSubscriptionUsesClosedReceiverProjection(t *testing.T) {
 		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
 		Context:   evt.DeliveryContext(),
 	}
-	if err := eventBus.deliverToRecipientsWithRoutes(hostilePublisherContext(t), evt, []string{node.Key()}, []events.DeliveryRoute{route}); err != nil {
+	if _, err := eventBus.deliverToRecipientsWithRoutes(hostilePublisherContext(t), evt, []string{node.Key()}, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("publish through internal receiver: %v", err)
 	}
 	delivery := <-deliveries
