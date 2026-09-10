@@ -1,0 +1,4274 @@
+diff --git a/go.mod b/go.mod
+index ec656fadb..3910b6210 100644
+--- a/go.mod
++++ b/go.mod
+@@ -5,2 +4,0 @@ go 1.25.0
+-replace github.com/lib/pq => ./third_party/pq
+-
+diff --git a/internal/apiv1/conversation_fork_commit_omission_probe_test.go b/internal/apiv1/conversation_fork_commit_omission_probe_test.go
+new file mode 100644
+index 000000000..33db6a6e4
+--- /dev/null
++++ b/internal/apiv1/conversation_fork_commit_omission_probe_test.go
+@@ -0,0 +1,162 @@
++package apiv1
++
++import (
++	"context"
++	"database/sql"
++	"errors"
++	"fmt"
++	"testing"
++	"time"
++
++	"github.com/division-sh/swarm/internal/runtime/agentmemory"
++	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
++	"github.com/division-sh/swarm/internal/runtime/manager"
++	"github.com/division-sh/swarm/internal/runtime/runfork"
++	"github.com/division-sh/swarm/internal/store/storetest"
++	"github.com/division-sh/swarm/internal/testutil"
++	"github.com/google/uuid"
++)
++
++type forkCommitOmissionProbeStore interface {
++	ConversationForkLifecycleStore
++	ConversationForkReadStore
++	APIIdempotencyStore
++	storetest.AgentFixtureStore
++	storetest.ManagedAgentTurnFixtureStore
++}
++
++type forkCommitOmissionProbeOwner struct {
++	ConversationForkLifecycleStore
++	omit bool
++	ids  []string
++}
++
++func (o *forkCommitOmissionProbeOwner) CreateOperatorConversationFork(ctx context.Context, req runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error) {
++	created, err := o.ConversationForkLifecycleStore.CreateOperatorConversationFork(ctx, req)
++	if err != nil {
++		return created, err
++	}
++	o.ids = append(o.ids, created.ForkID)
++	if o.omit {
++		// The real owner has committed. Suppress its return to the generic API
++		// completion writer; do not fabricate the mutation or delete durable facts.
++		return runfork.OperatorConversationForkSession{}, errors.New("injected omission after durable fork commit before API completion")
++	}
++	return created, nil
++}
++
++// Investigation only: public HTTP RPC + selected stores, with an injected
++// postcommit omission. This is not SIGKILL, restart, or wire ACK loss proof.
++func TestConversationForkCommitBeforeAPICompletionProbe(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		for _, omit := range []bool{false, true} {
++			phase := "healthy"
++			if omit {
++				phase = "postcommit_omission"
++			}
++			t.Run(backend+"/"+phase, func(t *testing.T) {
++				ctx := testAuthorActivityContext(context.Background())
++				var selected forkCommitOmissionProbeStore
++				var db *sql.DB
++				runID, sessionID, turnID := uuid.NewString(), uuid.NewString(), uuid.NewString()
++				now := time.Now().UTC().Truncate(time.Second)
++				runFixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour)}
++				if backend == "sqlite" {
++					s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
++					selected, db = s, storetest.DatabaseForTest(s)
++					storetest.RequireSQLiteRun(t, ctx, db, runFixture)
++				} else {
++					_, pg, _ := testutil.StartPostgres(t)
++					db = pg
++					selected = storetest.AdmitPostgresRuntimeStore(t, db)
++					storetest.RequirePostgresRun(t, ctx, db, runFixture)
++				}
++				const agentID = "fork-commit-omission-source"
++				identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
++				if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
++					Config: withAPITestIntent(t, runtimeactors.AgentConfig{
++						Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
++						ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Memory: agentmemory.Authored(true),
++					}), Status: "active", StartedAt: now.Add(-5 * time.Minute),
++				}); err != nil {
++					t.Fatal(err)
++				}
++				history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{
++					Identity: identity, RunID: runID, SessionID: sessionID, EntityID: uuid.NewString(),
++					Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), CreatedAt: now,
++					Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
++				})
++				storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
++					Store: selected, Selected: selected, Identity: identity, RunID: runID, SessionID: sessionID,
++					TurnID: turnID, Memory: agentmemory.Authored(true), Event: history[0], ParseOK: true, CreatedAt: now.Add(-2 * time.Minute),
++				})
++				makeHandler := func(owner ConversationForkLifecycleStore) *Handler {
++					return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
++						ConversationForkLifecycle: owner, ConversationForks: selected, Idempotency: selected, Now: func() time.Time { return now },
++					})})
++				}
++				const key = "fork-commit-omission-key"
++				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"fork-probe","method":"conversation.fork","params":{"source_session_id":%q,"fork_point":{"kind":"turn","turn_id":%q},"idempotency_key":%q}}`, sessionID, turnID, key)
++				firstOwner := &forkCommitOmissionProbeOwner{ConversationForkLifecycleStore: selected, omit: omit}
++				first := rpcCall(t, makeHandler(firstOwner), body)
++				if len(firstOwner.ids) != 1 {
++					t.Fatalf("fixture did not reach durable fork commit: ids=%v rpc_error=%+v", firstOwner.ids, first.Error)
++				}
++				if omit && first.Error == nil {
++					t.Fatal("injected omission did not reach RPC error")
++				}
++				if !omit && first.Error != nil {
++					t.Fatalf("healthy create RPC: %+v", first.Error)
++				}
++				count := func(table string) int {
++					t.Helper()
++					var n int
++					query := "SELECT count(*) FROM " + table
++					if err := db.QueryRow(query).Scan(&n); err != nil {
++						t.Fatal(err)
++					}
++					return n
++				}
++				beforeForks, beforeCompletions := count("conversation_forks"), count("api_idempotency")
++				wantBeforeCompletions := 1
++				if omit {
++					wantBeforeCompletions = 0
++				}
++				if beforeForks != 1 || beforeCompletions != wantBeforeCompletions {
++					t.Fatalf("post-first durable forks=%d completions=%d", beforeForks, beforeCompletions)
++				}
++				// A fresh HTTP handler has no predecessor result. Persistence, not the
++				// first wrapper's observation, must resolve the same-key request.
++				retryOwner := &forkCommitOmissionProbeOwner{ConversationForkLifecycleStore: selected}
++				retryHandler := makeHandler(retryOwner)
++				second := rpcCall(t, retryHandler, body)
++				if second.Error != nil {
++					t.Fatalf("same-key retry RPC: %+v", second.Error)
++				}
++				result := asMap(t, second.Result)
++				fork := asMap(t, result["fork"])
++				secondID := stringValue(t, fork["fork_id"], "retry fork_id")
++				third := rpcCall(t, retryHandler, body)
++				if third.Error != nil {
++					t.Fatalf("completed replay RPC: %+v", third.Error)
++				}
++				thirdFork := asMap(t, asMap(t, third.Result)["fork"])
++				if thirdFork["fork_id"] != secondID {
++					t.Error("healthy completed response replay changed resource")
++				}
++				forks, completions := count("conversation_forks"), count("api_idempotency")
++				listed, err := selected.ListOperatorConversationForks(ctx, runfork.ConversationForkListOptions{SourceSessionID: sessionID, Now: now, Limit: 100})
++				if err != nil {
++					t.Fatal(err)
++				}
++				t.Logf("backend=%s injected_omission=%t first_fork=%s first_rpc_error=%+v before_retry_forks=%d before_retry_api_completions=%d retry_fork=%s retry_owner_calls=%d final_forks=%d listed_forks=%d final_api_completions=%d", backend, omit, firstOwner.ids[0], first.Error, beforeForks, beforeCompletions, secondID, len(retryOwner.ids), forks, len(listed.Forks), completions)
++				if completions != 1 {
++					t.Errorf("final API completions=%d want=1", completions)
++				}
++				if forks != 1 || len(listed.Forks) != 1 || secondID != firstOwner.ids[0] {
++					t.Error("F1: same keyed RPC created a second durable fork after postcommit API completion omission")
++				}
++			})
++		}
++	}
++}
+diff --git a/internal/serveapp/main.go b/internal/serveapp/main.go
+index f97dec234..face9e24b 100644
+--- a/internal/serveapp/main.go
++++ b/internal/serveapp/main.go
+@@ -933 +933 @@ type runtimeCompositionRequest struct {
+-func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) int {
++func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) (exitCode int) {
+@@ -990,0 +991,3 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
++			if exitCode == 0 {
++				exitCode = 1
++			}
+@@ -1075 +1078,5 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
+-		presenter.shutdown(selectedLifecycle.Finalize(shutdownCtx, shutdownErr))
++		finalErr := selectedLifecycle.Finalize(shutdownCtx, shutdownErr)
++		presenter.shutdown(finalErr)
++		if finalErr != nil && exitCode == 0 {
++			exitCode = 1
++		}
+diff --git a/internal/serveapp/main_runtime_test.go b/internal/serveapp/main_runtime_test.go
+index e8f4442c8..38c30e1b8 100644
+--- a/internal/serveapp/main_runtime_test.go
++++ b/internal/serveapp/main_runtime_test.go
+@@ -4724,0 +4725 @@ func startServedEventPublishFollowUpRuntime(t *testing.T, opts cliapp.ServeOptio
++			t.Logf("stock-pq investigation served exit=%d transcript:\n%s", code, out.String())
+@@ -6463,0 +6465 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
++		StoreModeSet:     true,
+@@ -6470,0 +6473,3 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
++	if !strings.Contains(serve.outputString(), "backend=postgres") {
++		t.Fatalf("investigation requires actual PostgreSQL selection:\n%s", serve.outputString())
++	}
+@@ -9212,0 +9218 @@ func (p *serveRuntimeTestProcess) waitForExit(timeout time.Duration) (int, bool)
++		p.t.Logf("stock-pq investigation served exit=%d transcript:\n%s", code, p.outputString())
+diff --git a/internal/serveapp/postgres_commit_loss_contract_test.go b/internal/serveapp/postgres_commit_loss_contract_test.go
+new file mode 100644
+index 000000000..eea1d1725
+--- /dev/null
++++ b/internal/serveapp/postgres_commit_loss_contract_test.go
+@@ -0,0 +1,227 @@
++package serveapp
++
++import (
++	"bytes"
++	"context"
++	"database/sql"
++	"encoding/binary"
++	"fmt"
++	"io"
++	"net"
++	"os"
++	"path/filepath"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/division-sh/swarm/internal/cliapp"
++	"github.com/division-sh/swarm/internal/config"
++	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
++	storeselected "github.com/division-sh/swarm/internal/store/selected"
++)
++
++// PostgreSQL wire fault injection belongs only to this disposable proof. The
++// application still selects unmodified pq and its ordinary TCP connections.
++func contractLostCommitProxy(t *testing.T, target, marker string) (string, <-chan struct{}, *atomic.Int32) {
++	t.Helper()
++	l, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	lost := make(chan struct{})
++	var once sync.Once
++	var mu sync.Mutex
++	var conns []net.Conn
++	var wg sync.WaitGroup
++	var armedCommits atomic.Int32
++	wg.Add(1)
++	go func() {
++		defer wg.Done()
++		for {
++			client, err := l.Accept()
++			if err != nil {
++				return
++			}
++			wg.Add(1)
++			go func() {
++				defer wg.Done()
++				defer client.Close()
++				up, err := net.DialTimeout("tcp", target, time.Second)
++				if err != nil {
++					return
++				}
++				defer up.Close()
++				mu.Lock()
++				conns = append(conns, client, up)
++				mu.Unlock()
++				var size [4]byte
++				if _, err = io.ReadFull(client, size[:]); err != nil {
++					return
++				}
++				n := int(binary.BigEndian.Uint32(size[:]))
++				if n < 8 || n > 1<<20 {
++					return
++				}
++				startup := make([]byte, n)
++				copy(startup, size[:])
++				if _, err = io.ReadFull(client, startup[4:]); err != nil {
++					return
++				}
++				if _, err = up.Write(startup); err != nil {
++					return
++				}
++				var armed atomic.Bool
++				frontDone := make(chan struct{})
++				go func() {
++					defer close(frontDone)
++					defer up.Close()
++					for {
++						frame, err := contractPGFrame(client)
++						if err != nil {
++							return
++						}
++						if bytes.Contains(frame, []byte(marker)) {
++							armed.Store(true)
++						}
++						if _, err = up.Write(frame); err != nil {
++							return
++						}
++					}
++				}()
++				defer func() { _ = client.Close(); _ = up.Close(); <-frontDone }()
++				for {
++					frame, err := contractPGFrame(up)
++					if err != nil {
++						return
++					}
++					if armed.Load() && frame[0] == 'C' && bytes.Equal(frame[5:], []byte("COMMIT\x00")) {
++						armedCommits.Add(1)
++						drop := false
++						once.Do(func() { drop = true; close(lost) })
++						if drop {
++							return
++						}
++						armed.Store(false)
++					}
++					if _, err = client.Write(frame); err != nil {
++						return
++					}
++				}
++			}()
++		}
++	}()
++	t.Cleanup(func() {
++		_ = l.Close()
++		mu.Lock()
++		for _, c := range conns {
++			_ = c.Close()
++		}
++		mu.Unlock()
++		wg.Wait()
++	})
++	return l.Addr().String(), lost, &armedCommits
++}
++
++func contractPGFrame(r io.Reader) ([]byte, error) {
++	var h [5]byte
++	if _, err := io.ReadFull(r, h[:]); err != nil {
++		return nil, err
++	}
++	n := int(binary.BigEndian.Uint32(h[1:]))
++	if n < 4 || n > 32<<20 {
++		return nil, fmt.Errorf("invalid postgres frame %d", n)
++	}
++	f := make([]byte, n+1)
++	copy(f, h[:])
++	_, err := io.ReadFull(r, f[5:])
++	return f, err
++}
++
++func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T) {
++	server := newContractPostgresServer(t)
++	observer, err := sql.Open("postgres", server.dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { _ = observer.Close() })
++	var port string
++	if _, err := fmt.Sscanf(server.options, "-h 127.0.0.1 -p %s", &port); err != nil {
++		t.Fatal(err)
++	}
++	address, lost, commits := contractLostCommitProxy(t, net.JoinHostPort("127.0.0.1", port), "2444-commit-cut")
++	host, proxyPort, err := net.SplitHostPort(address)
++	if err != nil {
++		t.Fatal(err)
++	}
++	dsn := fmt.Sprintf("host=%s port=%s user=swarm_probe dbname=postgres sslmode=disable connect_timeout=2", host, proxyPort)
++	stubServeRuntimeWorkspaceLifecycle(t)
++	oldBuild := buildStoresForServe
++	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
++		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
++	}
++	t.Cleanup(func() { buildStoresForServe = oldBuild })
++	root := writeServedEventPublishFollowUpFixture(t)
++	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
++	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\nworkspace: {}\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	opts := cliapp.ServeOptions{ConfigPath: configPath, SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, ShutdownGrace: time.Second}
++	first := startServeRuntimeTestProcess(t, opts)
++	first.waitForReadyLine()
++	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
++	params := map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, root), "payload": map[string]any{"item_id": "2444-commit-cut"}, "idempotency_key": "lost-response-publication"}
++	response := requestServedJSONRPC(t, endpoint, "event.publish", params)
++	select {
++	case <-lost:
++	case <-time.After(5 * time.Second):
++		t.Fatal("did not drop real COMMIT response")
++	}
++	if response.Error == nil {
++		t.Fatalf("unacknowledged COMMIT claimed successful publication: %s", response.Result)
++	}
++	if commits.Load() != 1 {
++		t.Fatalf("uncertain commit retried callback: commits=%d", commits.Load())
++	}
++	var runID, eventID string
++	if err := observer.QueryRow(`SELECT run_id::text,event_id::text FROM events WHERE event_name='item.received'`).Scan(&runID, &eventID); err != nil {
++		t.Fatalf("COMMIT acknowledgement lost but durable event missing: %v", err)
++	}
++	t.Logf("actual server COMMIT completion dropped: caller=%#v durable event=%s run=%s", response.Error, eventID, runID)
++	if code := first.stop(); code != 0 {
++		t.Fatalf("stop after isolated publication failure: code=%d\n%s", code, first.outputString())
++	}
++	var deliveredBeforeRestart int
++	if err := observer.QueryRow(`SELECT count(*) FROM event_deliveries WHERE event_id=$1 AND status='delivered'`, eventID).Scan(&deliveredBeforeRestart); err != nil {
++		t.Fatal(err)
++	}
++	if deliveredBeforeRestart != 0 {
++		t.Fatalf("cut reached delivery before restart: %d; cannot credit startup recovery", deliveredBeforeRestart)
++	}
++	restarted := startServeRuntimeTestProcess(t, opts)
++	restarted.waitForReadyLine()
++	nextEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
++	entity := requireServedEventPublishEntityState(t, observer, "postgres", runID, "", "waiting")
++	requireServedEntityReadback(t, nextEndpoint, runID, entity, "waiting")
++	replay := requireServedEventPublishRPCResult(t, nextEndpoint, params)
++	if replay.RunID != runID || replay.EventID != eventID {
++		t.Fatalf("public idempotency replay lost exact durable identity: %#v", replay)
++	}
++	if n := servedEventPublishScalarCount(t, observer, "postgres", "application_events_by_run", runID, ""); n != 1 {
++		t.Fatalf("durable publication count=%d want 1", n)
++	}
++	var deliveries, outcomes int
++	if err := observer.QueryRow(`SELECT count(*) FROM event_deliveries WHERE event_id=$1 AND status='delivered'`, eventID).Scan(&deliveries); err != nil {
++		t.Fatal(err)
++	}
++	if err := observer.QueryRow(`SELECT count(*) FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id=o.delivery_id WHERE d.event_id=$1 AND o.outcome='delivered'`, eventID).Scan(&outcomes); err != nil {
++		t.Fatal(err)
++	}
++	if deliveries != 1 || outcomes != 1 {
++		t.Fatalf("recovery delivery=%d outcomes=%d want exactly 1 each", deliveries, outcomes)
++	}
++	if code := restarted.stop(); code != 0 {
++		t.Fatalf("restarted serve exit=%d\n%s", code, restarted.outputString())
++	}
++	t.Log("lost COMMIT response retained one event; actual serve recovery reached entity and delivered outcome; exact public replay did not redispatch")
++}
+diff --git a/internal/serveapp/postgres_graceful_contract_test.go b/internal/serveapp/postgres_graceful_contract_test.go
+new file mode 100644
+index 000000000..f7b0461ef
+--- /dev/null
++++ b/internal/serveapp/postgres_graceful_contract_test.go
+@@ -0,0 +1,278 @@
++package serveapp
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"errors"
++	"net/http"
++	"path/filepath"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/division-sh/swarm/internal/apiidempotency"
++	"github.com/division-sh/swarm/internal/cliapp"
++	"github.com/division-sh/swarm/internal/config"
++	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
++	"github.com/division-sh/swarm/internal/runtime/semanticview"
++	"github.com/division-sh/swarm/internal/sourceartifact"
++	"github.com/division-sh/swarm/internal/store"
++	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
++	storeselected "github.com/division-sh/swarm/internal/store/selected"
++	"github.com/division-sh/swarm/internal/testutil"
++)
++
++type gracefulContractWorkspace struct {
++	serveRuntimeWorkspaceStub
++	active   *atomic.Bool
++	released *atomic.Int32
++	failure  error
++}
++
++func (w gracefulContractWorkspace) ReleaseSourceProjection(ctx context.Context) error {
++	w.released.Add(1)
++	if w.active.Load() {
++		return errors.New("workspace released before admitted SQL settled")
++	}
++	return errors.Join(w.serveRuntimeWorkspaceStub.ReleaseSourceProjection(ctx), w.failure)
++}
++
++// The real serve lifecycle owns admission and dependencies. The admitted leaf
++// uses the selected idempotency owner, or an already-open SQL result. Its explicit
++// operation cancellation is distinct from requesting process shutdown. This is
++// not a crash/restart proof or a claim that every HTTP caller has that separation.
++func TestServePostgresGracefulContract(t *testing.T) {
++	for _, phase := range []string{"mutation_commit", "operation_cancel", "result_drain", "cleanup_failure"} {
++		t.Run(phase, func(t *testing.T) {
++			dsn, observer, cleanup := testutil.StartPostgres(t)
++			t.Cleanup(cleanup)
++			var active atomic.Bool
++			var released atomic.Int32
++			var cleanupErr error
++			if phase == "cleanup_failure" {
++				cleanupErr = errors.New("graceful proof workspace cleanup failure")
++			}
++			oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
++			cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
++				return gracefulContractWorkspace{active: &active, released: &released, failure: cleanupErr}, nil
++			}
++			t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace })
++			oldBuild := buildStoresForServe
++			buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
++				return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
++			}
++			t.Cleanup(func() { buildStoresForServe = oldBuild })
++			type selected struct {
++				db    *sql.DB
++				store *store.PostgresStore
++			}
++			selectedReady := make(chan selected, 1)
++			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
++				db, pg, _ := selectedRuntimeStoreForTest(t, p)
++				selectedReady <- selected{db, pg}
++			})
++			serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
++				ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
++				PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true,
++				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", ShutdownGrace: 5 * time.Second, SelfCheck: true, Verbose: true,
++			})
++			serve.waitForReadyLine()
++			selectedStore := <-selectedReady
++			serve.mu.Lock()
++			rt := serve.runtime
++			serve.mu.Unlock()
++			opCtx, cancelOperation := context.WithCancel(context.Background())
++			defer cancelOperation()
++			lease, err := rt.WorkOccurrence().Begin(opCtx)
++			if err != nil {
++				t.Fatal(err)
++			}
++			active.Store(true)
++			done := make(chan error, 1)
++			releaseResult := make(chan struct{})
++			var holder *sql.Conn
++			const lock = 2444301
++			var started atomic.Bool
++			t.Cleanup(func() {
++				if holder != nil {
++					_, _ = holder.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", lock)
++					_ = holder.Close()
++				}
++				close(releaseResult)
++				if !started.Load() {
++					active.Store(false)
++					_ = lease.Done()
++				}
++			})
++			var callbacks atomic.Int32
++			request := apiidempotency.Request{Method: "proof.graceful", ActorTokenID: "actor", IdempotencyKey: phase, RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
++			if phase == "result_drain" {
++				rows, err := selectedStore.db.QueryContext(opCtx, "SELECT i, repeat('x', 8192), pg_sleep(0.01) FROM generate_series(1, 30) i")
++				if err != nil {
++					t.Fatal(err)
++				}
++				started.Store(true)
++				go func() {
++					<-releaseResult
++					count := 0
++					var scanErr error
++					for rows.Next() {
++						count++
++						var number int
++						var payload string
++						var slept any
++						if scanErr = rows.Scan(&number, &payload, &slept); scanErr != nil {
++							break
++						}
++						if number != count || payload != strings.Repeat("x", 8192) {
++							scanErr = errors.New("admitted result values changed during drain")
++							break
++						}
++					}
++					err := errors.Join(scanErr, rows.Err(), rows.Close())
++					if count != 30 {
++						err = errors.Join(err, errors.New("incomplete admitted result drain"))
++					}
++					active.Store(false)
++					done <- errors.Join(err, lease.Done())
++				}()
++			} else {
++				for _, statement := range []string{
++					`CREATE FUNCTION serve_graceful_completion_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(2444301); RETURN NEW; END $$`,
++					`CREATE TRIGGER serve_graceful_completion_gate BEFORE INSERT ON api_idempotency FOR EACH ROW EXECUTE FUNCTION serve_graceful_completion_gate()`,
++				} {
++					if _, err := observer.Exec(statement); err != nil {
++						t.Fatal(err)
++					}
++				}
++				holder, err = observer.Conn(context.Background())
++				if err != nil {
++					t.Fatal(err)
++				}
++				if _, err := holder.ExecContext(context.Background(), "SELECT pg_advisory_lock($1)", lock); err != nil {
++					t.Fatal(err)
++				}
++				started.Store(true)
++				go func() {
++					_, _, err := selectedStore.store.WithAPIIdempotency(opCtx, request, func(ctx context.Context) (apiidempotency.Completion, error) {
++						callbacks.Add(1)
++						if ctx != opCtx {
++							return apiidempotency.Completion{}, errors.New("external callback context detached")
++						}
++						return apiidempotency.Completion{ResourceID: "resource", Response: json.RawMessage(`{"ok":true}`)}, nil
++					})
++					active.Store(false)
++					done <- errors.Join(err, lease.Done())
++				}()
++				deadline := time.Now().Add(5 * time.Second)
++				for {
++					var blocked bool
++					if err := observer.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND objid=2444301 AND NOT granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()))`).Scan(&blocked); err != nil {
++						t.Fatal(err)
++					}
++					if blocked {
++						break
++					}
++					if time.Now().After(deadline) {
++						t.Fatal("completion never reached real SQL barrier")
++					}
++					time.Sleep(10 * time.Millisecond)
++				}
++			}
++			serve.cancel()
++			deadline := time.Now().Add(3 * time.Second)
++			for {
++				next, err := rt.WorkOccurrence().Begin(context.Background())
++				if err != nil {
++					if !errors.Is(err, worklifetime.ErrAdmissionFenced) && !errors.Is(err, worklifetime.ErrRetired) {
++						t.Fatalf("new admission failed for unrelated reason: %v", err)
++					}
++					break
++				}
++				_ = next.Done()
++				if time.Now().After(deadline) {
++					t.Fatal("shutdown did not fence new admission")
++				}
++				time.Sleep(10 * time.Millisecond)
++			}
++			client := &http.Client{Timeout: time.Second}
++			resp, err := client.Get("http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/healthz")
++			if err == nil {
++				_ = resp.Body.Close()
++				if resp.StatusCode != http.StatusServiceUnavailable {
++					t.Fatalf("new HTTP request not refused after shutdown: %s", resp.Status)
++				}
++			}
++			if err := opCtx.Err(); err != nil {
++				t.Fatalf("process stop canceled independent operation: %v", err)
++			}
++			if phase == "operation_cancel" {
++				cancelOperation()
++			}
++			if code, exited := serve.waitForExit(100 * time.Millisecond); exited {
++				t.Fatalf("serve exited %d before admitted work settled: %s", code, serve.outputString())
++			}
++			select {
++			case err := <-done:
++				t.Fatalf("admitted work returned before barrier release: %v", err)
++			default:
++			}
++			if released.Load() != 0 {
++				t.Fatal("workspace dependency released before SQL settlement")
++			}
++			if err := selectedStore.db.PingContext(context.Background()); err != nil {
++				t.Fatalf("selected database released before SQL settlement: %v", err)
++			}
++			if holder != nil {
++				if _, err := holder.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", lock); err != nil {
++					t.Fatal(err)
++				}
++			} else {
++				releaseResult <- struct{}{}
++			}
++			select {
++			case err := <-done:
++				if phase == "operation_cancel" {
++					if !errors.Is(err, context.Canceled) {
++						t.Fatalf("explicit operation cancel = %v", err)
++					}
++				} else if err != nil {
++					t.Fatalf("healthy admitted work failed: %v", err)
++				}
++			case <-time.After(5 * time.Second):
++				t.Fatal("admitted work did not settle after barrier release")
++			}
++			code, exited := serve.waitForExit(10 * time.Second)
++			wantCode := 0
++			if cleanupErr != nil {
++				wantCode = 1
++			}
++			if !exited || code != wantCode {
++				t.Fatalf("serve exit=%d, joined=%t, want=%d: %s", code, exited, wantCode, serve.outputString())
++			}
++			if released.Load() == 0 {
++				t.Fatal("workspace dependency never released")
++			}
++			if cleanupErr != nil && !strings.Contains(serve.outputString(), cleanupErr.Error()) {
++				t.Fatal("cleanup failure missing from final diagnostics")
++			}
++			if err := selectedStore.db.PingContext(context.Background()); err == nil {
++				t.Fatal("selected database remains open after process exit")
++			}
++			var count int
++			if err := observer.QueryRow("SELECT count(*) FROM api_idempotency WHERE method=$1 AND idempotency_key=$2", request.Method, request.IdempotencyKey).Scan(&count); err != nil {
++				t.Fatal(err)
++			}
++			wantCount := 1
++			if phase == "operation_cancel" || phase == "result_drain" {
++				wantCount = 0
++			}
++			if count != wantCount || (phase != "result_drain" && callbacks.Load() != 1) {
++				t.Fatalf("durable completions=%d want=%d, callbacks=%d", count, wantCount, callbacks.Load())
++			}
++			t.Logf("phase=%s: exit=%d, durable completions=%d; new admission refused, SQL joined before dependency release", phase, code, count)
++		})
++	}
++}
+diff --git a/internal/serveapp/postgres_remote_possession_contract_test.go b/internal/serveapp/postgres_remote_possession_contract_test.go
+new file mode 100644
+index 000000000..32209d647
+--- /dev/null
++++ b/internal/serveapp/postgres_remote_possession_contract_test.go
+@@ -0,0 +1,171 @@
++package serveapp
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"io"
++	"net"
++	"path/filepath"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/division-sh/swarm/internal/cliapp"
++	"github.com/division-sh/swarm/internal/config"
++	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
++	storeselected "github.com/division-sh/swarm/internal/store/selected"
++)
++
++// Closing the client leg while retaining the server leg models detected local
++// connection loss whose remote backend has not observed disconnection yet.
++func contractPartitionProxy(t *testing.T, target string) (address string, cut, release func()) {
++	t.Helper()
++	l, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var mu sync.Mutex
++	var clients, servers []net.Conn
++	partitioned := false
++	released := make(chan struct{})
++	var releaseOnce sync.Once
++	var wg sync.WaitGroup
++	wg.Add(1)
++	go func() {
++		defer wg.Done()
++		for {
++			client, err := l.Accept()
++			if err != nil {
++				return
++			}
++			mu.Lock()
++			closed := partitioned
++			clients = append(clients, client)
++			mu.Unlock()
++			if closed {
++				_ = client.Close()
++				continue
++			}
++			wg.Add(1)
++			go func() {
++				defer wg.Done()
++				defer client.Close()
++				up, err := net.DialTimeout("tcp", target, time.Second)
++				if err != nil {
++					return
++				}
++				mu.Lock()
++				servers = append(servers, up)
++				mu.Unlock()
++				frontDone := make(chan struct{})
++				go func() {
++					defer close(frontDone)
++					_, _ = io.Copy(up, client)
++					mu.Lock()
++					hold := partitioned
++					mu.Unlock()
++					if hold {
++						<-released
++					}
++					_ = up.Close()
++				}()
++				_, _ = io.Copy(client, up)
++				_ = client.Close()
++				<-frontDone
++			}()
++		}
++	}()
++	cut = func() {
++		mu.Lock()
++		partitioned = true
++		for _, c := range clients {
++			_ = c.Close()
++		}
++		mu.Unlock()
++	}
++	release = func() {
++		releaseOnce.Do(func() {
++			close(released)
++			mu.Lock()
++			for _, c := range servers {
++				_ = c.Close()
++			}
++			mu.Unlock()
++		})
++	}
++	t.Cleanup(func() { _ = l.Close(); cut(); release(); wg.Wait() })
++	return l.Addr().String(), cut, release
++}
++
++func TestServePostgresRemotePossessionOutlivesLocalLoss(t *testing.T) {
++	server := newContractPostgresServer(t)
++	var port string
++	if _, err := fmt.Sscanf(server.options, "-h 127.0.0.1 -p %s", &port); err != nil {
++		t.Fatal(err)
++	}
++	address, cut, release := contractPartitionProxy(t, net.JoinHostPort("127.0.0.1", port))
++	host, p, err := net.SplitHostPort(address)
++	if err != nil {
++		t.Fatal(err)
++	}
++	routed := fmt.Sprintf("host=%s port=%s user=swarm_probe dbname=postgres sslmode=disable connect_timeout=2", host, p)
++	observer, err := sql.Open("postgres", server.dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { _ = observer.Close() })
++	stubServeRuntimeWorkspaceLifecycle(t)
++	dsn := routed
++	oldBuild := buildStoresForServe
++	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
++		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
++	}
++	t.Cleanup(func() { buildStoresForServe = oldBuild })
++	opts := cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: filepath.Join("tests", "tier8-boot-verification", "test-boot-success"), PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, ShutdownGrace: time.Second}
++	first := startServeRuntimeTestProcess(t, opts)
++	first.waitForReadyLine()
++	const ownershipSQL = `SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND classid::bigint=CASE WHEN hashtext($1)<0 THEN 4294967295::bigint ELSE 0::bigint END AND objid::bigint=(hashtext($1)::bigint & 4294967295::bigint) AND objsubid=1 LIMIT 1`
++	var predecessor int
++	if err := observer.QueryRow(ownershipSQL, "swarm:runtime:shared-store-owner").Scan(&predecessor); err != nil {
++		t.Fatal(err)
++	}
++	cut()
++	if code, done := first.waitForExit(15 * time.Second); !done || code == 0 {
++		t.Fatalf("local connection loss did not fail closed: done=%t code=%d\n%s", done, code, first.outputString())
++	}
++	var retained int
++	if err := observer.QueryRow(ownershipSQL, "swarm:runtime:shared-store-owner").Scan(&retained); err != nil || retained != predecessor {
++		t.Fatalf("test lost remote hold: pid=%d want=%d err=%v", retained, predecessor, err)
++	}
++	dsn = server.dsn
++	refused := startServeRuntimeTestProcess(t, opts)
++	if code, done := refused.waitForExit(10 * time.Second); !done || code == 0 || serveOutputIsReady(refused.outputString()) {
++		t.Fatalf("successor bypassed remote ownership: done=%t code=%d\n%s", done, code, refused.outputString())
++	}
++	release()
++	deadline := time.Now().Add(5 * time.Second)
++	for {
++		var count int
++		if err := observer.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND pid=$1`, predecessor).Scan(&count); err != nil {
++			t.Fatal(err)
++		}
++		if count == 0 {
++			break
++		}
++		if time.Now().After(deadline) {
++			t.Fatal("server did not release predecessor locks")
++		}
++		time.Sleep(10 * time.Millisecond)
++	}
++	next := startServeRuntimeTestProcess(t, opts)
++	next.waitForReadyLine()
++	var successor int
++	if err := observer.QueryRow(ownershipSQL, "swarm:runtime:shared-store-owner").Scan(&successor); err != nil || successor == predecessor {
++		t.Fatalf("no exact new backend possession: %d %v", successor, err)
++	}
++	if code := next.stop(); code != 0 {
++		t.Fatalf("healthy new owner exit=%d\n%s", code, next.outputString())
++	}
++	t.Logf("remote PID %d held authority after local failure; supported successor refused until remote release, then acquired PID %d", predecessor, successor)
++}
+diff --git a/internal/serveapp/postgres_three_contracts_test.go b/internal/serveapp/postgres_three_contracts_test.go
+new file mode 100644
+index 000000000..908618943
+--- /dev/null
++++ b/internal/serveapp/postgres_three_contracts_test.go
+@@ -0,0 +1,167 @@
++package serveapp
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"net"
++	"net/http"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/division-sh/swarm/internal/cliapp"
++	"github.com/division-sh/swarm/internal/config"
++	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
++	storeselected "github.com/division-sh/swarm/internal/store/selected"
++)
++
++// This private, fsync-enabled cluster is the only server these outage probes
++// stop. Never stop the shared SWARM_TEST_POSTGRES_DSN service.
++type contractPostgresServer struct {
++	t                            *testing.T
++	bin, data, log, options, dsn string
++	running                      bool
++}
++
++func newContractPostgresServer(t *testing.T) *contractPostgresServer {
++	t.Helper()
++	bin := os.Getenv("SWARM_INVESTIGATION_PG_BIN")
++	if bin == "" {
++		t.Skip("set SWARM_INVESTIGATION_PG_BIN for disposable PostgreSQL server-loss investigation")
++	}
++	root := t.TempDir()
++	listener, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	port := listener.Addr().(*net.TCPAddr).Port
++	if err := listener.Close(); err != nil {
++		t.Fatal(err)
++	}
++	s := &contractPostgresServer{t: t, bin: bin, data: filepath.Join(root, "data"), log: filepath.Join(root, "postgres.log")}
++	s.options = fmt.Sprintf("-h 127.0.0.1 -p %d -k %s -c max_connections=80", port, root)
++	s.dsn = fmt.Sprintf("host=127.0.0.1 port=%d user=swarm_probe dbname=postgres sslmode=disable connect_timeout=2", port)
++	s.run("initdb", "-D", s.data, "-U", "swarm_probe", "--auth=trust", "--no-locale")
++	t.Cleanup(func() {
++		if s.running {
++			s.stop()
++		}
++	})
++	s.start()
++	return s
++}
++
++func (s *contractPostgresServer) run(name string, args ...string) {
++	s.t.Helper()
++	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
++	defer cancel()
++	out, err := exec.CommandContext(ctx, filepath.Join(s.bin, name), args...).CombinedOutput()
++	if err != nil {
++		s.t.Fatalf("private postgres %s: %v\n%s", name, err, out)
++	}
++}
++func (s *contractPostgresServer) start() {
++	s.run("pg_ctl", "-D", s.data, "-l", s.log, "-o", s.options, "-w", "start")
++	s.running = true
++}
++func (s *contractPostgresServer) stop() {
++	s.run("pg_ctl", "-D", s.data, "-m", "immediate", "-w", "stop")
++	s.running = false
++}
++
++func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
++	for _, loss := range []string{"connection", "server"} {
++		t.Run(loss, func(t *testing.T) {
++			server := newContractPostgresServer(t)
++			observer, err := sql.Open("postgres", server.dsn)
++			if err != nil {
++				t.Fatal(err)
++			}
++			t.Cleanup(func() { _ = observer.Close() })
++			stubServeRuntimeWorkspaceLifecycle(t)
++			oldBuild := buildStoresForServe
++			buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
++				return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: server.dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
++			}
++			t.Cleanup(func() { buildStoresForServe = oldBuild })
++			root := writeServedEventPublishFollowUpFixture(t)
++			configPath := filepath.Join(t.TempDir(), "swarm.yaml")
++			if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\nworkspace: {}\n"), 0600); err != nil {
++				t.Fatal(err)
++			}
++			opts := cliapp.ServeOptions{ConfigPath: configPath, SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, ShutdownGrace: time.Second}
++			serve := startServeRuntimeTestProcess(t, opts)
++			serve.waitForReadyLine()
++			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
++			initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, root), "payload": map[string]any{"item_id": "durable-before-loss"}, "idempotency_key": "2444-before-loss"})
++			entityID := requireServedEventPublishEntityState(t, observer, "postgres", initial.RunID, "", "waiting")
++			requireServedEntityReadback(t, endpoint, initial.RunID, entityID, "waiting")
++			var beforeAuthority string
++			if err := observer.QueryRow(`SELECT authority_id::text FROM runtime_startup_authority_facts ORDER BY authority_generation DESC, transition_ordinal DESC LIMIT 1`).Scan(&beforeAuthority); err != nil {
++				t.Fatal(err)
++			}
++			if loss == "server" {
++				server.stop()
++			} else {
++				var pid int
++				if err := observer.QueryRow(`SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND classid::bigint=CASE WHEN hashtext($1)<0 THEN 4294967295::bigint ELSE 0::bigint END AND objid::bigint=(hashtext($1)::bigint & 4294967295::bigint) AND objsubid=1 LIMIT 1`, "swarm:runtime:shared-store-owner").Scan(&pid); err != nil {
++					t.Fatal(err)
++				}
++				var terminated bool
++				if err := observer.QueryRow(`SELECT pg_terminate_backend($1)`, pid).Scan(&terminated); err != nil || !terminated {
++					t.Fatalf("terminate exact authority %d: %t %v", pid, terminated, err)
++				}
++			}
++			code, exited := serve.waitForExit(15 * time.Second)
++			if !exited || code == 0 {
++				t.Fatalf("%s loss did not fail closed: exit=%t code=%d\n%s", loss, exited, code, serve.outputString())
++			}
++			if !strings.Contains(serve.outputString(), "ownership") {
++				t.Fatalf("missing authority-loss evidence: %s", serve.outputString())
++			}
++			response, err := (&http.Client{Timeout: time.Second}).Get(strings.TrimSuffix(endpoint, "/v1/rpc") + "/readyz")
++			if err == nil {
++				defer response.Body.Close()
++				if response.StatusCode == http.StatusOK {
++					t.Fatal("failed runtime still advertised readiness")
++				}
++			}
++			if loss == "server" {
++				refusal := startServeRuntimeTestProcess(t, opts)
++				refusalCode, done := refusal.waitForExit(10 * time.Second)
++				if !done || refusalCode == 0 || serveOutputIsReady(refusal.outputString()) {
++					t.Fatalf("unavailable service admitted startup: done=%t code=%d\n%s", done, refusalCode, refusal.outputString())
++				}
++				server.start()
++			}
++			restarted := startServeRuntimeTestProcess(t, opts)
++			restarted.waitForReadyLine()
++			nextEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
++			requireServedEntityReadback(t, nextEndpoint, initial.RunID, entityID, "waiting")
++			var afterAuthority string
++			if err := observer.QueryRow(`SELECT authority_id::text FROM runtime_startup_authority_facts ORDER BY authority_generation DESC, transition_ordinal DESC LIMIT 1`).Scan(&afterAuthority); err != nil {
++				t.Fatal(err)
++			}
++			if afterAuthority == beforeAuthority {
++				t.Fatal("restart reused predecessor process authority")
++			}
++			follow := requireServedEventPublishRPCResult(t, nextEndpoint, map[string]any{"event_name": "item.processed", "run_id": initial.RunID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": "2444-after-loss"})
++			requireServedEventPublishEntityState(t, observer, "postgres", initial.RunID, entityID, "done")
++			requireServedRunStatusWithDebug(t, nextEndpoint, observer, "postgres", initial.RunID, "completed")
++			if follow.RunID != initial.RunID || follow.NewRunCreated {
++				t.Fatalf("successor lost durable run identity: %#v", follow)
++			}
++			if n := servedEventPublishScalarCount(t, observer, "postgres", "application_events_by_run", initial.RunID, ""); n != 2 {
++				t.Fatalf("application events=%d want 2, no duplicate processing", n)
++			}
++			if code := restarted.stop(); code != 0 {
++				t.Fatalf("healthy successor exit=%d\n%s", code, restarted.outputString())
++			}
++			t.Logf("stock pq %s loss: predecessor nonzero, no ready endpoint, exact new authority, same durable run/entity continued once", loss)
++		})
++	}
++}
+diff --git a/internal/store/construction/postgres_stock_test.go b/internal/store/construction/postgres_stock_test.go
+new file mode 100644
+index 000000000..1e012423c
+--- /dev/null
++++ b/internal/store/construction/postgres_stock_test.go
+@@ -0,0 +1,18 @@
++package construction
++
++import (
++	"testing"
++
++	"github.com/lib/pq"
++)
++
++func TestOpenPostgresUsesStockDriver(t *testing.T) {
++	store, db, err := OpenPostgres("host=127.0.0.1 port=1 sslmode=disable")
++	if err != nil || store == nil || db == nil {
++		t.Fatalf("stock construction requires no transport policy: %v", err)
++	}
++	defer db.Close()
++	if _, ok := db.Driver().(*pq.Driver); !ok {
++		t.Fatalf("construction driver = %T, want stock pq", db.Driver())
++	}
++}
+diff --git a/internal/store/internal/apiidempotency/graceful_test.go b/internal/store/internal/apiidempotency/graceful_test.go
+new file mode 100644
+index 000000000..6949ff33c
+--- /dev/null
++++ b/internal/store/internal/apiidempotency/graceful_test.go
+@@ -0,0 +1,215 @@
++package apiidempotency
++
++import (
++	"context"
++	"database/sql"
++	"database/sql/driver"
++	"encoding/json"
++	"errors"
++	"testing"
++	"time"
++
++	apiidempotencycontract "github.com/division-sh/swarm/internal/apiidempotency"
++	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
++	"github.com/division-sh/swarm/internal/testutil"
++	"github.com/lib/pq"
++)
++
++func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
++	for _, phase := range []string{"before_admission", "purge", "completion", "external_callback"} {
++		t.Run(phase, func(t *testing.T) {
++			_, db, cleanup := testutil.StartPostgres(t)
++			t.Cleanup(cleanup)
++			db.SetMaxOpenConns(1)
++			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_token_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_token_id,idempotency_key))`); err != nil {
++				t.Fatal(err)
++			}
++			ctx, cancel := context.WithCancel(context.Background())
++			defer cancel()
++			conn, err := db.Conn(context.Background())
++			if err != nil {
++				t.Fatal(err)
++			}
++			var beforePID int
++			if err := conn.QueryRowContext(context.Background(), "SELECT pg_backend_pid()").Scan(&beforePID); err != nil {
++				t.Fatal(err)
++			}
++			if err := conn.Raw(func(raw any) error {
++				pq.SetNoticeHandler(raw.(driver.Conn), func(n *pq.Error) {
++					if n.Message == "graceful-stop" {
++						cancel()
++					}
++				})
++				return nil
++			}); err != nil {
++				t.Fatal(err)
++			}
++			if err := conn.Close(); err != nil {
++				t.Fatal(err)
++			}
++			if phase == "purge" || phase == "completion" {
++				if _, err := db.Exec(`CREATE FUNCTION api_stop_probe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'graceful-stop'; PERFORM pg_sleep(0.02); RETURN NULL; END $$`); err != nil {
++					t.Fatal(err)
++				}
++				event := "DELETE"
++				if phase == "completion" {
++					event = "INSERT"
++				}
++				if _, err := db.Exec(`CREATE TRIGGER api_stop BEFORE ` + event + ` ON api_idempotency FOR EACH STATEMENT EXECUTE FUNCTION api_stop_probe()`); err != nil {
++					t.Fatal(err)
++				}
++			}
++			backend, err := postgresbackend.New(db)
++			if err != nil {
++				t.Fatal(err)
++			}
++			owner, err := NewPostgres(backend, func() error { return nil })
++			if err != nil {
++				t.Fatal(err)
++			}
++			if phase == "before_admission" {
++				cancel()
++			}
++			req := apiidempotencycontract.Request{Method: "test.stop", ActorTokenID: "actor", IdempotencyKey: "key", RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
++			calls := 0
++			_, _, err = owner.WithAPIIdempotency(ctx, req, func(callbackCtx context.Context) (apiidempotencycontract.Completion, error) {
++				calls++
++				if callbackCtx != ctx || callbackCtx.Done() == nil {
++					t.Error("external API callback gained detached SQL authority")
++				}
++				if phase == "external_callback" {
++					cancel()
++				}
++				return apiidempotencycontract.Completion{ResourceID: "resource", Response: json.RawMessage(`{"ok":true}`)}, nil
++			})
++			if !errors.Is(err, context.Canceled) {
++				t.Fatalf("stop lost: %v", err)
++			}
++			wantCalls := 0
++			if phase == "completion" || phase == "external_callback" {
++				wantCalls = 1
++			}
++			if calls != wantCalls {
++				t.Fatalf("callbacks=%d want=%d", calls, wantCalls)
++			}
++			var afterPID, rows int
++			if err := db.QueryRow("SELECT pg_backend_pid(), (SELECT count(*) FROM api_idempotency)").Scan(&afterPID, &rows); err != nil {
++				t.Fatal(err)
++			}
++			if afterPID != beforePID || rows != 0 {
++				t.Fatalf("healthy PID %d -> %d; completion rows=%d", beforePID, afterPID, rows)
++			}
++			if backend.CapacityReservationsForTest() != 0 {
++				t.Fatal("retained capacity leaked")
++			}
++			if phase == "purge" || phase == "completion" {
++				if _, err := db.Exec("DROP TRIGGER api_stop ON api_idempotency"); err != nil {
++					t.Fatal(err)
++				}
++			}
++			lease, err := AcquirePostgresRequest(context.Background(), owner, req)
++			if err != nil {
++				t.Fatalf("successor acquisition: %v", err)
++			}
++			if err := lease.Release(context.Background()); err != nil {
++				t.Fatal(err)
++			}
++		})
++	}
++}
++
++func TestAPIIdempotencyContendedAdmissionCancellation(t *testing.T) {
++	dsn, observer, cleanup := testutil.StartPostgres(t)
++	t.Cleanup(cleanup)
++	if _, err := observer.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_token_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_token_id,idempotency_key))`); err != nil {
++		t.Fatal(err)
++	}
++	req := apiidempotencycontract.Request{Method: "test.wait", ActorTokenID: "actor", IdempotencyKey: "key", RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
++	key := apiIdempotencyLockKey(req.Method, req.ActorTokenID, req.IdempotencyKey)
++	holder, err := observer.Conn(context.Background())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer holder.Close()
++	if _, err := holder.ExecContext(context.Background(), "SELECT pg_advisory_lock(hashtext($1))", key); err != nil {
++		t.Fatal(err)
++	}
++	defer holder.ExecContext(context.Background(), "SELECT pg_advisory_unlock(hashtext($1))", key)
++	connector, err := pq.NewConnector(dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	db := sql.OpenDB(connector)
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	var waiterPID int
++	if err := db.QueryRow("SELECT pg_backend_pid()").Scan(&waiterPID); err != nil {
++		t.Fatal(err)
++	}
++	backend, err := postgresbackend.New(db)
++	if err != nil {
++		t.Fatal(err)
++	}
++	owner, err := NewPostgres(backend, func() error { return nil })
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	done := make(chan error, 1)
++	executed := false
++	go func() {
++		_, _, err := owner.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotencycontract.Completion, error) {
++			executed = true
++			return apiidempotencycontract.Completion{}, errors.New("executor admitted during lock wait")
++		})
++		done <- err
++	}()
++	deadline := time.Now().Add(3 * time.Second)
++	for {
++		var waiting bool
++		if err := observer.QueryRow("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event='advisory')", waiterPID).Scan(&waiting); err != nil {
++			t.Fatal(err)
++		}
++		if waiting {
++			break
++		}
++		if time.Now().After(deadline) {
++			t.Fatal("real advisory wait never reached")
++		}
++		time.Sleep(time.Millisecond)
++	}
++	cancel()
++	select {
++	case err := <-done:
++		if err == nil || !errors.Is(err, context.Canceled) || executed {
++			t.Fatalf("canceled admission err=%v executed=%t", err, executed)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("canceled admission did not join")
++	}
++	var held bool
++	if err := holder.QueryRowContext(context.Background(), "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted)").Scan(&held); err != nil || !held {
++		t.Fatalf("holder possession changed: %t %v", held, err)
++	}
++	if _, err := holder.ExecContext(context.Background(), "SELECT pg_advisory_unlock(hashtext($1))", key); err != nil {
++		t.Fatal(err)
++	}
++	var nextPID int
++	if err := db.QueryRow("SELECT pg_backend_pid()").Scan(&nextPID); err != nil {
++		t.Fatal(err)
++	}
++	if nextPID == waiterPID {
++		t.Fatal("interrupted ungranted waiter was returned to pool")
++	}
++	lease, err := AcquirePostgresRequest(context.Background(), owner, req)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := lease.Release(context.Background()); err != nil {
++		t.Fatal(err)
++	}
++	if backend.CapacityReservationsForTest() != 0 {
++		t.Fatal("waiter capacity leaked")
++	}
++}
+diff --git a/internal/store/internal/apiidempotency/owner.go b/internal/store/internal/apiidempotency/owner.go
+index d4c4a07dc..d941d6a6c 100644
+--- a/internal/store/internal/apiidempotency/owner.go
++++ b/internal/store/internal/apiidempotency/owner.go
+@@ -83,2 +83 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
+-		_ = requestLease.Release(ctx)
+-		return nil, fmt.Errorf("api idempotency authority has no current session")
++		return nil, errors.Join(fmt.Errorf("api idempotency authority has no current session"), requestLease.Release(ctx))
+@@ -86,5 +85,10 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
+-	if err := purgeExpiredAPIIdempotency(ctx, session, req.Now); err != nil {
+-		_ = requestLease.Release(ctx)
+-		return nil, err
+-	}
+-	existing, found, err := loadAPIIdempotency(ctx, session, req)
++	var existing apiIdempotencyRecord
++	var found bool
++	err = postgresbackend.RunAuthorityTransaction(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
++		if err := purgeExpiredAPIIdempotency(sqlCtx, tx, req.Now); err != nil {
++			return err
++		}
++		var err error
++		existing, found, err = loadAPIIdempotency(sqlCtx, tx, req)
++		return err
++	})
+@@ -92,2 +96 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
+-		_ = requestLease.Release(ctx)
+-		return nil, err
++		return nil, errors.Join(err, requestLease.Release(ctx))
+@@ -97,2 +100 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
+-			_ = requestLease.Release(ctx)
+-			return nil, conflictError(req, existing)
++			return nil, errors.Join(conflictError(req, existing), requestLease.Release(ctx))
+@@ -154 +156,3 @@ func (s *PostgresOwner) WithAPIIdempotency(
+-	if err := storeAPIIdempotency(ctx, requestLease.lease.Session(), requestLease.req, completion); err != nil {
++	if err := postgresbackend.RunAuthorityTransaction(ctx, requestLease.lease.Session(), func(sqlCtx context.Context, tx *sql.Tx) error {
++		return storeAPIIdempotency(sqlCtx, tx, requestLease.req, completion)
++	}); err != nil {
+diff --git a/internal/store/internal/backend/genericschedule/claims.go b/internal/store/internal/backend/genericschedule/claims.go
+index 2fc8662a6..6939606b8 100644
+--- a/internal/store/internal/backend/genericschedule/claims.go
++++ b/internal/store/internal/backend/genericschedule/claims.go
+@@ -5,0 +6 @@ import (
++	"database/sql/driver"
+@@ -19 +20 @@ func claimKey(wakeup runtimegenericschedule.Wakeup) string {
+-func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (bool, error) {
++func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (claimed bool, err error) {
+@@ -28,0 +30,19 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
++	if err := ctx.Err(); err != nil {
++		return false, err
++	}
++	admissionCtx := ctx
++	// One claim admission owns its complete SQL sequence and resulting lock.
++	ctx = context.WithoutCancel(ctx)
++	defer func() {
++		if err != nil && o.claims.conn != nil {
++			valid := false
++			checkErr := o.claims.conn.Raw(func(raw any) error {
++				validator, ok := raw.(driver.Validator)
++				valid = ok && validator.IsValid()
++				return nil
++			})
++			if checkErr != nil || !valid {
++				err = errors.Join(err, o.discardClaimConn())
++			}
++		}
++	}()
+@@ -46 +66 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
+-	conn, err := o.ensureClaimConn(ctx)
++	conn, err := o.ensureClaimConn(admissionCtx)
+@@ -59 +79,4 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
+-		_, _ = conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key)
++		_, unlockErr := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key)
++		if unlockErr != nil {
++			return false, errors.Join(err, unlockErr, o.discardClaimConn())
++		}
+@@ -92,0 +116 @@ func (o *PostgresOwner) ReleaseGenericScheduleWakeup(ctx context.Context, wakeup
++	ctx = context.WithoutCancel(ctx)
+@@ -101 +125 @@ func (o *PostgresOwner) ReleaseGenericScheduleWakeup(ctx context.Context, wakeup
+-		return err
++		return errors.Join(err, o.discardClaimConn())
+@@ -137,0 +162,3 @@ func (o *PostgresOwner) closeClaimConn() error {
++	if len(o.claims.keys) != 0 {
++		return o.discardClaimConn()
++	}
+@@ -146,0 +174,18 @@ func (o *PostgresOwner) closeClaimConn() error {
++func (o *PostgresOwner) discardClaimConn() error {
++	conn := o.claims.conn
++	o.claims.conn = nil
++	o.claims.keys = nil
++	if conn == nil {
++		return nil
++	}
++	err := conn.Raw(func(any) error { return driver.ErrBadConn })
++	if err == driver.ErrBadConn || err == sql.ErrConnDone {
++		err = nil
++	}
++	closeErr := conn.Close()
++	if closeErr == sql.ErrConnDone {
++		closeErr = nil
++	}
++	return errors.Join(err, closeErr)
++}
++
+diff --git a/internal/store/internal/backend/genericschedule/claims_graceful_test.go b/internal/store/internal/backend/genericschedule/claims_graceful_test.go
+new file mode 100644
+index 000000000..a9b174362
+--- /dev/null
++++ b/internal/store/internal/backend/genericschedule/claims_graceful_test.go
+@@ -0,0 +1,132 @@
++package genericschedule
++
++import (
++	"context"
++	"database/sql/driver"
++	"errors"
++	"testing"
++	"time"
++
++	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
++	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
++	"github.com/division-sh/swarm/internal/testutil"
++	"github.com/lib/pq"
++)
++
++func TestGenericClaimGracefulCancellationPreservesExactSession(t *testing.T) {
++	_, db, _ := testutil.StartPostgres(t)
++	backend, err := postgresbackend.New(db)
++	if err != nil {
++		t.Fatal(err)
++	}
++	owner, err := NewPostgres(backend, func() error { return nil })
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer owner.ReleaseGenericScheduleClaims(context.Background())
++	conn, err := owner.ensureClaimConn(context.Background())
++	if err != nil {
++		t.Fatal(err)
++	}
++	const id = "00000000-0000-4000-8000-000000002444"
++	due := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
++	wakeup, err := runtimegenericschedule.NewWakeup(id, due)
++	if err != nil {
++		t.Fatal(err)
++	}
++	_, err = conn.ExecContext(context.Background(), `
++		CREATE FUNCTION pg_temp.claim_type() RETURNS text LANGUAGE plpgsql AS $$
++		BEGIN RAISE NOTICE 'claim-active'; PERFORM pg_sleep(0.02); RETURN 'timer'; END $$;
++		CREATE TEMP TABLE runs(run_id uuid, status text);
++		CREATE TEMP VIEW timers AS SELECT '00000000-0000-4000-8000-000000002444'::uuid AS timer_id,
++		NULL::uuid AS run_id, pg_temp.claim_type() AS task_type, 'active'::text AS status,
++		'2026-09-10 12:00:00+00'::timestamptz AS fire_at`)
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	notices := 0
++	if err := conn.Raw(func(raw any) error {
++		pq.SetNoticeHandler(raw.(driver.Conn), func(*pq.Error) { notices++; cancel() })
++		return nil
++	}); err != nil {
++		t.Fatal(err)
++	}
++	var before, after int
++	if err := conn.QueryRowContext(context.Background(), "SELECT pg_backend_pid()").Scan(&before); err != nil {
++		t.Fatal(err)
++	}
++	claimed, err := owner.ClaimGenericScheduleWakeup(ctx, wakeup)
++	if err != nil || !claimed || notices == 0 {
++		t.Fatalf("admitted claim=%v error=%v notices=%d", claimed, err, notices)
++	}
++	if err := conn.QueryRowContext(context.Background(), "SELECT pg_backend_pid()").Scan(&after); err != nil || before != after {
++		t.Fatalf("session changed: %v", err)
++	}
++	if claimed, err := owner.ClaimGenericScheduleWakeup(ctx, wakeup); claimed || !errors.Is(err, context.Canceled) {
++		t.Fatalf("canceled admission=%v %v", claimed, err)
++	}
++	if claimed, err := owner.ClaimGenericScheduleWakeup(context.Background(), wakeup); err != nil || !claimed {
++		t.Fatalf("healthy successor=%v %v", claimed, err)
++	}
++	var competing bool
++	if err := db.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(hashtext($1))", claimKey(wakeup)).Scan(&competing); err != nil || competing {
++		t.Fatalf("possession lost: competing=%v %v", competing, err)
++	}
++	if err := owner.ReleaseGenericScheduleWakeup(ctx, wakeup); err != nil {
++		t.Fatal(err)
++	}
++	observer, err := db.Conn(context.Background())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer observer.Close()
++	if err := observer.QueryRowContext(context.Background(), "SELECT pg_try_advisory_lock(hashtext($1))", claimKey(wakeup)).Scan(&competing); err != nil || !competing {
++		t.Fatalf("claim not released: %v %v", competing, err)
++	}
++	if _, err := observer.ExecContext(context.Background(), "SELECT pg_advisory_unlock(hashtext($1))", claimKey(wakeup)); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestGenericClaimUnsafeSessionFencesCachedKeys(t *testing.T) {
++	_, db, _ := testutil.StartPostgres(t)
++	backend, err := postgresbackend.New(db)
++	if err != nil {
++		t.Fatal(err)
++	}
++	owner, err := NewPostgres(backend, func() error { return nil })
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer owner.ReleaseGenericScheduleClaims(context.Background())
++	conn, err := owner.ensureClaimConn(context.Background())
++	if err != nil {
++		t.Fatal(err)
++	}
++	wakeup, err := runtimegenericschedule.NewWakeup("00000000-0000-4000-8000-000000002445", time.Now())
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := conn.ExecContext(context.Background(), "SELECT pg_advisory_lock(hashtext($1))", claimKey(wakeup)); err != nil {
++		t.Fatal(err)
++	}
++	owner.claims.keys = map[string]struct{}{claimKey(wakeup): {}}
++	var pid int
++	if err := conn.QueryRowContext(context.Background(), "SELECT pg_backend_pid()").Scan(&pid); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := db.ExecContext(context.Background(), "SELECT pg_terminate_backend($1)", pid); err != nil {
++		t.Fatal(err)
++	}
++	if claimed, err := owner.ClaimGenericScheduleWakeup(context.Background(), wakeup); err == nil || claimed {
++		t.Fatalf("unsafe cached claim=%v %v", claimed, err)
++	}
++	if owner.claims.conn != nil || len(owner.claims.keys) != 0 {
++		t.Fatal("unsafe cached authority survived")
++	}
++	if _, err := conn.ExecContext(context.Background(), "SELECT 1"); err == nil {
++		t.Fatal("unsafe successor admitted")
++	}
++}
+diff --git a/internal/store/internal/backend/pipelinepersistence/owner_operations.go b/internal/store/internal/backend/pipelinepersistence/owner_operations.go
+index ddabb02a2..1501fbd52 100644
+--- a/internal/store/internal/backend/pipelinepersistence/owner_operations.go
++++ b/internal/store/internal/backend/pipelinepersistence/owner_operations.go
+@@ -884,18 +884,3 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
+-	tx, err := lease.Session().BeginTx(ctx)
+-	if err != nil {
+-		return err
+-	}
+-	if err := markDecisionRouteProcessedTx(ctx, tx, claim.EventID(), true, time.Now().UTC()); err != nil {
+-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	effects := newRevisionEffects()
+-	if err := declareEventRevisionFamily(ctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventReceipts); err != nil {
+-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	runID, err := eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), true)
+-	if err != nil {
+-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	if runID != "" {
+-		if _, err := s.candidateRequests.RequestCompletionCandidateTx(ctx, tx, runID, nil, handoff); err != nil {
+-			return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
++	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
++		if err := markDecisionRouteProcessedTx(txctx, tx, claim.EventID(), true, time.Now().UTC()); err != nil {
++			return err
+@@ -902,0 +888,24 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
++		effects := newRevisionEffects()
++		if err := declareEventRevisionFamily(txctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventReceipts); err != nil {
++			return err
++		}
++		runID, err := eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), true)
++		if err != nil {
++			return err
++		}
++		if runID != "" {
++			if _, err := s.candidateRequests.RequestCompletionCandidateTx(txctx, tx, runID, nil, handoff); err != nil {
++				return err
++			}
++		}
++		if err := postgresDeliveryAdapter.CommitPipelineHandoff(txctx, tx, claim.EventID()); err != nil {
++			return err
++		}
++		if err := declareEventRevisionFamily(txctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
++			return err
++		}
++		_, err = privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
++		return err
++	})
++	if !committed {
++		return err
+@@ -904,13 +912,0 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
+-	if err := postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, claim.EventID()); err != nil {
+-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	if err := declareEventRevisionFamily(ctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
+-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
+-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	if err := tx.Commit(); err != nil {
+-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	endErr := lease.Session().EndTx(tx)
+@@ -918 +914 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
+-	return errors.Join(endErr, handoffErr)
++	return errors.Join(err, handoffErr)
+@@ -1094 +1090,6 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEvent(ctx context.Context,
+-	eligible, err := postgresPipelineEligible(ctx, lease.Session(), eventID, purpose)
++	var eligible bool
++	err = postgresbackend.RunAuthorityReadTransaction(ctx, lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
++		var err error
++		eligible, err = postgresPipelineEligible(txctx, tx, eventID, purpose)
++		return err
++	})
+@@ -1195,7 +1196,10 @@ func (s *PipelinePostgresOwner) loadPostgresClaimedPipelineWork(ctx context.Cont
+-	if claim.Purpose() != runtimepipelineobligation.PurposePublication {
+-		eligible, err := postgresPipelineEligible(ctx, state.postgresLease.Session(), claim.EventID(), claim.Purpose())
+-		if err != nil {
+-			return runtimepipelineobligation.ClaimedWork{}, err
+-		}
+-		if !eligible {
+-			return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
++	var work runtimepipelineobligation.ClaimedWork
++	err = postgresbackend.RunAuthorityReadTransaction(ctx, state.postgresLease.Session(), func(txctx context.Context, tx *sql.Tx) error {
++		if claim.Purpose() != runtimepipelineobligation.PurposePublication {
++			eligible, err := postgresPipelineEligible(txctx, tx, claim.EventID(), claim.Purpose())
++			if err != nil {
++				return err
++			}
++			if !eligible {
++				return runtimepipelineobligation.ErrIneligible
++			}
+@@ -1202,0 +1207,6 @@ func (s *PipelinePostgresOwner) loadPostgresClaimedPipelineWork(ctx context.Cont
++		var err error
++		work, err = loadClaimedPipelineWork(txctx, tx, claim, true)
++		return err
++	})
++	if err != nil {
++		return runtimepipelineobligation.ClaimedWork{}, err
+@@ -1204 +1214 @@ func (s *PipelinePostgresOwner) loadPostgresClaimedPipelineWork(ctx context.Cont
+-	return loadClaimedPipelineWork(ctx, state.postgresLease.Session(), claim, true)
++	return work, nil
+@@ -1913,18 +1923,3 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
+-	tx, err := lease.Session().BeginTx(ctx)
+-	if err != nil {
+-		return runtimepipelineobligation.SettlementOutcome{}, err
+-	}
+-	if err := writePipelineDispositionTx(ctx, tx, claim.EventID(), claim.Purpose(), disposition, true, time.Now().UTC()); err != nil {
+-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	effects := newRevisionEffects()
+-	if err := declareEventRevisionFamily(ctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventReceipts); err != nil {
+-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	runID, err := eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), true)
+-	if err != nil {
+-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	if runID != "" {
+-		if _, err := s.candidateRequests.RequestCompletionCandidateTx(ctx, tx, runID, nil, handoff); err != nil {
+-			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
++	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
++		if err := writePipelineDispositionTx(txctx, tx, claim.EventID(), claim.Purpose(), disposition, true, time.Now().UTC()); err != nil {
++			return err
+@@ -1932,4 +1927,3 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
+-	}
+-	if disposition.Successful() {
+-		if err := postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, claim.EventID()); err != nil {
+-			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
++		effects := newRevisionEffects()
++		if err := declareEventRevisionFamily(txctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventReceipts); err != nil {
++			return err
+@@ -1937,2 +1931,3 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
+-		if err := declareEventRevisionFamily(ctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
+-			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
++		runID, err := eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), true)
++		if err != nil {
++			return err
+@@ -1940,6 +1935,18 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
+-	}
+-	if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
+-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+-	}
+-	if err := tx.Commit(); err != nil {
+-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
++		if runID != "" {
++			if _, err := s.candidateRequests.RequestCompletionCandidateTx(txctx, tx, runID, nil, handoff); err != nil {
++				return err
++			}
++		}
++		if disposition.Successful() {
++			if err := postgresDeliveryAdapter.CommitPipelineHandoff(txctx, tx, claim.EventID()); err != nil {
++				return err
++			}
++			if err := declareEventRevisionFamily(txctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
++				return err
++			}
++		}
++		_, err = privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
++		return err
++	})
++	if !committed {
++		return runtimepipelineobligation.SettlementOutcome{}, err
+@@ -1948,2 +1955,5 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
+-	endErr := lease.Session().EndTx(tx)
+-	releaseErr := s.releasePostgresPipelineClaimLocked(context.WithoutCancel(ctx), claim, state)
++	// EndTx may already have terminalized this exact lease on cleanup failure.
++	// Release it idempotently, rather than diagnosing its retired registry entry
++	// as a new stale-claim failure after an acknowledged commit.
++	releaseErr := lease.ReleaseTerminal(context.WithoutCancel(ctx))
++	state.postgresLease = nil
+@@ -1951 +1961 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
+-	return outcome, errors.Join(endErr, releaseErr, handoffErr)
++	return outcome, errors.Join(err, releaseErr, handoffErr)
+@@ -2062,13 +2072,9 @@ func awaitPostgresPipelineParentFence(ctx context.Context, session *postgresback
+-	key := pipelineParentFenceLockKey(eventID)
+-	var parentFence any
+-	if err := session.QueryRowContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, key).Scan(&parentFence); err != nil {
+-		return fmt.Errorf("await pipeline parent transaction: %w", err)
+-	}
+-	var released bool
+-	if err := session.QueryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key).Scan(&released); err != nil {
+-		return fmt.Errorf("release pipeline parent transaction fence: %w", err)
+-	}
+-	if !released {
+-		return errors.New("release pipeline parent transaction fence: lock was not owned")
+-	}
+-	return nil
++	return postgresbackend.RunAuthorityReadTransaction(ctx, session, func(txctx context.Context, tx *sql.Tx) error {
++		// Transaction settlement releases the fence even when cancellation wins
++		// after the wait; no session-level unlock can be skipped.
++		var parentFence any
++		if err := tx.QueryRowContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, pipelineParentFenceLockKey(eventID)).Scan(&parentFence); err != nil {
++			return fmt.Errorf("await pipeline parent transaction: %w", err)
++		}
++		return nil
++	})
+diff --git a/internal/store/internal/backend/postgres/authority_acquisition_test.go b/internal/store/internal/backend/postgres/authority_acquisition_test.go
+new file mode 100644
+index 000000000..8d492c72a
+--- /dev/null
++++ b/internal/store/internal/backend/postgres/authority_acquisition_test.go
+@@ -0,0 +1,246 @@
++package postgres
++
++import (
++	"context"
++	"database/sql"
++	"errors"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestAuthorityAcquisitionGracefulCancellation(t *testing.T) {
++	for _, scenario := range []string{"before_admission", "after_query", "custom_context", "custom_failure", "custom_panic"} {
++		t.Run(scenario, func(t *testing.T) {
++			b, probe := newExitProbe(t)
++			parent, held, err := AcquireAdvisoryLockLease(context.Background(), b.db, "acquisition-parent")
++			if err != nil || !held {
++				t.Fatalf("parent held=%t: %v", held, err)
++			}
++			defer parent.Release(context.Background())
++			session := parent.Session()
++			conn, err := session.connection()
++			if err != nil {
++				t.Fatal(err)
++			}
++			var beforePID int
++			if err := conn.QueryRowContext(context.Background(), "SELECT pg_backend_pid()").Scan(&beforePID); err != nil {
++				t.Fatal(err)
++			}
++			release, ok := session.retain()
++			if !ok {
++				t.Fatal("retain failed")
++			}
++			ctx, cancel := context.WithCancel(context.Background())
++			defer cancel()
++			primary := errors.New("independent acquisition failure")
++			queries, callbacks := 0, 0
++			probe.afterQuery = func(sqlCtx context.Context, query string) {
++				if !strings.Contains(query, "pg_try_advisory_lock") {
++					return
++				}
++				queries++
++				if scenario == "after_query" {
++					if sqlCtx.Done() != nil {
++						t.Error("built-in acquisition retained logical cancellation")
++					}
++					// Real stock-pq query has returned its rows; cancel before
++					// Scan/attachment. The owner must drain and relinquish only this lock.
++					cancel()
++				}
++			}
++			var acquire AdvisoryLockAcquire
++			if strings.HasPrefix(scenario, "custom_") {
++				acquire = func(callbackCtx context.Context, a *SessionAuthority, key string) (bool, error) {
++					callbacks++
++					if callbackCtx != ctx {
++						t.Error("arbitrary callback context was detached")
++					}
++					if a.operationMu.TryLock() {
++						a.operationMu.Unlock()
++						t.Error("acquisition callback not serialized")
++					}
++					if scenario == "custom_failure" {
++						cancel()
++						return false, primary
++					}
++					var held bool
++					err := a.queryRowContext(callbackCtx, "SELECT pg_try_advisory_lock(hashtext($1))", key).Scan(&held)
++					if scenario == "custom_panic" && err == nil {
++						panic(primary)
++					}
++					return held, err
++				}
++			}
++			if scenario == "before_admission" {
++				cancel()
++			}
++			retired := 0
++			parent.InstallTerminalOwner(nil, func() {
++				retired++
++				if !session.operationMu.TryLock() {
++					t.Error("terminal callback ran before operation unlock")
++				} else {
++					session.operationMu.Unlock()
++				}
++			}, nil)
++			var lease *AdvisoryLockLease
++			var recovered any
++			acquisitionFinished := false
++			func() {
++				defer func() { recovered = recover() }()
++				lease, held, err = AcquireAdvisoryLockLeaseOnSession(ctx, session, "acquisition-child", acquire, func() error {
++					if !acquisitionFinished {
++						if !session.operationMu.TryLock() {
++							t.Error("acquisition release callback ran before operation unlock")
++						} else {
++							session.operationMu.Unlock()
++						}
++					}
++					return release()
++				})
++			}()
++			acquisitionFinished = true
++			acquisitionErr := err
++			probe.afterQuery = nil
++			if scenario == "custom_panic" {
++				if recovered != primary {
++					t.Fatalf("panic identity=%v", recovered)
++				}
++			} else if recovered != nil {
++				t.Fatalf("unexpected panic=%v", recovered)
++			}
++			if scenario == "custom_context" {
++				if err != nil || !held || lease == nil || callbacks != 1 {
++					t.Fatalf("custom held=%t calls=%d: %v", held, callbacks, err)
++				}
++				if err := lease.Release(context.Background()); err != nil {
++					t.Fatal(err)
++				}
++			} else if scenario != "custom_panic" {
++				if lease != nil || held || !errors.Is(err, context.Canceled) {
++					t.Errorf("canceled acquired=%t lease=%v: %v", held, lease, err)
++				}
++			}
++			if scenario == "custom_failure" && !errors.Is(err, primary) {
++				t.Errorf("independent failure lost: %v", err)
++			}
++			if scenario == "before_admission" && queries != 0 {
++				t.Error("canceled acquisition admitted SQL")
++			}
++			if scenario == "after_query" && queries != 1 {
++				t.Errorf("queries=%d", queries)
++			}
++			unsafe := scenario == "custom_failure" || scenario == "custom_panic"
++			if unsafe {
++				if parent.Current() || retired != 1 {
++					t.Errorf("unsafe possession survived: current=%t retired=%d", parent.Current(), retired)
++				}
++				called := false
++				if err := RunAuthorityTransaction(context.Background(), session, func(context.Context, *sql.Tx) error { called = true; return nil }); err == nil || called {
++					t.Error("unsafe successor admitted")
++				}
++			} else {
++				var afterPID int
++				if err := RunAuthorityReadTransaction(context.Background(), session, func(ctx context.Context, tx *sql.Tx) error {
++					return tx.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&afterPID)
++				}); err != nil || beforePID != afterPID {
++					t.Errorf("healthy successor pid=%d->%d: %v", beforePID, afterPID, err)
++				}
++				if err := parent.ProveCurrent(context.Background()); err != nil {
++					t.Errorf("independent parent lock lost: %v", err)
++				}
++			}
++			// A different physical socket must acquire the child lock after cancellation,
++			// explicit release, or unsafe discard; never rely on same-session reentrancy.
++			other, err := sql.Open("postgres", probe.dsn)
++			if err != nil {
++				t.Fatal(err)
++			}
++			defer other.Close()
++			competitor, got, err := AcquireAdvisoryLockLease(context.Background(), other, "acquisition-child")
++			if err != nil || !got {
++				t.Fatalf("competing child acquired=%t: %v", got, err)
++			}
++			if err := competitor.Release(context.Background()); err != nil {
++				t.Fatal(err)
++			}
++			t.Logf("queries=%d callbacks=%d unsafe=%t retired=%d acquisitionError=%v", queries, callbacks, unsafe, retired, acquisitionErr)
++		})
++	}
++}
++
++func TestAuthorityAcquisitionWaitsForTransactionAndRechecksAdmission(t *testing.T) {
++	b, _ := newExitProbe(t)
++	parent, held, err := AcquireAdvisoryLockLease(context.Background(), b.db, "acquisition-wait-parent")
++	if err != nil || !held {
++		t.Fatalf("parent held=%t: %v", held, err)
++	}
++	defer parent.Release(context.Background())
++	session := parent.Session()
++	release, ok := session.retain()
++	if !ok {
++		t.Fatal("retain failed")
++	}
++	entered, finish := make(chan struct{}), make(chan struct{})
++	txDone := make(chan error, 1)
++	go func() {
++		txDone <- RunAuthorityTransaction(context.Background(), session, func(ctx context.Context, tx *sql.Tx) error {
++			var n int
++			if err := tx.QueryRowContext(ctx, "SELECT 1").Scan(&n); err != nil {
++				return err
++			}
++			close(entered)
++			<-finish
++			return nil
++		})
++	}()
++	select {
++	case <-entered:
++	case err := <-txDone:
++		t.Fatalf("transaction did not enter: %v", err)
++	case <-time.After(3 * time.Second):
++		t.Fatal("transaction barrier timeout")
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	started, called := make(chan struct{}), make(chan struct{}, 1)
++	done := make(chan error, 1)
++	go func() {
++		close(started)
++		_, _, err := AcquireAdvisoryLockLeaseOnSession(ctx, session, "acquisition-wait-child", func(context.Context, *SessionAuthority, string) (bool, error) {
++			called <- struct{}{}
++			return false, nil
++		}, release)
++		done <- err
++	}()
++	<-started
++	select {
++	case <-called:
++		t.Error("acquisition entered while transaction owned operation")
++	case err := <-done:
++		t.Errorf("acquisition completed before transaction: %v", err)
++	case <-time.After(20 * time.Millisecond):
++	}
++	cancel()
++	close(finish)
++	if err := <-txDone; err != nil {
++		t.Fatal(err)
++	}
++	select {
++	case err := <-done:
++		if !errors.Is(err, context.Canceled) {
++			t.Errorf("admission not rechecked: %v", err)
++		}
++	case <-time.After(3 * time.Second):
++		t.Fatal("acquisition did not join")
++	}
++	select {
++	case <-called:
++		t.Error("canceled acquisition callback admitted")
++	default:
++	}
++	if err := parent.ProveCurrent(context.Background()); err != nil {
++		t.Errorf("parent did not survive: %v", err)
++	}
++}
+diff --git a/internal/store/internal/backend/postgres/authority_outcome_test.go b/internal/store/internal/backend/postgres/authority_outcome_test.go
+new file mode 100644
+index 000000000..655708b20
+--- /dev/null
++++ b/internal/store/internal/backend/postgres/authority_outcome_test.go
+@@ -0,0 +1,341 @@
++package postgres
++
++import (
++	"context"
++	"database/sql"
++	"database/sql/driver"
++	"errors"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/division-sh/swarm/internal/testutil"
++	"github.com/lib/pq"
++)
++
++func TestAuthorityTransactionOutcomeEvidence(t *testing.T) {
++	for _, scenario := range []string{"success", "before_admission", "before_commit", "after_commit_admission", "uncertain_commit", "end_tx_failure", "callback_failure", "rollback_failure", "panic"} {
++		t.Run(scenario, func(t *testing.T) {
++			b, probe := newExitProbe(t)
++			if _, err := b.db.Exec("CREATE TABLE authority_outcome (n integer)"); err != nil {
++				t.Fatal(err)
++			}
++			lease, acquired, err := AcquireAdvisoryLockLease(context.Background(), b.db, "authority-outcome")
++			if err != nil || !acquired {
++				t.Fatalf("acquire=%t: %v", acquired, err)
++			}
++			t.Cleanup(func() { _ = lease.Release(context.Background()) })
++			session := lease.Session()
++			conn, err := session.connection()
++			if err != nil {
++				t.Fatal(err)
++			}
++			var pid int
++			if err := conn.QueryRowContext(context.Background(), "SELECT pg_backend_pid()").Scan(&pid); err != nil {
++				t.Fatal(err)
++			}
++			ctx, cancel := context.WithCancel(context.Background())
++			defer cancel()
++			primary, cleanup := errors.New("independent outcome failure"), errors.New("independent settlement failure")
++			switch scenario {
++			case "before_admission":
++				cancel()
++			case "after_commit_admission":
++				probe.beforeCommit = cancel
++			case "uncertain_commit":
++				// Actual COMMIT succeeds, but the driver reports failure. This is
++				// an uncertainty boundary injection, not a TCP response-loss proof.
++				probe.commitFailure = primary
++			case "end_tx_failure":
++				session.SetEndTxErrorForTest(func() error {
++					if session.operationMu.TryLock() {
++						session.operationMu.Unlock()
++						t.Error("EndTx failure observed after releasing operation ownership")
++					}
++					return cleanup
++				})
++			case "rollback_failure":
++				probe.rollbackFailure = cleanup
++			}
++			var committed bool
++			var recovered any
++			calls := 0
++			func() {
++				defer func() { recovered = recover() }()
++				committed, err = RunAuthorityTransactionOutcome(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
++					calls++
++					if _, err := tx.ExecContext(sqlCtx, "INSERT INTO authority_outcome VALUES (1)"); err != nil {
++						return err
++					}
++					switch scenario {
++					case "before_commit":
++						cancel()
++					case "callback_failure":
++						cancel()
++						return primary
++					case "rollback_failure":
++						return primary
++					case "panic":
++						panic(primary)
++					}
++					return nil
++				})
++			}()
++			wantCommitted := scenario == "success" || scenario == "after_commit_admission" || scenario == "end_tx_failure"
++			if committed != wantCommitted {
++				t.Errorf("committed=%t want=%t err=%v", committed, wantCommitted, err)
++			}
++			wantCalls := 1
++			if scenario == "before_admission" {
++				wantCalls = 0
++			}
++			if calls != wantCalls {
++				t.Errorf("callbacks=%d want=%d", calls, wantCalls)
++			}
++			if scenario == "panic" && recovered != primary {
++				t.Errorf("panic identity changed: %v", recovered)
++			}
++			if (scenario == "before_admission" || scenario == "before_commit" || scenario == "callback_failure") && !errors.Is(err, context.Canceled) {
++				t.Errorf("lost logical stop: %v", err)
++			}
++			if (scenario == "uncertain_commit" || scenario == "callback_failure" || scenario == "rollback_failure") && !errors.Is(err, primary) {
++				t.Errorf("lost independent primary: %v", err)
++			}
++			if (scenario == "end_tx_failure" || scenario == "rollback_failure") && !errors.Is(err, cleanup) {
++				t.Errorf("lost cleanup: %v", err)
++			}
++			if (scenario == "success" || scenario == "after_commit_admission") && err != nil {
++				t.Errorf("acknowledged commit gained failure: %v", err)
++			}
++			unsafe := scenario == "uncertain_commit" || scenario == "end_tx_failure" || scenario == "rollback_failure"
++			if lease.Current() == unsafe {
++				t.Errorf("possession current=%t unsafe=%t", lease.Current(), unsafe)
++			}
++			next, stop := context.WithTimeout(context.Background(), 3*time.Second)
++			defer stop()
++			err = RunAuthorityReadTransaction(next, session, func(sqlCtx context.Context, tx *sql.Tx) error {
++				if unsafe {
++					t.Error("unsafe session admitted successor")
++				}
++				var nextPID int
++				if err := tx.QueryRowContext(sqlCtx, "SELECT pg_backend_pid()").Scan(&nextPID); err != nil {
++					return err
++				}
++				if nextPID != pid {
++					t.Errorf("healthy PID changed: %d -> %d", pid, nextPID)
++				}
++				return nil
++			})
++			if (err != nil) != unsafe {
++				t.Errorf("successor error=%v unsafe=%t", err, unsafe)
++			}
++			if err := lease.Release(next); err != nil {
++				t.Fatal(err)
++			}
++			var rows int
++			if err := b.db.QueryRowContext(next, "SELECT count(*) FROM authority_outcome").Scan(&rows); err != nil {
++				t.Fatal(err)
++			}
++			wantRows := 0
++			if wantCommitted || scenario == "uncertain_commit" {
++				wantRows = 1
++			}
++			if rows != wantRows {
++				t.Errorf("durable rows=%d want=%d", rows, wantRows)
++			}
++			// After unsafe disposal, a different physical session must acquire the
++			// server lock; a successful local close alone is not release evidence.
++			var returnedPID int
++			if err := b.db.QueryRowContext(next, "SELECT pg_backend_pid()").Scan(&returnedPID); err != nil {
++				t.Fatal(err)
++			}
++			if unsafe && returnedPID == pid {
++				t.Error("unsafe physical session returned to pool")
++			}
++			if _, err := b.db.ExecContext(next, "SELECT pg_advisory_lock(hashtext('authority-outcome'))"); err != nil {
++				t.Fatal(err)
++			}
++			if _, err := b.db.ExecContext(next, "SELECT pg_advisory_unlock(hashtext('authority-outcome'))"); err != nil {
++				t.Fatal(err)
++			}
++		})
++	}
++}
++
++func TestAuthorityReadGracefulCancellation(t *testing.T) {
++	for _, surface := range []string{"before_admission", "query_row", "rows", "prepared_rows", "independent_error", "panic"} {
++		t.Run(surface, func(t *testing.T) {
++			_, db, _ := testutil.StartPostgres(t)
++			lease, acquired, err := AcquireAdvisoryLockLease(context.Background(), db, "authority-read")
++			if err != nil || !acquired {
++				t.Fatalf("acquire=%t: %v", acquired, err)
++			}
++			t.Cleanup(func() { _ = lease.Release(context.Background()) })
++			session := lease.Session()
++			conn, err := session.connection()
++			if err != nil {
++				t.Fatal(err)
++			}
++			if _, err := conn.ExecContext(context.Background(), `CREATE FUNCTION pg_temp.authority_read() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'active'; PERFORM pg_sleep(0.02); RETURN 1; END $$`); err != nil {
++				t.Fatal(err)
++			}
++			ctx, cancel := context.WithCancel(context.Background())
++			defer cancel()
++			noticed := false
++			if err := conn.Raw(func(raw any) error {
++				pq.SetNoticeHandler(raw.(driver.Conn), func(*pq.Error) { noticed = true; cancel() })
++				return nil
++			}); err != nil {
++				t.Fatal(err)
++			}
++			if surface == "before_admission" {
++				cancel()
++			}
++			var beforePID, afterPID, count int
++			if err := conn.QueryRowContext(context.Background(), "SELECT pg_backend_pid()").Scan(&beforePID); err != nil {
++				t.Fatal(err)
++			}
++			calls := 0
++			primary := errors.New("independent read callback")
++			var recovered any
++			func() {
++				defer func() { recovered = recover() }()
++				err = RunAuthorityReadTransaction(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
++					calls++
++					var readonly, isolation string
++					if err := tx.QueryRowContext(sqlCtx, "SHOW transaction_read_only").Scan(&readonly); err != nil {
++						return err
++					}
++					if err := tx.QueryRowContext(sqlCtx, "SHOW transaction_isolation").Scan(&isolation); err != nil {
++						return err
++					}
++					if readonly != "on" || isolation != "repeatable read" || sqlCtx.Done() != nil {
++						t.Errorf("read boundary readonly=%s isolation=%s detached=%t", readonly, isolation, sqlCtx.Done() == nil)
++					}
++					if surface == "panic" {
++						panic(primary)
++					}
++					if surface == "independent_error" {
++						cancel()
++						return primary
++					}
++					const query = "SELECT pg_temp.authority_read()"
++					if surface == "query_row" {
++						return tx.QueryRowContext(sqlCtx, query).Scan(&count)
++					}
++					var rows *sql.Rows
++					var err error
++					if surface == "prepared_rows" {
++						stmt, err := tx.PrepareContext(sqlCtx, query)
++						if err != nil {
++							return err
++						}
++						defer stmt.Close()
++						rows, err = stmt.QueryContext(sqlCtx)
++					} else {
++						rows, err = tx.QueryContext(sqlCtx, query)
++					}
++					if err != nil {
++						return err
++					}
++					for rows.Next() {
++						count++
++					}
++					return errors.Join(rows.Err(), rows.Close())
++				})
++			}()
++			if surface == "panic" {
++				if recovered != primary {
++					t.Errorf("panic changed: %v", recovered)
++				}
++			} else if !errors.Is(err, context.Canceled) {
++				t.Errorf("logical cancellation lost: %v", err)
++			}
++			if surface == "independent_error" && !errors.Is(err, primary) {
++				t.Errorf("independent read failure lost: %v", err)
++			}
++			if surface == "before_admission" {
++				if calls != 0 {
++					t.Error("canceled read admitted callback")
++				}
++			} else if surface != "panic" && surface != "independent_error" && (!noticed || count != 1 || !onlyCancellationLeaves(err, context.Canceled)) {
++				t.Errorf("admitted read did not drain cleanly: notice=%t rows=%d err=%v", noticed, count, err)
++			}
++			if !lease.Current() {
++				t.Error("healthy read lost possession")
++			}
++			if err := RunAuthorityReadTransaction(context.Background(), session, func(sqlCtx context.Context, tx *sql.Tx) error {
++				return tx.QueryRowContext(sqlCtx, "SELECT pg_backend_pid()").Scan(&afterPID)
++			}); err != nil || beforePID != afterPID {
++				t.Errorf("healthy successor: pid %d -> %d err=%v", beforePID, afterPID, err)
++			}
++			if err := lease.ProveCurrent(context.Background()); err != nil {
++				t.Errorf("healthy advisory possession: %v", err)
++			}
++		})
++	}
++}
++
++func TestAuthorityReadInvalidSessionFenced(t *testing.T) {
++	dsn, _, _ := testutil.StartPostgres(t)
++	readFailure := errors.New("injected retained read transport failure")
++	dialer := &sessionScopeDialer{readFailure: readFailure}
++	connector, err := pq.NewConnector(dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	connector.Dialer(dialer)
++	db := sql.OpenDB(connector)
++	db.SetMaxOpenConns(1)
++	defer db.Close()
++	lease, acquired, err := AcquireAdvisoryLockLease(context.Background(), db, "invalid-authority-read")
++	if err != nil || !acquired {
++		t.Fatalf("acquire=%t: %v", acquired, err)
++	}
++	t.Cleanup(func() { _ = lease.Release(context.Background()) })
++	session := lease.Session()
++	var retired atomic.Int32
++	lease.InstallTerminalOwner(nil, func() {
++		retired.Add(1)
++		if !session.operationMu.TryLock() {
++			t.Error("terminal callback ran under operation ownership")
++			return
++		}
++		session.operationMu.Unlock()
++	}, nil)
++	dialer.onFirstClose = func() {
++		if session.operationMu.TryLock() {
++			session.operationMu.Unlock()
++			t.Error("physical disposal ran after operation ownership release")
++		}
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	err = RunAuthorityReadTransaction(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
++		dialer.failRead.Store(true)
++		var n int
++		err := tx.QueryRowContext(sqlCtx, "SELECT 1").Scan(&n)
++		cancel()
++		return err
++	})
++	if !errors.Is(err, readFailure) || !errors.Is(err, context.Canceled) {
++		t.Errorf("lost independent read / logical stop: %v", err)
++	}
++	if lease.Current() || retired.Load() != 1 || dialer.closed.Load() != 1 {
++		t.Errorf("invalid disposition: current=%t retired=%d closes=%d", lease.Current(), retired.Load(), dialer.closed.Load())
++	}
++	if err := RunAuthorityReadTransaction(context.Background(), session, func(context.Context, *sql.Tx) error {
++		t.Error("invalid session admitted successor")
++		return nil
++	}); err == nil {
++		t.Error("invalid successor returned success")
++	}
++	next, stop := context.WithTimeout(context.Background(), 3*time.Second)
++	defer stop()
++	if _, err := db.ExecContext(next, "SELECT pg_advisory_lock(hashtext('invalid-authority-read'))"); err != nil {
++		t.Fatalf("competing server possession not released: %v", err)
++	}
++	if _, err := db.ExecContext(next, "SELECT pg_advisory_unlock(hashtext('invalid-authority-read'))"); err != nil {
++		t.Fatal(err)
++	}
++}
+diff --git a/internal/store/internal/backend/postgres/implicit_scope_lifetime_test.go b/internal/store/internal/backend/postgres/implicit_scope_lifetime_test.go
+index 05cac5b1c..4dba9c7ce 100644
+--- a/internal/store/internal/backend/postgres/implicit_scope_lifetime_test.go
++++ b/internal/store/internal/backend/postgres/implicit_scope_lifetime_test.go
+@@ -112 +111,0 @@ func TestImplicitTransactionScopeDoesNotBlockAdvisoryCleanup(t *testing.T) {
+-		_ = bindNativeOperation(conn, nil)
+diff --git a/internal/store/internal/backend/postgres/session_authority.go b/internal/store/internal/backend/postgres/session_authority.go
+index b23e8f358..9d5d63a71 100644
+--- a/internal/store/internal/backend/postgres/session_authority.go
++++ b/internal/store/internal/backend/postgres/session_authority.go
+@@ -13,2 +12,0 @@ import (
+-
+-	"github.com/lib/pq"
+@@ -36 +33,0 @@ type SessionAuthority struct {
+-	activeScope             *pq.OperationScope
+@@ -227,0 +225,4 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
++	return a.beginTxOptions(ctx, nil)
++}
++
++func (a *SessionAuthority) beginTxOptions(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+@@ -239 +240 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-	if a.closed || a.conn == nil {
++	if a.closed || a.discardPending || a.conn == nil {
+@@ -250 +251,5 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-	scope := pq.NewOperationScope(ctx)
++	if err := ctx.Err(); err != nil {
++		a.mu.Unlock()
++		a.operationMu.Unlock()
++		return nil, err
++	}
+@@ -253,6 +257,0 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-		if err := bindNativeOperation(conn, scope); err != nil {
+-			a.mu.Unlock()
+-			discard := a.prepareDiscardExcept(nil)
+-			a.operationMu.Unlock()
+-			return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+-		}
+@@ -260 +259 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-			return conn.BeginTx(beginCtx, nil)
++			return conn.BeginTx(beginCtx, opts)
+@@ -263,3 +262,2 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-	// database/sql must not terminate retained possession independently. The
+-	// native operation still observes the real caller carried by this scope.
+-	beginCtx := context.WithoutCancel(scope.Context(ctx))
++	// Investigation only: the existing owner settles admitted SQL synchronously.
++	beginCtx := context.WithoutCancel(ctx)
+@@ -267 +264,0 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-	err = errors.Join(err, scope.Err())
+@@ -275 +271,0 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-		var unbindErr error
+@@ -278,8 +273,0 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-			a.activeScope = scope
+-		} else if a.testBeginTx == nil {
+-			_ = scope.Wait()
+-			err = errors.Join(err, scope.Err())
+-			if contextError(ctx) != nil && scope.Err() == nil {
+-				unbindErr = bindNativeOperation(conn, nil)
+-				err = errors.Join(err, unbindErr)
+-			}
+@@ -291,4 +278,0 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-		if callerErr := contextError(ctx); callerErr != nil && scope.Err() == nil && unbindErr == nil {
+-			a.operationMu.Unlock()
+-			return nil, err
+-		}
+@@ -297 +281 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-		return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()), scope.Err())
++		return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+@@ -300 +283,0 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
+-	a.activeScope = scope
+@@ -315,2 +297,0 @@ func (a *SessionAuthority) endTx(tx *sql.Tx) error {
+-	scope := a.activeScope
+-	a.activeScope = nil
+@@ -321,6 +301,0 @@ func (a *SessionAuthority) endTx(tx *sql.Tx) error {
+-	if scope != nil {
+-		_ = scope.Wait()
+-		if !a.closed && a.conn != nil {
+-			err = errors.Join(err, bindNativeOperation(a.conn, nil))
+-		}
+-	}
+@@ -330,2 +304,0 @@ func (a *SessionAuthority) endTx(tx *sql.Tx) error {
+-	a.operationMu.Unlock()
+-	sessionDiscard{leases: retirements}.drain()
+@@ -335 +308,9 @@ func (a *SessionAuthority) endTx(tx *sql.Tx) error {
+-	return err
++	var discard sessionDiscard
++	if err != nil {
++		// A successor cannot borrow the session between failed settlement and
++		// its exact disposition. Terminal callbacks run after operation unlock.
++		discard = a.prepareDiscardExcept(nil)
++	}
++	a.operationMu.Unlock()
++	sessionDiscard{leases: retirements}.drain()
++	return errors.Join(err, discard.drain())
+@@ -372 +353 @@ func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run fu
+-	scope := a.activeScope
++	tx := a.activeTx
+@@ -374,2 +355,2 @@ func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run fu
+-	if scope == nil {
+-		return errors.New("PostgreSQL transaction operation scope is missing")
++	if tx == nil {
++		return errors.New("PostgreSQL transaction is missing")
+@@ -378 +359 @@ func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run fu
+-		err = errors.Join(err, ctx.Err(), scope.Err())
++		err = errors.Join(err, ctx.Err())
+@@ -380,12 +361 @@ func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run fu
+-	return run(context.WithoutCancel(scope.Context(ctx)))
+-}
+-
+-func (a *SessionAuthority) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+-	a.mu.Lock()
+-	tx := a.activeTx
+-	conn := a.conn
+-	a.mu.Unlock()
+-	if tx != nil {
+-		return tx.QueryContext(ctx, query, args...)
+-	}
+-	return conn.QueryContext(ctx, query, args...)
++	return run(context.WithoutCancel(ctx))
+@@ -612 +582 @@ func AcquireAdvisoryLockLeaseOnSession(
+-) (*AdvisoryLockLease, bool, error) {
++) (lease *AdvisoryLockLease, acquired bool, err error) {
+@@ -616,2 +586,31 @@ func AcquireAdvisoryLockLeaseOnSession(
+-	var acquired bool
+-	var err error
++	if ctx == nil {
++		ctx = context.Background()
++	}
++	if err := ctx.Err(); err != nil {
++		return nil, false, errors.Join(err, releaseSession())
++	}
++	endOperation, err := authority.beginOperation()
++	if err != nil {
++		return nil, false, errors.Join(err, releaseSession())
++	}
++	discard, handedOff := false, false
++	defer func() {
++		var disposition sessionDiscard
++		if discard {
++			disposition = authority.prepareDiscardExcept(nil)
++		}
++		endOperation()
++		cleanupErr := wrapAdvisoryDiscardError(disposition.drain())
++		if !handedOff {
++			cleanupErr = errors.Join(cleanupErr, releaseSession())
++		}
++		if cleanupErr != nil {
++			slog.Error("postgres advisory acquisition cleanup failed", "error", cleanupErr)
++		}
++		err = errors.Join(err, cleanupErr)
++	}()
++	if err := ctx.Err(); err != nil {
++		return nil, false, err
++	}
++	// An interrupted acquisition cannot return a possibly held lock to the pool.
++	discard = true
+@@ -618,0 +618,2 @@ func AcquireAdvisoryLockLeaseOnSession(
++		// Custom callbacks run inside this operation boundary, with their
++		// original context. They must not reenter another session owner.
+@@ -621 +622 @@ func AcquireAdvisoryLockLeaseOnSession(
+-		err = authority.queryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired)
++		err = authority.queryRowContext(context.WithoutCancel(ctx), `SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired)
+@@ -624,5 +625 @@ func AcquireAdvisoryLockLeaseOnSession(
+-		return nil, false, errors.Join(
+-			fmt.Errorf("acquire advisory lock: %w", err),
+-			wrapAdvisoryDiscardError(authority.forceDiscard()),
+-			releaseSession(),
+-		)
++		return nil, false, errors.Join(ctx.Err(), fmt.Errorf("acquire advisory lock: %w", err))
+@@ -631,2 +628,8 @@ func AcquireAdvisoryLockLeaseOnSession(
+-		if err := releaseSession(); err != nil {
+-			return nil, false, fmt.Errorf("release unacquired advisory lock session: %w", err)
++		discard = false
++		return nil, false, ctx.Err()
++	}
++	if callerErr := ctx.Err(); callerErr != nil {
++		var unlocked bool
++		unlockErr := authority.queryRowContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext($1))`, lockKey).Scan(&unlocked)
++		if unlockErr == nil && !unlocked {
++			unlockErr = errors.New("canceled PostgreSQL advisory acquisition did not hold its lock")
+@@ -634 +637,2 @@ func AcquireAdvisoryLockLeaseOnSession(
+-		return nil, false, nil
++		discard = unlockErr != nil
++		return nil, false, errors.Join(callerErr, unlockErr)
+@@ -636 +640 @@ func AcquireAdvisoryLockLeaseOnSession(
+-	lease := &AdvisoryLockLease{
++	lease = &AdvisoryLockLease{
+@@ -642,5 +646 @@ func AcquireAdvisoryLockLeaseOnSession(
+-		return nil, false, errors.Join(
+-			fmt.Errorf("attach advisory lock lease: %w", err),
+-			wrapAdvisoryDiscardError(authority.forceDiscard()),
+-			releaseSession(),
+-		)
++		return nil, false, fmt.Errorf("attach advisory lock lease: %w", err)
+@@ -647,0 +648 @@ func AcquireAdvisoryLockLeaseOnSession(
++	discard, handedOff = false, true
+@@ -655 +656,43 @@ func RunAuthorityTransaction(
+-) (err error) {
++) error {
++	_, err := RunAuthorityTransactionOutcome(ctx, session, fn)
++	return err
++}
++
++// RunAuthorityTransactionOutcome reports only an acknowledged successful COMMIT.
++// Later cleanup errors do not erase committed evidence; false does not prove rollback.
++func RunAuthorityTransactionOutcome(
++	ctx context.Context,
++	session *SessionAuthority,
++	fn func(context.Context, *sql.Tx) error,
++) (committed bool, err error) {
++	return runAuthorityTransaction(ctx, session, nil, fn)
++}
++
++// RunAuthorityTransactionOutcomeWithOptions uses the same settlement owner with
++// caller-selected isolation. Committed evidence survives later cleanup errors.
++func RunAuthorityTransactionOutcomeWithOptions(
++	ctx context.Context,
++	session *SessionAuthority,
++	opts *sql.TxOptions,
++	fn func(context.Context, *sql.Tx) error,
++) (committed bool, err error) {
++	return runAuthorityTransaction(ctx, session, opts, fn)
++}
++
++// RunAuthorityReadTransaction owns a complete retained read snapshot. The callback
++// must consume and close its results before returning; it cannot export SQL work.
++func RunAuthorityReadTransaction(
++	ctx context.Context,
++	session *SessionAuthority,
++	fn func(context.Context, *sql.Tx) error,
++) error {
++	_, err := runAuthorityTransaction(ctx, session, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, fn)
++	return err
++}
++
++func runAuthorityTransaction(
++	ctx context.Context,
++	session *SessionAuthority,
++	opts *sql.TxOptions,
++	fn func(context.Context, *sql.Tx) error,
++) (committed bool, err error) {
+@@ -657 +700 @@ func RunAuthorityTransaction(
+-		return errors.New("PostgreSQL session authority is required")
++		return false, errors.New("PostgreSQL session authority is required")
+@@ -660 +703 @@ func RunAuthorityTransaction(
+-		return nil
++		return false, nil
+@@ -662 +705 @@ func RunAuthorityTransaction(
+-	tx, err := session.beginTx(ctx)
++	tx, err := session.beginTxOptions(ctx, opts)
+@@ -664 +707 @@ func RunAuthorityTransaction(
+-		return err
++		return false, err
+@@ -666,3 +708,0 @@ func RunAuthorityTransaction(
+-	session.mu.Lock()
+-	scope := session.activeScope
+-	session.mu.Unlock()
+@@ -677,3 +716,0 @@ func RunAuthorityTransaction(
+-		if scope != nil {
+-			err = errors.Join(err, scope.Err())
+-		}
+@@ -684 +721 @@ func RunAuthorityTransaction(
+-		return runErr
++		return false, runErr
+@@ -687 +724 @@ func RunAuthorityTransaction(
+-		return callerErr
++		return false, callerErr
+@@ -695 +732 @@ func RunAuthorityTransaction(
+-		return errors.Join(commitErr, contextError(ctx), endErr, wrapAdvisoryDiscardError(discardErr))
++		return false, errors.Join(commitErr, contextError(ctx), endErr, wrapAdvisoryDiscardError(discardErr))
+@@ -696,0 +734 @@ func RunAuthorityTransaction(
++	committed = true
+@@ -699,4 +737 @@ func RunAuthorityTransaction(
+-	if endErr != nil {
+-		return errors.Join(endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
+-	}
+-	return nil
++	return committed, endErr
+@@ -726,3 +760,0 @@ func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
+-	session.mu.Lock()
+-	scope := session.activeScope
+-	session.mu.Unlock()
+@@ -742,5 +774 @@ func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
+-	var nativeErr error
+-	if scope != nil {
+-		nativeErr = scope.Err()
+-	}
+-	return errors.Join(rollbackErr, endErr, nativeErr, wrapAdvisoryDiscardError(discardErr))
++	return errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(discardErr))
+@@ -818 +845,0 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
+-	scope := pq.NewOperationScope(probeCtx)
+@@ -822,11 +848,0 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
+-		_ = scope.Wait()
+-		if keep {
+-			if unbindErr := bindNativeOperation(conn, nil); unbindErr != nil {
+-				keep = false
+-				if unbindErr != sql.ErrConnDone {
+-					err = errors.Join(err, unbindErr)
+-				} else if err == nil {
+-					err = errors.New("retained PostgreSQL session closed before proof settlement")
+-				}
+-			}
+-		}
+@@ -835 +851 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
+-			// Fence and close while serialized, with the exact scope still bound.
++			// Fence and close while serialized.
+@@ -839 +854,0 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
+-		err = errors.Join(err, scope.Err())
+@@ -847,4 +862,3 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
+-	if err := bindNativeOperation(conn, scope); err != nil {
+-		return err
+-	}
+-	queryCtx := context.WithoutCancel(scope.Context(probeCtx))
++	// The monitor deadline is checked after drain; it cannot bound a stalled
++	// transport in this investigation prototype.
++	queryCtx := context.WithoutCancel(probeCtx)
+@@ -858 +872 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
+-	err = errors.Join(proofErr, probeCtx.Err(), scope.Wait())
++	err = errors.Join(proofErr, probeCtx.Err())
+@@ -879 +893 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
+-	if ctx.Err() != nil {
++	if ctx.Err() != nil && proofErr == nil && held {
+@@ -890,4 +903,0 @@ func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Dura
+-func RollbackAuthorityTransaction(tx *sql.Tx, session *SessionAuthority) error {
+-	return rollbackSessionTransaction(tx, session)
+-}
+-
+@@ -916,14 +925,0 @@ func (l *AdvisoryLockLease) InstallTerminalOwner(releaseCapacity, onTerminal, re
+-func (a *SessionAuthority) BeginTx(ctx context.Context) (*sql.Tx, error) { return a.beginTx(ctx) }
+-func (a *SessionAuthority) EndTx(tx *sql.Tx) error {
+-	if a == nil || tx == nil {
+-		return errors.New("PostgreSQL session transaction is missing")
+-	}
+-	a.mu.Lock()
+-	scope := a.activeScope
+-	a.mu.Unlock()
+-	err := a.endTx(tx)
+-	if scope != nil {
+-		err = errors.Join(err, scope.Err())
+-	}
+-	return err
+-}
+diff --git a/internal/store/internal/backend/postgres/transaction.go b/internal/store/internal/backend/postgres/transaction.go
+index ecd60fcdf..aa22ff739 100644
+--- a/internal/store/internal/backend/postgres/transaction.go
++++ b/internal/store/internal/backend/postgres/transaction.go
+@@ -10,2 +9,0 @@ import (
+-
+-	"github.com/lib/pq"
+@@ -33,2 +31,3 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
+-	scope := pq.NewOperationScope(ctx)
+-	ctx = scope.Context(ctx)
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+@@ -39,3 +37,0 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
+-	if err := bindNativeOperation(conn, scope); err != nil {
+-		return errors.Join(err, conn.Close())
+-	}
+@@ -62,6 +57,0 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
+-		// Unsafe rollback must dispose first: only that exact physical close can
+-		// end an uncompleted driver transaction. Safe automatic rollback is also
+-		// joined here before the owned connection returns to the pool.
+-		_ = scope.Wait()
+-		// Keep the record bound through physical pool-return disposal. Native
+-		// ResetSession clears it before the next borrower is admitted.
+@@ -73,3 +62,0 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
+-		if nativeErr := scope.Err(); nativeErr != nil {
+-			err = errors.Join(err, nativeErr)
+-		}
+@@ -81 +68,7 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
+-	tx, err = conn.BeginTx(ctx, opts)
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	// Investigation only: graceful stop drains admitted SQL. This does not
++	// bound transport stalls or check logical admission before each statement.
++	sqlCtx := context.WithoutCancel(ctx)
++	tx, err = conn.BeginTx(sqlCtx, opts)
+@@ -82,0 +76,3 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
++		return errors.Join(ctx.Err(), err)
++	}
++	if err := ctx.Err(); err != nil {
+@@ -85 +81 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
+-	if operationErr := operation(ctx, tx); operationErr != nil {
++	if operationErr := operation(sqlCtx, tx); operationErr != nil {
+@@ -93,3 +88,0 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
+-		if commitErr == sql.ErrTxDone && ctx.Err() != nil {
+-			return ctx.Err()
+-		}
+@@ -101,6 +93,0 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
+-
+-func bindNativeOperation(conn *sql.Conn, scope *pq.OperationScope) error {
+-	return conn.Raw(func(raw any) error {
+-		return pq.BindOperationScope(raw.(driver.Conn), scope)
+-	})
+-}
+diff --git a/internal/store/internal/backend/postgres/transaction_exit_test.go b/internal/store/internal/backend/postgres/transaction_exit_test.go
+index 8e00b5379..438b676ed 100644
+--- a/internal/store/internal/backend/postgres/transaction_exit_test.go
++++ b/internal/store/internal/backend/postgres/transaction_exit_test.go
+@@ -15 +14,0 @@ import (
+-	"github.com/lib/pq"
+@@ -30,0 +30 @@ type exitProbeConnector struct {
++	beforeCommit                     func()
+@@ -31,0 +32 @@ type exitProbeConnector struct {
++	afterQuery                       func(context.Context, string)
+@@ -48,4 +48,0 @@ type exitProbeConn struct {
+-func (c *exitProbeConn) BindOperationScope(scope *pq.OperationScope) error {
+-	return pq.BindOperationScope(c.Conn, scope)
+-}
+-
+@@ -56 +53,5 @@ func (c *exitProbeConn) QueryContext(ctx context.Context, query string, args []d
+-	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
++	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
++	if c.probe.afterQuery != nil {
++		c.probe.afterQuery(ctx, query)
++	}
++	return rows, err
+@@ -85,0 +87,3 @@ func (t *exitProbeTx) Commit() error {
++	if t.probe.beforeCommit != nil {
++		t.probe.beforeCommit()
++	}
+diff --git a/internal/store/internal/backend/runforkpersistence/conversation_fork_backend.go b/internal/store/internal/backend/runforkpersistence/conversation_fork_backend.go
+index 1009ab5b6..deb5b6dc5 100644
+--- a/internal/store/internal/backend/runforkpersistence/conversation_fork_backend.go
++++ b/internal/store/internal/backend/runforkpersistence/conversation_fork_backend.go
+@@ -6 +5,0 @@ import (
+-	"database/sql/driver"
+@@ -8,0 +8 @@ import (
++	"log/slog"
+@@ -12,0 +13 @@ import (
++	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+@@ -135 +136 @@ func (s conversationForkStore) runMutation(ctx context.Context, serializable boo
+-	return s.runPostgresMutation(ctx, s.postgres.backend, serializable, fn)
++	return s.runPostgresMutation(ctx, nil, serializable, fn)
+@@ -141,0 +143,10 @@ func (s conversationForkStore) runForkMutation(ctx context.Context, forkID strin
++	return s.runPostgresMutation(ctx, &forkID, serializable, fn)
++}
++
++func (s conversationForkStore) runPostgresMutation(ctx context.Context, forkID *string, serializable bool, fn func(context.Context, *sql.Tx) error) (err error) {
++	if ctx == nil {
++		ctx = context.Background()
++	}
++	if err := ctx.Err(); err != nil {
++		return err
++	}
+@@ -146,3 +157,3 @@ func (s conversationForkStore) runForkMutation(ctx context.Context, forkID strin
+-	defer conn.Close()
+-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, forkID); err != nil {
+-		return fmt.Errorf("lock postgres conversation fork %s: %w", forkID, err)
++	session, err := postgresbackend.NewSessionAuthority(conn)
++	if err != nil {
++		return errors.Join(err, conn.Close())
+@@ -151,9 +162,4 @@ func (s conversationForkStore) runForkMutation(ctx context.Context, forkID strin
+-		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+-		defer cancel()
+-		var unlocked bool
+-		unlockErr := conn.QueryRowContext(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, forkID).Scan(&unlocked)
+-		if unlockErr == nil && unlocked {
+-			return
+-		}
+-		if unlockErr == nil {
+-			unlockErr = fmt.Errorf("postgres conversation fork advisory lock was not held")
++		if releaseErr := session.Release(); releaseErr != nil {
++			cleanupErr := errors.Join(releaseErr, session.ForceDiscard())
++			slog.Error("postgres conversation fork session release failed", "error", cleanupErr)
++			err = errors.Join(err, cleanupErr)
+@@ -161,2 +166,0 @@ func (s conversationForkStore) runForkMutation(ctx context.Context, forkID strin
+-		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+-		err = errors.Join(err, fmt.Errorf("unlock postgres conversation fork %s: %w", forkID, unlockErr))
+@@ -164,7 +168,32 @@ func (s conversationForkStore) runForkMutation(ctx context.Context, forkID strin
+-	err = s.runPostgresMutation(ctx, conn, serializable, fn)
+-	return err
+-}
+-
+-func (s conversationForkStore) runPostgresMutation(ctx context.Context, q interface {
+-	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+-}, serializable bool, fn func(context.Context, *sql.Tx) error) error {
++	if err := ctx.Err(); err != nil {
++		return err
++	}
++	if forkID != nil {
++		// The session lock precedes BEGIN so serializable snapshots are taken
++		// only after competing fork mutations settle. Admitted lock SQL drains.
++		if _, lockErr := conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_lock(hashtextextended($1, 0))`, *forkID); lockErr != nil {
++			return errors.Join(ctx.Err(), fmt.Errorf("lock postgres conversation fork %s: %w", *forkID, lockErr), session.ForceDiscard())
++		}
++		defer func() {
++			// The transaction owner may already have disposed this exact socket.
++			probeErr := conn.Raw(func(any) error { return nil })
++			if probeErr == sql.ErrConnDone {
++				return
++			}
++			unlockErr := probeErr
++			if unlockErr == nil {
++				unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++				defer cancel()
++				var unlocked bool
++				unlockErr = conn.QueryRowContext(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, *forkID).Scan(&unlocked)
++				if unlockErr == nil && !unlocked {
++					unlockErr = fmt.Errorf("postgres conversation fork advisory lock was not held")
++				}
++			}
++			if unlockErr != nil {
++				cleanupErr := errors.Join(fmt.Errorf("unlock postgres conversation fork %s: %w", *forkID, unlockErr), session.ForceDiscard())
++				slog.Error("postgres conversation fork unlock failed", "error", cleanupErr)
++				err = errors.Join(err, cleanupErr)
++			}
++		}()
++	}
+@@ -175,9 +204,2 @@ func (s conversationForkStore) runPostgresMutation(ctx context.Context, q interf
+-	tx, err := q.BeginTx(ctx, opts)
+-	if err != nil {
+-		return err
+-	}
+-	if err := fn(ctx, tx); err != nil {
+-		_ = tx.Rollback()
+-		return err
+-	}
+-	return tx.Commit()
++	_, err = postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, session, opts, fn)
++	return err
+diff --git a/internal/store/internal/backend/runforkpersistence/conversation_fork_graceful_test.go b/internal/store/internal/backend/runforkpersistence/conversation_fork_graceful_test.go
+new file mode 100644
+index 000000000..553edd70c
+--- /dev/null
++++ b/internal/store/internal/backend/runforkpersistence/conversation_fork_graceful_test.go
+@@ -0,0 +1,282 @@
++package runforkpersistence
++
++import (
++	"context"
++	"database/sql"
++	"database/sql/driver"
++	"errors"
++	"strings"
++	"testing"
++
++	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
++	"github.com/division-sh/swarm/internal/testutil"
++	"github.com/lib/pq"
++)
++
++// This trace forwards real SQL and transaction exits; it does not fabricate
++// settlement. It observes the exact ordering of session lock completion and BEGIN.
++type forkMutationConnector struct {
++	driver.Connector
++	keyed, lockHeld            bool
++	begins, commits, rollbacks int
++	orderWrong, contextWrong   bool
++	afterLock                  func()
++}
++
++func (p *forkMutationConnector) Connect(ctx context.Context) (driver.Conn, error) {
++	c, err := p.Connector.Connect(ctx)
++	if err != nil {
++		return nil, err
++	}
++	return &forkMutationConn{Conn: c, probe: p}, nil
++}
++
++type forkMutationConn struct {
++	driver.Conn
++	probe *forkMutationConnector
++}
++
++func (c *forkMutationConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
++	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
++	if strings.Contains(query, "SELECT pg_advisory_lock(") && err == nil {
++		c.probe.lockHeld = true
++		c.probe.contextWrong = c.probe.contextWrong || ctx.Done() != nil
++		if c.probe.afterLock != nil {
++			c.probe.afterLock()
++		}
++	}
++	return result, err
++}
++
++func (c *forkMutationConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
++	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
++}
++
++func (c *forkMutationConn) ResetSession(ctx context.Context) error {
++	return c.Conn.(driver.SessionResetter).ResetSession(ctx)
++}
++
++func (c *forkMutationConn) IsValid() bool { return c.Conn.(driver.Validator).IsValid() }
++
++func (c *forkMutationConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
++	c.probe.begins++
++	c.probe.orderWrong = c.probe.orderWrong || (c.probe.keyed && !c.probe.lockHeld)
++	c.probe.contextWrong = c.probe.contextWrong || ctx.Done() != nil
++	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
++	if err != nil {
++		return nil, err
++	}
++	return &forkMutationTx{Tx: tx, probe: c.probe}, nil
++}
++
++type forkMutationTx struct {
++	driver.Tx
++	probe *forkMutationConnector
++}
++
++func (tx *forkMutationTx) Commit() error {
++	tx.probe.commits++
++	return tx.Tx.Commit()
++}
++
++func (tx *forkMutationTx) Rollback() error {
++	tx.probe.rollbacks++
++	return tx.Tx.Rollback()
++}
++
++func TestConversationForkGracefulMutation(t *testing.T) {
++	for _, keyed := range []bool{false, true} {
++		name := "unkeyed"
++		if keyed {
++			name = "keyed"
++		}
++		t.Run(name, func(t *testing.T) {
++			for _, scenario := range []string{"success", "before_admission", "during_sql", "before_commit", "panic", "sql_failure", "commit_failure", "after_lock", "lost_lock"} {
++				if !keyed && (scenario == "after_lock" || scenario == "lost_lock") {
++					continue
++				}
++				t.Run(scenario, func(t *testing.T) {
++					dsn, observer, _ := testutil.StartPostgres(t)
++					if _, err := observer.Exec(`CREATE TABLE fork_graceful (n integer UNIQUE DEFERRABLE INITIALLY DEFERRED)`); err != nil {
++						t.Fatal(err)
++					}
++					connector, err := pq.NewConnector(dsn)
++					if err != nil {
++						t.Fatal(err)
++					}
++					ctx, cancel := context.WithCancel(context.Background())
++					defer cancel()
++					noticed := false
++					probe := &forkMutationConnector{Connector: pq.ConnectorWithNoticeHandler(connector, func(*pq.Error) {
++						noticed = true
++						cancel()
++					}), keyed: keyed}
++					db := sql.OpenDB(probe)
++					db.SetMaxOpenConns(1)
++					defer db.Close()
++					backend, err := postgresbackend.New(db)
++					if err != nil {
++						t.Fatal(err)
++					}
++					store := conversationForkStore{db: backend, dialect: conversationForkPostgres}
++					var beforePID int
++					if err := db.QueryRow("SELECT pg_backend_pid()").Scan(&beforePID); err != nil {
++						t.Fatal(err)
++					}
++					if scenario == "before_admission" {
++						cancel()
++					}
++					if scenario == "after_lock" {
++						probe.afterLock = cancel
++					}
++					const key = "fork-graceful-key"
++					run := func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
++						if keyed {
++							return store.runForkMutation(ctx, key, true, fn)
++						}
++						return store.runMutation(ctx, false, fn)
++					}
++					calls := 0
++					primary := errors.New("fork callback panic")
++					var recovered any
++					func() {
++						defer func() { recovered = recover() }()
++						err = run(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
++							calls++
++							var isolation string
++							if err := tx.QueryRowContext(sqlCtx, "SHOW transaction_isolation").Scan(&isolation); err != nil {
++								return err
++							}
++							want := "read committed"
++							if keyed {
++								want = "serializable"
++							}
++							if isolation != want || sqlCtx.Done() != nil {
++								t.Errorf("isolation=%s want=%s detached=%t", isolation, want, sqlCtx.Done() == nil)
++							}
++							if keyed {
++								assertForkLockAvailable(t, observer, key, false)
++							}
++							if _, err := tx.ExecContext(sqlCtx, "INSERT INTO fork_graceful VALUES (1)"); err != nil {
++								return err
++							}
++							switch scenario {
++							case "during_sql":
++								// A server NOTICE cancels the logical caller while actual
++								// PostgreSQL work is admitted. The second insert must drain.
++								if _, err := tx.ExecContext(sqlCtx, `DO $$ BEGIN RAISE NOTICE 'fork admitted'; PERFORM pg_sleep(0.02); INSERT INTO fork_graceful VALUES (2); END $$`); err != nil {
++									return err
++								}
++								var count int
++								if err := tx.QueryRowContext(sqlCtx, "SELECT count(*) FROM fork_graceful").Scan(&count); err != nil {
++									return err
++								}
++								if !noticed || count != 2 {
++									t.Errorf("admitted work did not drain: notice=%t rows=%d", noticed, count)
++								}
++							case "before_commit":
++								cancel()
++							case "panic":
++								panic(primary)
++							case "sql_failure":
++								_, err := tx.ExecContext(sqlCtx, "SELECT 1/0")
++								return err
++							case "commit_failure":
++								_, err := tx.ExecContext(sqlCtx, "INSERT INTO fork_graceful VALUES (1)")
++								return err
++							case "lost_lock":
++								_, err := tx.ExecContext(sqlCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, key)
++								return err
++							}
++							return nil
++						})
++					}()
++					if scenario == "panic" && recovered != primary {
++						t.Fatalf("panic identity=%v", recovered)
++					}
++					if scenario != "panic" && recovered != nil {
++						t.Fatalf("unexpected panic: %v", recovered)
++					}
++					canceled := scenario == "before_admission" || scenario == "during_sql" || scenario == "before_commit" || scenario == "after_lock"
++					if canceled && !errors.Is(err, context.Canceled) {
++						t.Errorf("logical stop lost: %v", err)
++					}
++					if scenario == "success" && err != nil {
++						t.Errorf("healthy work: %v", err)
++					}
++					if scenario == "sql_failure" || scenario == "commit_failure" {
++						var pgErr *pq.Error
++						want := pq.ErrorCode("22012")
++						if scenario == "commit_failure" {
++							want = "23505"
++						}
++						if !errors.As(err, &pgErr) || pgErr.Code != want {
++							t.Errorf("SQL failure lost: %v", err)
++						}
++					}
++					if scenario == "lost_lock" && (err == nil || !strings.Contains(err.Error(), "advisory lock was not held")) {
++						t.Errorf("cleanup failure lost: %v", err)
++					}
++					wantCalls, wantCommits, wantRollbacks := 1, 0, 1
++					if scenario == "before_admission" || scenario == "after_lock" {
++						wantCalls, wantRollbacks = 0, 0
++					}
++					if scenario == "success" || scenario == "commit_failure" || scenario == "lost_lock" {
++						wantCommits, wantRollbacks = 1, 0
++					}
++					if calls != wantCalls || probe.begins != wantCalls || probe.commits != wantCommits || probe.rollbacks != wantRollbacks || probe.orderWrong || probe.contextWrong {
++						t.Errorf("calls=%d BEGIN=%d COMMIT=%d ROLLBACK=%d orderWrong=%t contextWrong=%t", calls, probe.begins, probe.commits, probe.rollbacks, probe.orderWrong, probe.contextWrong)
++					}
++					var durable int
++					if err := observer.QueryRow("SELECT count(*) FROM fork_graceful").Scan(&durable); err != nil {
++						t.Fatal(err)
++					}
++					wantDurable := 0
++					if scenario == "success" || scenario == "lost_lock" {
++						wantDurable = 1
++					}
++					if durable != wantDurable {
++						t.Errorf("durable=%d want=%d", durable, wantDurable)
++					}
++					assertForkLockAvailable(t, observer, key, true)
++					probe.afterLock = nil
++					probe.lockHeld = false
++					var afterPID int
++					if err := run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
++						return tx.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&afterPID)
++					}); err != nil {
++						t.Fatalf("successor failed: %v", err)
++					}
++					unsafe := scenario == "commit_failure" || scenario == "lost_lock"
++					if (beforePID != afterPID) != unsafe {
++						t.Errorf("socket disposition pid %d -> %d unsafe=%t", beforePID, afterPID, unsafe)
++					}
++					assertForkLockAvailable(t, observer, key, true)
++					t.Logf("callbacks=%d durable=%d pid=%d->%d unsafe=%t error=%v", calls, durable, beforePID, afterPID, unsafe, err)
++				})
++			}
++		})
++	}
++}
++
++func assertForkLockAvailable(t *testing.T, db *sql.DB, key string, want bool) {
++	t.Helper()
++	conn, err := db.Conn(context.Background())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	var acquired bool
++	if err := conn.QueryRowContext(context.Background(), `SELECT pg_try_advisory_lock(hashtextextended($1, 0))`, key).Scan(&acquired); err != nil {
++		t.Fatal(err)
++	}
++	if acquired {
++		var unlocked bool
++		if err := conn.QueryRowContext(context.Background(), `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, key).Scan(&unlocked); err != nil || !unlocked {
++			t.Fatalf("competitor unlock=%t: %v", unlocked, err)
++		}
++	}
++	if acquired != want {
++		t.Errorf("competing lock acquired=%t want=%t", acquired, want)
++	}
++}
+diff --git a/internal/store/internal/runtimepersistence/completion_handoff_evidence_probe_test.go b/internal/store/internal/runtimepersistence/completion_handoff_evidence_probe_test.go
+new file mode 100644
+index 000000000..dc0d3107a
+--- /dev/null
++++ b/internal/store/internal/runtimepersistence/completion_handoff_evidence_probe_test.go
+@@ -0,0 +1,116 @@
++package runtimepersistence
++
++import (
++	"context"
++	"errors"
++	"testing"
++
++	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
++	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
++	"github.com/division-sh/swarm/internal/testutil"
++)
++
++type completionHandoffEvidenceProbeSink struct {
++	submit func(runtimerunlifecycle.Candidate) error
++}
++
++func (s *completionHandoffEvidenceProbeSink) ReserveCompletionCandidate(context.Context) (runtimerunlifecycle.CandidateAdmission, error) {
++	return s, nil
++}
++func (s *completionHandoffEvidenceProbeSink) Submit(c runtimerunlifecycle.Candidate) error {
++	return s.submit(c)
++}
++func (*completionHandoffEvidenceProbeSink) Cancel() error { return nil }
++
++// Investigation only: injected sink failure after real durable settlement, not
++// SIGKILL or a lost COMMIT response. The negative control intentionally fails
++// until the named completion owner preserves acknowledged commit evidence.
++func TestCompletionCommittedEvidenceAfterHandoffFailureProbe(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		for _, fail := range []bool{false, true} {
++			phase := "healthy"
++			if fail {
++				phase = "sink_failure"
++			}
++			t.Run(backend+"/"+phase, func(t *testing.T) {
++				var fixture completionSettlementFixture
++				if backend == "sqlite" {
++					s := newBootstrappedSQLiteRuntimeStoreForTest(t)
++					fixture = newCompletionSettlementFixture(t, s, s.backend.ConstructionHandle(), true)
++				} else {
++					_, db, _ := testutil.StartPostgres(t)
++					fixture = newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false)
++				}
++				ctx := fixture.context
++				handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "handoff-evidence-probe")
++				attempt := handle.Attempt()
++				query := "SELECT bundle_hash FROM runs WHERE run_id=?"
++				stateQuery := "SELECT state FROM runtime_external_effect_attempts WHERE attempt_id=?"
++				if !fixture.sqlite {
++					query = "SELECT bundle_hash FROM runs WHERE run_id=$1::uuid"
++					stateQuery = "SELECT state FROM runtime_external_effect_attempts WHERE attempt_id=$1::uuid"
++				}
++				var bundleHash string
++				if err := fixture.db.QueryRow(query, fixture.authority.Target.RunID).Scan(&bundleHash); err != nil {
++					t.Fatal(err)
++				}
++				injected := errors.New("injected postcommit completion sink submission failure")
++				submits := 0
++				durableAtSubmit := ""
++				sink := &completionHandoffEvidenceProbeSink{submit: func(c runtimerunlifecycle.Candidate) error {
++					submits++
++					if c.RunID != fixture.authority.Target.RunID {
++						t.Errorf("foreign candidate: %+v", c)
++					}
++					if err := fixture.db.QueryRow(stateQuery, attempt.AttemptID).Scan(&durableAtSubmit); err != nil {
++						return err
++					}
++					if durableAtSubmit != string(runtimeeffects.StateSettled) {
++						t.Errorf("sink entered before durable settlement: %s", durableAtSubmit)
++					}
++					if fail {
++						return injected
++					}
++					return nil
++				}}
++				registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
++				registration, err := registrar.RegisterCompletionCandidateSink(ctx, runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}, sink)
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer registration.Release()
++				settlement := completionSettlementForTest(t, attempt.Authority.Target, fixture, "claude_cli", "", "")
++				settlement.ProviderHead = nil
++				result, err := handle.SettleCompletion(ctx, settlement)
++				if fail && !errors.Is(err, injected) {
++					t.Fatalf("lost sink error: %v", err)
++				}
++				if !fail && err != nil {
++					t.Fatalf("healthy settlement: %v", err)
++				}
++				if submits != 1 {
++					t.Fatalf("sink submissions=%d want=1", submits)
++				}
++				requireCompletionSettlementRows(t, fixture, attempt.AttemptID, attempt.Authority.Target.ID, runtimeeffects.StateSettled, 1, 0)
++				reader := fixture.store.(runtimerunlifecycle.CandidateStore)
++				page, readErr := reader.ListCompletionCandidates(ctx, runtimerunlifecycle.CandidateScope{BundleHash: bundleHash}, runtimerunlifecycle.CandidateCursor{}, 100)
++				if readErr != nil {
++					t.Fatal(readErr)
++				}
++				found := false
++				for _, candidate := range page.Candidates {
++					if candidate.RunID == fixture.authority.Target.RunID {
++						found = true
++					}
++				}
++				if !found {
++					t.Error("canonical recovery reader lost committed run candidate")
++				}
++				t.Logf("backend=%s injected=%t submits=%d durable_at_submit=%s turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=%t returned_committed=%t error=%v", backend, fail, submits, durableAtSubmit, found, result.Committed, err)
++				if !result.Committed {
++					t.Error("F2: acknowledged settlement COMMIT erased by postcommit handoff error")
++				}
++			})
++		}
++	}
++}
+diff --git a/internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go b/internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go
+index e8d39615a..a25674da0 100644
+--- a/internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go
++++ b/internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go
+@@ -55,3 +54,0 @@ type diagnosticSQLConn struct {
+-func (c diagnosticSQLConn) BindOperationScope(scope *pq.OperationScope) error {
+-	return pq.BindOperationScope(c.Conn, scope)
+-}
+diff --git a/internal/store/internal/runtimepersistence/pipeline_graceful_operation_test.go b/internal/store/internal/runtimepersistence/pipeline_graceful_operation_test.go
+new file mode 100644
+index 000000000..f21d48983
+--- /dev/null
++++ b/internal/store/internal/runtimepersistence/pipeline_graceful_operation_test.go
+@@ -0,0 +1,474 @@
++package runtimepersistence
++
++import (
++	"context"
++	"database/sql"
++	"database/sql/driver"
++	"errors"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
++	obligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
++	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
++	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
++	"github.com/division-sh/swarm/internal/testutil"
++	"github.com/google/uuid"
++	"github.com/lib/pq"
++)
++
++// This connector delegates native SQL unchanged. The hooks place cancellation
++// and independent failures at the admitted operation and COMMIT boundaries.
++type pipelineGracefulProbe struct {
++	mu     sync.Mutex
++	hook   func(string, string) error
++	closes atomic.Int32
++}
++
++func (p *pipelineGracefulProbe) set(hook func(string, string) error) {
++	p.mu.Lock()
++	p.hook = hook
++	p.mu.Unlock()
++}
++
++func (p *pipelineGracefulProbe) call(phase, query string) error {
++	p.mu.Lock()
++	hook := p.hook
++	p.mu.Unlock()
++	if hook != nil {
++		return hook(phase, query)
++	}
++	return nil
++}
++
++type pipelineGracefulConnector struct {
++	driver.Connector
++	probe *pipelineGracefulProbe
++}
++
++func (c pipelineGracefulConnector) Connect(ctx context.Context) (driver.Conn, error) {
++	conn, err := c.Connector.Connect(ctx)
++	if err != nil {
++		return nil, err
++	}
++	pq.SetNoticeHandler(conn, func(notice *pq.Error) { _ = c.probe.call("notice", notice.Message) })
++	return &pipelineGracefulConn{Conn: conn, probe: c.probe}, nil
++}
++
++type pipelineGracefulConn struct {
++	driver.Conn
++	probe *pipelineGracefulProbe
++}
++
++func (c *pipelineGracefulConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
++	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
++	if err != nil {
++		return nil, err
++	}
++	return &pipelineGracefulTx{Tx: tx, probe: c.probe}, nil
++}
++func (c *pipelineGracefulConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
++	if err := c.probe.call("query", query); err != nil {
++		return nil, err
++	}
++	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
++}
++func (c *pipelineGracefulConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
++	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
++	return result, errors.Join(err, c.probe.call("exec", query))
++}
++func (c *pipelineGracefulConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
++	return c.Conn.(driver.ConnPrepareContext).PrepareContext(ctx, query)
++}
++func (c *pipelineGracefulConn) CheckNamedValue(value *driver.NamedValue) error {
++	return c.Conn.(driver.NamedValueChecker).CheckNamedValue(value)
++}
++func (c *pipelineGracefulConn) ResetSession(ctx context.Context) error {
++	return c.Conn.(driver.SessionResetter).ResetSession(ctx)
++}
++func (c *pipelineGracefulConn) IsValid() bool { return c.Conn.(driver.Validator).IsValid() }
++func (c *pipelineGracefulConn) Ping(ctx context.Context) error {
++	return c.Conn.(driver.Pinger).Ping(ctx)
++}
++func (c *pipelineGracefulConn) Close() error { c.probe.closes.Add(1); return c.Conn.Close() }
++
++type pipelineGracefulTx struct {
++	driver.Tx
++	probe *pipelineGracefulProbe
++}
++
++func (tx *pipelineGracefulTx) Commit() error {
++	if err := tx.probe.call("commit_admitted", ""); err != nil {
++		return err
++	}
++	err := tx.Tx.Commit()
++	return errors.Join(err, tx.probe.call("commit_returned", ""))
++}
++
++func openPipelineGracefulFixture(t *testing.T) (authorActivityReceiptFixture, *PostgresStore, *pipelineGracefulProbe) {
++	t.Helper()
++	dsn, _, _ := testutil.StartPostgres(t)
++	connector, err := pq.NewConnector(dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	probe := &pipelineGracefulProbe{}
++	db := sql.OpenDB(pipelineGracefulConnector{Connector: connector, probe: probe})
++	db.SetMaxOpenConns(1)
++	db.SetMaxIdleConns(1)
++	t.Cleanup(func() { probe.set(nil); _ = db.Close() })
++	store := admitTestPostgresStore(t, db)
++	registerTestAuthorActivityCatalog(t, store)
++	return authorActivityReceiptFixture{store: store, db: db, dialect: authoractivityfixture.DialectPostgres}, store, probe
++}
++
++func TestPipelineGracefulClaimReadCancellation(t *testing.T) {
++	for _, phase := range []string{"entry", "parent_fence", "eligibility", "event_hydration", "receipt", "scope", "native_notice"} {
++		t.Run(phase, func(t *testing.T) {
++			fixture, store, probe := openPipelineGracefulFixture(t)
++			base := testAuthorActivityContext()
++			runID := uuid.NewString()
++			seedAuthorActivityReceiptRun(t, fixture, base, runID)
++			eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
++			if phase == "native_notice" {
++				for _, statement := range []string{
++					`CREATE FUNCTION pipeline_graceful_notice() RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'pipeline active read'; RETURN true; END $$`,
++					`ALTER TABLE events RENAME TO pipeline_graceful_events`,
++					`CREATE VIEW events AS SELECT * FROM pipeline_graceful_events WHERE pipeline_graceful_notice()`,
++				} {
++					if _, err := fixture.db.Exec(statement); err != nil {
++						t.Fatal(err)
++					}
++				}
++			}
++			ctx, cancel := context.WithCancel(base)
++			defer cancel()
++			var canceled atomic.Bool
++			match := map[string]string{"parent_fence": "pg_advisory_xact_lock", "eligibility": "SELECT EXISTS", "event_hydration": "e.payload_bytes", "receipt": "SELECT outcome FROM event_receipts", "scope": "SELECT scope FROM committed_replay_scopes"}[phase]
++			probe.set(func(at, query string) error {
++				matches := phase != "native_notice" && at == "query" && strings.Contains(query, match)
++				if phase == "native_notice" {
++					matches = at == "notice" && query == "pipeline active read"
++				}
++				if matches && canceled.CompareAndSwap(false, true) {
++					cancel()
++				}
++				return nil
++			})
++			if phase == "entry" {
++				probe.set(nil)
++				cancel()
++			}
++			closes := probe.closes.Load()
++			work, err := store.PipelineObligations().ClaimEvent(ctx, eventID, obligation.PurposeRecovery)
++			probe.set(nil)
++			if !errors.Is(err, context.Canceled) || work.Event.ID() != "" {
++				t.Fatalf("canceled claim exposed work: %s, %v", work.Event.ID(), err)
++			}
++			if phase != "entry" && !canceled.Load() {
++				t.Fatal("read boundary was not exercised")
++			}
++			if got := probe.closes.Load(); got != closes {
++				t.Fatalf("healthy cancellation closed native session: %d -> %d", closes, got)
++			}
++			if n := store.pipelinePostgresOwner.PostgresPipelineClaimsForTest().ClaimCountForTest(); n != 0 {
++				t.Fatalf("canceled claim retained %d claims", n)
++			}
++			next, err := store.PipelineObligations().ClaimEvent(base, eventID, obligation.PurposeRecovery)
++			if err != nil {
++				t.Fatalf("successor claim: %v", err)
++			}
++			outcome, err := store.PipelineObligations().Settle(base, next.Claim, obligation.Acknowledged("processed"))
++			if err != nil || !outcome.Committed() {
++				t.Fatalf("successor settlement: %#v, %v", outcome, err)
++			}
++		})
++	}
++}
++
++func TestPipelineGracefulParentFenceDrainsCanceledWait(t *testing.T) {
++	fixture, store, probe := openPipelineGracefulFixture(t)
++	base := testAuthorActivityContext()
++	runID := uuid.NewString()
++	seedAuthorActivityReceiptRun(t, fixture, base, runID)
++	eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
++	fixture.db.SetMaxOpenConns(2)
++	holder, err := fixture.db.Conn(base)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer holder.Close()
++	key := "swarm:pipeline-parent-fence:" + eventID
++	if _, err := holder.ExecContext(base, `SELECT pg_advisory_lock(hashtext($1))`, key); err != nil {
++		t.Fatal(err)
++	}
++	defer holder.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, key)
++	entered := make(chan struct{})
++	var once sync.Once
++	probe.set(func(at, query string) error {
++		if at == "query" && strings.Contains(query, "pg_advisory_xact_lock") {
++			once.Do(func() { close(entered) })
++		}
++		return nil
++	})
++	ctx, cancel := context.WithCancel(base)
++	defer cancel()
++	done := make(chan error, 1)
++	go func() {
++		_, err := store.PipelineObligations().ClaimEvent(ctx, eventID, obligation.PurposeRecovery)
++		done <- err
++	}()
++	select {
++	case <-entered:
++	case <-time.After(5 * time.Second):
++		t.Fatal("claim never entered parent fence")
++	}
++	cancel()
++	select {
++	case err := <-done:
++		t.Fatalf("admitted fence returned before parent settlement: %v", err)
++	case <-time.After(30 * time.Millisecond):
++	}
++	if _, err := holder.ExecContext(base, `SELECT pg_advisory_unlock(hashtext($1))`, key); err != nil {
++		t.Fatal(err)
++	}
++	select {
++	case err := <-done:
++		if !errors.Is(err, context.Canceled) {
++			t.Fatalf("fence cancellation: %v", err)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("claim did not settle after parent fence released")
++	}
++	probe.set(nil)
++	var acquired bool
++	if err := holder.QueryRowContext(base, `SELECT pg_try_advisory_lock(hashtext($1))`, key).Scan(&acquired); err != nil || !acquired {
++		t.Fatalf("canceled fence leaked lock: %v, %v", acquired, err)
++	}
++	if _, err := holder.ExecContext(base, `SELECT pg_advisory_unlock(hashtext($1))`, key); err != nil {
++		t.Fatal(err)
++	}
++	if err := holder.Close(); err != nil {
++		t.Fatal(err)
++	}
++	work, err := store.PipelineObligations().ClaimEvent(base, eventID, obligation.PurposeRecovery)
++	if err != nil {
++		t.Fatalf("successor claim: %v", err)
++	}
++	if _, err := store.PipelineObligations().Settle(base, work.Claim, obligation.Acknowledged("processed")); err != nil {
++		t.Fatal(err)
++	}
++}
++
++type pipelineGracefulSink struct {
++	submits, cancels atomic.Int32
++	failure          error
++}
++
++func (s *pipelineGracefulSink) ReserveCompletionCandidate(context.Context) (runlifecycle.CandidateAdmission, error) {
++	return s, nil
++}
++func (s *pipelineGracefulSink) Submit(runlifecycle.Candidate) error {
++	s.submits.Add(1)
++	return s.failure
++}
++func (s *pipelineGracefulSink) Cancel() error { s.cancels.Add(1); return nil }
++
++func TestPipelineGracefulWriteOutcome(t *testing.T) {
++	for _, method := range []string{"settle", "mark_decision"} {
++		for _, phase := range []string{"success", "cancel_entry", "cancel_work", "cancel_commit_admitted", "independent_work", "panic", "endtx", "release", "handoff", "combined", "release_handoff", "commit_refused", "commit_ack_lost"} {
++			if method == "mark_decision" && (phase == "release" || phase == "release_handoff") {
++				continue
++			}
++			t.Run(method+"/"+phase, func(t *testing.T) {
++				fixture, store, probe := openPipelineGracefulFixture(t)
++				base := testAuthorActivityContext()
++				runID := uuid.NewString()
++				seedAuthorActivityReceiptRun(t, fixture, base, runID)
++				eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
++				purpose := obligation.PurposeRecovery
++				if method == "mark_decision" {
++					insertProducerIdentityDecisionObligation(t, fixture, base, eventID, runID, time.Now().UTC())
++					purpose = obligation.PurposeDecisionRoute
++				}
++				owner := store.PipelineObligations()
++				work, err := owner.ClaimEvent(base, eventID, purpose)
++				if err != nil {
++					t.Fatal(err)
++				}
++				state, err := store.pipelinePostgresOwner.PostgresPipelineClaimStateForTest(work.Claim)
++				if err != nil {
++					t.Fatal(err)
++				}
++				lease := state.LeaseForTest()
++				session := lease.Session()
++				t.Cleanup(func() { session.SetEndTxErrorForTest(nil); _ = lease.ReleaseTerminal(context.Background()) })
++				primary := errors.New("independent pipeline operation failure")
++				cleanup := errors.New("independent pipeline EndTx failure")
++				release := errors.New("independent pipeline release failure")
++				handoff := errors.New("independent pipeline handoff failure")
++				if phase == "endtx" || phase == "combined" {
++					session.SetEndTxErrorForTest(func() error { return cleanup })
++				}
++				if phase == "release" || phase == "release_handoff" {
++					lease.SetReleaseSessionForTest(func() error { return errors.Join(session.Release(), release) })
++				}
++				process := worklifetime.NewProcess()
++				occurrence := newRunLifecycleExecutorOccurrence(t, process)
++				base = worklifetime.WithRuntimeOccurrence(base, occurrence)
++				sink := &pipelineGracefulSink{}
++				if phase == "handoff" || phase == "combined" || phase == "release_handoff" {
++					sink.failure = handoff
++				}
++				registration, err := store.RegisterCompletionCandidateSink(base, runlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash}, sink)
++				if err != nil {
++					t.Fatal(err)
++				}
++				t.Cleanup(func() {
++					registration.Release()
++					retireRunLifecycleExecutorOccurrence(t, occurrence)
++					retireRunLifecycleProcess(t, process)
++				})
++				ctx, cancel := context.WithCancel(base)
++				defer cancel()
++				var fired atomic.Bool
++				probe.set(func(at, query string) error {
++					if at == "exec" && strings.Contains(query, "INSERT INTO event_receipts") && fired.CompareAndSwap(false, true) {
++						switch phase {
++						case "cancel_work":
++							cancel()
++						case "independent_work":
++							cancel()
++							return primary
++						case "panic":
++							panic(primary)
++						}
++					}
++					if at == "commit_admitted" {
++						if phase == "cancel_commit_admitted" {
++							cancel()
++						}
++						if phase == "commit_refused" {
++							return primary
++						}
++					}
++					if at == "commit_returned" && phase == "commit_ack_lost" {
++						return primary
++					}
++					return nil
++				})
++				if phase == "cancel_entry" {
++					cancel()
++				}
++				var outcome obligation.SettlementOutcome
++				var recovered any
++				func() {
++					defer func() { recovered = recover() }()
++					if method == "settle" {
++						outcome, err = owner.Settle(ctx, work.Claim, obligation.Acknowledged("processed"))
++					} else {
++						err = owner.MarkDecisionProcessed(ctx, work.Claim)
++					}
++				}()
++				probe.set(nil)
++				session.SetEndTxErrorForTest(nil)
++				committed := phase == "success" || phase == "cancel_commit_admitted" || phase == "endtx" || phase == "release" || phase == "handoff" || phase == "combined" || phase == "release_handoff"
++				if method == "settle" && (outcome.Committed() != committed || outcome.DeliveryHandoffCommitted() != committed) {
++					t.Fatalf("commit evidence=%#v, want committed=%v, err=%v", outcome, committed, err)
++				}
++				if phase == "panic" && recovered != primary {
++					t.Fatalf("panic=%v", recovered)
++				}
++				if (phase == "cancel_entry" || phase == "cancel_work") && !errors.Is(err, context.Canceled) {
++					t.Fatalf("lost cancellation: %v", err)
++				}
++				if (phase == "independent_work" || phase == "commit_refused" || phase == "commit_ack_lost") && !errors.Is(err, primary) {
++					t.Fatalf("lost primary error: %v", err)
++				}
++				if (phase == "endtx" || phase == "combined") && !errors.Is(err, cleanup) {
++					t.Fatalf("lost EndTx error: %v", err)
++				}
++				if (phase == "release" || phase == "release_handoff") && !errors.Is(err, release) {
++					t.Fatalf("lost release error: %v", err)
++				}
++				if (phase == "handoff" || phase == "combined" || phase == "release_handoff") && !errors.Is(err, handoff) {
++					t.Fatalf("lost handoff error: %v", err)
++				}
++				if (phase == "success" || phase == "cancel_commit_admitted") && err != nil {
++					t.Fatalf("acknowledged commit relabeled: %v", err)
++				}
++				wantSubmits := int32(0)
++				if committed {
++					wantSubmits = 1
++				}
++				if sink.submits.Load() != wantSubmits {
++					t.Fatalf("handoff submissions=%d, want %d", sink.submits.Load(), wantSubmits)
++				}
++				count, _, _ := readExactPipelineReceipt(t, context.Background(), fixture, eventID)
++				persisted := committed || phase == "commit_ack_lost"
++				if (count == 1) != persisted {
++					t.Fatalf("durable receipts=%d, expected persisted=%v", count, persisted)
++				}
++				if phase == "commit_refused" || phase == "commit_ack_lost" {
++					if lease.Current() {
++						t.Fatal("uncertain commit retained usable claim session")
++					}
++				} else if !committed {
++					if !lease.Current() {
++						t.Fatal("safe rollback lost healthy claim session")
++					}
++					if method == "settle" {
++						_, err = owner.Settle(base, work.Claim, obligation.Acknowledged("processed"))
++					} else {
++						err = owner.MarkDecisionProcessed(base, work.Claim)
++					}
++					if err != nil {
++						t.Fatalf("healthy successor operation: %v", err)
++					}
++				}
++			})
++		}
++	}
++}
++
++func TestPipelineGracefulCanceledAdmissionBothStores(t *testing.T) {
++	for _, backend := range []string{"sqlite", "postgres"} {
++		t.Run(backend, func(t *testing.T) {
++			var fixture authorActivityReceiptFixture
++			if backend == "sqlite" {
++				fixture = openSQLiteAuthorActivityReceiptFixture(t)
++			} else {
++				fixture = openPostgresAuthorActivityReceiptFixture(t)
++			}
++			store := fixture.store.(pipelineObligationParityStore)
++			base := testAuthorActivityContext()
++			runID := uuid.NewString()
++			seedAuthorActivityReceiptRun(t, fixture, base, runID)
++			eventID := commitPipelineParityEvent(t, base, store, runID, time.Now().UTC())
++			ctx, cancel := context.WithCancel(base)
++			cancel()
++			owner := store.PipelineObligations()
++			if _, err := owner.ClaimEvent(ctx, eventID, obligation.PurposeRecovery); !errors.Is(err, context.Canceled) {
++				t.Fatalf("canceled claim: %v", err)
++			}
++			work, err := owner.ClaimEvent(base, eventID, obligation.PurposeRecovery)
++			if err != nil {
++				t.Fatal(err)
++			}
++			outcome, err := owner.Settle(ctx, work.Claim, obligation.Acknowledged("processed"))
++			if !errors.Is(err, context.Canceled) || outcome.Committed() {
++				t.Fatalf("canceled settlement=%#v, %v", outcome, err)
++			}
++			outcome, err = owner.Settle(base, work.Claim, obligation.Acknowledged("processed"))
++			if err != nil || !outcome.Committed() {
++				t.Fatalf("successor settlement=%#v, %v", outcome, err)
++			}
++		})
++	}
++}
++
++var _ driver.ConnBeginTx = (*pipelineGracefulConn)(nil)
++var _ driver.Validator = (*pipelineGracefulConn)(nil)
+diff --git a/internal/store/internal/runtimepersistence/pipeline_process_crash_test.go b/internal/store/internal/runtimepersistence/pipeline_process_crash_test.go
+new file mode 100644
+index 000000000..7ebe814a9
+--- /dev/null
++++ b/internal/store/internal/runtimepersistence/pipeline_process_crash_test.go
+@@ -0,0 +1,490 @@
++package runtimepersistence
++
++import (
++	"context"
++	"database/sql"
++	"database/sql/driver"
++	"encoding/json"
++	"errors"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"sync/atomic"
++	"syscall"
++	"testing"
++	"time"
++
++	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
++	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
++	obligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
++	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
++	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
++	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
++	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
++	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
++	"github.com/division-sh/swarm/internal/testutil"
++	"github.com/google/uuid"
++	"github.com/lib/pq"
++	modernc "modernc.org/sqlite"
++)
++
++// These are process-death proofs at the selected-store/runtime recovery surface,
++// not serve-startup tests. Only driver transaction exit is instrumented. SQL,
++// ownership acquisition, pipeline recovery and candidate enumeration are real.
++type pipelineCrashConnector struct {
++	driver.Connector
++	armed   atomic.Bool
++	cut     string
++	barrier func()
++}
++
++func (c *pipelineCrashConnector) Connect(ctx context.Context) (driver.Conn, error) {
++	conn, err := c.Connector.Connect(ctx)
++	if err != nil {
++		return nil, err
++	}
++	return &pipelineCrashConn{Conn: conn, owner: c}, nil
++}
++
++type pipelineCrashSQLiteConnector struct{ path string }
++
++func (c pipelineCrashSQLiteConnector) Driver() driver.Driver { return &modernc.Driver{} }
++func (c pipelineCrashSQLiteConnector) Connect(context.Context) (driver.Conn, error) {
++	return c.Driver().Open("file:" + c.path + "?_pragma=foreign_keys(ON)&_pragma=busy_timeout(50)")
++}
++
++type pipelineCrashConn struct {
++	driver.Conn
++	owner *pipelineCrashConnector
++}
++
++func (c *pipelineCrashConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
++	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
++	if err != nil {
++		return nil, err
++	}
++	return &pipelineCrashTx{Tx: tx, owner: c.owner}, nil
++}
++func (c *pipelineCrashConn) QueryContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Rows, error) {
++	return c.Conn.(driver.QueryerContext).QueryContext(ctx, q, args)
++}
++func (c *pipelineCrashConn) ExecContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Result, error) {
++	return c.Conn.(driver.ExecerContext).ExecContext(ctx, q, args)
++}
++func (c *pipelineCrashConn) CheckNamedValue(v *driver.NamedValue) error {
++	if checker, ok := c.Conn.(driver.NamedValueChecker); ok {
++		return checker.CheckNamedValue(v)
++	}
++	return driver.ErrSkip
++}
++func (c *pipelineCrashConn) ResetSession(ctx context.Context) error {
++	if resetter, ok := c.Conn.(driver.SessionResetter); ok {
++		return resetter.ResetSession(ctx)
++	}
++	return nil
++}
++func (c *pipelineCrashConn) IsValid() bool {
++	if validator, ok := c.Conn.(driver.Validator); ok {
++		return validator.IsValid()
++	}
++	return true
++}
++func (c *pipelineCrashConn) Ping(ctx context.Context) error {
++	if pinger, ok := c.Conn.(driver.Pinger); ok {
++		return pinger.Ping(ctx)
++	}
++	return nil
++}
++
++type pipelineCrashTx struct {
++	driver.Tx
++	owner *pipelineCrashConnector
++}
++
++func (tx *pipelineCrashTx) Commit() error {
++	armed := tx.owner.armed.Swap(false)
++	if armed && tx.owner.cut == "before_commit" {
++		tx.owner.barrier()
++	}
++	err := tx.Tx.Commit()
++	if armed && err == nil && tx.owner.cut == "after_commit_before_ack" {
++		tx.owner.barrier()
++	}
++	return err
++}
++
++func openPipelineCrashStore(t *testing.T, backend, location string) (authorActivityReceiptFixture, *pipelineCrashConnector) {
++	t.Helper()
++	var native driver.Connector
++	if backend == "postgres" {
++		var err error
++		native, err = pq.NewConnector(location)
++		if err != nil {
++			t.Fatal(err)
++		}
++	} else {
++		native = pipelineCrashSQLiteConnector{path: location}
++	}
++	control := &pipelineCrashConnector{Connector: native}
++	db := sql.OpenDB(control)
++	db.SetMaxOpenConns(8)
++	db.SetMaxIdleConns(8)
++	t.Cleanup(func() {
++		if err := db.Close(); err != nil {
++			t.Error(err)
++		}
++	})
++	if backend == "postgres" {
++		store := admitTestPostgresStore(t, db)
++		registerTestAuthorActivityCatalog(t, store)
++		return authorActivityReceiptFixture{store: store, db: db, dialect: authoractivityfixture.DialectPostgres}, control
++	}
++	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
++		t.Fatal(err)
++	}
++	b, err := sqlitebackend.New(db)
++	if err != nil {
++		t.Fatal(err)
++	}
++	schema, err := storeschema.NewSQLiteWithBackend(b, location)
++	if err != nil {
++		t.Fatal(err)
++	}
++	store, err := newSQLiteStoreComposition(schema, b, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := store.BootstrapSchema(testAuthorActivityContext(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
++		t.Fatal(err)
++	}
++	store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
++	registerTestAuthorActivityCatalog(t, store)
++	return authorActivityReceiptFixture{store: store, db: db, dialect: authoractivityfixture.DialectSQLite}, control
++}
++
++type pipelineCrashEvidence struct {
++	Authority startupownership.Authority
++	Recovered bool
++}
++
++func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
++	if mode := os.Getenv("SWARM_PIPELINE_CRASH_CHILD"); mode != "" {
++		runPipelineCrashChild(t, mode)
++		return
++	}
++	for _, backend := range []string{"sqlite", "postgres"} {
++		for _, cut := range []string{"before_commit", "after_commit_before_ack"} {
++			t.Run(backend+"/"+cut, func(t *testing.T) {
++				location := filepath.Join(t.TempDir(), "pipeline.db")
++				if backend == "postgres" {
++					location, _, _ = testutil.StartPostgres(t)
++				}
++				fixture, _ := openPipelineCrashStore(t, backend, location)
++				ctx := testAuthorActivityContext()
++				runID := uuid.NewString()
++				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
++				eventID := commitPipelineParityEvent(t, ctx, fixture.store.(pipelineObligationParityStore), runID, time.Now().UTC())
++				// Drain any setup notification through its real owner so only the
++				// killed settlement can authorize the candidate tested at restart.
++				candidates := fixture.store.(runlifecycle.CandidateStore)
++				if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
++					result, err := candidates.ExecuteCompletionCandidate(ctx, pending, runlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}))
++					if err != nil || result.Outcome != runlifecycle.OutcomeAwaitMutation {
++						t.Fatalf("drain setup candidate: %#v %v", result, err)
++					}
++				}
++				if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
++					t.Fatal("setup left a candidate masking lost settlement handoff")
++				}
++				env := []string{"SWARM_PIPELINE_CRASH_BACKEND=" + backend, "SWARM_PIPELINE_CRASH_LOCATION=" + location,
++					"SWARM_PIPELINE_CRASH_CUT=" + cut, "SWARM_PIPELINE_CRASH_EVENT=" + eventID, "SWARM_PIPELINE_CRASH_RUN=" + runID}
++				child, receipt, wait := startPipelineCrashChild(t, "predecessor", env)
++				old := awaitPipelineCrashEvidence(t, receipt)
++				// A live predecessor, not a stale row or local socket assumption,
++				// must prevent another process authority from being granted.
++				attemptCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
++				contender, err := fixture.store.(startupownership.Store).AcquireProcessCapability(attemptCtx, testStartupAcquireRequest("crash-contender"))
++				cancel()
++				if err == nil {
++					_ = contender.Release(ctx)
++					t.Fatal("live predecessor permitted another process capability")
++				}
++				if err := child.Process.Kill(); err != nil {
++					t.Fatal(err)
++				}
++				select {
++				case err := <-wait:
++					var exit *exec.ExitError
++					if !errors.As(err, &exit) {
++						t.Fatalf("kill exit: %v", err)
++					}
++					status, ok := exit.Sys().(syscall.WaitStatus)
++					if !ok || !status.Signaled() || status.Signal() != syscall.SIGKILL {
++						t.Fatalf("not SIGKILL: %v", exit)
++					}
++				case <-time.After(10 * time.Second):
++					t.Fatal("SIGKILL child did not exit")
++				}
++				encoded, err := json.Marshal(old.Authority)
++				if err != nil {
++					t.Fatal(err)
++				}
++				env = append(env, "SWARM_PIPELINE_CRASH_PREDECESSOR="+string(encoded))
++				_, recoveryReceipt, recovered := startPipelineCrashChild(t, "successor", env)
++				next := awaitPipelineCrashEvidence(t, recoveryReceipt)
++				if !next.Recovered {
++					t.Fatal("successor did not prove recovery")
++				}
++				select {
++				case err := <-recovered:
++					if err != nil {
++						t.Fatalf("successor: %v", err)
++					}
++				case <-time.After(15 * time.Second):
++					t.Fatal("successor did not settle")
++				}
++				t.Logf("SIGKILL %s: exact authority %s -> %s; real bus recovery, one receipt, durable candidate, repeat sweep unchanged", cut, old.Authority.AuthorityID, next.Authority.AuthorityID)
++			})
++		}
++	}
++}
++
++func startPipelineCrashChild(t *testing.T, mode string, env []string) (*exec.Cmd, <-chan pipelineCrashEvidence, <-chan error) {
++	t.Helper()
++	read, write, err := os.Pipe()
++	if err != nil {
++		t.Fatal(err)
++	}
++	cmd := exec.Command(os.Args[0], "-test.run=^TestPipelineProcessSIGKILLRecovery$", "-test.count=1", "-test.timeout=45s")
++	cmd.Env = append(append(os.Environ(), env...), "SWARM_PIPELINE_CRASH_CHILD="+mode)
++	cmd.ExtraFiles = []*os.File{write}
++	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
++	if err := cmd.Start(); err != nil {
++		_ = read.Close()
++		_ = write.Close()
++		t.Fatal(err)
++	}
++	_ = write.Close()
++	wait := make(chan error, 1)
++	done := make(chan struct{})
++	go func() { wait <- cmd.Wait(); close(done) }()
++	evidence := make(chan pipelineCrashEvidence, 1)
++	go func() {
++		defer close(evidence)
++		defer read.Close()
++		var record pipelineCrashEvidence
++		if json.NewDecoder(read).Decode(&record) == nil {
++			evidence <- record
++		}
++	}()
++	t.Cleanup(func() {
++		_ = cmd.Process.Kill()
++		_ = read.Close()
++		select {
++		case <-done:
++		case <-time.After(5 * time.Second):
++			t.Error("child cleanup did not join process exit")
++		}
++	})
++	return cmd, evidence, wait
++}
++
++func awaitPipelineCrashEvidence(t *testing.T, evidence <-chan pipelineCrashEvidence) pipelineCrashEvidence {
++	t.Helper()
++	select {
++	case record, ok := <-evidence:
++		if !ok {
++			t.Fatal("child closed evidence pipe before proof boundary")
++		}
++		return record
++	case <-time.After(30 * time.Second):
++		t.Fatal("child did not reach proof boundary")
++	}
++	return pipelineCrashEvidence{}
++}
++
++func runPipelineCrashChild(t *testing.T, mode string) {
++	backend, location := os.Getenv("SWARM_PIPELINE_CRASH_BACKEND"), os.Getenv("SWARM_PIPELINE_CRASH_LOCATION")
++	fixture, control := openPipelineCrashStore(t, backend, location)
++	ctx := testAuthorActivityContext()
++	selected := fixture.store.(pipelineObligationParityStore)
++	capability, err := fixture.store.(startupownership.Store).AcquireProcessCapability(ctx, testStartupAcquireRequest("pipeline-crash-"+mode))
++	if err != nil {
++		t.Fatalf("acquire exact process authority: %v", err)
++	}
++	t.Cleanup(func() {
++		if err := capability.Release(context.Background()); err != nil {
++			t.Error(err)
++		}
++	})
++	authority, err := capability.Evidence()
++	if err != nil {
++		t.Fatal(err)
++	}
++	report := os.NewFile(3, "pipeline-crash-evidence")
++	defer report.Close()
++	cut, eventID, runID := os.Getenv("SWARM_PIPELINE_CRASH_CUT"), os.Getenv("SWARM_PIPELINE_CRASH_EVENT"), os.Getenv("SWARM_PIPELINE_CRASH_RUN")
++	if mode == "predecessor" {
++		work, err := selected.PipelineObligations().ClaimEvent(ctx, eventID, obligation.PurposeRecovery)
++		if err != nil {
++			t.Fatal(err)
++		}
++		process := worklifetime.NewProcess()
++		occurrence := newRunLifecycleExecutorOccurrence(t, process)
++		ctx = worklifetime.WithRuntimeOccurrence(ctx, occurrence)
++		sink := &pipelineGracefulSink{}
++		registration, err := fixture.store.(runlifecycle.CandidateRegistrar).RegisterCompletionCandidateSink(ctx, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash}, sink)
++		if err != nil {
++			t.Fatal(err)
++		}
++		defer registration.Release()
++		control.cut = cut
++		control.barrier = func() {
++			if sink.submits.Load() != 0 {
++				t.Fatal("handoff ran before crash barrier")
++			}
++			if err := json.NewEncoder(report).Encode(pipelineCrashEvidence{Authority: authority}); err != nil {
++				t.Fatal(err)
++			}
++			for {
++				time.Sleep(time.Hour)
++			}
++		}
++		control.armed.Store(true)
++		_, err = selected.PipelineObligations().Settle(ctx, work.Claim, obligation.Acknowledged("processed"))
++		t.Fatalf("settlement escaped crash barrier: %v", err)
++	}
++	var old startupownership.Authority
++	if err := json.Unmarshal([]byte(os.Getenv("SWARM_PIPELINE_CRASH_PREDECESSOR")), &old); err != nil {
++		t.Fatal(err)
++	}
++	if authority.AuthorityID == old.AuthorityID || authority.PredecessorAuthorityID != old.AuthorityID || authority.AuthorityGeneration != old.AuthorityGeneration+1 || authority.AcquisitionKind != startupownership.AcquisitionCrashTakeover {
++		t.Fatalf("not exact crash takeover: old=%#v next=%#v", old, authority)
++	}
++	count, _, _ := readExactPipelineReceipt(t, ctx, fixture, eventID)
++	wantBefore := 0
++	if cut == "after_commit_before_ack" {
++		wantBefore = 1
++	}
++	if count != wantBefore {
++		t.Fatalf("receipt at restart=%d want %d", count, wantBefore)
++	}
++	candidates := fixture.store.(runlifecycle.CandidateStore)
++	before := pipelineCrashCandidate(t, ctx, candidates, runID)
++	if (before.RunID != "") != (wantBefore == 1) {
++		t.Fatalf("candidate at restart=%#v, committed settlement=%v", before, wantBefore == 1)
++	}
++	bus, err := newRunConvergenceEventBus(t, fixture.store)
++	if err != nil {
++		t.Fatal(err)
++	}
++	recovery := runtimepipeline.NewRecoveryManagerWith(bus)
++	if err := recovery.RecoverToExhaustion(ctx); err != nil {
++		t.Fatalf("real bus startup recovery: %v", err)
++	}
++	count, receiptOutcome, receiptReason := readExactPipelineReceipt(t, ctx, fixture, eventID)
++	wantReason := "pipeline_persisted"
++	if wantBefore == 1 {
++		wantReason = "processed"
++	}
++	if count != 1 || receiptOutcome != "success" || receiptReason != wantReason {
++		t.Fatalf("recovery receipt=%d/%s/%s want 1/success/%s", count, receiptOutcome, receiptReason, wantReason)
++	}
++	after := pipelineCrashCandidate(t, ctx, candidates, runID)
++	if after.RunID != runID {
++		t.Fatal("committed follow-up candidate lost")
++	}
++	if wantBefore == 1 && after.Revision != before.Revision {
++		t.Fatalf("committed settlement replayed: candidate revision %d -> %d", before.Revision, after.Revision)
++	}
++	if err := recovery.RecoverToExhaustion(ctx); err != nil {
++		t.Fatal(err)
++	}
++	again := pipelineCrashCandidate(t, ctx, candidates, runID)
++	count, receiptOutcome, receiptReason = readExactPipelineReceipt(t, ctx, fixture, eventID)
++	if count != 1 || receiptOutcome != "success" || receiptReason != wantReason || again.Revision != after.Revision {
++		t.Fatalf("duplicate durable processing: receipt=%d candidate=%d -> %d", count, after.Revision, again.Revision)
++	}
++	if _, err := selected.PipelineObligations().ClaimEvent(ctx, eventID, obligation.PurposeRecovery); !errors.Is(err, obligation.ErrIneligible) {
++		t.Fatalf("settled event remains replayable: %v", err)
++	}
++	// The real startup executor must discover the durable candidate without any
++	// predecessor notification. Observe its actual selected-store execution, not
++	// a replacement recovery implementation or direct SQL interpretation.
++	process := worklifetime.NewProcess()
++	occurrence := newRunLifecycleExecutorOccurrence(t, process)
++	t.Cleanup(func() {
++		retireRunLifecycleExecutorOccurrence(t, occurrence)
++		retireRunLifecycleProcess(t, process)
++	})
++	observed := &pipelineCrashCandidateObserver{CandidateStore: candidates, results: make(chan pipelineCrashCandidateResult, 8)}
++	executor, err := runlifecycle.NewExecutor(observed, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash},
++		runlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runlifecycle.ExecutorOptions{})
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if err := executor.Retire(context.Background()); err != nil {
++			t.Error(err)
++		}
++	})
++	if err := executor.Start(ctx); err != nil {
++		t.Fatalf("real lifecycle startup executor: %v", err)
++	}
++	select {
++	case result := <-observed.results:
++		if result.err != nil || result.candidate.RunID != runID || result.candidate.Revision != after.Revision || result.outcome.Outcome != runlifecycle.OutcomeAwaitMutation {
++			t.Fatalf("recovered lifecycle execution=%#v err=%v", result, result.err)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("startup executor did not discover committed candidate")
++	}
++	if err := executor.Retire(ctx); err != nil {
++		t.Fatal(err)
++	}
++	if observed.executions.Load() != 1 {
++		t.Fatalf("startup candidate executions=%d want 1", observed.executions.Load())
++	}
++	if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
++		t.Fatalf("settled await-mutation candidate remains pending: %#v", pending)
++	}
++	if err := json.NewEncoder(report).Encode(pipelineCrashEvidence{Authority: authority, Recovered: true}); err != nil {
++		t.Fatal(err)
++	}
++}
++
++type pipelineCrashCandidateResult struct {
++	candidate runlifecycle.Candidate
++	outcome   runlifecycle.CompletionResult
++	err       error
++}
++
++type pipelineCrashCandidateObserver struct {
++	runlifecycle.CandidateStore
++	executions atomic.Int32
++	results    chan pipelineCrashCandidateResult
++}
++
++func (s *pipelineCrashCandidateObserver) ExecuteCompletionCandidate(ctx context.Context, candidate runlifecycle.Candidate, catalog runlifecycle.TerminalCatalog) (runlifecycle.CompletionResult, error) {
++	s.executions.Add(1)
++	outcome, err := s.CandidateStore.ExecuteCompletionCandidate(ctx, candidate, catalog)
++	select {
++	case s.results <- pipelineCrashCandidateResult{candidate: candidate, outcome: outcome, err: err}:
++	default:
++	}
++	return outcome, err
++}
++
++func pipelineCrashCandidate(t *testing.T, ctx context.Context, store runlifecycle.CandidateStore, runID string) runlifecycle.Candidate {
++	t.Helper()
++	page, err := store.ListCompletionCandidates(ctx, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash}, runlifecycle.CandidateCursor{}, 128)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, candidate := range page.Candidates {
++		if candidate.RunID == runID {
++			return candidate
++		}
++	}
++	return runlifecycle.Candidate{}
++}

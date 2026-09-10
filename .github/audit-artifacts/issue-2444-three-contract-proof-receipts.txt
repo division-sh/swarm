@@ -1,0 +1,234 @@
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/mutation_commit
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=mutation_commit: exit=0, durable completions=1; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/operation_cancel
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=operation_cancel: exit=0, durable completions=0; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/result_drain
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=result_drain: exit=0, durable completions=0; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/cleanup_failure
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=cleanup_failure: exit=1, durable completions=1; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:--- PASS: TestServePostgresGracefulContract (11.13s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/mutation_commit (5.00s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/operation_cancel (2.00s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/result_drain (2.14s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/cleanup_failure (1.99s)
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/mutation_commit
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=mutation_commit: exit=0, durable completions=1; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/operation_cancel
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=operation_cancel: exit=0, durable completions=0; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/result_drain
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=result_drain: exit=0, durable completions=0; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/cleanup_failure
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=cleanup_failure: exit=1, durable completions=1; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:--- PASS: TestServePostgresGracefulContract (8.13s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/mutation_commit (2.00s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/operation_cancel (2.00s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/result_drain (2.17s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/cleanup_failure (1.97s)
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/mutation_commit
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=mutation_commit: exit=0, durable completions=1; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/operation_cancel
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=operation_cancel: exit=0, durable completions=0; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/result_drain
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=result_drain: exit=0, durable completions=0; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestServePostgresGracefulContract/cleanup_failure
+/tmp/agent-g-2444-graceful-final.log:    postgres_graceful_contract_test.go:275: phase=cleanup_failure: exit=1, durable completions=1; new admission refused, SQL joined before dependency release
+/tmp/agent-g-2444-graceful-final.log:--- PASS: TestServePostgresGracefulContract (8.11s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/mutation_commit (1.98s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/operation_cancel (1.98s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/result_drain (2.16s)
+/tmp/agent-g-2444-graceful-final.log:    --- PASS: TestServePostgresGracefulContract/cleanup_failure (1.99s)
+/tmp/agent-g-2444-graceful-final.log:PASS
+/tmp/agent-g-2444-graceful-final.log:ok  	github.com/division-sh/swarm/internal/serveapp	28.419s
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestOpenPostgresUsesStockDriver
+/tmp/agent-g-2444-graceful-final.log:--- PASS: TestOpenPostgresUsesStockDriver (0.00s)
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestOpenPostgresUsesStockDriver
+/tmp/agent-g-2444-graceful-final.log:--- PASS: TestOpenPostgresUsesStockDriver (0.00s)
+/tmp/agent-g-2444-graceful-final.log:=== RUN   TestOpenPostgresUsesStockDriver
+/tmp/agent-g-2444-graceful-final.log:--- PASS: TestOpenPostgresUsesStockDriver (0.00s)
+/tmp/agent-g-2444-graceful-final.log:PASS
+/tmp/agent-g-2444-graceful-final.log:ok  	github.com/division-sh/swarm/internal/store/construction	1.021s
+/tmp/issue2444-pipeline-sigkill-race.log:=== RUN   TestPipelineProcessSIGKILLRecovery
+/tmp/issue2444-pipeline-sigkill-race.log:=== RUN   TestPipelineProcessSIGKILLRecovery/sqlite/before_commit
+/tmp/issue2444-pipeline-sigkill-race.log:2026/09/10 18:00:22 INFO startup pipeline recovery claimed event_id=67c3869e-bd08-4632-bd08-98f54d319048 run_id=c1506229-c7d1-45e3-a28c-2eccc222cb43 scan_phase=1 purpose=recovery
+/tmp/issue2444-pipeline-sigkill-race.log:PASS
+/tmp/issue2444-pipeline-sigkill-race.log:    pipeline_process_crash_test.go:246: SIGKILL before_commit: exact authority d64d01bc-79fe-567f-acac-8ff443fe3db5 -> a1090f9b-9a69-5533-a182-b0e412749673; real bus recovery, one receipt, durable candidate, repeat sweep unchanged
+/tmp/issue2444-pipeline-sigkill-race.log:=== RUN   TestPipelineProcessSIGKILLRecovery/sqlite/after_commit_before_ack
+/tmp/issue2444-pipeline-sigkill-race.log:PASS
+/tmp/issue2444-pipeline-sigkill-race.log:    pipeline_process_crash_test.go:246: SIGKILL after_commit_before_ack: exact authority e4569570-25a0-5003-9df0-e501739e1030 -> 22959064-30f8-580b-879f-88c04c2617bf; real bus recovery, one receipt, durable candidate, repeat sweep unchanged
+/tmp/issue2444-pipeline-sigkill-race.log:=== RUN   TestPipelineProcessSIGKILLRecovery/postgres/before_commit
+/tmp/issue2444-pipeline-sigkill-race.log:2026/09/10 18:00:38 INFO startup pipeline recovery claimed event_id=fc77e96c-6d2a-4b64-8c90-35a3bf8e38d0 run_id=3a3e05ae-a45f-452e-b4e4-257be43cb279 scan_phase=1 purpose=recovery
+/tmp/issue2444-pipeline-sigkill-race.log:PASS
+/tmp/issue2444-pipeline-sigkill-race.log:    pipeline_process_crash_test.go:246: SIGKILL before_commit: exact authority 126afb4d-1a95-5b34-9409-c7968be59562 -> 7a19242b-e5e1-5ade-854b-4d52c02ce52f; real bus recovery, one receipt, durable candidate, repeat sweep unchanged
+/tmp/issue2444-pipeline-sigkill-race.log:=== RUN   TestPipelineProcessSIGKILLRecovery/postgres/after_commit_before_ack
+/tmp/issue2444-pipeline-sigkill-race.log:PASS
+/tmp/issue2444-pipeline-sigkill-race.log:    pipeline_process_crash_test.go:246: SIGKILL after_commit_before_ack: exact authority 2a28cb43-6835-575b-ad63-a9bc775053c7 -> 69e96164-a7e6-5ef2-8e2e-34e29f0d59c4; real bus recovery, one receipt, durable candidate, repeat sweep unchanged
+/tmp/issue2444-pipeline-sigkill-race.log:--- PASS: TestPipelineProcessSIGKILLRecovery (31.78s)
+/tmp/issue2444-pipeline-sigkill-race.log:    --- PASS: TestPipelineProcessSIGKILLRecovery/sqlite/before_commit (9.85s)
+/tmp/issue2444-pipeline-sigkill-race.log:    --- PASS: TestPipelineProcessSIGKILLRecovery/sqlite/after_commit_before_ack (7.89s)
+/tmp/issue2444-pipeline-sigkill-race.log:    --- PASS: TestPipelineProcessSIGKILLRecovery/postgres/before_commit (8.41s)
+/tmp/issue2444-pipeline-sigkill-race.log:    --- PASS: TestPipelineProcessSIGKILLRecovery/postgres/after_commit_before_ack (5.63s)
+/tmp/issue2444-pipeline-sigkill-race.log:PASS
+/tmp/issue2444-pipeline-sigkill-race.log:ok  	github.com/division-sh/swarm/internal/store/internal/runtimepersistence	32.821s
+/tmp/agent-g-2444-stock-owner-final.log:ok  	github.com/division-sh/swarm/internal/store/internal/backend/postgres	19.731s
+/tmp/agent-g-2444-no-timeout-consumer-controls.log:ok  	github.com/division-sh/swarm/internal/store/internal/runtimepersistence	37.275s
+/tmp/agent-g-2444-remote-possession.log:=== RUN   TestServePostgresRemotePossessionOutlivesLocalLoss
+/tmp/agent-g-2444-remote-possession.log:    postgres_remote_possession_contract_test.go:170: remote PID 3058286 held authority after local failure; supported successor refused until remote release, then acquired PID 3058862
+/tmp/agent-g-2444-remote-possession.log:--- PASS: TestServePostgresRemotePossessionOutlivesLocalLoss (6.52s)
+/tmp/agent-g-2444-remote-possession.log:=== RUN   TestServePostgresRemotePossessionOutlivesLocalLoss
+/tmp/agent-g-2444-remote-possession.log:    postgres_remote_possession_contract_test.go:170: remote PID 3058926 held authority after local failure; supported successor refused until remote release, then acquired PID 3058998
+/tmp/agent-g-2444-remote-possession.log:--- PASS: TestServePostgresRemotePossessionOutlivesLocalLoss (5.13s)
+/tmp/agent-g-2444-remote-possession.log:=== RUN   TestServePostgresRemotePossessionOutlivesLocalLoss
+/tmp/agent-g-2444-remote-possession.log:    postgres_remote_possession_contract_test.go:170: remote PID 3059049 held authority after local failure; supported successor refused until remote release, then acquired PID 3059099
+/tmp/agent-g-2444-remote-possession.log:--- PASS: TestServePostgresRemotePossessionOutlivesLocalLoss (5.13s)
+/tmp/agent-g-2444-remote-possession.log:PASS
+/tmp/agent-g-2444-remote-possession.log:ok  	github.com/division-sh/swarm/internal/serveapp	17.832s
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/sqlite/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=sqlite injected_omission=false first_fork=1536e53b-311d-4d7b-b2d5-1565bd267aec first_rpc_error=<nil> before_retry_forks=1 before_retry_api_completions=1 retry_fork=1536e53b-311d-4d7b-b2d5-1565bd267aec retry_owner_calls=0 final_forks=1 listed_forks=1 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/sqlite/postcommit_omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=sqlite injected_omission=true first_fork=6922770b-38b8-4dd3-852b-529f4efbb425 first_rpc_error=&{Code:-32603 Message:internal error Data:map[correlation_id:fork-probe details:map[failure:map[class:platform.internal_failure component:api detail:map[code:unclassified_runtime_error] deterministic:false message:The platform encountered an internal failure (unclassified_runtime_error). operation:conversation.fork remediation:Inspect the typed detail and runtime diagnostics (unclassified_runtime_error). retryable:false schema_version:platform.failure/v1]]]} before_retry_forks=1 before_retry_api_completions=0 retry_fork=493f704c-c189-481e-bc84-4a634120c1c3 retry_owner_calls=1 final_forks=2 listed_forks=2 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:157: F1: same keyed RPC created a second durable fork after postcommit API completion omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/postgres/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=postgres injected_omission=false first_fork=a501a4e8-d99f-4442-98a7-e48e1db4724b first_rpc_error=<nil> before_retry_forks=1 before_retry_api_completions=1 retry_fork=a501a4e8-d99f-4442-98a7-e48e1db4724b retry_owner_calls=0 final_forks=1 listed_forks=1 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/postgres/postcommit_omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=postgres injected_omission=true first_fork=14a60744-e459-4258-b44c-1d418b54f410 first_rpc_error=&{Code:-32603 Message:internal error Data:map[correlation_id:fork-probe details:map[failure:map[class:platform.internal_failure component:api detail:map[code:unclassified_runtime_error] deterministic:false message:The platform encountered an internal failure (unclassified_runtime_error). operation:conversation.fork remediation:Inspect the typed detail and runtime diagnostics (unclassified_runtime_error). retryable:false schema_version:platform.failure/v1]]]} before_retry_forks=1 before_retry_api_completions=0 retry_fork=4c6d087a-0c79-4448-9abb-53e8031c28bf retry_owner_calls=1 final_forks=2 listed_forks=2 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:157: F1: same keyed RPC created a second durable fork after postcommit API completion omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:--- FAIL: TestConversationForkCommitBeforeAPICompletionProbe (12.68s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestConversationForkCommitBeforeAPICompletionProbe/sqlite/healthy (4.89s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestConversationForkCommitBeforeAPICompletionProbe/sqlite/postcommit_omission (2.83s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestConversationForkCommitBeforeAPICompletionProbe/postgres/healthy (3.54s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestConversationForkCommitBeforeAPICompletionProbe/postgres/postcommit_omission (1.42s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/sqlite/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=sqlite injected_omission=false first_fork=162bd6c5-0a0d-438f-8a50-7888063a7d51 first_rpc_error=<nil> before_retry_forks=1 before_retry_api_completions=1 retry_fork=162bd6c5-0a0d-438f-8a50-7888063a7d51 retry_owner_calls=0 final_forks=1 listed_forks=1 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/sqlite/postcommit_omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=sqlite injected_omission=true first_fork=810db7cc-7f26-4910-b2b7-5b50b24a2cf5 first_rpc_error=&{Code:-32603 Message:internal error Data:map[correlation_id:fork-probe details:map[failure:map[class:platform.internal_failure component:api detail:map[code:unclassified_runtime_error] deterministic:false message:The platform encountered an internal failure (unclassified_runtime_error). operation:conversation.fork remediation:Inspect the typed detail and runtime diagnostics (unclassified_runtime_error). retryable:false schema_version:platform.failure/v1]]]} before_retry_forks=1 before_retry_api_completions=0 retry_fork=e5e90588-1f57-406a-8c75-b00cb523c570 retry_owner_calls=1 final_forks=2 listed_forks=2 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:157: F1: same keyed RPC created a second durable fork after postcommit API completion omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/postgres/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=postgres injected_omission=false first_fork=0cbe7e41-3388-4084-a164-a99b9e6f3d18 first_rpc_error=<nil> before_retry_forks=1 before_retry_api_completions=1 retry_fork=0cbe7e41-3388-4084-a164-a99b9e6f3d18 retry_owner_calls=0 final_forks=1 listed_forks=1 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/postgres/postcommit_omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=postgres injected_omission=true first_fork=a9b319c9-62cb-4959-9603-93087ecf1087 first_rpc_error=&{Code:-32603 Message:internal error Data:map[correlation_id:fork-probe details:map[failure:map[class:platform.internal_failure component:api detail:map[code:unclassified_runtime_error] deterministic:false message:The platform encountered an internal failure (unclassified_runtime_error). operation:conversation.fork remediation:Inspect the typed detail and runtime diagnostics (unclassified_runtime_error). retryable:false schema_version:platform.failure/v1]]]} before_retry_forks=1 before_retry_api_completions=0 retry_fork=6594c828-9738-4d37-b527-0c31b77a6e70 retry_owner_calls=1 final_forks=2 listed_forks=2 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:157: F1: same keyed RPC created a second durable fork after postcommit API completion omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:--- FAIL: TestConversationForkCommitBeforeAPICompletionProbe (8.37s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestConversationForkCommitBeforeAPICompletionProbe/sqlite/healthy (2.71s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestConversationForkCommitBeforeAPICompletionProbe/sqlite/postcommit_omission (2.89s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestConversationForkCommitBeforeAPICompletionProbe/postgres/healthy (1.39s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestConversationForkCommitBeforeAPICompletionProbe/postgres/postcommit_omission (1.39s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/sqlite/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=sqlite injected_omission=false first_fork=79045402-dddb-454f-9ba9-dd3233027615 first_rpc_error=<nil> before_retry_forks=1 before_retry_api_completions=1 retry_fork=79045402-dddb-454f-9ba9-dd3233027615 retry_owner_calls=0 final_forks=1 listed_forks=1 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/sqlite/postcommit_omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=sqlite injected_omission=true first_fork=b0e4abd9-49af-456b-920d-05293a4b7860 first_rpc_error=&{Code:-32603 Message:internal error Data:map[correlation_id:fork-probe details:map[failure:map[class:platform.internal_failure component:api detail:map[code:unclassified_runtime_error] deterministic:false message:The platform encountered an internal failure (unclassified_runtime_error). operation:conversation.fork remediation:Inspect the typed detail and runtime diagnostics (unclassified_runtime_error). retryable:false schema_version:platform.failure/v1]]]} before_retry_forks=1 before_retry_api_completions=0 retry_fork=e7a26ae1-4111-40ad-b96b-fd29a9ba2a4f retry_owner_calls=1 final_forks=2 listed_forks=2 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:157: F1: same keyed RPC created a second durable fork after postcommit API completion omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/postgres/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=postgres injected_omission=false first_fork=53b569b3-ad8b-4078-9ba1-5f83751ba1d1 first_rpc_error=<nil> before_retry_forks=1 before_retry_api_completions=1 retry_fork=53b569b3-ad8b-4078-9ba1-5f83751ba1d1 retry_owner_calls=0 final_forks=1 listed_forks=1 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestConversationForkCommitBeforeAPICompletionProbe/postgres/postcommit_omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:152: backend=postgres injected_omission=true first_fork=164b4628-72f7-4628-837e-4a07667c7590 first_rpc_error=&{Code:-32603 Message:internal error Data:map[correlation_id:fork-probe details:map[failure:map[class:platform.internal_failure component:api detail:map[code:unclassified_runtime_error] deterministic:false message:The platform encountered an internal failure (unclassified_runtime_error). operation:conversation.fork remediation:Inspect the typed detail and runtime diagnostics (unclassified_runtime_error). retryable:false schema_version:platform.failure/v1]]]} before_retry_forks=1 before_retry_api_completions=0 retry_fork=af32d781-5953-4058-94fe-598515b940d0 retry_owner_calls=1 final_forks=2 listed_forks=2 final_api_completions=1
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    conversation_fork_commit_omission_probe_test.go:157: F1: same keyed RPC created a second durable fork after postcommit API completion omission
+/tmp/agent-g-2444-f1-f2-probes-race3.log:--- FAIL: TestConversationForkCommitBeforeAPICompletionProbe (8.18s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestConversationForkCommitBeforeAPICompletionProbe/sqlite/healthy (2.80s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestConversationForkCommitBeforeAPICompletionProbe/sqlite/postcommit_omission (2.71s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestConversationForkCommitBeforeAPICompletionProbe/postgres/healthy (1.34s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestConversationForkCommitBeforeAPICompletionProbe/postgres/postcommit_omission (1.34s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:FAIL
+/tmp/agent-g-2444-f1-f2-probes-race3.log:FAIL	github.com/division-sh/swarm/internal/apiv1	29.278s
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=sqlite injected=false submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=true error=<nil>
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/sink_failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=sqlite injected=true submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=false error=injected postcommit completion sink submission failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:111: F2: acknowledged settlement COMMIT erased by postcommit handoff error
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=postgres injected=false submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=true error=<nil>
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/sink_failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=postgres injected=true submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=false error=injected postcommit completion sink submission failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:111: F2: acknowledged settlement COMMIT erased by postcommit handoff error
+/tmp/agent-g-2444-f1-f2-probes-race3.log:--- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe (12.17s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/healthy (4.54s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/sink_failure (2.39s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/healthy (4.26s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/sink_failure (1.00s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=sqlite injected=false submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=true error=<nil>
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/sink_failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=sqlite injected=true submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=false error=injected postcommit completion sink submission failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:111: F2: acknowledged settlement COMMIT erased by postcommit handoff error
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=postgres injected=false submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=true error=<nil>
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/sink_failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=postgres injected=true submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=false error=injected postcommit completion sink submission failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:111: F2: acknowledged settlement COMMIT erased by postcommit handoff error
+/tmp/agent-g-2444-f1-f2-probes-race3.log:--- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe (6.62s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/healthy (2.28s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/sink_failure (2.32s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/healthy (1.03s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/sink_failure (0.99s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=sqlite injected=false submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=true error=<nil>
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/sink_failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=sqlite injected=true submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=false error=injected postcommit completion sink submission failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:111: F2: acknowledged settlement COMMIT erased by postcommit handoff error
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/healthy
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=postgres injected=false submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=true error=<nil>
+/tmp/agent-g-2444-f1-f2-probes-race3.log:=== RUN   TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/sink_failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:109: backend=postgres injected=true submits=1 durable_at_submit=settled turn_rows=1 spend_rows=1 reservations=0 recovery_candidate=true returned_committed=false error=injected postcommit completion sink submission failure
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    completion_handoff_evidence_probe_test.go:111: F2: acknowledged settlement COMMIT erased by postcommit handoff error
+/tmp/agent-g-2444-f1-f2-probes-race3.log:--- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe (6.57s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/healthy (2.31s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/sqlite/sink_failure (2.32s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- PASS: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/healthy (0.98s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:    --- FAIL: TestCompletionCommittedEvidenceAfterHandoffFailureProbe/postgres/sink_failure (0.96s)
+/tmp/agent-g-2444-f1-f2-probes-race3.log:FAIL
+/tmp/agent-g-2444-f1-f2-probes-race3.log:FAIL	github.com/division-sh/swarm/internal/store/internal/runtimepersistence	25.412s
+/tmp/agent-g-2444-f1-f2-probes-race3.log:FAIL
+/tmp/agent-g-2444-commit-loss-final.log:=== RUN   TestServePostgresLostCommitResponseRecoversDurablePublication
+/tmp/agent-g-2444-commit-loss-final.log:    postgres_commit_loss_contract_test.go:190: actual server COMMIT completion dropped: caller=&serveapp.servedJSONRPCError{Code:-32035, Message:"Application error: EVENT_PUBLISH_FAILED", Data:map[string]interface {}{"code":"EVENT_PUBLISH_FAILED", "correlation_id":"event.publish-proof", "details":map[string]interface {}{"event_id":"f9ef9766-d5aa-554f-a54c-717823c1d166", "event_name":"item.received", "phase":"publish", "reason":"driver: bad connection", "run_id":"a7b833ac-7d04-4c9d-ab5e-a1d5211a2ae8"}, "retryable":true}} durable event=f9ef9766-d5aa-554f-a54c-717823c1d166 run=a7b833ac-7d04-4c9d-ab5e-a1d5211a2ae8
+/tmp/agent-g-2444-commit-loss-final.log:2026/09/10 17:53:12 INFO startup pipeline recovery claimed event_id=f9ef9766-d5aa-554f-a54c-717823c1d166 run_id=a7b833ac-7d04-4c9d-ab5e-a1d5211a2ae8 scan_phase=1 purpose=recovery
+/tmp/agent-g-2444-commit-loss-final.log:    postgres_commit_loss_contract_test.go:226: lost COMMIT response retained one event; actual serve recovery reached entity and delivered outcome; exact public replay did not redispatch
+/tmp/agent-g-2444-commit-loss-final.log:--- PASS: TestServePostgresLostCommitResponseRecoversDurablePublication (5.70s)
+/tmp/agent-g-2444-commit-loss-final.log:=== RUN   TestServePostgresLostCommitResponseRecoversDurablePublication
+/tmp/agent-g-2444-commit-loss-final.log:    postgres_commit_loss_contract_test.go:190: actual server COMMIT completion dropped: caller=&serveapp.servedJSONRPCError{Code:-32035, Message:"Application error: EVENT_PUBLISH_FAILED", Data:map[string]interface {}{"code":"EVENT_PUBLISH_FAILED", "correlation_id":"event.publish-proof", "details":map[string]interface {}{"event_id":"b3d25846-f142-5814-973d-ed301269ae46", "event_name":"item.received", "phase":"publish", "reason":"driver: bad connection", "run_id":"a0bf0a8b-224b-4a91-afc2-c1597a98471d"}, "retryable":true}} durable event=b3d25846-f142-5814-973d-ed301269ae46 run=a0bf0a8b-224b-4a91-afc2-c1597a98471d
+/tmp/agent-g-2444-commit-loss-final.log:2026/09/10 17:53:17 INFO startup pipeline recovery claimed event_id=b3d25846-f142-5814-973d-ed301269ae46 run_id=a0bf0a8b-224b-4a91-afc2-c1597a98471d scan_phase=1 purpose=recovery
+/tmp/agent-g-2444-commit-loss-final.log:    postgres_commit_loss_contract_test.go:226: lost COMMIT response retained one event; actual serve recovery reached entity and delivered outcome; exact public replay did not redispatch
+/tmp/agent-g-2444-commit-loss-final.log:--- PASS: TestServePostgresLostCommitResponseRecoversDurablePublication (4.32s)
+/tmp/agent-g-2444-commit-loss-final.log:=== RUN   TestServePostgresLostCommitResponseRecoversDurablePublication
+/tmp/agent-g-2444-commit-loss-final.log:    postgres_commit_loss_contract_test.go:190: actual server COMMIT completion dropped: caller=&serveapp.servedJSONRPCError{Code:-32035, Message:"Application error: EVENT_PUBLISH_FAILED", Data:map[string]interface {}{"code":"EVENT_PUBLISH_FAILED", "correlation_id":"event.publish-proof", "details":map[string]interface {}{"event_id":"68565918-89e1-558c-ae08-1e3704c25d2e", "event_name":"item.received", "phase":"publish", "reason":"driver: bad connection", "run_id":"bdadb795-3194-4050-b249-a7f02f7b3471"}, "retryable":true}} durable event=68565918-89e1-558c-ae08-1e3704c25d2e run=bdadb795-3194-4050-b249-a7f02f7b3471
+/tmp/agent-g-2444-commit-loss-final.log:2026/09/10 17:53:21 INFO startup pipeline recovery claimed event_id=68565918-89e1-558c-ae08-1e3704c25d2e run_id=bdadb795-3194-4050-b249-a7f02f7b3471 scan_phase=1 purpose=recovery
+/tmp/agent-g-2444-commit-loss-final.log:    postgres_commit_loss_contract_test.go:226: lost COMMIT response retained one event; actual serve recovery reached entity and delivered outcome; exact public replay did not redispatch
+/tmp/agent-g-2444-commit-loss-final.log:--- PASS: TestServePostgresLostCommitResponseRecoversDurablePublication (4.64s)
+/tmp/agent-g-2444-commit-loss-final.log:PASS
+/tmp/agent-g-2444-commit-loss-final.log:ok  	github.com/division-sh/swarm/internal/serveapp	15.720s
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState/connection
+/tmp/agent-g-2444-db-loss-final.log:    postgres_three_contracts_test.go:164: stock pq connection loss: predecessor nonzero, no ready endpoint, exact new authority, same durable run/entity continued once
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState/server
+/tmp/agent-g-2444-db-loss-final.log:2026/09/10 17:50:07 INFO startup pipeline recovery claimed event_id=d796a938-93e1-5a3d-b554-7cea4f1bc13c run_id=83c97e18-fa0c-4986-8d2d-f1d1147194ca scan_phase=1 purpose=recovery
+/tmp/agent-g-2444-db-loss-final.log:    postgres_three_contracts_test.go:164: stock pq server loss: predecessor nonzero, no ready endpoint, exact new authority, same durable run/entity continued once
+/tmp/agent-g-2444-db-loss-final.log:--- PASS: TestServePostgresLossAndRestartFromDurableState (11.32s)
+/tmp/agent-g-2444-db-loss-final.log:    --- PASS: TestServePostgresLossAndRestartFromDurableState/connection (6.22s)
+/tmp/agent-g-2444-db-loss-final.log:    --- PASS: TestServePostgresLossAndRestartFromDurableState/server (5.10s)
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState/connection
+/tmp/agent-g-2444-db-loss-final.log:    postgres_three_contracts_test.go:164: stock pq connection loss: predecessor nonzero, no ready endpoint, exact new authority, same durable run/entity continued once
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState/server
+/tmp/agent-g-2444-db-loss-final.log:2026/09/10 17:50:17 INFO startup pipeline recovery claimed event_id=980957f6-f2e0-5209-b6d0-da8a2a2a5fa0 run_id=29096716-9742-4d92-a055-838793305834 scan_phase=1 purpose=recovery
+/tmp/agent-g-2444-db-loss-final.log:    postgres_three_contracts_test.go:164: stock pq server loss: predecessor nonzero, no ready endpoint, exact new authority, same durable run/entity continued once
+/tmp/agent-g-2444-db-loss-final.log:--- PASS: TestServePostgresLossAndRestartFromDurableState (9.95s)
+/tmp/agent-g-2444-db-loss-final.log:    --- PASS: TestServePostgresLossAndRestartFromDurableState/connection (4.87s)
+/tmp/agent-g-2444-db-loss-final.log:    --- PASS: TestServePostgresLossAndRestartFromDurableState/server (5.08s)
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState/connection
+/tmp/agent-g-2444-db-loss-final.log:    postgres_three_contracts_test.go:164: stock pq connection loss: predecessor nonzero, no ready endpoint, exact new authority, same durable run/entity continued once
+/tmp/agent-g-2444-db-loss-final.log:=== RUN   TestServePostgresLossAndRestartFromDurableState/server
+/tmp/agent-g-2444-db-loss-final.log:2026/09/10 17:50:27 INFO startup pipeline recovery claimed event_id=72962a47-f6cc-5a28-8123-ae95ab86333c run_id=4982fc49-c811-4193-bc6c-6df227936369 scan_phase=1 purpose=recovery
+/tmp/agent-g-2444-db-loss-final.log:    postgres_three_contracts_test.go:164: stock pq server loss: predecessor nonzero, no ready endpoint, exact new authority, same durable run/entity continued once
+/tmp/agent-g-2444-db-loss-final.log:--- PASS: TestServePostgresLossAndRestartFromDurableState (9.97s)
+/tmp/agent-g-2444-db-loss-final.log:    --- PASS: TestServePostgresLossAndRestartFromDurableState/connection (4.88s)
+/tmp/agent-g-2444-db-loss-final.log:    --- PASS: TestServePostgresLossAndRestartFromDurableState/server (5.09s)
+/tmp/agent-g-2444-db-loss-final.log:PASS
+/tmp/agent-g-2444-db-loss-final.log:ok  	github.com/division-sh/swarm/internal/serveapp	32.295s

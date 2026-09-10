@@ -1,5 +1,11 @@
 # #2444 Consolidated Removal Investigation / Implementation Gate Request
 
+**Historical candidate.** The mandatory I/O policy and socket wrapper proposed
+below were superseded by lead comment `5622859909`. They are not approved or
+required. See `issue-2444-three-contracts-gate.md` for the current contract delta
+and proof ledger. The original patch/hash and receipts remain historical evidence,
+not a production implementation or a current timeout recommendation.
+
 Status: investigation only; NOT production implementation or merge approval.
 Agent: agent-g. Baseline: `a32749a31edcf62a4c07879062c0f2e820885be6`.
 The runtime experiment is an uncommitted disposable candidate. The accompanying
