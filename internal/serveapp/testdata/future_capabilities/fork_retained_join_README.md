@@ -12,8 +12,12 @@ projection, repeated materialization and source-isolation assertions remain.
 Only successful fork/child projection is **split / escalated to #642**. This
 artifact is not a skipped test, passing refusal proof, or support claim. It remains
 RED under current admission. The active `TestServedJoinWriterCompletedHistoryRefusal*`
-tests execute the same source journeys, then assert both exact blockers and no
-database mutation on first and repeated refusal, on SQLite and PostgreSQL.
+tests execute the same source journeys and captured-generation assertions, then
+successfully shut down and join the real source runtime before taking the
+all-application-table baseline. Delivery settlement alone does not join background
+completion-candidate writes to `runs.completion_due_at`. With those writers joined,
+the tests assert both exact blockers and no database mutation on first and repeated
+store-only refusal, on SQLite and PostgreSQL. No table or column is excluded.
 
 To reproduce the original oracle from the repository root without changing
 production code or the checkout, use the checked-in overlay:

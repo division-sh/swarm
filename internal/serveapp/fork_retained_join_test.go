@@ -133,6 +133,11 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if err := rt.DB.QueryRow(`SELECT MIN(revision) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present`, started.RunID, frontier).Scan(&frontierRevision); err != nil || frontierRevision <= 0 {
 				t.Fatalf("missing fixed-revision frontier: revision=%d err=%v", frontierRevision, err)
 			}
+			// Delivery settlement does not join the lifecycle candidate executor. Stop
+			// the real source writers before measuring the store-only refusal.
+			if err := rt.Runtime.Shutdown(); err != nil {
+				t.Fatalf("join source runtime before refusal snapshot: %v", err)
+			}
 			before := snapshotForkReceiverApplication(t, rt)
 			owner, ok := selected.RunFork()
 			if !ok {
