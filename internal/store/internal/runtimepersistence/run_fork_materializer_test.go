@@ -1247,6 +1247,10 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}
 	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, sourceRoute, runtimedelivery.StateQueued, nil)
 	sourceDeliveryID := sourceDelivery.DeliveryID
+	var sourceDeliveryBefore []byte
+	if err := db.QueryRowContext(ctx, `SELECT row_to_json(d) FROM event_deliveries d WHERE delivery_id=$1::uuid`, sourceDeliveryID).Scan(&sourceDeliveryBefore); err != nil {
+		t.Fatalf("capture source delivery before fork: %v", err)
+	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
@@ -1399,16 +1403,12 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("lineage rows = %d, want 1", lineageCount)
 	}
 
-	var sourceDeliveryRun, sourceDeliveryStatus, sourceDeliveryReason string
-	if err := db.QueryRowContext(ctx, `
-		SELECT run_id::text, status, COALESCE(reason_code, '')
-		FROM event_deliveries
-		WHERE delivery_id = $1::uuid
-	`, sourceDeliveryID).Scan(&sourceDeliveryRun, &sourceDeliveryStatus, &sourceDeliveryReason); err != nil {
+	var sourceDeliveryAfter []byte
+	if err := db.QueryRowContext(ctx, `SELECT row_to_json(d) FROM event_deliveries d WHERE delivery_id=$1::uuid`, sourceDeliveryID).Scan(&sourceDeliveryAfter); err != nil {
 		t.Fatalf("load source delivery after activation: %v", err)
 	}
-	if sourceDeliveryRun != sourceRunID || sourceDeliveryStatus != "dead_letter" || sourceDeliveryReason != "run_forked" {
-		t.Fatalf("source delivery terminalization = run:%s status:%s reason:%s", sourceDeliveryRun, sourceDeliveryStatus, sourceDeliveryReason)
+	if string(sourceDeliveryAfter) != string(sourceDeliveryBefore) {
+		t.Fatalf("fork source freeze changed immutable delivery history:\nbefore=%s\nafter=%s", sourceDeliveryBefore, sourceDeliveryAfter)
 	}
 
 	var rawScope string
