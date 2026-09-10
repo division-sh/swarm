@@ -2,20 +2,24 @@ package runtimepersistence
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
+			fixture, reopen := openPayloadBindingHistoryFixture(t, backend.name)
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
 			payload := []byte("{\n  \"integer\":9007199254740993, \"double\":1.0\n}")
@@ -39,6 +43,18 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 			var firstRaw []byte
 			if err := fixture.db.QueryRowContext(ctx, `SELECT revision, fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present ORDER BY revision LIMIT 1`, event.RunID(), event.ID()).Scan(&firstRevision, &firstRaw); err != nil {
 				t.Fatal(err)
+			}
+			if err := fixture.db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			fixture = reopen()
+			store = fixture.store.(eventRecordContractStore)
+			restored, found, err := loadEventProducerIdentityRecord(ctx, fixture, event.ID())
+			if err != nil || !found || !restored.Equal(record) {
+				t.Fatalf("reopened canonical record differs: found=%v err=%v", found, err)
+			}
+			if _, err := restored.Decode(); err != nil {
+				t.Fatalf("reopened strict event decode: %v", err)
 			}
 			for attempt := 0; attempt < 3; attempt++ {
 				var raw []byte
@@ -75,5 +91,34 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func openPayloadBindingHistoryFixture(t *testing.T, backend string) (authorActivityReceiptFixture, func() authorActivityReceiptFixture) {
+	t.Helper()
+	if backend == "sqlite" {
+		path := filepath.Join(t.TempDir(), "history.db")
+		open := func() authorActivityReceiptFixture {
+			store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+			return authorActivityReceiptFixture{store: store, db: store.backend.ConstructionHandle(), dialect: authoractivityfixture.DialectSQLite}
+		}
+		return open(), open
+	}
+	if backend != "postgres" {
+		t.Fatalf("unsupported history fixture backend %q", backend)
+	}
+	dsn, db, _ := testutil.StartPostgres(t)
+	wrap := func(db *sql.DB) authorActivityReceiptFixture {
+		store := admitTestPostgresStore(t, db)
+		registerTestAuthorActivityCatalog(t, store)
+		return authorActivityReceiptFixture{store: store, db: db, dialect: authoractivityfixture.DialectPostgres}
+	}
+	return wrap(db), func() authorActivityReceiptFixture {
+		reopened, err := sql.Open("postgres", dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = reopened.Close() })
+		return wrap(reopened)
 	}
 }
