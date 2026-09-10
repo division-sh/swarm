@@ -26,9 +26,12 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			for _, cell := range []string{"current", "historical", "external_current", "external_historical", "missing_original", "foreign_original", "unknown_revision"} {
+			for _, cell := range []string{"current", "historical", "no_lineage_role", "external_current", "external_historical", "missing_original", "foreign_original", "unknown_revision"} {
 				t.Run(cell, func(t *testing.T) {
 					source := selectedActivityProducerSourceWithLoops(t, true, false)
+					if cell == "no_lineage_role" {
+						source = selectedActivityProducerSource(t)
+					}
 					runID := uuid.NewString()
 					ctx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, runID, source), runID)
 					descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
@@ -56,8 +59,10 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 						}
 					}
 					buckets := map[string]map[string]any{}
-					if err := loopruntime.Store(buckets, activation); err != nil {
-						t.Fatal(err)
+					if cell != "no_lineage_role" {
+						if err := loopruntime.Store(buckets, activation); err != nil {
+							t.Fatal(err)
+						}
 					}
 					seedWorkflowTargetStateForTransition(t, backend.name, fixture.db, runID, runID, runID, "initial", 1, at)
 					if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET entity_type='root' WHERE run_id=$1`, runID); err != nil {
@@ -74,6 +79,9 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 						revision = "not-owned-by-source"
 					}
 					payload := json.RawMessage(forkTestJSON(t, map[string]any{"opaque_revision": revision, "business_revision": generation.RevisionID, "large": json.Number("9007199254740993")}))
+					if cell == "no_lineage_role" {
+						payload = json.RawMessage("{ \"opaque_revision\": " + forkTestJSON(t, revision) + ", \"business_revision\": " + forkTestJSON(t, generation.RevisionID) + ", \"large\":9007199254740993, \"double\":1.0 }")
+					}
 					routingSource := eventtest.RootRoutingSource(runID)
 					isExternal := cell == "external_current" || cell == "external_historical"
 					if isExternal {
@@ -184,8 +192,15 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					if err := json.Unmarshal(raw, &got); err != nil {
 						t.Fatal(err)
 					}
-					if string(got["opaque_revision"]) != forkTestJSON(t, want.RevisionID) || string(got["business_revision"]) != forkTestJSON(t, generation.RevisionID) || string(got["large"]) != "9007199254740993" {
-						t.Fatalf("historical payload: got %s; want opaque_revision=%s, business_revision=%s, large=9007199254740993", raw, want.RevisionID, generation.RevisionID)
+					wantRevision := want.RevisionID
+					if cell == "no_lineage_role" {
+						wantRevision = generation.RevisionID
+						if string(raw) != string(payload) {
+							t.Fatalf("replay without declared lineage changed exact bytes: got %s want %s", raw, payload)
+						}
+					}
+					if string(got["opaque_revision"]) != forkTestJSON(t, wantRevision) || string(got["business_revision"]) != forkTestJSON(t, generation.RevisionID) || string(got["large"]) != "9007199254740993" {
+						t.Fatalf("historical payload: got %s; want opaque_revision=%s, business_revision=%s, large=9007199254740993", raw, wantRevision, generation.RevisionID)
 					}
 					before = snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					if _, err := owner.ActivateRunFork(ctx, request); err == nil {
