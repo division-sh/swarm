@@ -76,3 +76,19 @@ func TestRecoveryManagerRequiresCanonicalOwner(t *testing.T) {
 	}()
 	_ = runtimepipeline.NewRecoveryManagerWith(nil)
 }
+
+func TestRecoveryManagerRejectsBlockedEvenWhenScanExhausted(t *testing.T) {
+	for _, startup := range []bool{false, true} {
+		owner := &recoveryOwnerProbe{results: []runtimepipelineobligation.SweepResult{{Blocked: true, Exhausted: true}}}
+		recovery := runtimepipeline.NewRecoveryManagerWith(owner)
+		var err error
+		if startup {
+			err = recovery.RecoverToExhaustion(context.Background())
+		} else {
+			err = recovery.Recover(context.Background())
+		}
+		if (err != nil) != startup || owner.calls != 1 {
+			t.Fatalf("startup=%v: error=%v calls=%d", startup, err, owner.calls)
+		}
+	}
+}

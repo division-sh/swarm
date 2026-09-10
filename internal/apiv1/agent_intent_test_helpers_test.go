@@ -6,16 +6,26 @@ import (
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
 func withAPITestIntent(t testing.TB, cfg runtimeactors.AgentConfig) runtimeactors.AgentConfig {
 	t.Helper()
-	if strings.TrimSpace(cfg.ResolvedLLMBackend) == "" {
-		cfg.ResolvedLLMBackend = strings.TrimSpace(cfg.LLMBackend)
-		if cfg.ResolvedLLMBackend == "" {
-			cfg.ResolvedLLMBackend = "anthropic"
-		}
+	backend := strings.TrimSpace(cfg.LLMBackend)
+	if backend == "" {
+		backend = llmselection.BackendAnthropic
 	}
+	profile, err := llmselection.ResolveLiveBackend(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = selected.Actor
 	content := "Test intent for " + cfg.ID + "."
 	intent, err := runtimeagentintent.Resolve(
 		runtimeagentintent.SourceInline,

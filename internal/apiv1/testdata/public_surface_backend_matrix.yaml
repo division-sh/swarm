@@ -154,7 +154,8 @@ store_parity:
     - {id: resource-data-surface, kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, path: internal/apiv1/operator_data_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: resource_data, risk_dimensions: [real_v1_handler, served_lifecycle]}]}
     - id: served-source-artifact
       kind: go_test
-      name: TestSwarmTestConsumesLiveSourceArtifactAcrossSupportedBackendsAndModes
+      # H: retained internal lifecycle composition, not public swarm test or live serve.
+      name: TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsAndModes
       path: internal/serveapp/test_command_runtime_test.go
       profile: full
       backends: [default_sqlite, explicit_postgres]

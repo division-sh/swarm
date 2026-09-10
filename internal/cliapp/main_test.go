@@ -1659,7 +1659,6 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndRejectsEmptyConfig(t *
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	writeRuntimeConfigText(t, configPath, strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: \"   \"",
@@ -1888,7 +1887,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if authority.CLIFlag != "--workspace-backend <docker|host>" || authority.ConfigKey != "workspace.backend" || authority.UnsafeConfigKey != "workspace.allow_exec_on_host" || authority.RetiredEnvVar != "SWARM_WORKSPACE_BACKEND" {
 		t.Fatalf("workspace backend selectors = %#v", authority)
 	}
-	for _, want := range []string{"loaded contract execution capability", "--workspace-backend", "workspace.backend"} {
+	for _, want := range []string{"command-selected executable descriptor", "--workspace-backend", "workspace.backend"} {
 		if !stringSliceContains(authority.SourceOrder, want) {
 			t.Fatalf("workspace backend order missing %q: %#v", want, authority.SourceOrder)
 		}
@@ -3024,7 +3023,7 @@ func TestDefaultRuntimeConfig_DoesNotInferLLMBackendFromCredentials(t *testing.T
 
 func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
 	for key, value := range map[string]string{
-		"SWARM_RUNTIME_RECOVERY_ON_STARTUP":          "true",
+		"SWARM_RUNTIME_RECOVERY_ON_STARTUP":          "false",
 		"SWARM_LLM_SESSION_LOCK_TTL":                 "1s",
 		"SWARM_LLM_SESSION_ROTATE_AFTER_TURNS":       "2",
 		"SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES": "2",
@@ -3045,8 +3044,8 @@ func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaultRuntimeConfig: %v", err)
 	}
-	if cfg.Runtime.RecoveryOnStartup {
-		t.Fatalf("recovery_on_startup = true, want built-in false")
+	if !cfg.Runtime.RecoveryOnStartup {
+		t.Fatalf("recovery_on_startup = false, want built-in true regardless of retired environment override")
 	}
 	if cfg.LLM.Session.LockTTL != 10*time.Second || cfg.LLM.Session.RotateAfterTurns != 40 || cfg.LLM.Session.RotateOnParseFailures != 3 {
 		t.Fatalf("session defaults = %#v, want built-ins", cfg.LLM.Session)
@@ -3460,11 +3459,12 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 	if code == 0 {
 		t.Fatalf("runVerifyCommand --json exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
-	if strings.TrimSpace(stdout.String()) != "" {
-		t.Fatalf("verify --json stdout = %q, want empty for non-boot validation failure", stdout.String())
+	result := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+	if result.OK || len(result.Errors) != 1 || result.Errors[0].CheckID != "workflow_contract_validation" || !strings.Contains(result.Errors[0].Message, "emit schema strict mode enabled") {
+		t.Fatalf("verify --json lost strict emit schema failure: %#v", result)
 	}
-	if errText := stderr.String(); !strings.Contains(errText, "verify failed: emit schema strict mode enabled") {
-		t.Fatalf("verify --json stderr = %q, want strict emit schema validation failure", errText)
+	if stderr.Len() != 0 {
+		t.Fatalf("verify --json stderr = %q, want structured output only", stderr.String())
 	}
 }
 
@@ -3701,7 +3701,7 @@ func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *t
 	}
 }
 
-func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.T) {
+func TestRunVerifyCommand_FailsForUndefinedDeclaredModelAlias(t *testing.T) {
 	root := canonicalrouting.CopyVerifyModelAlias(t, canonicalrouting.VerifyModelAliasUndefined)
 
 	var buf bytes.Buffer
@@ -3710,7 +3710,7 @@ func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.
 		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
 	}
 	out := buf.String()
-	for _, want := range []string{"model alias resolution failed", "llm.models alias \"not_configured\" is not configured"} {
+	for _, want := range []string{"model alias declaration failed", "llm.models alias \"not_configured\" is not configured"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("verify output missing %q:\n%s", want, out)
 		}
@@ -4039,7 +4039,7 @@ root.unused: {}
 	return root
 }
 
-func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t *testing.T) {
+func TestExecutionValidation_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	cases := []struct {
@@ -4103,13 +4103,13 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			source := semanticviewtest.WrapRootAgents(tc.bundle)
-			verifyErr := VerifyBundle(context.Background(), source, executionposture.Live)
+			verifyErr := validateExecutionFixture(context.Background(), source, executionposture.Live)
 			if tc.wantErr {
 				if verifyErr == nil || !strings.Contains(verifyErr.Error(), tc.errContains) {
-					t.Fatalf("VerifyBundle error = %v, want substring %q", verifyErr, tc.errContains)
+					t.Fatalf("validateExecutionFixture error = %v, want substring %q", verifyErr, tc.errContains)
 				}
 			} else if verifyErr != nil {
-				t.Fatalf("VerifyBundle error = %v, want nil", verifyErr)
+				t.Fatalf("validateExecutionFixture error = %v, want nil", verifyErr)
 			}
 
 			result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
@@ -4493,12 +4493,12 @@ func writeRuntimeConfigText(t *testing.T, path, configText string) {
 	}
 }
 
-func TestVerifyBundle_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testing.T) {
+func TestExecutionValidation_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testing.T) {
 	source := semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-local-events")))
 
-	err := VerifyBundle(context.Background(), source, executionposture.Live)
+	err := validateExecutionFixture(context.Background(), source, executionposture.Live)
 	if err == nil {
-		t.Fatal("VerifyBundle error = nil, want warning-only failure from unrelated fixture warnings")
+		t.Fatal("validateExecutionFixture error = nil, want warning-only failure from unrelated fixture warnings")
 	}
 	if strings.Contains(err.Error(), "'child/child.internal' emitted but no schema in events.yaml") {
 		t.Fatalf("unexpected flow-local no-schema warning: %v", err)
@@ -4508,16 +4508,16 @@ func TestVerifyBundle_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(
 	}
 }
 
-func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
+func TestExecutionValidation_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
 	source := semanticview.Wrap(requiredagentsparentconnect.LoadBundle(t))
 
-	err := VerifyBundle(context.Background(), source, executionposture.Live)
+	err := validateExecutionFixture(context.Background(), source, executionposture.Live)
 	if err != nil && strings.Contains(err.Error(), "'work.ready' emitted but nobody subscribes") {
 		t.Fatalf("unexpected flow-owned agent output warning: %v", err)
 	}
 }
 
-func TestVerifyBundle_CreateEntityAccumulatePreemptsDynamicComputeWarningSurface(t *testing.T) {
+func TestExecutionValidation_CreateEntityAccumulatePreemptsDynamicComputeWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	bundle.RootEntities = runtimecontracts.EntityContractsDocument{
@@ -4551,13 +4551,13 @@ func TestVerifyBundle_CreateEntityAccumulatePreemptsDynamicComputeWarningSurface
 	}
 	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(bundle), executionposture.Live)
+	err := validateExecutionFixture(context.Background(), semanticview.Wrap(bundle), executionposture.Live)
 	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
-		t.Fatalf("VerifyBundle error = %v, want create_entity/accumulate boot error", err)
+		t.Fatalf("validateExecutionFixture error = %v, want create_entity/accumulate boot error", err)
 	}
 }
 
-func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing.T) {
+func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -4617,24 +4617,24 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(bundle), executionposture.Live)
+	err := validateExecutionFixture(context.Background(), semanticview.Wrap(bundle), executionposture.Live)
 	if err == nil {
-		t.Fatal("VerifyBundle error = nil, want emitted payload completeness invalidity")
+		t.Fatal("validateExecutionFixture error = nil, want emitted payload completeness invalidity")
 	}
 	if !strings.Contains(err.Error(), "scan_id is not statically provable") {
-		t.Fatalf("VerifyBundle error = %v, want emitted payload completeness invalidity", err)
+		t.Fatalf("validateExecutionFixture error = %v, want emitted payload completeness invalidity", err)
 	}
 	if strings.Contains(err.Error(), "definitely missing") {
-		t.Fatalf("VerifyBundle error = %v, want approved warning wording only", err)
+		t.Fatalf("validateExecutionFixture error = %v, want approved warning wording only", err)
 	}
 }
 
-func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testing.T) {
+func TestExecutionValidation_InputPinProducerPathReturnsHardInvaliditySurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))), executionposture.Live)
+	err := validateExecutionFixture(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))), executionposture.Live)
 	if err == nil {
-		t.Fatal("VerifyBundle error = nil, want hard invalidity from missing producer path")
+		t.Fatal("validateExecutionFixture error = nil, want hard invalidity from missing producer path")
 	}
 	for _, want := range []string{
 		"no accepted producer source was found in the authored bundle",
@@ -4646,7 +4646,7 @@ func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testin
 		"Internal topology producer: not found",
 	} {
 		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("VerifyBundle error = %v, want substring %q", err, want)
+			t.Fatalf("validateExecutionFixture error = %v, want substring %q", err, want)
 		}
 	}
 }
@@ -4656,12 +4656,12 @@ func writeVerifyMissingPinWarningFixture(t *testing.T) string {
 	return canonicalrouting.CopyVerifyMissingPin(t)
 }
 
-func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {
+func TestExecutionValidation_UnreachableStateReturnsWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-state-machine-unreachable"))), executionposture.Live)
+	err := validateExecutionFixture(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-state-machine-unreachable"))), executionposture.Live)
 	if err == nil {
-		t.Fatal("VerifyBundle error = nil, want warning-only failure from unreachable declared state")
+		t.Fatal("validateExecutionFixture error = nil, want warning-only failure from unreachable declared state")
 	}
 	for _, want := range []string{
 		"semantic_drift_unreachable_state",
@@ -4670,19 +4670,19 @@ func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {
 		"Unreachable states: review",
 	} {
 		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("VerifyBundle error = %v, want substring %q", err, want)
+			t.Fatalf("validateExecutionFixture error = %v, want substring %q", err, want)
 		}
 	}
 }
 
-func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T) {
+func TestExecutionValidation_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
 	source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeWorkflowValidationDeadEventSchemaFixture(t)))
 
-	verifyErr := VerifyBundle(context.Background(), source, executionposture.Live)
+	verifyErr := validateExecutionFixture(context.Background(), source, executionposture.Live)
 	if verifyErr == nil {
-		t.Fatal("VerifyBundle error = nil, want warning-only failure from dead declared event schema")
+		t.Fatal("validateExecutionFixture error = nil, want warning-only failure from dead declared event schema")
 	}
 	for _, want := range []string{
 		"semantic_drift_dead_event_schema",
@@ -4690,7 +4690,7 @@ func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T)
 		"has no active role in the authored bundle",
 	} {
 		if !strings.Contains(verifyErr.Error(), want) {
-			t.Fatalf("VerifyBundle error = %v, want substring %q", verifyErr, want)
+			t.Fatalf("validateExecutionFixture error = %v, want substring %q", verifyErr, want)
 		}
 	}
 
@@ -4712,14 +4712,14 @@ func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T)
 	}
 }
 
-func TestVerifyBundle_CreateEntityAccumulateReturnsBootError(t *testing.T) {
+func TestExecutionValidation_CreateEntityAccumulateReturnsBootError(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate"))), executionposture.Live)
+	err := validateExecutionFixture(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate"))), executionposture.Live)
 	if err == nil {
-		t.Fatal("VerifyBundle error = nil, want create_entity/accumulate boot error")
+		t.Fatal("validateExecutionFixture error = nil, want create_entity/accumulate boot error")
 	}
 	if !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
-		t.Fatalf("VerifyBundle error = %v, want create_entity/accumulate boot error", err)
+		t.Fatalf("validateExecutionFixture error = %v, want create_entity/accumulate boot error", err)
 	}
 }

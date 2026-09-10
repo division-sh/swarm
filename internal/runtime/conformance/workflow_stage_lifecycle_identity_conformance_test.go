@@ -203,12 +203,13 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 	storetest.RequireBundleDataCatalog(t, runtimeCtx, catalogStore, bundle)
 	cfg := &config.Config{
 		LLM:     config.LLMConfig{Backend: "anthropic"},
-		Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live},
+		Runtime: config.RuntimeConfig{},
 	}
 	base := runtimepkg.RuntimeDeps{
 		Config: cfg,
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-			SelfCheck: false, WorkflowModule: module, LLMRuntime: conformanceNoopLLMRuntime{},
+			ExecutionPosture: executionposture.Live,
+			SelfCheck:        false, WorkflowModule: module, LLMRuntime: conformanceNoopLLMRuntime{},
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID, SourceArtifactFact: sourceArtifactFact,
 		}),
 	}

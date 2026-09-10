@@ -350,7 +350,6 @@ func TestSwarmTestGeneratesConfiguredTelegramInputThroughProductionCommand(t *te
 	setCLIAPITestToken(t, "test-token")
 	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	sourceRoot := exampleRoot
-	configPath := filepath.Join(sourceRoot, "swarm.yaml")
 	scenarioPath := filepath.Join(sourceRoot, "telegram-chat", "tests", "generated-telegram.yaml")
 	writeWorkflowValidationFixtureFile(t, scenarioPath, `
 name: generated Telegram normalized input
@@ -395,11 +394,10 @@ steps:
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), sourceRoot, []string{
 		"test", sourceRoot,
-		"--config", configPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 		filepath.ToSlash(filepath.Join("telegram-chat", "tests", "generated-telegram.yaml")),
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}

@@ -392,7 +392,7 @@ func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storete
 	}
 	var admitted *runtimemanager.PersistedAgent
 	for i := range persisted {
-		if persisted[i].Config.ID == cfg.ID {
+		if persisted[i].Config.Identity == cfg.Identity {
 			admitted = &persisted[i]
 			break
 		}
@@ -400,7 +400,8 @@ func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storete
 	if admitted == nil {
 		t.Fatalf("admitted API test agent %s is missing", cfg.ID)
 	}
-	admitted.Config = cfg
+	// Prompt is process-local; keep the selected execution descriptor from storage.
+	admitted.Config.Prompt = cfg.Prompt
 	if err := manager.MaterializeAdmittedAgentForExecution(ctx, *admitted); err != nil {
 		t.Fatalf("materialize API test agent: %v", err)
 	}

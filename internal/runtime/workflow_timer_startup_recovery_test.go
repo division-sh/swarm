@@ -462,11 +462,60 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				t.Fatalf("generic schedule crossed failed topology latch: found=%v activation=%#v events=%d err=%v", found, activation, countGenericEvents(), err)
 			}
 
+			for _, interruption := range []string{"publication_abort", "standing_finalization_failure"} {
+				interruptedRuntime, interruptedProcess := newRuntime(selected)
+				interruptedCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, interruptedRuntime)
+				release, err := interruptedRuntime.PrepareStart(ctx)
+				if err != nil {
+					t.Fatalf("prepare %s: %v", interruption, err)
+				}
+				if interruption == "publication_abort" {
+					closeRuntime(interruption, interruptedRuntime, interruptedProcess, interruptedCapability)
+					if err := release.Start(nil); err == nil {
+						t.Fatal("aborted prepared runtime admitted work")
+					}
+				} else {
+					cause := errors.New("injected standing finalization failure")
+					if err := release.Start(func() error { return cause }); !errors.Is(err, cause) {
+						t.Fatalf("finalization error lost: %v", err)
+					}
+					closeRuntime(interruption, interruptedRuntime, interruptedProcess, interruptedCapability)
+				}
+				if interruptedRuntime.Manager.IsRunning() || countGenericEvents() != 0 {
+					t.Fatalf("%s leaked executable work", interruption)
+				}
+				waiting, found, err := interruptedRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.RouteForInstancePath(workflowRunID)})
+				if err != nil || !found || waiting.CurrentState != "waiting" {
+					t.Fatalf("%s released workflow timer: found=%v state=%s err=%v", interruption, found, waiting.CurrentState, err)
+				}
+			}
+
 			recoveredRuntime, recoveredProcess := newRuntime(selected)
 			recoveredCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, recoveredRuntime)
-			if err := recoveredRuntime.Start(ctx); err != nil {
+			release, err := recoveredRuntime.PrepareStart(ctx)
+			if err != nil {
+				closeRuntime("failed preparation", recoveredRuntime, recoveredProcess, recoveredCapability)
+				t.Fatalf("prepare after completed topology: %v", err)
+			}
+			if recoveredRuntime.Manager.IsRunning() {
+				t.Fatal("preparation admitted manager execution before publication")
+			}
+			time.Sleep(100 * time.Millisecond)
+			if countGenericEvents() != 0 {
+				t.Fatal("prepared runtime released an overdue generic schedule")
+			}
+			beforeRelease, _, err := recoveredRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RunScopedFlowInstance{
+				RunID: workflowRunID, Route: runtimeflowidentity.RouteForInstancePath(workflowRunID),
+			})
+			if err != nil || beforeRelease.CurrentState != "waiting" {
+				t.Fatalf("prepared runtime released an overdue workflow timer: state=%s err=%v", beforeRelease.CurrentState, err)
+			}
+			if err := release.Start(nil); err != nil {
 				closeRuntime("failed recovery", recoveredRuntime, recoveredProcess, recoveredCapability)
 				t.Fatalf("Start after completed topology: %v", err)
+			}
+			if err := release.Start(nil); err == nil {
+				t.Fatal("prepared startup was released twice")
 			}
 			defer closeRuntime("recovered", recoveredRuntime, recoveredProcess, recoveredCapability)
 			deadline := time.Now().Add(8 * time.Second)

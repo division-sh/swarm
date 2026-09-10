@@ -45,11 +45,9 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			activityRoot := filepath.Join(base, "activity-control")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/node_identity_activity"), activityRoot)
-			// This control only verifies authored activity identity; it never serves
-			// or dispatches the fixture's HTTP tool. The runtime proof stays mock-only.
-			writeReleaseFile(t, config, strings.Replace(goldenRuntimeConfig(store), "execution_posture: mock_only", "execution_posture: live", 1))
+			// This structural control never dispatches the authored HTTP activity.
+			// The public served proof below uses only system nodes.
 			activity := runReleaseCommand(t, goldenStartupTimeout, base, env, "", binary, "verify", activityRoot, "--config", config, "--json")
-			writeReleaseFile(t, config, goldenRuntimeConfig(store))
 			if activity.err != nil {
 				t.Fatalf("legitimate activity ID rejected: %v\n%s", activity.err, activity.output)
 			}
@@ -76,7 +74,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				return p
 			}
 			process := start()
-			hash := goldenServedBundleHash(t, process.rpc)
+			hash := goldenServedBundleHash(t, process.rpc, "live")
 			persisted := map[string][]goldenEvent{}
 			for _, scope := range []string{".", "left", "right", "left/nested"} {
 				run, events := executeNodeIdentityWork(t, process, hash, scope, "before-"+scope)
@@ -86,7 +84,7 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 			process = start()
-			if goldenServedBundleHash(t, process.rpc) != hash {
+			if goldenServedBundleHash(t, process.rpc, "live") != hash {
 				t.Fatal("restart changed selected artifact")
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)

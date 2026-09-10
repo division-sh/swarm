@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -116,8 +118,9 @@ func (b *resetCandidateSubscriptionBarrier) Run(ctx context.Context) {
 
 func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, failSecond := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/fail_second=%t", backend, failSecond), func(t *testing.T) {
+		for _, failure := range []string{"none", "second_preparation", "registered_release", "normal_registered_release", "normal_active_release", "reset_active_release", "normal_second_preparation"} {
+			t.Run(fmt.Sprintf("%s/failure=%s", backend, failure), func(t *testing.T) {
+				failSecond := failure == "second_preparation"
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				stores := openStandingRuntimeContextStore(t, backend, "reset-candidates")
@@ -181,7 +184,8 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 						t.Fatal(err)
 					}
 					candidate, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
-						Ctx: ctx, Stores: projectServeRuntimePersistence(stores), Config: cfg, Loaded: loaded,
+						ExecutionPosture: executionposture.Live,
+						Ctx:              ctx, Stores: projectServeRuntimePersistence(stores), Config: cfg, Loaded: loaded,
 						WorkspaceBackend:       cliapp.WorkspaceBackendSelection{Backend: "host"},
 						EnableToolGateway:      true,
 						ToolGatewayBinding:     binding,
@@ -224,6 +228,44 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				if err != nil {
 					t.Fatal(err)
 				}
+				if failure == "normal_second_preparation" {
+					managed = true
+					// All lifecycle preparation has succeeded by the first candidate's
+					// preflight. Fail the later release-preparation entrance without
+					// canceling the caller or replacing either real runtime.
+					candidates[0].runtime.Options.BootProgress = func(event runtime.BootProgressEvent) {
+						if event.Step == 15 && event.Status == "ok" {
+							candidates[1].runtime.CloseAdmission()
+						}
+					}
+					release, err := prepareServeRuntimeContexts(ctx, candidates, manager)
+					if err == nil || release != nil || !strings.Contains(err.Error(), "shutdown") {
+						t.Fatalf("partial registration did not retain independent startup refusal: %v", err)
+					}
+					for index, candidate := range candidates {
+						if got := candidate.runtime.WorkOccurrence().ActiveCount(); got != 0 {
+							t.Errorf("partially registered candidate retains %d leases", got)
+						}
+						use, lookup, _ := manager.AcquireBundleHash(ctx, candidate.sourceArtifactFact.BundleHash())
+						if index == 0 && !lookup.Found {
+							t.Error("failure occurred before the first real registration")
+						}
+						if use != nil {
+							_ = use.Done()
+							t.Error("partially registered candidate remains selectable")
+						}
+					}
+					return
+				}
+				if failure == "normal_registered_release" || failure == "normal_active_release" {
+					managed = true
+					release, err := prepareServeRuntimeContexts(ctx, candidates, manager)
+					if err != nil {
+						t.Fatal(err)
+					}
+					assertRegisteredStartupAbort(t, cancel, release, candidates, manager, failure == "normal_active_release")
+					return
+				}
 				if err := manager.StageRecoveredRuntimeContexts(definitions...); err != nil {
 					t.Fatal(err)
 				}
@@ -256,15 +298,15 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				barrier := &resetCandidateSubscriptionBarrier{entered: make(chan struct{}), release: make(chan struct{})}
 				candidates[1].runtime.SystemNodes = append(candidates[1].runtime.SystemNodes, barrier)
 				type result struct {
-					starts []*runtime.PreparedStartup
-					err    error
+					release func() error
+					err     error
 				}
 				done := make(chan result, 1)
 				finished := make(chan struct{})
 				go func() {
 					defer close(finished)
-					starts, err := startResetServeRuntimeContexts(ctx, candidates, manager)
-					done <- result{starts, err}
+					release, err := prepareResetServeRuntimeContexts(ctx, candidates, manager)
+					done <- result{release, err}
 				}()
 				t.Cleanup(func() {
 					cancel()
@@ -352,13 +394,19 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				if prepared.err != nil {
 					t.Fatal(prepared.err)
 				}
+				if failure == "registered_release" {
+					assertRegisteredStartupAbort(t, cancel, prepared.release, candidates, manager, false)
+					return
+				}
 				if err := manager.ReleaseResetExecution(definitions...); err != nil {
 					t.Fatal(err)
 				}
-				for _, start := range prepared.starts {
-					if err := start.Start(); err != nil {
-						t.Fatal(err)
-					}
+				if failure == "reset_active_release" {
+					assertRegisteredStartupAbort(t, cancel, prepared.release, candidates, manager, true)
+					return
+				}
+				if err := prepared.release(); err != nil {
+					t.Fatal(err)
 				}
 				supervisor.mu.Lock()
 				supervisor.resetting = false
@@ -375,6 +423,69 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					}
 				}
 			})
+		}
+	}
+}
+
+func assertRegisteredStartupAbort(t *testing.T, cancel context.CancelFunc, release func() error, candidates []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, active bool) {
+	t.Helper()
+	if candidates[0].runtime.WorkOccurrence().ActiveCount() == 0 {
+		t.Fatal("registered composition has no standing child lease")
+	}
+	var accepted *runtime.RuntimeContextUse
+	if active {
+		target := candidates[0].startupStandingTargets[0]
+		var err error
+		accepted, _, err = manager.AcquireIngress(context.Background(), target.Alias, target.Provider)
+		if err != nil || accepted == nil {
+			t.Fatalf("acquire actual standing ingress work: %v", err)
+		}
+		defer func() { _ = accepted.Done() }()
+	}
+	cancel()
+	aborted := make(chan error, 1)
+	go func() { aborted <- release() }()
+	if accepted != nil {
+		select {
+		case <-accepted.WorkContext().Done():
+		case <-time.After(10 * time.Second):
+			t.Fatal("composed abort did not retire accepted standing work")
+		}
+		select {
+		case err := <-aborted:
+			t.Fatalf("abort returned before accepted work settled: %v", err)
+		default:
+		}
+		for _, candidate := range candidates {
+			use, _, _ := manager.AcquireBundleHash(context.Background(), candidate.sourceArtifactFact.BundleHash())
+			if use != nil {
+				_ = use.Done()
+				t.Error("sibling remained selectable while abort joined standing work")
+			}
+		}
+		if err := accepted.Done(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case err := <-aborted:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("composed release lost cancellation: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("composed release could not retire registered standing children")
+	}
+	for _, candidate := range candidates {
+		if got := candidate.runtime.WorkOccurrence().ActiveCount(); got != 0 {
+			t.Errorf("aborted candidate retains %d leases", got)
+		}
+		use, _, _ := manager.AcquireBundleHash(context.Background(), candidate.sourceArtifactFact.BundleHash())
+		if use != nil {
+			_ = use.Done()
+			t.Error("aborted candidate remains selectable")
+		}
+		if err := candidate.runtime.Shutdown(); err != nil {
+			t.Errorf("repeated shutdown: %v", err)
 		}
 	}
 }

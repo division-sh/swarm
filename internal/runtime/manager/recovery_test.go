@@ -327,6 +327,7 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 func TestMockOnlyPostureRejectsPersistedLiveAgentBeforeStartupReconstruction(t *testing.T) {
 	store := &recoveryTestStore{agents: []PersistedAgent{{Config: models.AgentConfig{
 		ExecutionMode: executionmode.Live, ID: "persisted-live", Role: "worker",
+		ResolvedLLMBackend: "anthropic", ResolvedLLMProvider: "anthropic", ResolvedLLMTransport: "api",
 		Identity: managerScopedRuntimeAgentIdentity(
 			"persisted-live", "test://recovery/persisted-live", "review", "inst-live", "review/inst-live",
 		),
@@ -340,7 +341,7 @@ func TestMockOnlyPostureRejectsPersistedLiveAgentBeforeStartupReconstruction(t *
 	}, AgentManagerOptions{ExecutionPosture: executionposture.MockOnly}, store)
 	installRecoveryTestStaticTopology(t, am, store)
 
-	if err := am.hydratePersistedAgentExecutions(testAuthorActivityContext(context.Background())); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+	if err := am.hydratePersistedAgentExecutions(testAuthorActivityContext(context.Background())); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 		t.Fatalf("HydrateForStartup error = %v, want live-agent rejection", err)
 	}
 	if factoryCalls != 0 || am.Count() != 0 || bus.routeListQueries != 0 || bus.pipelineSweeps != 0 {
@@ -364,7 +365,7 @@ func TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory(t *testing
 		t.Fatal("live agent execution snapshot is missing")
 	}
 	am.executionPosture = executionposture.MockOnly
-	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{RunID: managerIdentityTestRunID, AgentID: "restart-live"}); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{RunID: managerIdentityTestRunID, AgentID: "restart-live"}); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 		t.Fatalf("Restart error = %v, want live-agent rejection", err)
 	}
 	after, ok := testExecutionSnapshot(t, am, "restart-live", "")

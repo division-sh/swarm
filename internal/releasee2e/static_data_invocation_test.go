@@ -39,6 +39,9 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, releaseRoot)
+	// Retained mocked execution uses the compiled lifecycle harness; public
+	// verify still exercises the release command against the admitted source.
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
 	// Every worker compares against the same checked fixture, so splitting the
 	// process does not reset the cross-geometry/cross-backend equality oracle.
 	var expected struct {
@@ -96,7 +99,8 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 					}
 					serveStarted := time.Now()
 					process := startReleaseServe(t, releaseProcessSpec{
-						BinaryPath: binary, WorkingDir: cell.cwd, Source: cell.operand, ConfigPath: config,
+						InternalMockLifecycleBinary: lifecycleBinary,
+						BinaryPath:                  binary, WorkingDir: cell.cwd, Source: cell.operand, ConfigPath: config,
 						Store: backend, APIPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env,
 					})
 					ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
@@ -105,7 +109,7 @@ func testDurableDataInvocation(t *testing.T, shard int) {
 						t.Fatal(err)
 					}
 					t.Logf("invocation serve ready after %s", time.Since(serveStarted))
-					hash := goldenServedBundleHash(t, process.rpc)
+					hash := goldenServedBundleHash(t, process.rpc, "mock_only")
 					var identity struct {
 						SourceArtifacts []struct {
 							BundleHash string `json:"bundle_hash"`

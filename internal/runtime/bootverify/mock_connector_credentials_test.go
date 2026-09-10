@@ -21,7 +21,7 @@ func TestCredentialChecksConsumeExactMockConnectorAdmission(t *testing.T) {
 	for _, credentialKind := range []string{"static", "managed"} {
 		t.Run(credentialKind, func(t *testing.T) {
 			source, plan := mockConnectorCredentialFixture(t, credentialKind, false, false)
-			reachability := mockConnectorEffectReachability(t, source, plan)
+			reachability := commandConnectorEffectReachability(t, source, plan, executionposture.MockOnly)
 			findings := newCheckerContext(context.Background(), source, Options{
 				Credentials:        bootverifyCredentialStore{values: map[string]string{}},
 				EffectReachability: reachability,
@@ -39,8 +39,8 @@ func TestCredentialChecksUseTypedSelectionAndExactResponseAuthority(t *testing.T
 	source, plan := mockConnectorCredentialFixture(t, "static", false, false)
 	mixedSource, mixedPlan := mockConnectorCredentialFixture(t, "static", false, true)
 	mixedReachability := mockConnectorEffectReachability(t, mixedSource, mixedPlan)
-	if got := mixedReachability.LiveAgentIDs(); len(got) != 1 || got[0] != "live-agent" {
-		t.Fatalf("mixed live agents = %#v, want live-agent", got)
+	if got := mixedReachability.LiveAgentIDs(); len(got) != 2 || got[0] != "live-agent" || got[1] != "mock-agent" {
+		t.Fatalf("live command agents = %#v, want both declarations regardless of doubles", got)
 	}
 	tests := []struct {
 		name        string
@@ -53,7 +53,7 @@ func TestCredentialChecksUseTypedSelectionAndExactResponseAuthority(t *testing.T
 			source: source,
 			opts: Options{
 				Credentials:        bootverifyCredentialStore{values: map[string]string{}},
-				EffectReachability: mockConnectorEffectReachability(t, source, plan),
+				EffectReachability: commandConnectorEffectReachability(t, source, plan, executionposture.MockOnly),
 			},
 		},
 		{
@@ -66,7 +66,7 @@ func TestCredentialChecksUseTypedSelectionAndExactResponseAuthority(t *testing.T
 			wantMissing: true,
 		},
 		{
-			name:   "all mock without exact responder retains requirement",
+			name:   "live command with all source doubles retains requirement",
 			source: source,
 			opts: Options{
 				Credentials:        bootverifyCredentialStore{values: map[string]string{}},
@@ -142,7 +142,7 @@ func TestMockOnlyPostureRequiresMockAgentsAndExactActivityResponses(t *testing.T
 		t.Fatal(err)
 	}
 	liveSource, livePlan := mockConnectorCredentialFixture(t, "static", false, true)
-	if _, err := ResolveSourceBootEffectReachability(liveSource, profile, livePlan, executionposture.MockOnly); err == nil || !strings.Contains(err.Error(), "live agents") {
+	if _, err := ResolveSourceBootEffectReachability(liveSource, profile, livePlan, executionposture.MockOnly); err == nil || !strings.Contains(err.Error(), "exact mock performance artifact") {
 		t.Fatalf("live-agent reachability error = %v, want mock-only actor rejection", err)
 	}
 
@@ -210,8 +210,8 @@ func TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias(t *testing
 	addScopedAliasActivities(t, source)
 
 	reachability := mockConnectorEffectReachability(t, source, plan)
-	if got := reachability.LiveAgentIDs(); len(got) != 0 {
-		t.Fatalf("live agents = %#v, want every scoped agent mocked", got)
+	if got := reachability.LiveAgentIDs(); len(got) != 5 {
+		t.Fatalf("live agents = %#v, want root plus four scoped declarations despite doubles", got)
 	}
 	sites := strings.Join(reachability.LiveWorkflowActivitySites("provider.send"), "\n")
 	for _, want := range []string{
@@ -253,7 +253,7 @@ func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
 	source, plan := mockConnectorCredentialFixture(t, "static", true, false)
 	findings := newCheckerContext(context.Background(), source, Options{
 		Credentials:        bootverifyCredentialStore{values: map[string]string{}},
-		EffectReachability: mockConnectorEffectReachability(t, source, plan),
+		EffectReachability: commandConnectorEffectReachability(t, source, plan, executionposture.MockOnly),
 	}).credentials()
 	if !credentialFindingContains(findings, "provider_credential", "mcp_server audit") {
 		t.Fatalf("credential findings = %#v, want non-tool MCP requirement", findings)
@@ -462,11 +462,16 @@ func scopedReachabilityActivityNode() runtimecontracts.SystemNodeContract {
 
 func mockConnectorEffectReachability(t *testing.T, source semanticview.Source, plan *providerconnectors.MockResponsePlan) SourceBootEffectReachability {
 	t.Helper()
+	return commandConnectorEffectReachability(t, source, plan, executionposture.Live)
+}
+
+func commandConnectorEffectReachability(t *testing.T, source semanticview.Source, plan *providerconnectors.MockResponsePlan, posture executionposture.Posture) SourceBootEffectReachability {
+	t.Helper()
 	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
-	reachability, err := ResolveSourceBootEffectReachability(source, profile, plan, executionposture.Live)
+	reachability, err := ResolveSourceBootEffectReachability(source, profile, plan, posture)
 	if err != nil {
 		t.Fatalf("ResolveSourceBootEffectReachability: %v", err)
 	}

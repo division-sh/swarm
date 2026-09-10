@@ -105,7 +105,8 @@ func TestServeActivatesSelectedStoreBeforeProcessOwnedConstruction(t *testing.T)
 		t.Fatal("serve selected-store activation owner is missing")
 	}
 	for _, marker := range []string{
-		"loadedBundles, err = loadServeRuntimeBundles",
+		"loadedBundles, err = loadRuntimeCompositionBundles",
+		"loadedBundles, err = loadServeRecoveredResetSources",
 		"buildServeRuntimeBundleContext(request)",
 		"startServeOwnershipWatch(ownershipWatchCtx",
 		"installServeSourceSet(ctx, processCapability",
@@ -117,7 +118,7 @@ func TestServeActivatesSelectedStoreBeforeProcessOwnedConstruction(t *testing.T)
 		}
 	}
 	acquisition := bytes.Index(source, []byte("processCapability, err = stores.StartupOwnership().AcquireProcessCapability"))
-	load := bytes.Index(source, []byte("loadedBundles, err = loadServeRuntimeBundles"))
+	load := bytes.Index(source, []byte("loadedBundles, err = loadRuntimeCompositionBundles"))
 	if acquisition < activation || acquisition >= load {
 		t.Fatal("source loading must follow retained process authority acquisition")
 	}

@@ -876,14 +876,14 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 	}{
 		{
 			name:        "nil config",
-			deps:        RuntimeDeps{Options: RuntimeOptions{WorkflowModule: validModule}},
+			deps:        RuntimeDeps{Options: RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: validModule}},
 			errContains: "runtime config is required",
 		},
 		{
 			name: "missing workflow module",
 			deps: RuntimeDeps{
-				Config:  &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
-				Options: RuntimeOptions{SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)},
+				Config:  &config.Config{Runtime: config.RuntimeConfig{}},
+				Options: RuntimeOptions{ExecutionPosture: executionposture.Live, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)},
 			},
 			errContains: "workflow contract validation failed: workflow module is required",
 		},
@@ -891,10 +891,10 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			name: "retired llm runtime mode",
 			deps: RuntimeDeps{
 				Config: &config.Config{
-					Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live},
+					Runtime: config.RuntimeConfig{},
 					LLM:     config.LLMConfig{RuntimeMode: "cli_test"},
 				},
-				Options: RuntimeOptions{
+				Options: RuntimeOptions{ExecutionPosture: executionposture.Live,
 					WorkflowModule:     validModule,
 					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 				},
@@ -904,8 +904,8 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 		{
 			name: "valid dependency graph",
 			deps: RuntimeDeps{
-				Config: &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
-				Options: RuntimeOptions{
+				Config: &config.Config{Runtime: config.RuntimeConfig{}},
+				Options: RuntimeOptions{ExecutionPosture: executionposture.Live,
 					WorkflowModule:     validModule,
 					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 				},
@@ -914,9 +914,9 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 		{
 			name: "inbound store without admitted provider registry",
 			deps: RuntimeDeps{
-				Config:       &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
+				Config:       &config.Config{Runtime: config.RuntimeConfig{}},
 				InboundStore: &recordingInboundStore{},
-				Options: RuntimeOptions{
+				Options: RuntimeOptions{ExecutionPosture: executionposture.Live,
 					WorkflowModule:     validModule,
 					SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 				},
@@ -947,8 +947,8 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	module := semanticOnlyWorkflowRuntime{source: semanticview.Wrap(testRuntimeWorkflowValidationBundle())}
 
 	boot, err := (RuntimeDeps{
-		Config: &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
-		Options: RuntimeOptions{
+		Config: &config.Config{Runtime: config.RuntimeConfig{}},
+		Options: RuntimeOptions{ExecutionPosture: executionposture.Live,
 			WorkflowModule:     module,
 			SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 		},
