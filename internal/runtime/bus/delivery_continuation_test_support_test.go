@@ -14,6 +14,21 @@ import (
 // recovery. Store/conformance tests use the real committed-handoff owner.
 type permissiveTestDeliveryOwner struct{}
 
+func acquireTestDeliveryCapability(owner DeliveryContinuationOwner, id string) (worklifetime.DeliveryContinuation, error) {
+	result, err := owner.Acquire(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := result.Validate(id); err != nil {
+		return nil, err
+	}
+	capability, acquired := result.Acquired()
+	if !acquired {
+		return nil, errors.New("expected acquired continuation")
+	}
+	return capability, nil
+}
+
 func (permissiveTestDeliveryOwner) AcceptCommitted(proofs []runtimedelivery.DurableHandoffProof) error {
 	for _, proof := range proofs {
 		if err := proof.Validate(); err != nil {
@@ -23,12 +38,12 @@ func (permissiveTestDeliveryOwner) AcceptCommitted(proofs []runtimedelivery.Dura
 	return nil
 }
 
-func (permissiveTestDeliveryOwner) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (permissiveTestDeliveryOwner) Acquire(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	deliveryID = strings.TrimSpace(deliveryID)
 	if deliveryID == "" {
-		return nil, errors.New("test delivery id is required")
+		return worklifetime.DeliveryAcquisition{}, errors.New("test delivery id is required")
 	}
-	return &permissiveTestDeliveryContinuation{deliveryID: deliveryID}, nil
+	return worklifetime.AcquiredDelivery(&permissiveTestDeliveryContinuation{deliveryID: deliveryID}), nil
 }
 
 func (permissiveTestDeliveryOwner) Retain(snapshot runtimedelivery.Snapshot) error {
@@ -68,17 +83,17 @@ func (o *controlledTestDeliveryOwner) AcceptCommitted(proofs []runtimedelivery.D
 	return nil
 }
 
-func (o *controlledTestDeliveryOwner) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (o *controlledTestDeliveryOwner) Acquire(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	deliveryID = strings.TrimSpace(deliveryID)
 	if deliveryID == "" {
-		return nil, errors.New("test delivery id is required")
+		return worklifetime.DeliveryAcquisition{}, errors.New("test delivery id is required")
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.failAcquire {
-		return nil, errors.New("injected delivery continuation admission failure")
+		return worklifetime.DeliveryAcquisition{}, errors.New("injected delivery continuation admission failure")
 	}
-	return &controlledTestDeliveryContinuation{owner: o, deliveryID: deliveryID}, nil
+	return worklifetime.AcquiredDelivery(&controlledTestDeliveryContinuation{owner: o, deliveryID: deliveryID}), nil
 }
 
 func (*controlledTestDeliveryOwner) Retain(snapshot runtimedelivery.Snapshot) error {
@@ -121,7 +136,7 @@ func (c *controlledTestDeliveryContinuation) Resolve(_ context.Context, intent w
 	if c.settled {
 		return 0, errors.New("test delivery continuation is already settled")
 	}
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent == worklifetime.DeliveryContinuationReturn || intent == worklifetime.DeliveryContinuationReturnUnqueued {
 		c.owner.mu.Lock()
 		defer c.owner.mu.Unlock()
 		c.owner.returnAttempts++
@@ -156,7 +171,7 @@ func (c *permissiveTestDeliveryContinuation) Resolve(_ context.Context, intent w
 		return 0, errors.New("test delivery continuation is already settled")
 	}
 	c.settled = true
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent == worklifetime.DeliveryContinuationReturn || intent == worklifetime.DeliveryContinuationReturnUnqueued {
 		return worklifetime.DeliveryContinuationReturned, nil
 	}
 	if intent == worklifetime.DeliveryContinuationConsume {

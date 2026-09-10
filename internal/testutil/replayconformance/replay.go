@@ -393,13 +393,17 @@ func Project(eventsByID map[string]operatorread.OperatorEventFull, runID string,
 			item.CreatedAt = &createdAt
 		}
 		deliveryKeys := map[string]string{}
-		for _, delivery := range full.Deliveries {
-			route, err := json.Marshal(delivery.Route)
-			if err != nil {
-				return nil, err
-			}
+		deliveryRoutes := make([]events.DeliveryRoute, len(full.Deliveries))
+		for i, delivery := range full.Deliveries {
+			deliveryRoutes[i] = delivery.Route
+		}
+		projectedRoutes, err := projectReceiverRoutes(event, deliveryRoutes, key)
+		if err != nil {
+			return nil, fmt.Errorf("canonicalize event %s receiver routes: %w", id, err)
+		}
+		for i, delivery := range full.Deliveries {
 			projected := projectionDelivery{
-				SubscriberType: delivery.SubscriberType, SubscriberID: delivery.SubscriberID, Route: route,
+				SubscriberType: delivery.SubscriberType, SubscriberID: delivery.SubscriberID, Route: projectedRoutes[i],
 				Status: delivery.Status, ReasonCode: delivery.ReasonCode, Failure: delivery.Failure,
 				RetryCount: delivery.RetryCount, RetryScheduled: delivery.RetryScheduled, Terminal: delivery.Terminal,
 			}

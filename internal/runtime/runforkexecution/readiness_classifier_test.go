@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -22,7 +21,7 @@ func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *tes
 			SourceEventID: "source-event",
 			EventName:     "work.begin",
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				testAgentFrontierRecipient("worker", "flow-a/worker", "selected_contracts", agentidentity.Plan{}),
+				testAgentFrontierRecipient(mustTestAgentPlan(selectedContractTestAgentIdentity(t, "worker", "flow-a/worker")), "work.begin", "flow-a/worker", "selected_contracts"),
 			},
 		}},
 	}
@@ -99,7 +98,7 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 			SourceEventID: "source-event",
 			EventName:     "work.begin",
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				testNodeFrontierRecipient("worker", "flow-a/worker", "selected_contracts"),
+				testNodeFrontierRecipient(mustRunForkNode("flow-a", "worker"), "work.begin", "flow-a/worker", "selected_contracts"),
 			},
 		}},
 	}
@@ -136,7 +135,7 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 		SourceEventID: "source-event",
 		EventName:     "work.begin",
 		Recipients: []runfork.RunForkContractFrontierRecipient{
-			testNodeFrontierRecipient("worker", "flow-a/worker", "selected_contracts"),
+			testNodeFrontierRecipient(mustRunForkNode("flow-a", "worker"), "work.begin", "flow-a/worker", "selected_contracts"),
 		},
 		Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 	}}

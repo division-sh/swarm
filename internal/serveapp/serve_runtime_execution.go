@@ -51,18 +51,20 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 		Idempotency:      idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, SourceArtifact: rt.Bus,
 		Runs: caps.Runs, Entities: caps.Entities, Observability: caps.Observability,
 		RunBundleContext: caps.RunBundleContext, RuntimeContexts: caps.RuntimeContexts,
-		Source: req.Source, Bundle: primary.bootIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
+		SelectedForkControls: caps.SelectedForkControls,
+		Source:               req.Source, Bundle: primary.bootIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
 	}
 	handlers := apiv1.MergeOperatorHandlers(
+		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: req.RuntimeSupervisor}, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
 		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Effective: rt.Manager}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: caps.ConversationForks, Lifecycle: caps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primary.workspaceBackend), Idempotency: idempotency, ExecutionPosture: rt.ExecutionPosture}),
-		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: deps.DecisionCards, ProposedEffects: deps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, SourceArtifact: rt.Bus, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts}),
+		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: deps.DecisionCards, ProposedEffects: deps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, SourceArtifact: rt.Bus, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
-		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: caps.Observability, AgentIdentities: caps.Agents, RuntimeContexts: caps.RuntimeContexts}),
+		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: caps.Observability, AgentIdentities: caps.Agents, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
 		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: caps.TestSetup, Idempotency: idempotency, RunBundleContext: caps.RunBundleContext, RuntimeContexts: caps.RuntimeContexts, SourceArtifact: rt.Bus, Source: req.Source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles()}),
-		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: caps.RunForkAvailability, Executor: caps.RunFork, Selector: caps.RunForkSelector, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts}),
-		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts}),
+		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: caps.RunForkAvailability, Executor: caps.RunFork, Idempotency: idempotency}),
+		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls, SelectedForkStop: caps.SelectedForkProcess}),
 		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts}),
 	)
 	for method := range handlers {
@@ -112,6 +114,7 @@ func (s *processLifecycleSupervisor) executionDispatch() map[string]apiv1.Method
 
 // Kept exhaustive against the real composed handlers by the served reset proof.
 var serveRuntimeExecutionMethods = []string{
+	"agent.restart", "agent.send_directive",
 	"agent.frame", "agent.replay", "conversation.fork", "conversation.fork_chat",
 	"conversation.fork_delete", "conversation.fork_list", "conversation.fork_view",
 	"event.publish", "event.replay", "mailbox.acknowledge", "mailbox.begin_input",

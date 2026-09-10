@@ -106,12 +106,20 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 
 	var fork apiv1.RunForkExecutionResult
 	forkResponse := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
-		"source_run_id":         started.RunID,
-		"fork_event_id":         published.EventID,
-		"confirm_source_freeze": true,
-		"idempotency_key":       "issue-2361-dev-scratch-run-fork",
+		"source_run_id":       started.RunID,
+		"fork_event_id":       published.EventID,
+		"allow_source_freeze": true,
+		"idempotency_key":     "issue-2361-dev-scratch-run-fork",
 	}, 30*time.Second)
 	if forkResponse.Error != nil {
+		logServedForkHandlerDiagnostics(t, servedControlProofRuntime{DB: db})
+		var kind, authority string
+		var route []byte
+		if err := db.QueryRow(`SELECT routing_source_kind, COALESCE(routing_source_authority, ''), source_route FROM events WHERE event_id=?`, published.EventID).Scan(&kind, &authority, &route); err != nil {
+			t.Logf("fork source admission readback: %v", err)
+		} else {
+			t.Logf("fork source admission: event=%s kind=%q authority=%q route=%s", published.EventID, kind, authority, route)
+		}
 		t.Fatalf("run.fork error = %#v\nserve output:\n%s", forkResponse.Error, process.outputString())
 	}
 	if err := json.Unmarshal(forkResponse.Result, &fork); err != nil {

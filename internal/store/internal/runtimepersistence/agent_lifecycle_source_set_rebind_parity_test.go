@@ -48,6 +48,86 @@ func TestAgentLifecycleSourceSetRebindParity(t *testing.T) {
 	})
 }
 
+func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var store lifecycleSourceSetRebindStore
+			if backend == "sqlite" {
+				store = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				store = admitTestPostgresStore(t, db)
+			}
+			ctx := testAuthorActivityContext()
+			identity := testAgentIdentity(t, "removed-source-agent", "")
+			requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
+			record := runtimemanager.PersistedAgent{
+				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+					ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "sonnet", Model: "regular",
+					ExecutionMode: "live", Memory: agentmemory.PlatformDefault(),
+				}),
+				Status: "active", HiredBy: "retirement-proof", StartedAt: time.Now().UTC(),
+			}
+			if err := agentfixture.UpsertStatic(t, ctx, store, record); err != nil {
+				t.Fatal(err)
+			}
+			before, found, err := store.LoadAgentLifecycleState(ctx, identity)
+			if err != nil || !found {
+				t.Fatalf("load predecessor: %v %v", found, err)
+			}
+			capability, err := agentfixture.ProcessCapability(t, ctx, store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash := "bundle-v2:sha256:" + strings.Repeat("e", 64)
+			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := capability.RestoreSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: before.Topology.Authority.Static.SourceSetRevision, Plan: plan}); err != nil {
+				t.Fatal(err)
+			}
+			authority, err := capability.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+				BundleHash: hash, RuntimeInstanceID: authority.RuntimeInstanceID, RuntimeGeneration: 2, SourceSetRevision: plan.Revision,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ownership, err := grant.InspectRunExecutionOwnership(ctx, identity.RunID); err != nil || ownership != runtimemanager.RunExecutionOtherNormalSource {
+				t.Fatalf("removed source acquired execution: %v %v", ownership, err)
+			}
+			topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, hash, runtimeagenttopology.LifetimeDurableManaged)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := runtimemanager.AgentLifecycleTransition{
+				OperationID: uuid.NewString(), OperationKind: "source_set_retire", RequestHash: uuid.NewString(),
+				Identity: identity, AgentID: identity.AgentID(), Trigger: "source_set_retire",
+				ExpectedEpoch: before.RuntimeEpoch, ExpectedGeneration: before.Generation, ExpectedPhase: before.Phase,
+				TargetEpoch: before.RuntimeEpoch, TargetGeneration: before.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
+				ConfigRevision: before.ConfigRevision, RunMode: before.RunMode, Topology: topology, Now: time.Now().UTC(),
+			}
+			if _, err := grant.CommitAgentLifecycleTransition(ctx, req); !errors.Is(err, runtimemanager.ErrRunExecutionNotOwned) {
+				t.Fatalf("nonterminal removed-source mutation: %v", err)
+			}
+			req.TargetPhase = runtimemanager.AgentLifecycleTerminated
+			if _, err := grant.CommitAgentLifecycleTransition(ctx, req); err != nil {
+				t.Fatalf("terminalize removed source: %v", err)
+			}
+			after, found, err := store.LoadAgentLifecycleState(ctx, identity)
+			binding, bindingErr := grant.ProcessExecutionBinding()
+			if err != nil || bindingErr != nil || !found || after.Phase != runtimemanager.AgentLifecycleTerminated ||
+				after.Generation != before.Generation+1 || !after.Topology.Equal(topology) || !after.ProcessBinding.Equal(binding) {
+				t.Fatalf("terminal readback: %+v found=%v err=%v bindingErr=%v", after, found, err, bindingErr)
+			}
+		})
+	}
+}
+
 func TestAgentLifecycleProcessBindingReadbackParity(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		proveAgentLifecycleProcessBindingReadback(t, newBootstrappedSQLiteRuntimeStoreForTest(t))

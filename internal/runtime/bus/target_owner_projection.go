@@ -15,20 +15,22 @@ import (
 )
 
 type selectedRunTargetOwnerProjection struct {
-	context           context.Context
-	agents            map[agentidentity.Identity]ActiveAgentDescriptor
-	agentsAvailable   bool
-	descriptors       []ActiveTargetDescriptor
-	targetsAvailable  bool
-	workflowInstances runtimepipeline.WorkflowInstancePersistenceReader
-	source            semanticview.Source
-	required          bool
+	context          context.Context
+	agents           map[agentidentity.Identity]ActiveAgentDescriptor
+	agentsAvailable  bool
+	descriptors      []ActiveTargetDescriptor
+	targetsAvailable bool
+	source           semanticview.Source
+	required         bool
 }
 
 func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (RoutePlan, error) {
 	plan = plan.Normalized()
 	var err error
 	if err = p.resolveNodeTargetOwners(&plan); err != nil {
+		return RoutePlan{}, err
+	}
+	if err = p.bindReceiverMaterializations(&plan); err != nil {
 		return RoutePlan{}, err
 	}
 	for index := range plan.DeliveryIntents {
@@ -127,11 +129,17 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 		}
 		return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: node intent escaped canonical preclassification", intent.Recipient.ID())
 	}
+	if err := completeReceiverInitializations(&plan); err != nil {
+		return RoutePlan{}, err
+	}
 	ledger, err := p.resolveConnectEvaluation(plan.ConnectEvaluation, plan.DeliveryIntents)
 	if err != nil {
 		return RoutePlan{}, err
 	}
 	plan.ConnectEvaluation = ledger
+	if err := events.ValidateReceiverMaterializations(plan.Event, plan.DeliveryRoutes()); err != nil {
+		return RoutePlan{}, err
+	}
 	return plan.Normalized(), nil
 }
 
@@ -173,8 +181,8 @@ func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePla
 				return fmt.Errorf("resolve delivery target handler for %s: route intent has no exact admitted handler", intent.Recipient.ID())
 			}
 			owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(runtimepipeline.DeliveryTargetOwnershipRequest{
-				Context: p.context, Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
-				Handler: handler, Candidates: p.targetOwnerCandidates(), WorkflowInstances: p.workflowInstances,
+				Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
+				Handler: handler, Candidates: p.targetOwnerCandidates(),
 			})
 			if err != nil {
 				return fmt.Errorf("resolve delivery target for %s: %w", intent.Recipient.ID(), err)
@@ -371,7 +379,7 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 	projection := selectedRunTargetOwnerProjection{
 		context: ctx,
 		agents:  agents, agentsAvailable: agentsAvailable,
-		descriptors: descriptors, targetsAvailable: targetsAvailable, workflowInstances: p.workflowInstances,
+		descriptors: descriptors, targetsAvailable: targetsAvailable,
 		source: p.semanticSource, required: p.requireTargetOwners,
 	}
 	if projection.required {
@@ -420,6 +428,11 @@ func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.
 		}
 		if blueprint.EntityID != "" && descriptor.EntityID != blueprint.EntityID {
 			continue
+		}
+		if !descriptor.Materializing {
+			if err := descriptor.Availability.Validate(p.source, blueprint.FlowID); err != nil {
+				return events.DeliveryTargetOwnership{}, err
+			}
 		}
 		owner := blueprint
 		owner.EntityID = descriptor.EntityID
@@ -471,6 +484,7 @@ func (p selectedRunTargetOwnerProjection) targetOwnerCandidates() []runtimepipel
 				EntityID:     descriptor.EntityID,
 			},
 			Materializing: descriptor.Materializing,
+			Availability:  descriptor.Availability,
 		})
 	}
 	return out

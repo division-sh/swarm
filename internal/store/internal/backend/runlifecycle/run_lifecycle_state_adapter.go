@@ -28,6 +28,17 @@ type terminalRunMutation struct {
 	IncludeCommittedDecisionCards bool
 }
 
+func (m terminalRunMutation) terminalizesDeliveries() (bool, error) {
+	switch m.State {
+	case runtimerunlifecycle.StateFailed, runtimerunlifecycle.StateCancelled:
+		return true, nil
+	case runtimerunlifecycle.StateCompleted, runtimerunlifecycle.StateForked:
+		return false, nil
+	default:
+		return false, fmt.Errorf("unsupported terminal lifecycle effect state %q", m.State)
+	}
+}
+
 func terminalRunMutationFromRequest(request runtimerunlifecycle.TerminalRequest) (terminalRunMutation, error) {
 	request.EndedAt = runtimerunlifecycle.CanonicalTimestamp(request.EndedAt)
 	if err := request.Validate(); err != nil {
@@ -383,6 +394,10 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 	if story == nil {
 		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("terminal run lifecycle mutation requires private story ownership")
 	}
+	terminalizeDeliveries, err := request.terminalizesDeliveries()
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
 	current, err := loadPostgresRunLifecycleSnapshot(ctx, tx, request.RunID, true)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
@@ -406,7 +421,7 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 	if err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).SyncCounters(ctx, request.RunID); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	if request.State != runtimerunlifecycle.StateCompleted {
+	if terminalizeDeliveries {
 		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, request.RunID, "run_"+string(request.State)); err != nil {
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
@@ -475,6 +490,10 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 	if story == nil {
 		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("terminal run lifecycle mutation requires private story ownership")
 	}
+	terminalizeDeliveries, err := request.terminalizesDeliveries()
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
 	current, err := loadSQLiteRunLifecycleSnapshot(ctx, tx, request.RunID)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
@@ -498,7 +517,7 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 	if err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).SyncCounters(ctx, request.RunID); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	if request.State != runtimerunlifecycle.StateCompleted {
+	if terminalizeDeliveries {
 		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, request.RunID, "run_"+string(request.State)); err != nil {
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}

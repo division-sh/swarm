@@ -67,6 +67,10 @@ func (*supervisorTestRetainedSession) RecordGenerationGrantTransition(context.Co
 	return nil
 }
 
+func (*supervisorTestRetainedSession) ProveSelectedForkGenerationGrant(context.Context, runtimestartupownership.GrantEvidence) error {
+	return errors.New("ordinary supervisor test session has no selected-fork execution authority")
+}
+
 func (s *supervisorTestRetainedSession) LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,6 +98,10 @@ func (s *supervisorTestRetainedSession) ApplyDestructiveResetCleanup(_ context.C
 		s.plan = topology.Plan
 	}
 	return runtimedestructivereset.CleanupResult{OperationName: req.Result.OperationName, IncludeSourceArtifacts: req.Result.IncludeSourceArtifacts, AppliedAt: req.RequestedAt}, nil
+}
+
+func (*supervisorTestRetainedSession) InspectRunExecutionOwnership(context.Context, runtimestartupownership.GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error) {
+	return 0, errors.New("run execution ownership requires a store-backed test session")
 }
 
 func (*supervisorTestRetainedSession) CommitAgentLifecycleTransition(context.Context, runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {

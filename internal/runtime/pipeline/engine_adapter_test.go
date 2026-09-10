@@ -122,6 +122,25 @@ func applyMaterializedEngineStateMutationForTest(
 	}
 }
 
+func assertEntityStateField(t *testing.T, db *sql.DB, entityID, field string, want any) {
+	t.Helper()
+	var gotRaw []byte
+	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
+		SELECT fields -> $3
+		FROM entity_state
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, testPipelineRunID, entityID, field).Scan(&gotRaw); err != nil {
+		t.Fatalf("load entity_state fields for %s: %v", entityID, err)
+	}
+	wantRaw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal wanted entity_state field %s: %v", field, err)
+	}
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("entity_state.fields[%q] = %s, want %s", field, gotRaw, wantRaw)
+	}
+}
+
 func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"research_context": map[string]any{"summary": "done"}},
@@ -1383,7 +1402,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	artifactRoot := t.TempDir()
-	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: artifactRoot, module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: artifactRoot, module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -1721,7 +1740,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: "/data/swarm/artifacts", bus: bus, module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: "/data/swarm/artifacts", bus: bus, module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -1796,7 +1815,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			store := newPostgresWorkflowInstanceStoreForTest(db)
 			bus := &recordingPipelineBus{}
 			artifactRoot, _ := tc.root(t)
-			pc := &PipelineCoordinator{workflowStore: store, artifactRoot: artifactRoot, bus: bus, module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+			pc := &PipelineCoordinator{workflowStore: store, artifactRoot: artifactRoot, bus: bus, module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 			ctx := testWorkflowStoreRunContext(t, store)
 			entityID := "22222222-2222-2222-2222-222222222222"
 			initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -2269,7 +2288,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus, module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus, module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -2333,7 +2352,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus, module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus, module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -2374,7 +2393,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
-	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -2424,7 +2443,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus, module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus, module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -2499,7 +2518,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
-	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -2558,7 +2577,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
-	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), module: &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("artifact-repo", "test_entity")}}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), module: &pipelineFixtureWorkflowModule{source: testArtifactRepoResultEventSource(t)}}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
@@ -2659,8 +2678,8 @@ func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadWorkflowTempSource(t, map[string]string{
 
-		"schema.yaml":   "initial_state: ready\nterminal_states: [ready]\nstates: [ready]\n",
-		"entities.yaml": "test_entity: {}\n",
+		"schema.yaml":   "initial_state: ready\nterminal_states: [done]\nstates: [ready, done]\n",
+		"entities.yaml": artifactRepoStateEntityYAML,
 		"nodes.yaml":    "artifact-node:\n  execution_type: system_node\n",
 		"types.yaml": `types:
   ArtifactProvenance:

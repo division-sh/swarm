@@ -773,7 +773,7 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 	}
 
 	rpcErr := requireServedJSONRPCError(t, endpoint, "run.fork", map[string]any{
-		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "confirm_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString(),
+		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "allow_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString(),
 	})
 	if rpcErr == nil {
 		t.Fatal("join run.fork succeeded, want timer-history rejection")
@@ -957,15 +957,13 @@ func requirePersistedRunForkBranchAuthority(t *testing.T, db *sql.DB, runID, eve
 	t.Fatalf("persisted restart fork authority for run=%s event=%s = status:%q event_revision:%d head_revision:%d err:%v", runID, eventID, status, eventRevision, headRevision, lastErr)
 }
 
-func requireServedRunForkCounterfactualCompleted(t *testing.T, db *sql.DB, forkRunID string, wantDeliveredEvents int) {
+func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var terminalEntities, deliveredEvents int
-		var executionState string
-		err := db.QueryRowContext(context.Background(), `
+	var waitingEntities, deliveredEvents int
+	var executionState string
+	err := db.QueryRowContext(context.Background(), `
 			SELECT
-					(SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND current_state='done'),
+					(SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND current_state='waiting'),
 				(SELECT COUNT(*)
 				 FROM events e
 				 JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
@@ -976,14 +974,9 @@ func requireServedRunForkCounterfactualCompleted(t *testing.T, db *sql.DB, forkR
 				(SELECT state
 				 FROM run_fork_selected_contract_runtime_executions
 					 WHERE fork_run_id=$1)
-		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&terminalEntities, &deliveredEvents, &executionState)
-		if err == nil && terminalEntities == 1 && deliveredEvents == wantDeliveredEvents && executionState == "closed" {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("counterfactual completion for %s = entities:%d deliveries:%d execution:%q err:%v", forkRunID, terminalEntities, deliveredEvents, executionState, err)
-		}
-		time.Sleep(10 * time.Millisecond)
+		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&waitingEntities, &deliveredEvents, &executionState)
+	if err != nil || waitingEntities != 1 || deliveredEvents != 1 || executionState != "closed" {
+		t.Fatalf("stopped replay for %s = waiting entities:%d deliveries:%d execution:%q err:%v", forkRunID, waitingEntities, deliveredEvents, executionState, err)
 	}
 }
 
@@ -1466,15 +1459,16 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 }
 
 type servedControlProofRuntime struct {
-	Endpoint   string
-	DB         *sql.DB
-	Backend    string
-	BundleHash string
-	Probe      *lifecycletest.Probe
-	Runtime    *runtimepkg.Runtime
-	Contexts   *runtimepkg.RuntimeContextManager
-	Postgres   *store.PostgresStore
-	SQLite     *store.SQLiteRuntimeStore
+	Endpoint    string
+	DB          *sql.DB
+	Backend     string
+	BundleHash  string
+	Probe       *lifecycletest.Probe
+	Runtime     *runtimepkg.Runtime
+	Contexts    *runtimepkg.RuntimeContextManager
+	Postgres    *store.PostgresStore
+	SQLite      *store.SQLiteRuntimeStore
+	ForkRuntime selectedForkRuntimeProofOptions
 }
 
 func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
@@ -1493,6 +1487,10 @@ func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProof
 	if rt.Runtime.WorkOccurrence() == nil {
 		t.Fatal("served control proof runtime work occurrence is required")
 	}
+	if rt.Runtime.Options.ProcessWorkOwner == nil {
+		t.Fatal("served control proof process work owner is required")
+	}
+	ctx = worklifetime.WithProcess(ctx, rt.Runtime.Options.ProcessWorkOwner)
 	return worklifetime.WithOccurrence(ctx, rt.Runtime.WorkOccurrence())
 }
 
@@ -1707,15 +1705,15 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "running")
 
 	forkParams := map[string]any{
-		"source_run_id":         started.RunID,
-		"fork_event_id":         published.EventID,
-		"confirm_source_freeze": true,
-		"idempotency_key":       "issue-2361-" + rt.Backend + "-run-fork",
+		"source_run_id":       started.RunID,
+		"fork_event_id":       published.EventID,
+		"allow_source_freeze": true,
+		"idempotency_key":     "issue-2361-" + rt.Backend + "-run-fork",
 	}
 	stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{
 		"run", "fork", started.RunID,
 		"--at-event", published.EventID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--idempotency-key", forkParams["idempotency_key"].(string),
 		"--json",
 	})
@@ -1742,24 +1740,40 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := rt.DB.QueryRowContext(context.Background(), forkCountQuery, started.RunID, published.EventID).Scan(&forkRows); err != nil || forkRows != 1 {
 		t.Fatalf("%s durable fork rows = %d, err=%v, want 1", rt.Backend, forkRows, err)
 	}
-	var completed struct {
-		EventID string `json:"event_id"`
-		RunID   string `json:"run_id"`
-	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.publish", map[string]any{
+	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+	beforeRefusal := snapshotForkReceiverApplication(t, rt)
+	// A selected fork cannot acquire future ordinary ingress from the loaded
+	// same-hash runtime. Retained controls still own its explicit terminal stop.
+	refused := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
 		"bundle_hash":     rt.BundleHash,
 		"run_id":          fork.ForkRunID,
 		"event_name":      "item.processed",
 		"payload":         map[string]any{"item_id": "review"},
 		"idempotency_key": "issue-2361-" + rt.Backend + "-fork-completion",
-	}, &completed)
-	if completed.RunID != fork.ForkRunID || strings.TrimSpace(completed.EventID) == "" {
-		t.Fatalf("fork completion event.publish result = %#v", completed)
+	})
+	if refused.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
+		t.Fatalf("selected ingress refusal = %+v", refused)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, fork.ForkRunID, completed.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
-	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, fork.ForkRunID, "completed")
-	requireServedRunForkCounterfactualCompleted(t, rt.DB, fork.ForkRunID, 2)
+	var bindingID string
+	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, fork.ForkRunID).Scan(&bindingID); err != nil {
+		t.Fatal(err)
+	}
+	details, ok := refused.Data["details"].(map[string]any)
+	if !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != "event.publish" {
+		t.Fatalf("selected ingress refusal lost exact binding: %+v", refused)
+	}
+	if !reflect.DeepEqual(beforeRefusal, snapshotForkReceiverApplication(t, rt)) {
+		t.Fatal("refused selected ingress changed persisted state")
+	}
+	var stopped struct {
+		OK bool `json:"ok"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.stop", map[string]any{"run_id": fork.ForkRunID}, &stopped)
+	if !stopped.OK {
+		t.Fatal("selected stop lost terminal acknowledgment")
+	}
+	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, fork.ForkRunID, "cancelled")
+	requireServedRunForkStoppedReplay(t, rt.DB, fork.ForkRunID)
 
 	for method, params := range map[string]map[string]any{
 		"run.get":           {"run_id": fork.ForkRunID},
@@ -1773,7 +1787,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 			t.Fatalf("%s returned empty result envelope", method)
 		}
 	}
-	requireServedStatusCLIReadback(t, rt.Endpoint, fork.ForkRunID, "  completed")
+	requireServedStatusCLIReadback(t, rt.Endpoint, fork.ForkRunID, "  cancelled")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fork.ForkRunID, servedparity.MustScenario(servedparity.ScenarioRunForkLifecycle))
 }
 
@@ -2384,6 +2398,28 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 
 func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
+	return startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, sourceRoot, false, hooks...)
+}
+
+func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+	t.Helper()
+	forkOptions := captureServedForkRuntimeOptions(t)
+	configureWorkspace := func() {
+		if !realWorkspace {
+			return
+		}
+		previous := cliapp.ConfiguredWorkspaceLifecycleForServe
+		root := t.TempDir()
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *config.Config, projection *sourceartifact.RuntimeProjection, source semanticview.Source, _ cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+			manager := workspace.NewHostManager()
+			cfg := workspace.DefaultHostConfig()
+			cfg.WorkspaceRoot, cfg.SourceProjection = root, projection
+			manager.SetConfig(cfg)
+			manager.SetSemanticSource(source)
+			return manager, nil
+		}
+		t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previous })
+	}
 	var handlerStart runtimepipeline.WorkflowNodeHandlerStartHook
 	if len(hooks) > 1 {
 		t.Fatal("at most one handler-start barrier is supported")
@@ -2395,14 +2431,19 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
+		configureWorkspace()
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		var servedDB *sql.DB
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 			servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 		})
+		configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
+		if realWorkspace {
+			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
+		}
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:                       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
@@ -2415,14 +2456,19 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions}
 	case servedparity.BackendExplicitPostgres:
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
+		configureWorkspace()
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
+		configPath := writeServeRuntimeTestConfig(t)
+		if realWorkspace {
+			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
+		}
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:                       writeServeRuntimeTestConfig(t),
+			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
 			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
@@ -2434,7 +2480,7 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Runtime: rt}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}

@@ -147,6 +147,22 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 	if err != nil {
 		return fmt.Errorf("load selected-contract route recovery for activation: %w", err)
 	}
+	actualTopology, actualPlanning, err := decodeRunForkSelectedContractRouteRecoveryModels(actual)
+	if err != nil {
+		return fmt.Errorf("decode persisted selected-contract route recovery: %w", err)
+	}
+	expectedTopology, expectedPlanning, err := decodeRunForkSelectedContractRouteRecoveryModels(expected)
+	if err != nil {
+		return fmt.Errorf("decode expected selected-contract route recovery: %w", err)
+	}
+	topologyEqual, err := runfork.EqualSelectedContractRouteTopology(actualTopology, expectedTopology)
+	if err != nil {
+		return fmt.Errorf("compare selected-contract route recovery topology: %w", err)
+	}
+	planningEqual, err := runfork.EqualSelectedContractRecipientPlanning(actualPlanning, expectedPlanning)
+	if err != nil {
+		return fmt.Errorf("compare selected-contract route recovery planning: %w", err)
+	}
 	if actual.Owner != expected.Owner ||
 		actual.RuntimeRecoveryOwner != expected.RuntimeRecoveryOwner ||
 		actual.SourceRunID != expected.SourceRunID ||
@@ -155,8 +171,7 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 		actual.DynamicTopologyOwner != expected.DynamicTopologyOwner ||
 		actual.RecipientPlanningOwner != expected.RecipientPlanningOwner ||
 		actual.FrontierEvidenceFingerprint != expected.FrontierEvidenceFingerprint ||
-		actual.RouteTopologyFingerprint != expected.RouteTopologyFingerprint ||
-		actual.RecipientPlanningFingerprint != expected.RecipientPlanningFingerprint ||
+		!topologyEqual || !planningEqual ||
 		actual.StaticRouteEventCount != expected.StaticRouteEventCount ||
 		actual.DynamicTopologyProofCount != expected.DynamicTopologyProofCount ||
 		actual.RecipientPlanEventCount != expected.RecipientPlanEventCount {
@@ -170,6 +185,46 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 		return err
 	}
 	return nil
+}
+
+func decodeRunForkSelectedContractRouteRecoveryModels(record runfork.RunForkSelectedContractRouteRecovery) (runfork.RunForkSelectedContractRouteTopology, runfork.RunForkSelectedContractRecipientPlanning, error) {
+	var topology runfork.RunForkSelectedContractRouteTopology
+	var planning runfork.RunForkSelectedContractRecipientPlanning
+	// Integrity binds each hash to its own payload, not to a separately derived model.
+	for _, item := range []struct {
+		name        string
+		payload     json.RawMessage
+		fingerprint string
+	}{
+		{"topology", record.RouteTopology, record.RouteTopologyFingerprint},
+		{"planning", record.RecipientPlanning, record.RecipientPlanningFingerprint},
+	} {
+		got, err := runForkSelectedContractRecoveryCanonicalJSONFingerprint(item.payload)
+		if err != nil {
+			return topology, planning, fmt.Errorf("fingerprint %s: %w", item.name, err)
+		}
+		if got != strings.TrimSpace(item.fingerprint) {
+			return topology, planning, fmt.Errorf("%s fingerprint mismatch", item.name)
+		}
+	}
+	topologyDecoder := json.NewDecoder(bytes.NewReader(record.RouteTopology))
+	topologyDecoder.DisallowUnknownFields()
+	if err := topologyDecoder.Decode(&topology); err != nil {
+		return topology, planning, fmt.Errorf("decode topology: %w", err)
+	}
+	var trailing any
+	if err := topologyDecoder.Decode(&trailing); err != io.EOF {
+		return topology, planning, fmt.Errorf("decode topology: unexpected trailing JSON")
+	}
+	planningDecoder := json.NewDecoder(bytes.NewReader(record.RecipientPlanning))
+	planningDecoder.DisallowUnknownFields()
+	if err := planningDecoder.Decode(&planning); err != nil {
+		return topology, planning, fmt.Errorf("decode planning: %w", err)
+	}
+	if err := planningDecoder.Decode(&trailing); err != io.EOF {
+		return topology, planning, fmt.Errorf("decode planning: unexpected trailing JSON")
+	}
+	return topology, planning, nil
 }
 
 func (s *RunForkPostgresOwner) LoadRunForkSelectedContractRouteRecovery(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractRouteRecovery, bool, error) {

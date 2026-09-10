@@ -646,8 +646,8 @@ func TestRunForkPlanner_TypedSourceMetadataWinsOverAuthoredEntityTypeCollision(t
 		t.Fatalf("plan entities = %#v, want one typed source-at-revision metadata owner", plan.Entities)
 	}
 	entity := plan.Entities[0]
-	if entity.MaterializationMetadata.EntityType != "source_case" || entity.MaterializationMetadata.FlowInstance != "event-flow/at-T" ||
-		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEvent {
+	if entity.MaterializationMetadata.EntityType != "source_case" || entity.MaterializationMetadata.FlowInstance != "state-flow/at-T" ||
+		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
 		t.Fatalf("typed source metadata = %#v", entity.MaterializationMetadata)
 	}
 	if entity.Fields["entity_type"] != "field_case" {
@@ -697,7 +697,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 		t.Fatalf("loaded selected binding = %#v", loaded)
 	}
 
-	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
+	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}
@@ -955,7 +955,7 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	}
 	requireRunOriginHeader(t, ctx, pg, materialized.ForkRunID, forkOrigin, 0)
 	requireListedRunOrigin(t, ctx, pg, materialized.ForkRunID, forkOrigin)
-	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
+	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}
@@ -1039,15 +1039,15 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
 	sourceRunID := uuid.NewString()
+	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: store}, sourceRunID, selectedActivityProducerSource(t))
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000840, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, rootEventID, at)
+	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, rootEventID, at)
 
 	sourceID := uuid.NewString()
-	sourceEvent := eventtest.ChildWithLineage(
+	sourceEvent := eventtest.ChildWithLineageAndRoutingSource(
 		sourceID,
 		events.EventType("fork.ready"),
 		"declarative-node",
@@ -1058,6 +1058,7 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 			RunID: sourceRunID, ParentEventID: rootEventID, TaskID: "event-owned-task", ExecutionMode: executionmode.Mock,
 		},
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity, Target: events.RouteIdentity{EntityID: entityID}},
+		eventtest.RootRoutingSource(sourceRunID),
 		at.Add(time.Second),
 	)
 	agentIdentity := runtimebustest.IdentityForRun(t, sourceRunID, "safe-agent", "")
@@ -1076,6 +1077,11 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 		t.Fatalf("decode historical replay source event: %v", err)
 	}
 	sourceEvent = sourceAdmitted.Event()
+	ctx, releaseCatalog, err := semanticEventFixtureContext(ctx, store, sourceEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(releaseCatalog)
 	sourceDelivery := seedDeliveryStateFixture(t, ctx, store, sourceEvent, sourceRoute, runtimedelivery.StateQueued, nil)
 	deliveryID := sourceDelivery.DeliveryID
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -1100,7 +1106,8 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 func (f runForkReplaySettlementFixture) activate(t *testing.T, confirm bool) (runfork.RunForkActivation, error) {
 	t.Helper()
 	return f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{
-		ForkRunID: f.forkRunID, ConfirmSourceFreeze: confirm,
+		ForkRunID: f.forkRunID, AllowSourceFreeze: confirm,
+		OriginalLoopCarriage:              originalCarriageForRun(t, f.store, f.sourceRunID),
 		HistoricalReplayExecutionAdmitter: &fakeRunForkHistoricalReplayExecutionAdmitter{},
 	})
 }
@@ -1188,13 +1195,13 @@ func TestPostgresOperatorEventReadbackProjectsRunForkReplaySettlement(t *testing
 func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
 
 	sourceRunID := uuid.NewString()
+	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: pg}, sourceRunID, selectedActivityProducerSource(t))
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, rootEventID, at)
+	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, rootEventID, at)
 	eventID := uuid.NewString()
 	// Route-bearing replay is gated by historical route proof; this fixture isolates direct pending-delivery replay.
 	sourceEnvelope := events.EventEnvelope{
@@ -1231,6 +1238,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 	sourceEvent = sourceAdmitted.Event()
 
+	ctx, releaseCatalog, err := semanticEventFixtureContext(ctx, pg, sourceEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(releaseCatalog)
 	safeAgentIdentity := runtimebustest.IdentityForRun(t, sourceRunID, "safe-agent", "")
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}
 	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, sourceRoute, runtimedelivery.StateQueued, nil)
@@ -1268,8 +1280,9 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{}
 	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 		ForkRunID:                         materialized.ForkRunID,
-		ConfirmSourceFreeze:               true,
+		AllowSourceFreeze:                 true,
 		HistoricalReplayExecutionAdmitter: admitter,
+		OriginalLoopCarriage:              originalCarriageForRun(t, pg, sourceRunID),
 	})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
@@ -1412,7 +1425,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if err := acknowledgePipelineEventFixture(ctx, pg, eventID); !errors.Is(err, runtimepipelineobligation.ErrIneligible) {
 		t.Fatalf("post-freeze source pipeline receipt error = %v, want ErrIneligible", err)
 	}
-	eb, err := newStoreTestEventBus(t, pg)
+	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok {
+		t.Fatal("replay fixture requires its admitted source fact")
+	}
+	eb, err := newStoreTestEventBus(t, pg, runtimebus.EventBusOptions{SourceArtifactFact: fact})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1706,7 +1723,7 @@ func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.
 		t.Fatalf("source revision after excluded session update = %d, want %d", afterExcluded, selectedRevision)
 	}
 
-	activation, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
+	activation, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork after excluded session update: %v", err)
 	}
@@ -1760,7 +1777,7 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MaterializeRunFork clean: %v", err)
 	}
-	if _, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID, ConfirmSourceFreeze: true}); err != nil {
+	if _, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID, AllowSourceFreeze: true}); err != nil {
 		t.Fatalf("ActivateRunFork clean: %v", err)
 	}
 	_, err = pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID})
@@ -1825,7 +1842,7 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	`, orphanRunID, orphanEntityID, at); err != nil {
 		t.Fatalf("seed orphan fork entity_state: %v", err)
 	}
-	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: orphanRunID, ConfirmSourceFreeze: true})
+	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: orphanRunID, AllowSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork typed-origin lineage: %v", err)
 	}
@@ -2110,6 +2127,11 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
+	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, eventID, at)
+}
+
+func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (

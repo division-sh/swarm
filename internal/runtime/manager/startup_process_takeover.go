@@ -59,6 +59,13 @@ func (am *AgentManager) RebindLifecycleExecutionForStartup(ctx context.Context) 
 		if strings.TrimSpace(current.BundleHash) != strings.TrimSpace(target.BundleHash) {
 			continue
 		}
+		ownership, err := am.inspectRunExecutionOwnership(ctx, identity.RunID)
+		if err != nil {
+			return err
+		}
+		if ownership != RunExecutionOwned {
+			continue
+		}
 		if current.Equal(target) {
 			continue
 		}

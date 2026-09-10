@@ -31,7 +31,8 @@ func TestRuntimeStart_StructurallyNestedFlowAgentsCarryCanonicalMemoryIdentity(t
 
 func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.Source, flowPath string) {
 	t.Helper()
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Options: RuntimeOptions{
+	session := newRuntimeTestRetainedSession(t)
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, ManagerStore: session, Options: RuntimeOptions{
 		SelfCheck:      false,
 		LLMRuntime:     noopLLMRuntime{},
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: source},
@@ -49,6 +50,7 @@ func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.S
 	}
 
 	runID := uuid.NewString()
+	session.admitRun(t, runID, rt.Options.SourceArtifactFact)
 	if _, err := rt.Manager.ResolveAgentConfig(runID, "backend", flowPath); !errors.Is(err, runtimemanager.ErrAgentNotFound) {
 		t.Fatalf("pre-run static agent lookup error = %v, want not found", err)
 	}

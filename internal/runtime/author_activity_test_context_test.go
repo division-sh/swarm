@@ -60,9 +60,46 @@ type runtimeTestRetainedSession struct {
 	authority       runtimestartupownership.Authority
 	plan            runtimeagenttopology.SourceSetPlan
 	agents          map[string]runtimemanager.PersistedAgent
+	runs            map[string]runtimecorrelation.SourceArtifactFact
+	grants          map[string]string
 	callback        func(runtimestartupownership.TerminalResult)
 	grantTransition func(*runtimestartupownership.GrantEvidence, runtimestartupownership.GrantEvidence)
 	released        bool
+}
+
+func newRuntimeTestRetainedSession(t testing.TB) *runtimeTestRetainedSession {
+	t.Helper()
+	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	}, "runtime_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &runtimeTestRetainedSession{authority: authority}
+}
+
+func (s *runtimeTestRetainedSession) runtimeTestStartupSession() *runtimeTestRetainedSession {
+	return s
+}
+
+func (s *runtimeTestRetainedSession) admitRun(t testing.TB, runID string, source runtimecorrelation.SourceArtifactFact) {
+	t.Helper()
+	id, err := uuid.Parse(runID)
+	if err != nil || id == uuid.Nil || id.String() != runID {
+		t.Fatalf("runtime fixture requires an exact run UUID: %q", runID)
+	}
+	if err := source.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runs == nil {
+		s.runs = make(map[string]runtimecorrelation.SourceArtifactFact)
+	}
+	if previous, ok := s.runs[runID]; ok && previous != source {
+		t.Fatal("runtime fixture cannot replace a run's source")
+	}
+	s.runs[runID] = source
 }
 
 type runtimeTestRetainedSessionProvider interface {
@@ -102,13 +139,25 @@ func (s *runtimeTestRetainedSession) InstallTerminalOwner(owner runtimestartupow
 }
 
 func (s *runtimeTestRetainedSession) RecordGenerationGrantTransition(_ context.Context, previous *runtimestartupownership.GrantEvidence, next runtimestartupownership.GrantEvidence) error {
+	raw, err := canonicaljson.Bytes(next)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
+	if s.grants == nil {
+		s.grants = make(map[string]string)
+	}
+	s.grants[next.GrantID] = string(raw)
 	observe := s.grantTransition
 	s.mu.Unlock()
 	if observe != nil {
 		observe(previous, next)
 	}
 	return nil
+}
+
+func (*runtimeTestRetainedSession) ProveSelectedForkGenerationGrant(context.Context, runtimestartupownership.GrantEvidence) error {
+	return errors.New("normal-runtime test session has no selected-fork execution authority")
 }
 
 func (s *runtimeTestRetainedSession) LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
@@ -127,6 +176,35 @@ func (s *runtimeTestRetainedSession) CommitSourceSet(_ context.Context, req runt
 
 func (*runtimeTestRetainedSession) ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	return runtimedestructivereset.CleanupResult{}, errors.New("runtime test retained session does not own destructive reset")
+}
+
+func (s *runtimeTestRetainedSession) InspectRunExecutionOwnership(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (runtimemanager.RunExecutionOwnership, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if err := evidence.Validate(); err != nil {
+		return 0, err
+	}
+	raw, err := canonicaljson.Bytes(evidence)
+	if err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.released || evidence.State == runtimestartupownership.GrantRetired || s.grants[evidence.GrantID] != string(raw) {
+		return 0, errors.New("runtime fixture requires current retained generation evidence")
+	}
+	if evidence.SelectedFork != nil {
+		return 0, errors.New("normal runtime fixture cannot authorize selected execution")
+	}
+	source, ok := s.runs[runID]
+	if !ok {
+		return 0, errors.New("runtime fixture run ownership was not explicitly admitted")
+	}
+	if source.BundleHash() != evidence.BundleHash {
+		return runtimemanager.RunExecutionOtherNormalSource, nil
+	}
+	return runtimemanager.RunExecutionOwned, nil
 }
 
 func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
@@ -247,11 +325,11 @@ func (s *runtimeTestRetainedSession) Release(context.Context) error {
 	return nil
 }
 
-func newRuntimeTestProcessCapability(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, error) {
+func newRuntimeTestProcessCapability(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant, error) {
 	return newRuntimeTestProcessCapabilityWithSession(t, manager, source, fact, runtimeInstanceID, nil)
 }
 
-func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, session *runtimeTestRetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, error) {
+func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, session *runtimeTestRetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant, error) {
 	t.Helper()
 	bundleHash := fact.BundleHash()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
@@ -311,7 +389,7 @@ func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimema
 	return capability, grant, nil
 }
 
-func installRuntimeTestManagerGeneration(t testing.TB, ctx context.Context, manager *runtimemanager.AgentManager, grant runtimestartupownership.GenerationGrant) {
+func installRuntimeTestManagerGeneration(t testing.TB, ctx context.Context, manager *runtimemanager.AgentManager, grant runtimestartupownership.LiveGenerationGrant) {
 	t.Helper()
 	if manager == nil || grant == nil {
 		t.Fatal("runtime test manager generation requires a manager and generation grant")
@@ -410,7 +488,7 @@ func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtim
 		ReplyContext: durable, RunLifecycle: durable,
 		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
 		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
-		ActiveFlows: durable, TargetOwners: durable, WorkflowInstances: durable, PreparedEvents: durable,
+		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }

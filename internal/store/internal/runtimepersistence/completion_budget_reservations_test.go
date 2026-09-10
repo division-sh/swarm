@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -223,7 +224,13 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		authority.Target.ID = uuid.NewString()
 		return authority
 	case runtimeeffects.AuthoritySelectedContractFork:
-		selected := newSelectedCompletionFixture(t, fixture.primary, fixture.db, fixture.sqlite)
+		// Ordinary and selected execution share this process, not competing
+		// selected-store startup capabilities.
+		process, err := agentfixture.ProcessCapability(fixture.normal.agentOwner, testAuthorActivityContext(), fixture.normal.store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected := newSelectedCompletionFixtureWithProcess(t, fixture.primary, fixture.db, fixture.sqlite, process)
 		issued, err := fixture.primary.IssueRunForkSelectedContractRuntimeExecution(testAuthorActivityContext(), selected.request)
 		if err != nil {
 			t.Fatalf("issue budget-race selected authority: %v", err)

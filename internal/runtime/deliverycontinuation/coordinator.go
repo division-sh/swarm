@@ -32,10 +32,12 @@ const (
 	ownershipCarrier
 	ownershipAttempt
 	ownershipTerminalCarrier
+	ownershipTerminal
 )
 
 type entry struct {
-	state ownershipState
+	state   ownershipState
+	carrier *capability
 }
 
 type synchronizationRequest struct {
@@ -251,12 +253,18 @@ func (c *Coordinator) AcceptCommitted(proofs []runtimedelivery.DurableHandoffPro
 			return fmt.Errorf("delivery %s is duplicated in committed handoff batch", proof.DeliveryID())
 		}
 		seen[proof.DeliveryID()] = struct{}{}
-		if current, exists := c.entries[proof.DeliveryID()]; exists && current.state != ownershipCoordinator {
-			return fmt.Errorf("delivery %s already has a non-coordinator owner", proof.DeliveryID())
+		if current, exists := c.entries[proof.DeliveryID()]; exists {
+			switch current.state {
+			case ownershipCoordinator, ownershipCarrier, ownershipAttempt, ownershipTerminalCarrier, ownershipTerminal:
+			default:
+				return fmt.Errorf("delivery %s has unknown continuation ownership", proof.DeliveryID())
+			}
 		}
 	}
 	for _, proof := range proofs {
-		c.entries[proof.DeliveryID()] = entry{state: ownershipCoordinator}
+		if _, exists := c.entries[proof.DeliveryID()]; !exists {
+			c.entries[proof.DeliveryID()] = entry{state: ownershipCoordinator}
+		}
 	}
 	c.Signal()
 	return nil
@@ -277,11 +285,18 @@ func (c *Coordinator) Retain(snapshot runtimedelivery.Snapshot) error {
 		return errors.New("delivery continuation coordinator is retired")
 	}
 	current, exists := c.entries[snapshot.DeliveryID]
-	if exists && current.state != ownershipAttempt {
+	if !exists {
 		c.mu.Unlock()
-		return fmt.Errorf("delivery %s already has a process-local continuation owner", snapshot.DeliveryID)
+		return fmt.Errorf("delivery %s has no process-local continuation owner", snapshot.DeliveryID)
 	}
-	c.entries[snapshot.DeliveryID] = entry{state: ownershipCoordinator}
+	switch current.state {
+	case ownershipCoordinator, ownershipCarrier, ownershipAttempt, ownershipTerminalCarrier, ownershipTerminal:
+		// A scan may already have reclaimed this committed retry and transferred
+		// it again. Retain signals durable evidence; it never overwrites an owner.
+	default:
+		c.mu.Unlock()
+		return fmt.Errorf("delivery %s has unknown continuation ownership", snapshot.DeliveryID)
+	}
 	c.mu.Unlock()
 	c.Signal()
 	return nil
@@ -296,19 +311,26 @@ func (c *Coordinator) Release(deliveryID string) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.releaseTerminalLocked(deliveryID)
+}
+
+func (c *Coordinator) releaseTerminalLocked(deliveryID string) error {
 	current, exists := c.entries[deliveryID]
 	if !exists {
+		c.entries[deliveryID] = entry{state: ownershipTerminal}
 		return nil
 	}
 	switch current.state {
 	case ownershipCoordinator, ownershipAttempt:
-		delete(c.entries, deliveryID)
+		c.entries[deliveryID] = entry{state: ownershipTerminal}
 		return nil
 	case ownershipCarrier:
-		c.entries[deliveryID] = entry{state: ownershipTerminalCarrier}
+		current.state = ownershipTerminalCarrier
+		c.entries[deliveryID] = current
 		return nil
-	case ownershipTerminalCarrier:
-		// The exact carrier capability owns removal of this terminal fence.
+	case ownershipTerminalCarrier, ownershipTerminal:
+		// Keep terminal evidence until this generation is released; a delayed
+		// committed handoff or scan must not revive the delivery.
 		return nil
 	default:
 		return fmt.Errorf("delivery %s has unknown continuation ownership", deliveryID)
@@ -319,21 +341,31 @@ func (*Coordinator) OwnsPersistedRecovery() bool { return true }
 
 // Acquire transfers one exact coordinator-held continuation to a carrier.
 // Callers must attach the returned capability before enqueueing the carrier.
-func (c *Coordinator) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (c *Coordinator) Acquire(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	if c == nil || deliveryID == "" {
-		return nil, errors.New("exact delivery continuation identity is required")
+		return worklifetime.DeliveryAcquisition{}, errors.New("exact delivery continuation identity is required")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.retired {
-		return nil, errors.New("delivery continuation coordinator is retired")
+		return worklifetime.DeliveryAcquisition{}, errors.New("delivery continuation coordinator is retired")
 	}
 	current, exists := c.entries[deliveryID]
-	if !exists || current.state != ownershipCoordinator {
-		return nil, fmt.Errorf("delivery %s is not coordinator-owned", deliveryID)
+	if !exists {
+		return worklifetime.DeliveryAcquisition{}, fmt.Errorf("delivery %s has no continuation evidence", deliveryID)
 	}
-	c.entries[deliveryID] = entry{state: ownershipCarrier}
-	return &capability{coordinator: c, deliveryID: deliveryID}, nil
+	switch current.state {
+	case ownershipCarrier, ownershipAttempt:
+		return worklifetime.AlreadyOwnedDelivery(deliveryID), nil
+	case ownershipTerminalCarrier, ownershipTerminal:
+		return worklifetime.TerminallyFencedDelivery(deliveryID), nil
+	case ownershipCoordinator:
+		cap := &capability{coordinator: c, deliveryID: deliveryID}
+		c.entries[deliveryID] = entry{state: ownershipCarrier, carrier: cap}
+		return worklifetime.AcquiredDelivery(cap), nil
+	default:
+		return worklifetime.DeliveryAcquisition{}, fmt.Errorf("delivery %s has unknown continuation ownership", deliveryID)
+	}
 }
 
 func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) {
@@ -416,6 +448,7 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 	var next time.Duration
 	var wake bool
 	for {
+		beforeScan := c.heldEntries()
 		page, err := c.store.ScanDeliveryContinuations(ctx, c.authority, cursor, scanPageSize)
 		if err != nil {
 			return 0, false, err
@@ -438,16 +471,18 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 				if err := c.observe(item.DeliveryID); err != nil {
 					return 0, false, err
 				}
-				c.reclaimAttempt(item.DeliveryID)
-				if c.coordinatorOwns(item.DeliveryID) {
+				c.reclaimAttempt(item.DeliveryID, beforeScan[item.DeliveryID])
+				{
 					result := c.dispatcher.DispatchDeliveryContinuation(ctx, item.Event, item.Snapshot.Route)
 					if err := result.Validate(); err != nil {
 						return 0, false, fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", item.DeliveryID, err)
 					}
 					switch result.Disposition() {
-					case DispatchTransferred:
+					case DispatchTransferred, DispatchAlreadyOwned:
 					case DispatchTerminal:
-						c.releaseTerminal(item.DeliveryID)
+						if err := c.releaseTerminal(item.DeliveryID); err != nil {
+							return 0, false, err
+						}
 					case DispatchDeferred:
 						// The named owner signals this coordinator after its
 						// transition commits. A deferral never invents a timer.
@@ -469,7 +504,9 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 					return 0, false, err
 				}
 			case runtimedelivery.ClaimTerminal:
-				c.releaseTerminal(item.DeliveryID)
+				if err := c.releaseTerminal(item.DeliveryID); err != nil {
+					return 0, false, err
+				}
 			case runtimedelivery.ClaimWrongAuthority:
 				return 0, false, fmt.Errorf("continuation %s crossed execution authority", item.DeliveryID)
 			case runtimedelivery.ClaimAbsent:
@@ -504,33 +541,36 @@ func (c *Coordinator) observe(deliveryID string) error {
 	if c.retired {
 		return errors.New("delivery continuation coordinator is retired")
 	}
-	if _, exists := c.entries[deliveryID]; !exists {
+	if current, exists := c.entries[deliveryID]; !exists {
 		c.entries[deliveryID] = entry{state: ownershipCoordinator}
+	} else {
+		switch current.state {
+		case ownershipCoordinator, ownershipCarrier, ownershipAttempt, ownershipTerminalCarrier, ownershipTerminal:
+		default:
+			return fmt.Errorf("delivery %s has unknown continuation ownership", deliveryID)
+		}
 	}
 	return nil
 }
 
-func (c *Coordinator) coordinatorOwns(deliveryID string) bool {
+func (c *Coordinator) reclaimAttempt(deliveryID string, observed entry) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	current, exists := c.entries[deliveryID]
-	return exists && current.state == ownershipCoordinator
-}
-
-func (c *Coordinator) reclaimAttempt(deliveryID string) {
-	c.mu.Lock()
-	if current, exists := c.entries[deliveryID]; exists && current.state == ownershipAttempt {
+	if current, exists := c.entries[deliveryID]; exists && current == observed && observed.state == ownershipAttempt {
 		c.entries[deliveryID] = entry{state: ownershipCoordinator}
+		return true
 	}
-	c.mu.Unlock()
+	return false
 }
 
-func (c *Coordinator) heldEntries() map[string]ownershipState {
+func (c *Coordinator) heldEntries() map[string]entry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	held := make(map[string]ownershipState, len(c.entries))
+	held := make(map[string]entry, len(c.entries))
 	for deliveryID, current := range c.entries {
-		held[deliveryID] = current.state
+		if current.state != ownershipTerminal && current.state != ownershipTerminalCarrier {
+			held[deliveryID] = current
+		}
 	}
 	return held
 }
@@ -538,7 +578,7 @@ func (c *Coordinator) heldEntries() map[string]ownershipState {
 func (c *Coordinator) reconcileHeld(ctx context.Context) (time.Duration, bool, error) {
 	var next time.Duration
 	var wake bool
-	for deliveryID, state := range c.heldEntries() {
+	for deliveryID, observed := range c.heldEntries() {
 		observation, err := c.store.ObserveDeliveryContinuation(ctx, c.authority, deliveryID)
 		if err != nil {
 			return 0, false, err
@@ -548,10 +588,11 @@ func (c *Coordinator) reconcileHeld(ctx context.Context) (time.Duration, bool, e
 		}
 		switch observation.Disposition {
 		case runtimedelivery.ClaimTerminal:
-			c.releaseTerminal(deliveryID)
+			if err := c.releaseTerminal(deliveryID); err != nil {
+				return 0, false, err
+			}
 		case runtimedelivery.ClaimAcquired, runtimedelivery.ClaimReclaimable:
-			if state == ownershipAttempt {
-				c.reclaimAttempt(deliveryID)
+			if c.reclaimAttempt(deliveryID, observed) {
 				next, wake = earlierWake(next, wake, 0)
 			}
 		case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
@@ -568,19 +609,10 @@ func (c *Coordinator) reconcileHeld(ctx context.Context) (time.Duration, bool, e
 	return next, wake, nil
 }
 
-func (c *Coordinator) releaseTerminal(deliveryID string) {
+func (c *Coordinator) releaseTerminal(deliveryID string) error {
 	c.mu.Lock()
-	current, exists := c.entries[deliveryID]
-	switch {
-	case !exists:
-	case current.state == ownershipCarrier:
-		c.entries[deliveryID] = entry{state: ownershipTerminalCarrier}
-	case current.state == ownershipTerminalCarrier:
-		// Repeated durable observations cannot consume the carrier's fence.
-	default:
-		delete(c.entries, deliveryID)
-	}
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	return c.releaseTerminalLocked(deliveryID)
 }
 
 func earlierWake(current time.Duration, present bool, candidate time.Duration) (time.Duration, bool) {
@@ -611,7 +643,7 @@ func (c *capability) Resolve(_ context.Context, intent worklifetime.DeliveryCont
 	if c == nil || c.coordinator == nil {
 		return 0, errors.New("delivery continuation capability is required")
 	}
-	if intent != worklifetime.DeliveryContinuationReturn && intent != worklifetime.DeliveryContinuationConsume {
+	if intent != worklifetime.DeliveryContinuationReturn && intent != worklifetime.DeliveryContinuationReturnUnqueued && intent != worklifetime.DeliveryContinuationConsume {
 		return 0, errors.New("delivery continuation resolution intent is invalid")
 	}
 	c.mu.Lock()
@@ -621,25 +653,31 @@ func (c *capability) Resolve(_ context.Context, intent worklifetime.DeliveryCont
 	}
 	c.coordinator.mu.Lock()
 	current, exists := c.coordinator.entries[c.deliveryID]
-	if !exists || (current.state != ownershipCarrier && current.state != ownershipTerminalCarrier) {
+	if !exists || current.carrier != c || (current.state != ownershipCarrier && current.state != ownershipTerminalCarrier) {
 		c.coordinator.mu.Unlock()
 		return 0, fmt.Errorf("delivery %s is not carrier-owned", c.deliveryID)
 	}
 	if current.state == ownershipTerminalCarrier {
-		delete(c.coordinator.entries, c.deliveryID)
+		c.coordinator.entries[c.deliveryID] = entry{state: ownershipTerminal}
 		c.coordinator.mu.Unlock()
 		c.settled = true
 		return worklifetime.DeliveryContinuationTerminal, nil
 	}
-	if intent == worklifetime.DeliveryContinuationReturn {
-		c.coordinator.entries[c.deliveryID] = entry{state: ownershipCoordinator}
+	if c.coordinator.retired && intent == worklifetime.DeliveryContinuationConsume {
+		c.coordinator.mu.Unlock()
+		return 0, errors.New("retired delivery continuation coordinator cannot admit an attempt")
+	}
+	if intent != worklifetime.DeliveryContinuationConsume {
+		c.coordinator.entries[c.deliveryID] = entry{state: ownershipCoordinator, carrier: c}
 	} else {
-		c.coordinator.entries[c.deliveryID] = entry{state: ownershipAttempt}
+		c.coordinator.entries[c.deliveryID] = entry{state: ownershipAttempt, carrier: c}
 	}
 	c.coordinator.mu.Unlock()
 	c.settled = true
-	c.coordinator.Signal()
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent != worklifetime.DeliveryContinuationReturnUnqueued {
+		c.coordinator.Signal()
+	}
+	if intent != worklifetime.DeliveryContinuationConsume {
 		return worklifetime.DeliveryContinuationReturned, nil
 	}
 	return worklifetime.DeliveryContinuationConsumed, nil

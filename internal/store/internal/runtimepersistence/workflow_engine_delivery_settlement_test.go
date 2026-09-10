@@ -168,7 +168,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 					NodeKey: node.Key(), ExecutionFlowID: flowID,
 					Route:    runtimeflowidentity.StoredRoute(flowID, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath),
 					EntityID: entityID, HandlerEventKey: string(event.Type()), ProducerSource: event.RoutingSource(),
-					DeliveryRoute: &route, Lineage: events.LineageFromEvent(event), CurrentState: "active",
+					Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(event), CurrentState: "active",
 				},
 			}
 			joinRef, err := timeridentity.NewFanOutDeliveryJoinRef(

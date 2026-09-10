@@ -130,6 +130,11 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 	case runtimecontracts.ExpressionKindLiteral:
 		return expr.Literal, true, nil
 	case runtimecontracts.ExpressionKindRef:
+		if expr.RefPath.Root == paths.RootLoop || opts.AllowJoin {
+			if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Ref, opts); err != nil {
+				return nil, false, err
+			}
+		}
 		if expr.RefPath.Root == paths.RootEvent {
 			if err := events.ValidateEventContextReference(strings.Join(expr.RefPath.Segments, ".")); err != nil {
 				return nil, false, err
@@ -137,6 +142,9 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 		}
 		if value, ok := resolveParsedRef(base, state, expr.RefPath); ok {
 			return value, true, nil
+		}
+		if expr.RefPath.Root == paths.RootLoop {
+			return nil, false, fmt.Errorf("captured loop reference %s is unavailable", expr.Ref)
 		}
 		return nil, false, nil
 	case runtimecontracts.ExpressionKindCEL:

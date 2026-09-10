@@ -20,7 +20,6 @@ func TestWorkflowLifecycleIdentityConsumersDoNotReintroduceFallbacks(t *testing.
 		"workflow_gate_decision.go",
 		"workflow_gate_terminal.go",
 		"workflow_state_persistence.go",
-		"select_entity.go",
 		"workflow_instance_route_recovery.go",
 	}
 	forbidden := []string{
@@ -63,7 +62,8 @@ func TestWorkflowLifecycleIdentityConsumersDoNotReintroduceFallbacks(t *testing.
 		{file: filepath.Join(pipelineDir, "workflow_join_resolution.go"), function: "ResolveWorkflowJoinOccurrenceDeliveryTarget", forbidden: []string{"WorkflowName", "NodeContractSource", "RuntimeEventOwners"}, required: []string{"resolveWorkflowJoinOccurrence", "RootExecutionFlowID", "NewDeliveryTargetHandler"}},
 		{file: filepath.Join(pipelineDir, "workflow_nodes.go"), function: "workflowNodeEventHandlerResolutionForDeliveryContext", forbidden: []string{"NodeContractSource", "RuntimeEventOwners"}, required: []string{"resolveWorkflowJoinOccurrence", "RootExecutionFlowID"}},
 		{file: filepath.Join(pipelineDir, "delivery_target_ownership.go"), function: "ClassifyDeliveryTargetOwnership", forbidden: []string{"ParseJoinHandle", "WorkflowJoinPlanForHandler"}, required: []string{"ResolveWorkflowJoinOccurrenceDeliveryTarget"}},
-		{file: filepath.Join(pipelineDir, "delivery_target_application.go"), function: "prepareDeliveryTargetApplication", forbidden: []string{"ParseJoinHandle", "WorkflowJoinPlanForHandler"}, required: []string{"resolveWorkflowJoinOccurrence", "declarationBoundTarget"}},
+		{file: filepath.Join(pipelineDir, "delivery_target_ownership.go"), function: "ValidateStampedDeliveryTargetOwnership", forbidden: []string{"ParseJoinHandle", "WorkflowJoinPlanForHandler"}, required: []string{"ResolveWorkflowJoinOccurrenceDeliveryTarget", "declaredHandler.eventType", "owner.Route() != target"}},
+		{file: filepath.Join(pipelineDir, "delivery_target_application.go"), function: "prepareDeliveryTargetApplication", forbidden: []string{"ParseJoinHandle", "WorkflowJoinPlanForHandler"}, required: []string{"ValidateStampedDeliveryTargetOwnership"}},
 		{file: filepath.Join(pipelineDir, "..", "bus", "delivery_planner.go"), function: "planAtGeneration", forbidden: []string{"ParseJoinHandle", "WorkflowJoinPlanForHandler", "RuntimeEventOwners"}, required: []string{"ResolveWorkflowJoinOccurrenceDeliveryTarget"}},
 		{file: filepath.Join(pipelineDir, "workflow_join_resolution.go"), function: "workflowJoinDeclarationRef", forbidden: []string{"WorkflowName", "NodeContractSource", "candidates"}, required: []string{"WorkflowJoinPlanForExecutionHandler", "WorkflowJoinPlanForRef"}},
 		{file: filepath.Join(pipelineDir, "workflow_join_resolution.go"), function: "workflowJoinDeclarationForExecution", forbidden: []string{"WorkflowName", "WorkflowJoinPlanForHandler"}, required: []string{"resolveWorkflowJoinOccurrence", "workflowJoinDeclarationRef"}},

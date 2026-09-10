@@ -32,9 +32,14 @@ func NewOperatorEventFull(event events.Event) (OperatorEventFull, error) {
 	if provenance, ok := event.OperatorReference(); ok {
 		operatorReferenceEventID = provenance.ReferencedEventID()
 	}
+	var inheritedOrigin *events.InheritedFanOutOrigin
+	if origin, ok := event.InheritedFanOutOrigin(); ok {
+		inheritedOrigin = &origin
+	}
 	return OperatorEventFull{
 		EventID: event.ID(), EventName: strings.TrimSpace(string(event.Type())), ExecutionMode: event.ExecutionMode(),
 		EntityID: event.EntityID(), RunID: event.RunID(), SourceEventID: event.ParentEventID(),
+		InheritedFanOutOrigin:    inheritedOrigin,
 		OperatorReferenceEventID: operatorReferenceEventID, CreatedAt: event.CreatedAt(), Source: event.SourceAgent(),
 		ProducerType: event.ProducerType(), Payload: payload, Deliveries: []OperatorEventDelivery{},
 		DeadLetters: []OperatorDeadLetterRecord{}, event: event.Clone(),

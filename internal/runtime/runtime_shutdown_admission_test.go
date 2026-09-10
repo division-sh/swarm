@@ -130,7 +130,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			execution_mode TEXT NOT NULL, chain_depth INTEGER NOT NULL, produced_by TEXT NOT NULL,
 			produced_by_type TEXT NOT NULL, source_event_id TEXT, created_at TIMESTAMP NOT NULL,
 			routing_source_kind TEXT NOT NULL, routing_source_authority TEXT, source_route BLOB NOT NULL,
-				target_route BLOB NOT NULL, target_set BLOB NOT NULL, operator_reference_event_id TEXT,
+				target_route BLOB NOT NULL, target_set BLOB NOT NULL, operator_reference_event_id TEXT, inherited_fan_out_origin BLOB,
 				route_settlement BLOB NOT NULL
 		)`,
 		`CREATE TABLE event_deliveries (
@@ -141,6 +141,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 				agent_flow_instance_id TEXT NOT NULL, agent_flow_instance_path TEXT NOT NULL,
 				delivery_context BLOB NOT NULL, delivery_payload_projection BLOB NOT NULL,
 				connect_execution_claim BLOB NOT NULL,
+				receiver_materialization_plan BLOB NOT NULL DEFAULT 'null',
 				execution_authority_kind TEXT NOT NULL, authority_bundle_hash TEXT NOT NULL,
 				execution_authority_id TEXT NOT NULL,
 				execution_authority_generation INTEGER NOT NULL, selected_execution_id TEXT,
@@ -383,6 +384,21 @@ func (*runtimeShutdownInboundStore) LoadInboundPublicationByIdentity(context.Con
 
 func (*runtimeShutdownInboundStore) ValidateInboundPublicationIntegrity(context.Context) error {
 	return nil
+}
+
+func TestRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapter(t *testing.T) {
+	store := newRuntimeShutdownDeliveryStore(t)
+	identity := agentidentitytest.RootRuntime(t, "agent-1", "runtime-test/shutdown-admission")
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("shutdown-fixture-claim"),
+		"test.in", "tester", "", nil, 0, identity.RunID, events.EventEnvelope{}, time.Now().UTC())
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
+	result, err := store.ClaimDelivery(testAuthorActivityContext(context.Background()), store.authority, event, route)
+	if err != nil {
+		t.Fatalf("shutdown fixture must admit its real delivery claim: %v", err)
+	}
+	if _, acquired := result.Acquired(); !acquired {
+		t.Fatalf("shutdown fixture did not acquire delivery: %+v", result)
+	}
 }
 
 func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *testing.T) {

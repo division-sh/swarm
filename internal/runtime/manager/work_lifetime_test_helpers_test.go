@@ -323,7 +323,11 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	if setter, ok := bus.(interface {
 		SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizer)
 	}); ok {
-		setter.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
+		if opts.LifecycleStore == nil {
+			setter.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.finalizeEphemeralTestReadiness))
+		} else {
+			setter.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
+		}
 	}
 	manager.mu.Lock()
 	manager.startupAgentsHydrated = true

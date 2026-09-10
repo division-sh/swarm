@@ -285,35 +285,33 @@ func (r FlowInputProducerResolution) AutoWireResolution() FlowInputAutoWireResol
 }
 
 type HandlerTransitionSemantic struct {
-	ID                   string
-	Node                 runtimeidentity.ExecutableNode
-	EventType            string
-	CreateEntity         bool
-	Action               ActionSpec
-	Activity             ActivitySpec
-	SelectEntity         *SelectEntitySpec
-	SelectOrCreateEntity *SelectOrCreateEntitySpec
-	Guard                *GuardSpec
-	AdvancesTo           string
-	SetsGate             *GateSpec
-	ClearGates           []string
-	DataAccumulation     WorkflowDataAccumulation
-	Emit                 EmitSpec
-	OnSuccess            HandlerOnSuccessSpec
-	Condition            string
-	Loop                 *LoopOperationSpec
-	OnComplete           []HandlerRuleEntry
-	Rules                []HandlerRuleEntry
-	Accumulate           *AccumulateSpec
-	Join                 *JoinSpec
-	Compute              *ComputeSpec
-	Query                *QuerySpec
-	FanOut               *FanOutSpec
-	GroupBy              *GroupBySpec
-	Filter               *FilterSpec
-	Reduce               *ReduceSpec
-	Count                *CountSpec
-	Clear                *ClearSpec
+	ID               string
+	Node             runtimeidentity.ExecutableNode
+	EventType        string
+	CreateEntity     bool
+	Action           ActionSpec
+	Activity         ActivitySpec
+	Guard            *GuardSpec
+	AdvancesTo       string
+	SetsGate         *GateSpec
+	ClearGates       []string
+	DataAccumulation WorkflowDataAccumulation
+	Emit             EmitSpec
+	OnSuccess        HandlerOnSuccessSpec
+	Condition        string
+	Loop             *LoopOperationSpec
+	OnComplete       []HandlerRuleEntry
+	Rules            []HandlerRuleEntry
+	Accumulate       *AccumulateSpec
+	Join             *JoinSpec
+	Compute          *ComputeSpec
+	Query            *QuerySpec
+	FanOut           *FanOutSpec
+	GroupBy          *GroupBySpec
+	Filter           *FilterSpec
+	Reduce           *ReduceSpec
+	Count            *CountSpec
+	Clear            *ClearSpec
 }
 type HandlerRuleEntry struct {
 	ID                  string                   `yaml:"id"`
@@ -819,30 +817,6 @@ type ConfigBinding struct {
 	Key     string
 	Ref     string
 	RefPath paths.Path
-}
-
-type SelectEntitySpec struct {
-	By       map[string]string        `yaml:"by"`
-	Bindings []SelectEntityKeyBinding `yaml:"-"`
-}
-
-type SelectOrCreateEntitySpec struct {
-	By       map[string]string        `yaml:"by"`
-	Bindings []SelectEntityKeyBinding `yaml:"-"`
-}
-
-type SelectEntityKeyBinding struct {
-	Field   string
-	Ref     string
-	RefPath paths.Path
-}
-
-func (s *SelectEntitySpec) Empty() bool {
-	return s == nil || len(s.Bindings) == 0
-}
-
-func (s *SelectOrCreateEntitySpec) Empty() bool {
-	return s == nil || len(s.Bindings) == 0
 }
 
 func cloneStringMap(in map[string]string) map[string]string {
@@ -1755,35 +1729,33 @@ type SystemNodeContract struct {
 	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
 type SystemNodeEventHandler struct {
-	Action               ActionSpec                `yaml:"action"`
-	Activity             ActivitySpec              `yaml:"activity"`
-	CreateEntity         bool                      `yaml:"create_entity"`
-	SelectEntity         *SelectEntitySpec         `yaml:"select_entity"`
-	SelectOrCreateEntity *SelectOrCreateEntitySpec `yaml:"select_or_create_entity"`
-	Description          string                    `yaml:"description"`
-	EvidenceTarget       string                    `yaml:"evidence_target"`
-	Emit                 EmitSpec                  `yaml:"emit"`
-	OnSuccess            HandlerOnSuccessSpec      `yaml:"on_success"`
-	Guard                *GuardSpec                `yaml:"guard"`
-	AdvancesTo           string                    `yaml:"advances_to"`
-	SetsGate             *GateSpec                 `yaml:"sets_gate"`
-	ClearGates           []string                  `yaml:"clear_gates"`
-	DataAccumulation     WorkflowDataAccumulation  `yaml:"data_accumulation"`
-	Condition            string                    `yaml:"condition"`
-	Logic                string                    `yaml:"logic"`
-	Loop                 *LoopOperationSpec        `yaml:"loop"`
-	OnComplete           []HandlerRuleEntry        `yaml:"on_complete"`
-	Rules                []HandlerRuleEntry        `yaml:"rules"`
-	Accumulate           *AccumulateSpec           `yaml:"accumulate"`
-	Join                 *JoinSpec                 `yaml:"join"`
-	Compute              *ComputeSpec              `yaml:"compute"`
-	Query                *QuerySpec                `yaml:"query"`
-	FanOut               *FanOutSpec               `yaml:"fan_out"`
-	GroupBy              *GroupBySpec              `yaml:"group_by"`
-	Filter               *FilterSpec               `yaml:"filter"`
-	Reduce               *ReduceSpec               `yaml:"reduce"`
-	Count                *CountSpec                `yaml:"count"`
-	Clear                *ClearSpec                `yaml:"clear"`
+	Action           ActionSpec               `yaml:"action"`
+	Activity         ActivitySpec             `yaml:"activity"`
+	CreateEntity     bool                     `yaml:"create_entity"`
+	Description      string                   `yaml:"description"`
+	EvidenceTarget   string                   `yaml:"evidence_target"`
+	Emit             EmitSpec                 `yaml:"emit"`
+	OnSuccess        HandlerOnSuccessSpec     `yaml:"on_success"`
+	Guard            *GuardSpec               `yaml:"guard"`
+	AdvancesTo       string                   `yaml:"advances_to"`
+	SetsGate         *GateSpec                `yaml:"sets_gate"`
+	ClearGates       []string                 `yaml:"clear_gates"`
+	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
+	Condition        string                   `yaml:"condition"`
+	Logic            string                   `yaml:"logic"`
+	Loop             *LoopOperationSpec       `yaml:"loop"`
+	OnComplete       []HandlerRuleEntry       `yaml:"on_complete"`
+	Rules            []HandlerRuleEntry       `yaml:"rules"`
+	Accumulate       *AccumulateSpec          `yaml:"accumulate"`
+	Join             *JoinSpec                `yaml:"join"`
+	Compute          *ComputeSpec             `yaml:"compute"`
+	Query            *QuerySpec               `yaml:"query"`
+	FanOut           *FanOutSpec              `yaml:"fan_out"`
+	GroupBy          *GroupBySpec             `yaml:"group_by"`
+	Filter           *FilterSpec              `yaml:"filter"`
+	Reduce           *ReduceSpec              `yaml:"reduce"`
+	Count            *CountSpec               `yaml:"count"`
+	Clear            *ClearSpec               `yaml:"clear"`
 }
 type EventCatalogEntry struct {
 	Swarm               EventSwarmMetadata `yaml:"swarm"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -16,8 +17,10 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -38,6 +41,7 @@ type selectedCompletionAuthorityStore interface {
 }
 
 type selectedCompletionFixture struct {
+	process   startupownership.ProcessCapability
 	store     selectedCompletionAuthorityStore
 	db        *sql.DB
 	sqlite    bool
@@ -126,6 +130,8 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 		{name: "container", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ContainerPlanFingerprint += ":stale" }},
 		{name: "actors", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ActorCensusFingerprint += ":stale" }},
 		{name: "config", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.EffectiveConfigFingerprint += ":stale" }},
+		{name: "declarations", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.DeclarationPlanFingerprint += ":stale" }},
+		{name: "executable coordinate", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ExecutableCoordinateFingerprint += ":stale" }},
 		{name: "generation", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.Generation++ }},
 		{name: "issue owner", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ExecutionOwner += ":stale" }},
 	}
@@ -287,7 +293,7 @@ func TestSelectedForkRuntimeAuthorityFinalizationAfterRunTerminalSelectedStorePa
 				t.Fatalf("close terminal fork authority: %v", err)
 			}
 
-			failFixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			failFixture := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, quiesceFixture.process)
 			issued, err = store.IssueRunForkSelectedContractRuntimeExecution(ctx, failFixture.request)
 			if err != nil {
 				t.Fatalf("issue failure authority: %v", err)
@@ -415,7 +421,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 		handles[tc.name] = handle
 	}
 
-	expired := time.Now().UTC().Add(-time.Minute)
+	expired := time.Now().UTC().Add(time.Hour)
 	if fixture.sqlite {
 		if _, err := fixture.db.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET lease_expires_at=? WHERE operation_id IN (SELECT operation_id FROM runtime_external_effect_operations WHERE selected_execution_id=?)`, expired, authority.ID); err != nil {
 			t.Fatal(err)
@@ -431,10 +437,120 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 			t.Fatal(err)
 		}
 	}
-	summary, err := fixture.store.ReconcileExternalEffectAttempts(ctx, liveExternalEffectRecoveryRequest(time.Now().UTC()))
+	ordinary, err := fixture.store.ReconcileExternalEffectAttempts(ctx, liveExternalEffectRecoveryRequest(time.Now().UTC()))
+	if err != nil || ordinary.PrelaunchTerminal != 0 || ordinary.OutcomeUncertain != 0 {
+		t.Fatalf("ordinary recovery mutated selected execution: %+v %v", ordinary, err)
+	}
+	if err := fixture.process.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	successor := selectedPreparationProcessForTest(t, fixture.store)
+	process, err := successor.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := fixture.store.(interface {
+		ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+		RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
+	})
+	entries, err := recovery.ListSelectedForkRecoveryEntries(ctx)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("recovery entries = %+v %v", entries, err)
+	}
+	recoveryRequest := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process, Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
+	beforeRecovery := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
+	assertRecoveryRolledBack := func() {
+		t.Helper()
+		after := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
+		if !reflect.DeepEqual(beforeRecovery, after) {
+			for table, before := range beforeRecovery {
+				if !reflect.DeepEqual(before, after[table]) {
+					t.Errorf("recovery changed table %s despite refusal/rollback", table)
+				}
+			}
+			t.Fatal("selected recovery did not roll back all persisted facts")
+		}
+		var state, status string
+		var fence uint64
+		if err := fixture.db.QueryRowContext(ctx, `SELECT e.state,e.fence_generation,r.status FROM run_fork_selected_contract_runtime_executions e JOIN runs r ON r.run_id=e.fork_run_id WHERE e.execution_id=$1`, issued.ExecutionID).Scan(&state, &fence, &status); err != nil || state != "running" || fence != authority.FenceGeneration || status != "paused" {
+			t.Fatalf("recovery partially committed: %s/%d/%s err=%v", state, fence, status, err)
+		}
+		for _, c := range cases {
+			want := runtimeeffects.State(c.name)
+			requireExternalAttemptState(t, fixture.db, fixture.sqlite, handles[c.name].Attempt().AttemptID, want)
+		}
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := recovery.RecoverSelectedFork(cancelled, recoveryRequest); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled recovery = %v", err)
+	}
+	assertRecoveryRolledBack()
+	bad := recoveryRequest
+	bad.Process.StateVersion++
+	if _, err := recovery.RecoverSelectedFork(ctx, bad); err == nil {
+		t.Fatal("stale process recovered execution")
+	}
+	assertRecoveryRolledBack()
+	for _, column := range []string{
+		"preparation_fingerprint", "executable_coordinate_fingerprint", "admission_fingerprint",
+		"container_plan_fingerprint", "actor_census_fingerprint", "effective_config_fingerprint", "declaration_plan_fingerprint",
+	} {
+		var original string
+		if err := fixture.db.QueryRowContext(ctx, "SELECT "+column+" FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1", issued.ExecutionID).Scan(&original); err != nil {
+			t.Fatal(err)
+		}
+		corrupt := "sha256:" + strings.Repeat("f", 64)
+		if corrupt == original {
+			t.Fatal("corruption must differ from the control")
+		}
+		if _, err := fixture.db.ExecContext(ctx, "UPDATE run_fork_selected_contract_runtime_executions SET "+column+"=$1 WHERE execution_id=$2", corrupt, issued.ExecutionID); err != nil {
+			t.Fatal(err)
+		}
+		before := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
+		if _, err := recovery.RecoverSelectedFork(ctx, recoveryRequest); err == nil {
+			t.Fatalf("recovery accepted corrupt %s", column)
+		}
+		if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)) {
+			t.Fatalf("corrupt %s refusal mutated persisted facts", column)
+		}
+		if _, err := fixture.db.ExecContext(ctx, "UPDATE run_fork_selected_contract_runtime_executions SET "+column+"=$1 WHERE execution_id=$2", original, issued.ExecutionID); err != nil {
+			t.Fatal(err)
+		}
+		assertRecoveryRolledBack()
+	}
+	if fixture.sqlite {
+		_, err = fixture.db.ExecContext(ctx, `CREATE TRIGGER selected_recovery_fail BEFORE UPDATE OF state ON run_fork_selected_contract_runtime_executions WHEN NEW.state='closed' BEGIN SELECT RAISE(ABORT,'selected recovery injection'); END`)
+	} else {
+		_, err = fixture.db.ExecContext(ctx, `CREATE FUNCTION selected_recovery_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.state='closed' THEN RAISE EXCEPTION 'selected recovery injection'; END IF; RETURN NEW; END $$`)
+		if err == nil {
+			_, err = fixture.db.ExecContext(ctx, `CREATE TRIGGER selected_recovery_fail BEFORE UPDATE ON run_fork_selected_contract_runtime_executions FOR EACH ROW EXECUTE FUNCTION selected_recovery_fail()`)
+		}
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 2; n++ {
+		if _, err := recovery.RecoverSelectedFork(ctx, recoveryRequest); err == nil || !strings.Contains(err.Error(), "selected recovery injection") {
+			t.Fatalf("persistent recovery failure = %v", err)
+		}
+		assertRecoveryRolledBack()
+	}
+	drop := `DROP TRIGGER selected_recovery_fail`
+	if !fixture.sqlite {
+		drop += ` ON run_fork_selected_contract_runtime_executions`
+	}
+	if _, err := fixture.db.ExecContext(ctx, drop); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := recovery.RecoverSelectedFork(ctx, recoveryRequest)
 	if err != nil {
 		t.Fatalf("reconcile selected completions: %v", err)
 	}
+	if recovered.Disposition != runfork.SelectedForkRecoveryFailed {
+		t.Fatalf("selected recovery = %+v", recovered)
+	}
+	summary := recovered.Effects
 	if summary.PrelaunchTerminal != 1 || summary.OutcomeUncertain != 2 {
 		t.Fatalf("recovery summary = %#v, want 1 terminal/2 uncertain", summary)
 	}
@@ -451,6 +567,18 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	}
 	if err := fixture.db.QueryRowContext(ctx, query, authority.ID).Scan(&parentState); err != nil || parentState != "closed" {
 		t.Fatalf("recovered parent state=%q err=%v, want closed", parentState, err)
+	}
+	var fence int64
+	if err := fixture.db.QueryRowContext(ctx, `SELECT fence_generation FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, issued.ExecutionID).Scan(&fence); err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := recovery.RecoverSelectedFork(ctx, recoveryRequest)
+	if err != nil || repeated.Disposition != runfork.SelectedForkRecoveryTerminal || repeated.Effects != (runtimeeffects.RecoverySummary{}) {
+		t.Fatalf("repeat recovery = %+v %v", repeated, err)
+	}
+	var repeatedFence int64
+	if err := fixture.db.QueryRowContext(ctx, `SELECT fence_generation FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, issued.ExecutionID).Scan(&repeatedFence); err != nil || repeatedFence != fence {
+		t.Fatalf("repeat recovery mutated fence: %d -> %d %v", fence, repeatedFence, err)
 	}
 }
 
@@ -1215,6 +1343,10 @@ func requireSelectedAttemptUsesCurrentLease(t *testing.T, fixture selectedComple
 }
 
 func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool) selectedCompletionFixture {
+	return newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, selectedPreparationProcessForTest(t, store))
+}
+
+func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability) selectedCompletionFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
@@ -1258,10 +1390,14 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
 		DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
 	}
+	declarations := emptySelectedDeclarationForTest(t, db, forkRun)
 	return selectedCompletionFixture{
-		store: store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
+		process: process,
+		store:   store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
 		request: runfork.SelectedContractRuntimeExecutionIssueRequest{
-			Admission: admission, ContainerPlanFingerprint: "sha256:container", ActorCensusFingerprint: "sha256:actors",
+			Preparation:     selectedPreparationForTest(t, process, sourceRun, forkRun, eventID, declarations),
+			DeclarationPlan: declarations,
+			Admission:       admission, ContainerPlanFingerprint: "sha256:container", ActorCensusFingerprint: "sha256:actors",
 			EffectiveConfigFingerprint: "sha256:config", ExecutionMode: runtimeeffects.ExecutionModeLive, Now: now,
 		},
 	}

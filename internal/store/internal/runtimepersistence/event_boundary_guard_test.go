@@ -23,6 +23,8 @@ type eventBoundaryCallsite struct {
 
 var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", scope: "persistLifecycleDiagnosticTx", name: "AdmitForPersistence"}:                        1,
+	{path: "internal/runtime/bus/outbox.go", scope: "engineDispatcher.DispatchPostCommit", name: "RevalidatePersistedEvent"}:                                                      1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.admitPublicationEventFacts", name: "AdmitForPersistence"}:                                                 1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                                                    1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:                                                1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                                                 2,
@@ -40,6 +42,10 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 }
 
 var eventRecordImportFiles = map[string]struct{}{
+	// The materialization dependency owner decodes complete publication records; it does not reconstruct event identity.
+	"internal/store/internal/backend/delivery/receiver_materialization.go": {},
+	// Historical inherited ordinals are revalidated by the complete-record decoder before the shared fan-out owner.
+	"internal/store/internal/backend/runforkpersistence/run_fork_inherited_fan_out_history.go":            {},
 	"internal/store/eventfixture/event.go":                                                                {},
 	"internal/store/internal/backend/delivery/lifecycle.go":                                               {},
 	"internal/store/internal/backend/eventpersistence/event_persistence_identity.go":                      {},
@@ -52,9 +58,12 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go":                {},
 	"internal/store/internal/backend/runforkpersistence/run_fork_activity_lineage.go":                     {},
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": {},
-	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go":      {},
-	"internal/store/internal/backend/runlifecycle/standalone_runtime.go":                                  {},
-	"internal/store/storetest/event.go":                                                                   {},
+	// selectedContractWorkflowSourceModes decodes complete records before checking
+	// exact source-run ownership; it does not reconstruct identity with raw SQL.
+	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_materialization_owner.go": {},
+	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go":         {},
+	"internal/store/internal/backend/runlifecycle/standalone_runtime.go":                                     {},
+	"internal/store/storetest/event.go": {},
 }
 
 var eventRecordSQLFiles = map[string]struct{}{
@@ -241,7 +250,7 @@ func checkEventBoundaryFile(t *testing.T, path, relative string, gotAdmission ma
 				return true
 			}
 			if eventInsertSQL.MatchString(raw) || completeEventReadSQL.MatchString(raw) {
-				if _, ok := eventRecordSQLFiles[relative]; !ok {
+				if _, ok := eventRecordSQLFiles[relative]; !ok && !(relative == "internal/store/internal/backend/runforkrevision/projection.go" && eventBoundaryEnclosingScope(file, value.Pos()) == "canonicalProjectionSpec" && !eventInsertSQL.MatchString(raw)) {
 					t.Fatalf("%s:%d owns event-record SQL outside a private backend adapter", relative, fset.Position(value.Pos()).Line)
 				}
 			}

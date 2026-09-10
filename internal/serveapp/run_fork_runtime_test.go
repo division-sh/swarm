@@ -620,7 +620,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -670,7 +670,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthorit
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -720,7 +720,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--json",
 	}, &activateOut)
 	if activateCode != 0 {

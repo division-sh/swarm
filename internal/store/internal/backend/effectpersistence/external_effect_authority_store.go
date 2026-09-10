@@ -12,6 +12,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
@@ -287,6 +288,9 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			forkchat.RequestHash, forkchat.BundleHash, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityStartupProbe:
 		startup := authority.StartupProbe
+		if startup.Preparation != nil {
+			return requirePreparedProbeProcess(ctx, tx, authority, false)
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE runtime_generation_grants SET created_at=created_at
 			WHERE grant_id=$1::uuid AND state_version=$2 AND state IN ('prepared','probe_settled')
@@ -380,6 +384,9 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			forkchat.RequestHash, forkchat.BundleHash, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityStartupProbe:
 		startup := authority.StartupProbe
+		if startup.Preparation != nil {
+			return requirePreparedProbeProcess(ctx, tx, authority, true)
+		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE runtime_generation_grants SET created_at=created_at
 			WHERE grant_id=? AND state_version=? AND state IN ('prepared','probe_settled')
@@ -555,8 +562,22 @@ func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, auth
 	}
 }
 
+func requirePreparedProbeProcess(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, sqlite bool) error {
+	current, err := storestartupownership.PreparedProbeProcessCurrent(ctx, tx, *authority.StartupProbe.Preparation, authority.FenceGeneration, sqlite, true)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return invalidExternalAuthority(authority, "prepared_probe_process_not_current")
+	}
+	return nil
+}
+
 func startupProbeAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.StartupProbe
+	if startup.Preparation != nil {
+		return storestartupownership.PreparedProbeProcessCurrent(ctx, q, *startup.Preparation, authority.FenceGeneration, false, false)
+	}
 	var count int
 	err := q.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM runtime_generation_grants f
@@ -568,6 +589,9 @@ func startupProbeAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, 
 
 func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.StartupProbe
+	if startup.Preparation != nil {
+		return storestartupownership.PreparedProbeProcessCurrent(ctx, q, *startup.Preparation, authority.FenceGeneration, true, false)
+	}
 	var count int
 	err := q.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM runtime_generation_grants f

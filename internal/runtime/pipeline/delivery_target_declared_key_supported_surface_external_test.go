@@ -3,25 +3,23 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -34,7 +32,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 		{name: "postgres", open: openPostgresGateRecoveryStore},
 	} {
 		for _, acquisition := range []string{"select", "select_or_create"} {
-			for _, keyRelation := range []string{"agreement", "conflict", "later_match"} {
+			for _, keyRelation := range []string{"agreement", "business_difference", "conflict", "later_match"} {
 				t.Run(storeCase.name+"/"+acquisition+"/"+keyRelation, func(t *testing.T) {
 					selected := storeCase.open(t)
 					runID := uuid.NewString()
@@ -68,7 +66,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					competingEntityID := runtimeflowidentity.EntityID(competingPath)
 					payloadKey := "payload-key"
 					exactKey := payloadKey
-					if keyRelation == "conflict" {
+					if keyRelation == "business_difference" {
 						exactKey = "different-exact-key"
 					}
 					createdAt := time.Now().UTC()
@@ -80,14 +78,14 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					instances := []runtimepipeline.WorkflowInstance{
 						{
 							InstanceID: exactRoute.InstanceID, StorageRef: exactPath, EntityID: exactEntityID,
-							WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
-							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"account_id": exactKey, "owner": "exact"},
+							WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active",
+							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"receiver_id": exactRoute.InstanceID, "account_id": exactKey, "owner": "exact"},
 							EntityType: "review_entity",
 						},
 						{
 							InstanceID: competingRoute.InstanceID, StorageRef: competingPath, EntityID: competingEntityID,
-							WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
-							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"account_id": payloadKey, "owner": "competing"},
+							WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active",
+							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"receiver_id": competingRoute.InstanceID, "account_id": payloadKey, "owner": "competing"},
 							EntityType: "review_entity",
 						},
 					}
@@ -98,7 +96,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 								InstancePath: instance.StorageRef, EntityID: instance.EntityID, HasStoredPath: true,
 							},
 							RunID: runID, BundleHash: bundleHash,
-							WorkflowVersion: "1", ExecutionMode: executionmode.Live,
+							WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 						}
 						instance.RuntimeReadiness = &readiness
 						if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef), instance, createdAt); err != nil {
@@ -116,22 +114,19 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						materialize(instances[1])
 					}
 
-					payload, err := json.Marshal(map[string]any{"account_id": payloadKey, "item": "accepted"})
+					payload, err := json.Marshal(map[string]any{"receiver_id": exactRoute.InstanceID, "account_id": payloadKey, "item": "accepted"})
 					if err != nil {
 						t.Fatal(err)
 					}
 					target := events.RouteIdentity{FlowID: "review", FlowInstance: exactPath, EntityID: exactEntityID}
-					event := eventtest.ExistingRunRootIngress(
-						uuid.NewString(), "work.keyed", "operator", "", payload, 0, runID,
-						events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), createdAt.Add(time.Minute),
-					)
+					event := targetedDeclaredKeyPublication(t, ctx, eventBus, source, runID, payload, target, createdAt.Add(time.Minute))
 					plan, err := eventBus.CheckPublishRecipientPlan(ctx, event)
 					if err != nil {
 						t.Fatalf("plan targeted declared-key delivery: %v", err)
 					}
 					if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != node.Key() ||
 						!plan.DeliveryRoutes[0].Target.ExistingEntity() || plan.DeliveryRoutes[0].Target.Route() != target {
-						t.Fatalf("targeted declared-key plan = %#v, want exact owner %#v", plan.DeliveryRoutes, target)
+						t.Fatalf("targeted declared-key plan = %#v, want exact owner %#v", plan, target)
 					}
 					if err := eventBus.Publish(ctx, event); err != nil {
 						t.Fatalf("persist targeted declared-key delivery: %v", err)
@@ -144,6 +139,11 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						// The second matching receiver is created only after the actual
 						// EventBus commit. Execution must validate, not rerun acquisition.
 						materialize(instances[1])
+					}
+					if keyRelation == "conflict" {
+						if _, err := selected.db.ExecContext(ctx, `UPDATE entity_state SET entity_type=$1 WHERE run_id=$2 AND entity_id=$3`, "wrong_entity_type", runID, exactEntityID); err != nil {
+							t.Fatal(err)
+						}
 					}
 					delivery, err := events.NewDeliveryEvent(prepared.Event.Event(), prepared.DeliveryRoutes[0])
 					if err != nil {
@@ -163,8 +163,8 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						if executionErr != nil {
 							t.Fatalf("execute exact key agreement: %v", executionErr)
 						}
-						if _, disposed := outcome.Disposition(); disposed {
-							t.Fatalf("exact key agreement disposition = %#v", outcome)
+						if disposition, disposed := outcome.Disposition(); disposed {
+							t.Fatalf("exact key agreement disposition = %s failure=%+v", disposition.Kind(), disposition.Failure())
 						}
 						if exact.Revision != 2 || competing.Revision != 1 || exact.Fields["owner"] != "exact" || competing.Fields["owner"] != "competing" {
 							t.Fatalf("agreement mutations: exact=%#v competing=%#v", exact, competing)
@@ -190,7 +190,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						failureText = failure.Detail.Code
 					}
 					if executionErr != nil {
-						if want := acquisition + "_entity_conflict"; !strings.Contains(failureText, want) {
+						if want := "entity_type"; !strings.Contains(failureText, want) {
 							t.Fatalf("key conflict failure = %q, want %q", failureText, want)
 						}
 					}
@@ -205,80 +205,24 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 
 func targetedDeclaredKeyExecutionSource(t *testing.T, acquisition string) (semanticview.Source, runtimeidentity.ExecutableNode) {
 	t.Helper()
-	binding := []runtimecontracts.SelectEntityKeyBinding{{
-		Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id"),
-	}}
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+	root := canonicalrouting.CopyTargetedDeclaredKey(t, acquisition)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if acquisition == "select" {
-		handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: binding}
-	} else {
-		handler.SelectOrCreateEntity = &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}
-	}
-	flow := runtimecontracts.FlowContractView{
-		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Name: "review", Mode: runtimecontracts.FlowModeTemplate, InitialState: "active",
-			States: []string{"active", "done"}, TerminalStates: []string{"done"},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"work.keyed": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"key-consumer": {
-				SubscribesTo:  []string{"work.keyed"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.keyed": handler},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "declared-key-execution", Version: "1",
-			FlowInitial:  map[string]string{"review": "active"},
-			FlowStates:   map[string][]string{"review": {"active", "done"}},
-			FlowTerminal: map[string][]string{"review": {"done"}},
-		},
-		FlowTree:    runtimeflowmodelTree(root),
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": flow.Schema},
-	}
-	bundle = admitTargetedDeclaredKeyContract(t, bundle)
 	source := semanticview.Wrap(bundle)
 	node := externalPipelineSourceNode(t, source, "review", "key-consumer")
 	return source, node
 }
 
-func admitTargetedDeclaredKeyContract(t *testing.T, base *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+func targetedDeclaredKeyPublication(t *testing.T, ctx context.Context, bus *runtimebus.EventBus, source semanticview.Source, runID string, payload []byte, target events.RouteIdentity, at time.Time) events.Event {
 	t.Helper()
-	root := t.TempDir()
-	files := map[string]string{
-
-		"schema.yaml":          "name: declared-key-execution\n",
-		"review/schema.yaml":   "name: review\nmode: template\ninitial_state: active\nstates: [active, done]\n",
-		"review/entities.yaml": "review_entity: {}\n",
+	seed := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "operator", "", payload, 0, runID, events.EventEnvelope{}, at)
+	if err := bus.Publish(ctx, seed); err != nil {
+		t.Fatalf("publish declared root input: %v", err)
 	}
-	for relative, body := range files {
-		path := filepath.Join(root, relative)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatalf("create declared-key contract directory: %v", err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatalf("write declared-key contract: %v", err)
-		}
-	}
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("load declared-key contract: %v", err)
-	}
-	admitted.Semantics = base.Semantics
-	admitted.FlowTree = base.FlowTree
-	admitted.FlowSchemas = base.FlowSchemas
-	return admitted
-}
-
-func runtimeflowmodelTree(root runtimecontracts.FlowContractView) flowmodel.Tree[runtimecontracts.FlowContractView] {
-	return flowmodel.Tree[runtimecontracts.FlowContractView]{
-		Root: &root,
-		ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
-	}
+	producer := externalPipelineSourceNode(t, source, "", "controller")
+	return eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "work.keyed", eventtest.Producer(events.EventProducerNode, producer.Key()), "", payload, 0,
+		events.LineageFromEvent(seed), events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), eventtest.RootRoutingSource(runID), at.Add(time.Second))
 }

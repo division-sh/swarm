@@ -20,6 +20,11 @@ type scriptedLLMRuntime struct {
 	responses      map[string]llm.Response
 	agentEventFlow map[string][]scriptedAgentFixtureStep
 	runBarriers    map[string]*scriptedManagedRunBarrier
+	deliveryCalls  []scriptedDeliveryCall
+}
+
+type scriptedDeliveryCall struct {
+	RunID, EventID, AgentID, EntityID, TargetEntityID string
 }
 
 func newScriptedLLMRuntime() *scriptedLLMRuntime {
@@ -134,6 +139,7 @@ func (r *scriptedLLMRuntime) ContinueManagedSession(ctx context.Context, session
 	}
 	key := strings.TrimSpace(message.Content)
 	r.mu.Lock()
+	r.deliveryCalls = append(r.deliveryCalls, scriptedDeliveryCall{frame.Turn.Event.RunID, frame.Turn.Event.ID, agentID, frame.Turn.Event.EntityID, frame.Turn.Event.Target.EntityID})
 	response, ok := r.responses[agentID+"::"+key]
 	steps := append([]scriptedAgentFixtureStep(nil), r.agentEventFlow[agentID]...)
 	barrier := r.runBarriers[strings.TrimSpace(frame.Turn.Event.RunID)]

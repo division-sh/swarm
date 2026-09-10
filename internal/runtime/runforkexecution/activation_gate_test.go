@@ -7,11 +7,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testing.T) {
@@ -24,11 +31,12 @@ func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testin
 		Activated:       true,
 		SourceFrozen:    true,
 	}
-	fakeStore := &fakeSelectedContractActivationStore{activation: activation}
+	fakeStore := &fakeSelectedContractActivationStore{activation: activation, originalRunID: activation.SourceRunID}
 
 	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID: forkRunID,
-		Store:     fakeStore,
+		ForkRunID:    forkRunID,
+		Store:        fakeStore,
+		SourceLoader: &fakeSelectedContractSourceLoader{original: originalActivationSourceFixture(t)},
 	})
 	if err != nil {
 		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
@@ -38,6 +46,9 @@ func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testin
 	}
 	if fakeStore.activateRequest.HistoricalReplayExecutionAdmitter == nil {
 		t.Fatal("non-selected activation did not receive historical replay execution admitter")
+	}
+	if err := fakeStore.activateRequest.OriginalLoopCarriage.RequireSource(originalActivationSourceFixture(t).SourceArtifactFact.BundleHash()); err != nil {
+		t.Fatal(err)
 	}
 	if result.SelectedContractExecutionAdmission != nil || result.ForkRunID != forkRunID || !result.Activated {
 		t.Fatalf("result = %#v", result)
@@ -55,12 +66,16 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 		plan:               plan,
 		activation:         runfork.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkRunID, Activated: true, SourceFrozen: true},
 	}
-	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
+	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
-	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+	ctx := runForkTestContext(t)
+	owner := selectedContractGateOwnerForTest(t)
+	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+		ExecutionOwner: owner,
+		AgentRuntime:   SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability},
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err != nil {
 		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
@@ -97,7 +112,7 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 	}
 }
 
-func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t *testing.T) {
+func TestActivateSelectedContractRunForkRequiresExecutionOwnerBeforeReplayAdmission(t *testing.T) {
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
 	plan := testSelectedContractStateOnlyPlan(binding)
@@ -146,30 +161,22 @@ func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t
 		},
 		routeOK: true,
 	}
-	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
+	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
 	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
 	})
-	if err == nil || !strings.Contains(err.Error(), runfork.RunForkHistoricalReplayContractSwapBootResumeOwner) {
-		t.Fatalf("err = %v, want concrete store requirement for contract-swap historical replay execution", err)
+	if err == nil || !strings.Contains(err.Error(), "selected-contract execution owner is required") {
+		t.Fatalf("err = %v, want process-owned execution admission before replay planning", err)
 	}
 	if fakeStore.activateCalled {
 		t.Fatal("ActivateRunFork called, want fail closed before mutation")
 	}
-	if !fakeStore.requireCalled || result.SelectedContractExecutionAdmission == nil {
-		t.Fatalf("admission not consumed before block; require:%v result:%#v", fakeStore.requireCalled, result)
-	}
-	if result.ContractSwapBootResumeAdmission == nil ||
-		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, runfork.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
-		t.Fatalf("contract-swap admission = %#v, want non-mutating blocker before source replay block", result.ContractSwapBootResumeAdmission)
-	}
-	if result.HistoricalReplayExecutionAdmission == nil ||
-		!unsupportedBlockerHas(result.HistoricalReplayExecutionAdmission.UnsupportedBlockers, runfork.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) ||
-		!historicalReplayFactHas(result.HistoricalReplayExecutionAdmission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries, runfork.RunForkHistoricalReplayAdmissionExecutableForkWork) {
-		t.Fatalf("historical replay admission = %#v, want non-mutating replayable-source classification before source replay block", result.HistoricalReplayExecutionAdmission)
+	if fakeStore.loadBundleCalled || fakeStore.planCalled || fakeStore.requireCalled ||
+		result.SelectedContractExecutionAdmission != nil || result.ContractSwapBootResumeAdmission != nil || result.HistoricalReplayExecutionAdmission != nil {
+		t.Fatalf("unowned activation reached preparation or replay admission: store=%+v result=%#v", fakeStore, result)
 	}
 }
 
@@ -196,12 +203,16 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 		routeOK:            true,
 		activation:         runfork.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkRunID, Activated: true, SourceFrozen: true},
 	}
-	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
+	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
-	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+	ctx := runForkTestContext(t)
+	owner := selectedContractGateOwnerForTest(t)
+	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+		ExecutionOwner: owner,
+		AgentRuntime:   SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability},
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err != nil {
 		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
@@ -238,9 +249,10 @@ func TestActivateSelectedContractRunForkFailsBeforeMutationOnUnavailableSource(t
 	loader := &fakeSelectedContractSourceLoader{err: errors.New("selected source unavailable")}
 
 	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), "selected source unavailable") {
 		t.Fatalf("err = %v, want selected source failure", err)
@@ -261,12 +273,13 @@ func TestActivateSelectedContractRunForkFailsBeforePlanningOnPersistedIdentityMi
 	}
 	loaded := testLoadedSelectedSource(binding.ContractSelection)
 	loaded.SourceArtifactFact = testEphemeralSourceArtifactFact("bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	loader := &fakeSelectedContractSourceLoader{loaded: loaded}
+	loader := &fakeSelectedContractSourceLoader{loaded: loaded, original: originalActivationSourceFixture(t)}
 
 	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), "bundle_hash mismatch") {
 		t.Fatalf("err = %v, want persisted bundle identity mismatch", err)
@@ -286,12 +299,13 @@ func TestActivateSelectedContractRunForkFailsBeforeMutationOnStaleBindingAdmissi
 		requireErr:         errors.New("selected contract binding disappeared"),
 		plan:               testSelectedContractStateOnlyPlan(binding),
 	}
-	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
+	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
 	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), "selected contract binding disappeared") {
 		t.Fatalf("err = %v, want stale binding failure", err)
@@ -318,12 +332,13 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 		bundleAvailability: testSelectedContractBundleAvailability(forkRunID),
 		plan:               plan,
 	}
-	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
+	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)}
 
 	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
-		ForkRunID:    forkRunID,
-		Store:        fakeStore,
-		SourceLoader: loader,
+		ExecutionOwner: selectedContractGateOwnerForTest(t),
+		ForkRunID:      forkRunID,
+		Store:          fakeStore,
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) {
 		t.Fatalf("err = %v, want preserved planner blocker", err)
@@ -331,6 +346,15 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	if fakeStore.activateCalled {
 		t.Fatal("ActivateRunFork called, want fail closed before mutation")
 	}
+}
+
+// These gate tests stub planning/mutation, but retain actual process admission.
+// Complete both-store execution is covered by the staged replay tests.
+func selectedContractGateOwnerForTest(t *testing.T) SelectedContractExecutionOwner {
+	t.Helper()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	return selectedContractExecutionOwnerForTest(t, storetest.AdmitPostgresRuntimeStore(t, db))
 }
 
 func historicalReplayFactHas(items []runfork.RunForkHistoricalReplayFactAdmission, fact, admission string) bool {
@@ -343,6 +367,7 @@ func historicalReplayFactHas(items []runfork.RunForkHistoricalReplayFactAdmissio
 }
 
 type fakeSelectedContractActivationStore struct {
+	originalRunID         string
 	binding               runfork.RunForkSelectedContractBinding
 	bindingOK             bool
 	bindingErr            error
@@ -364,6 +389,27 @@ type fakeSelectedContractActivationStore struct {
 	loadRouteCalled  bool
 	planCalled       bool
 	activateCalled   bool
+}
+
+func (s *fakeSelectedContractActivationStore) LoadRunForkSourceRunID(context.Context, string) (string, error) {
+	if s.originalRunID == "" {
+		return "", errors.New("original fork source not configured")
+	}
+	return s.originalRunID, nil
+}
+
+func originalActivationSourceFixture(t *testing.T) *LoadedSelectedContractSource {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutCarrier(t, false, false), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &LoadedSelectedContractSource{Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}, Source: semanticview.Wrap(bundle), SourceArtifactFact: fact}
 }
 
 func (s *fakeSelectedContractActivationStore) LoadRunBundleAvailability(_ context.Context, _ string) (runbundle.Availability, error) {

@@ -178,20 +178,21 @@ type OperatorEventListResult struct {
 }
 
 type OperatorEventFull struct {
-	EventID                  string                     `json:"event_id"`
-	EventName                string                     `json:"event_name"`
-	ExecutionMode            executionmode.Mode         `json:"execution_mode"`
-	EntityID                 string                     `json:"entity_id,omitempty"`
-	RunID                    string                     `json:"run_id,omitempty"`
-	SourceEventID            string                     `json:"source_event_id,omitempty"`
-	OperatorReferenceEventID string                     `json:"operator_reference_event_id,omitempty"`
-	CreatedAt                time.Time                  `json:"created_at"`
-	Source                   string                     `json:"source"`
-	ProducerType             events.EventProducerType   `json:"producer_type"`
-	Payload                  map[string]any             `json:"payload"`
-	Deliveries               []OperatorEventDelivery    `json:"deliveries"`
-	NoDelivery               *OperatorNoDelivery        `json:"no_delivery,omitempty"`
-	DeadLetters              []OperatorDeadLetterRecord `json:"dead_letters"`
+	EventID                  string                        `json:"event_id"`
+	EventName                string                        `json:"event_name"`
+	ExecutionMode            executionmode.Mode            `json:"execution_mode"`
+	EntityID                 string                        `json:"entity_id,omitempty"`
+	RunID                    string                        `json:"run_id,omitempty"`
+	SourceEventID            string                        `json:"source_event_id,omitempty"`
+	InheritedFanOutOrigin    *events.InheritedFanOutOrigin `json:"inherited_fan_out_origin,omitempty"`
+	OperatorReferenceEventID string                        `json:"operator_reference_event_id,omitempty"`
+	CreatedAt                time.Time                     `json:"created_at"`
+	Source                   string                        `json:"source"`
+	ProducerType             events.EventProducerType      `json:"producer_type"`
+	Payload                  map[string]any                `json:"payload"`
+	Deliveries               []OperatorEventDelivery       `json:"deliveries"`
+	NoDelivery               *OperatorNoDelivery           `json:"no_delivery,omitempty"`
+	DeadLetters              []OperatorDeadLetterRecord    `json:"dead_letters"`
 	event                    events.Event
 }
 

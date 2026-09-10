@@ -15,9 +15,10 @@ import (
 type AuthorityKind string
 
 const (
-	AuthorityStaticDeclarationPlan AuthorityKind = "static_declaration_plan"
-	AuthorityFlowReadinessPlan     AuthorityKind = "flow_readiness_plan"
-	AuthorityEphemeralExecution    AuthorityKind = "ephemeral_execution"
+	AuthorityStaticDeclarationPlan       AuthorityKind = "static_declaration_plan"
+	AuthoritySelectedForkDeclarationPlan AuthorityKind = "selected_fork_declaration_plan"
+	AuthorityFlowReadinessPlan           AuthorityKind = "flow_readiness_plan"
+	AuthorityEphemeralExecution          AuthorityKind = "ephemeral_execution"
 )
 
 type ExecutionLifetime string
@@ -44,10 +45,11 @@ type EphemeralExecution struct {
 }
 
 type Authority struct {
-	Kind      AuthorityKind          `json:"kind"`
-	Static    *StaticDeclarationPlan `json:"static_declaration_plan,omitempty"`
-	Readiness *FlowReadinessPlan     `json:"flow_readiness_plan,omitempty"`
-	Ephemeral *EphemeralExecution    `json:"ephemeral_execution,omitempty"`
+	Kind      AuthorityKind                `json:"kind"`
+	Static    *StaticDeclarationPlan       `json:"static_declaration_plan,omitempty"`
+	Readiness *FlowReadinessPlan           `json:"flow_readiness_plan,omitempty"`
+	Ephemeral *EphemeralExecution          `json:"ephemeral_execution,omitempty"`
+	Selected  *SelectedForkDeclarationPlan `json:"selected_fork_declaration_plan,omitempty"`
 }
 
 type Admission struct {
@@ -60,6 +62,8 @@ func (a Admission) Equal(other Admission) bool {
 		return false
 	}
 	switch a.Authority.Kind {
+	case AuthoritySelectedForkDeclarationPlan:
+		return a.Authority.Selected != nil && other.Authority.Selected != nil && *a.Authority.Selected == *other.Authority.Selected
 	case AuthorityStaticDeclarationPlan:
 		return a.Authority.Static != nil && other.Authority.Static != nil &&
 			*a.Authority.Static == *other.Authority.Static
@@ -129,6 +133,9 @@ func (a Admission) Validate() error {
 	if a.Authority.Kind == AuthorityEphemeralExecution && a.Lifetime != LifetimeEphemeral {
 		return errors.New("ephemeral topology provenance requires ephemeral execution lifetime")
 	}
+	if a.Authority.Kind == AuthoritySelectedForkDeclarationPlan && a.Lifetime != LifetimeDurableManaged {
+		return errors.New("selected declaration requires durable managed execution lifetime")
+	}
 	return nil
 }
 
@@ -143,10 +150,18 @@ func (a Authority) Validate() error {
 	if a.Ephemeral != nil {
 		variants++
 	}
+	if a.Selected != nil {
+		variants++
+	}
 	if variants != 1 {
 		return errors.New("agent topology authority must contain exactly one sealed variant")
 	}
 	switch a.Kind {
+	case AuthoritySelectedForkDeclarationPlan:
+		if a.Selected == nil {
+			return errors.New("selected declaration topology authority has an invalid variant shape")
+		}
+		return a.Selected.Validate()
 	case AuthorityStaticDeclarationPlan:
 		if a.Static == nil || a.Readiness != nil || a.Ephemeral != nil {
 			return errors.New("static declaration topology authority has an invalid variant shape")

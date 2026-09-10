@@ -27,6 +27,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -35,8 +36,10 @@ const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-11111111111
 const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 type storeTestWorkFixture struct {
-	process *worklifetime.Process
-	runtime *worklifetime.RuntimeOccurrence
+	process        *worklifetime.Process
+	runtime        *worklifetime.RuntimeOccurrence
+	capabilitiesMu sync.Mutex
+	capabilities   map[any]startupownership.ProcessCapability
 }
 
 var storeTestWorkFixtures sync.Map
@@ -158,7 +161,7 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	opts.Durable = runtimebus.DurableDependencies{
 		ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
-		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, WorkflowInstances: store, PreparedEvents: store,
+		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(store, opts)

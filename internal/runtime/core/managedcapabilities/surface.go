@@ -28,20 +28,22 @@ const (
 type ExecutionKind string
 
 const (
-	ExecutionNormalAgent          ExecutionKind = "normal_agent"
-	ExecutionSelectedContractFork ExecutionKind = "selected_contract_fork"
+	ExecutionNormalAgent             ExecutionKind = "normal_agent"
+	ExecutionSelectedContractFork    ExecutionKind = "selected_contract_fork"
+	ExecutionSelectedForkPreparation ExecutionKind = "selected_fork_preparation"
 )
 
 type Authority struct {
-	Kind                 AuthorityKind `json:"kind"`
-	ID                   string        `json:"id"`
-	ExecutionKind        ExecutionKind `json:"execution_kind"`
-	ExecutionAuthorityID string        `json:"execution_authority_id"`
-	RunID                string        `json:"run_id,omitempty"`
-	SessionID            string        `json:"session_id,omitempty"`
-	TurnOrdinal          int           `json:"turn_ordinal,omitempty"`
-	StartupOwnerID       string        `json:"startup_owner_id,omitempty"`
-	StartupGeneration    uint64        `json:"startup_generation,omitempty"`
+	Kind                 AuthorityKind                       `json:"kind"`
+	ID                   string                              `json:"id"`
+	ExecutionKind        ExecutionKind                       `json:"execution_kind"`
+	ExecutionAuthorityID string                              `json:"execution_authority_id"`
+	RunID                string                              `json:"run_id,omitempty"`
+	SessionID            string                              `json:"session_id,omitempty"`
+	TurnOrdinal          int                                 `json:"turn_ordinal,omitempty"`
+	StartupOwnerID       string                              `json:"startup_owner_id,omitempty"`
+	StartupGeneration    uint64                              `json:"startup_generation,omitempty"`
+	Preparation          *PreparedSelectedForkProbeAuthority `json:"preparation,omitempty"`
 }
 
 func validateAuthorityActorRun(authority Authority, actor agentidentity.Identity) error {
@@ -60,13 +62,12 @@ func normalizeActorOwner(authority Authority, identity agentidentity.Identity, p
 	if hasIdentity == hasPlan {
 		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability surface requires exactly one typed actor owner")
 	}
-	requireLive := authority.Kind == AuthorityProviderTurn ||
-		(authority.Kind == AuthorityStartupProbe && authority.ExecutionKind == ExecutionSelectedContractFork)
+	requireLive := authority.Kind == AuthorityProviderTurn
 	if requireLive && !hasIdentity {
 		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability authority requires a live actor identity")
 	}
 	if !requireLive && !hasPlan {
-		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("normal startup capability authority requires a runless actor plan")
+		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("pre-admission startup capability authority requires a runless actor plan")
 	}
 	if hasIdentity {
 		if err := identity.Validate(); err != nil {
@@ -80,6 +81,15 @@ func normalizeActorOwner(authority Authority, identity agentidentity.Identity, p
 	if err := plan.Validate(); err != nil {
 		return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("managed capability actor plan: %w", err)
 	}
+	if authority.Preparation != nil {
+		fingerprint, err := plan.Fingerprint()
+		if err != nil {
+			return agentidentity.Identity{}, agentidentity.Plan{}, "", err
+		}
+		if fingerprint != authority.Preparation.ActorPlanFingerprint {
+			return agentidentity.Identity{}, agentidentity.Plan{}, "", fmt.Errorf("prepared selected-fork probe actor plan does not match preparation")
+		}
+	}
 	return agentidentity.Identity{}, plan, plan.AgentID(), nil
 }
 
@@ -89,6 +99,21 @@ func (a Authority) Validate() error {
 	}
 	if strings.TrimSpace(a.ExecutionAuthorityID) == "" {
 		return fmt.Errorf("managed capability execution authority id is required")
+	}
+	if a.ExecutionKind == ExecutionSelectedForkPreparation {
+		if a.Kind != AuthorityStartupProbe || a.RunID != "" || a.SessionID != "" || a.TurnOrdinal != 0 || a.StartupOwnerID != "" || a.StartupGeneration != 0 {
+			return fmt.Errorf("prepared selected-fork probe cannot carry execution or normal startup authority")
+		}
+		if id, err := uuid.Parse(a.ExecutionAuthorityID); err != nil || id == uuid.Nil || id.String() != a.ExecutionAuthorityID {
+			return fmt.Errorf("selected-fork preparation id must be a canonical nonzero UUID")
+		}
+		if a.Preparation == nil {
+			return fmt.Errorf("prepared selected-fork probe evidence is required")
+		}
+		return a.Preparation.Validate()
+	}
+	if a.Preparation != nil {
+		return fmt.Errorf("selected-fork preparation evidence cannot authorize another execution kind")
 	}
 	switch a.ExecutionKind {
 	case ExecutionNormalAgent, ExecutionSelectedContractFork:
@@ -104,6 +129,9 @@ func (a Authority) Validate() error {
 			return fmt.Errorf("managed capability provider-turn authority is malformed")
 		}
 	case AuthorityStartupProbe:
+		if a.ExecutionKind != ExecutionNormalAgent {
+			return fmt.Errorf("selected startup requires non-executable preparation authority")
+		}
 		if strings.TrimSpace(a.StartupOwnerID) == "" || a.StartupGeneration == 0 || a.SessionID != "" || a.TurnOrdinal != 0 {
 			return fmt.Errorf("managed capability startup-probe authority is malformed")
 		}
@@ -190,6 +218,23 @@ type Surface struct {
 
 type Persistence interface {
 	SaveManagedCapabilitySurface(context.Context, Surface) error
+}
+
+// ValidateEffective is shared by preflight and durable receipt consumption.
+// Integrity alone does not establish the planned tools' effective callability.
+func (s Surface) ValidateEffective() error {
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	if s.HasMismatch() {
+		return fmt.Errorf("surface contains typed delivery mismatch")
+	}
+	for _, tool := range s.Tools {
+		if tool.Capability.Visible && tool.Capability.Callable && (!tool.EffectiveVisible || !tool.EffectiveCallable) {
+			return fmt.Errorf("capability %s is not effectively callable: %s", tool.Name, tool.EffectiveDenial)
+		}
+	}
+	return nil
 }
 
 type PlannedTool struct {
@@ -322,7 +367,7 @@ func New(plan Plan) (Surface, error) {
 		Provider:         strings.TrimSpace(plan.Provider),
 		Transport:        strings.TrimSpace(plan.Transport),
 		ProviderContract: strings.TrimSpace(plan.ProviderContract),
-		Authority:        plan.Authority,
+		Authority:        plan.Authority.clone(),
 		CreatedAt:        plan.CreatedAt.UTC(),
 	}
 	if s.CreatedAt.IsZero() {
@@ -694,6 +739,7 @@ func (s Surface) PlannedBindingNames(kind BindingKind) []string {
 
 func (s Surface) Clone() Surface {
 	out := s
+	out.Authority = s.Authority.clone()
 	out.Tools = append([]Tool(nil), s.Tools...)
 	for i := range out.Tools {
 		out.Tools[i].Bindings = append([]DeliveryBinding(nil), s.Tools[i].Bindings...)

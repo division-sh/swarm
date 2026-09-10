@@ -120,7 +120,8 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			source_route BLOB NOT NULL,
 			target_route BLOB NOT NULL,
 			target_set BLOB NOT NULL,
-			operator_reference_event_id TEXT
+			operator_reference_event_id TEXT,
+			inherited_fan_out_origin BLOB
 			,route_settlement BLOB NOT NULL
 		)`,
 		`CREATE TABLE event_deliveries (
@@ -140,6 +141,7 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			delivery_context BLOB NOT NULL,
 			delivery_payload_projection BLOB NOT NULL,
 			connect_execution_claim BLOB NOT NULL,
+			receiver_materialization_plan BLOB NOT NULL DEFAULT 'null',
 			execution_authority_kind TEXT NOT NULL,
 			authority_bundle_hash TEXT NOT NULL,
 			execution_authority_id TEXT NOT NULL,
@@ -323,7 +325,8 @@ func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, rout
 
 func deliverToTestAgent(ctx context.Context, eb *EventBus, evt events.Event, identity agentidentity.Identity) error {
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
-	return eb.deliverToRecipientsWithRoutes(ctx, evt, []string{identity.AgentID()}, []events.DeliveryRoute{route})
+	_, err := eb.deliverToRecipientsWithRoutes(ctx, evt, []string{identity.AgentID()}, []events.DeliveryRoute{route})
+	return err
 }
 
 func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
@@ -363,14 +366,14 @@ func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
 	if err := owner.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
 		t.Fatalf("accept selected committed handoff: %v", err)
 	}
-	capability, err := owner.Acquire(proof.DeliveryID())
+	capability, err := acquireTestDeliveryCapability(owner, proof.DeliveryID())
 	if err != nil {
 		t.Fatalf("acquire selected delivery carrier: %v", err)
 	}
 	if resolution, err := capability.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
 		t.Fatalf("return selected delivery carrier: %v", err)
 	}
-	reacquired, err := owner.Acquire(proof.DeliveryID())
+	reacquired, err := acquireTestDeliveryCapability(owner, proof.DeliveryID())
 	if err != nil {
 		t.Fatalf("reacquire returned selected delivery: %v", err)
 	}
@@ -386,7 +389,7 @@ func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
 	if err := owner.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
 		t.Fatalf("reaccept selected delivery for terminal race: %v", err)
 	}
-	terminalCarrier, err := owner.Acquire(proof.DeliveryID())
+	terminalCarrier, err := acquireTestDeliveryCapability(owner, proof.DeliveryID())
 	if err != nil {
 		t.Fatalf("acquire selected terminal-race carrier: %v", err)
 	}
@@ -594,7 +597,7 @@ func TestInternalSubscriptionInactiveSendReturnsExactContinuation(t *testing.T) 
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			owner := &controlledTestDeliveryOwner{}
-			continuation, err := owner.Acquire("delivery-" + strings.ReplaceAll(test.name, " ", "-"))
+			continuation, err := acquireTestDeliveryCapability(owner, "delivery-"+strings.ReplaceAll(test.name, " ", "-"))
 			if err != nil {
 				t.Fatal(err)
 			}

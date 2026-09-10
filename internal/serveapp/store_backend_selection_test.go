@@ -222,7 +222,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if apiCaps.ConversationForkLifecycle == nil {
 		t.Fatal("sqlite apiCapabilities missing ConversationForkLifecycle mutation owner")
 	}
-	if apiCaps.RunForkAvailability == nil || apiCaps.RunFork == nil || apiCaps.RunForkSelector == nil {
+	if apiCaps.RunForkAvailability == nil || apiCaps.RunFork == nil {
 		t.Fatal("sqlite apiCapabilities missing complete run-fork capability family")
 	}
 	if apiCaps.ResetCoordinator == nil {
@@ -369,13 +369,11 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 		"sqlite conversation reads":          sqliteCaps.ConversationForks != nil,
 		"sqlite conversation lifecycle":      sqliteCaps.ConversationForkLifecycle != nil,
 		"sqlite run fork":                    sqliteCaps.RunFork != nil,
-		"sqlite run fork selector":           sqliteCaps.RunForkSelector != nil,
 		"sqlite reset":                       sqliteCaps.ResetCoordinator != nil,
 		"postgres source artifact writer":    postgres.SourceArtifactWriter() != nil,
 		"postgres source artifact store":     postgres.SourceArtifactStore() != nil,
 		"postgres required run availability": postgres.RunBundleAvailability() != nil,
 		"postgres run fork":                  postgresCaps.RunFork != nil,
-		"postgres run fork selector":         postgresCaps.RunForkSelector != nil,
 		"postgres reset":                     postgresCaps.ResetCoordinator != nil,
 	} {
 		if !available {

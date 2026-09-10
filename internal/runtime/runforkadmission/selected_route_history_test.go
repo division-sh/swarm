@@ -1,17 +1,15 @@
 package runforkadmission
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t *testing.T) {
@@ -99,12 +97,13 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 	}
 }
 
-func TestW2SelectedForkUsesPersistedCompiledEdgeAfterCurrentGraphChanges(t *testing.T) {
+func TestW2SelectedForkPreservesHistoricalClaimButDerivesCurrentSelectedRecipients(t *testing.T) {
 	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "consumer-b")
 	plan.PendingWork[0].DeliveryRoute = testW2CompiledConnectRoute(t, "consumer-b")
+	historical := plan.PendingWork[0].DeliveryRoute
+	before := recipientAuthorityJSON(t, plan)
 
-	// The selected source no longer routes to consumer-b. Historical selection
-	// must use the exact stamped compiled-edge claim rather than rematching it.
+	// Historical execution authority remains evidence, not selected authority.
 	source := testContractFrontierSource("consumer-a")
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -127,36 +126,28 @@ func TestW2SelectedForkUsesPersistedCompiledEdgeAfterCurrentGraphChanges(t *test
 		t.Fatalf("selected route events = %#v, want one source event", history.SelectedRouteEvents)
 	}
 	recipients := history.SelectedRouteEvents[0].DerivedRecipients
-	if len(recipients) != 1 || recipients[0].Recipient.ID() != identitytest.RootNode(t, "consumer-b").Key() {
-		t.Fatalf("derived recipients = %#v, want persisted consumer-b only", recipients)
+	if len(recipients) != 1 || recipients[0].Recipient.ID() != identitytest.FlowNode(t, "consumer", "consumer-a").Key() || recipients[0].HandlerEvent() != "scan.requested" {
+		t.Fatalf("derived recipients = %#v, want selected consumer-a only", recipients)
+	}
+	recipientAuthorityAssertConnect(t, recipients[0], recipientAuthorityConnectPlan(t, source, "consumer", "scan.requested"))
+	if got := history.SelectedRouteEvents[0].HistoricalDeliveryRoutes; !reflect.DeepEqual(got, []events.DeliveryRoute{historical}) {
+		t.Fatalf("historical route changed: %#v", got)
+	}
+	if recipientAuthorityJSON(t, plan) != before {
+		t.Fatal("selected admission mutated historical input")
 	}
 }
 
 func testW2CompiledConnectRoute(t testing.TB, subscriberID string) events.DeliveryRoute {
 	t.Helper()
-	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{
-		Mode:      canonicalrouting.TemplateInstanceRouteSelect,
-		SecondPin: canonicalrouting.TemplateInstanceNoSecondPin,
-	})
-	repoRoot := canonicalrouting.RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
-	if err != nil {
-		t.Fatalf("load canonical connect fixture: %v", err)
+	source := testContractFrontierSource(subscriberID)
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	if len(graph.Issues()) != 0 || len(graph.Plans()) != 1 {
+		t.Fatalf("historical fixture graph: plans=%d issues=%#v", len(graph.Plans()), graph.Issues())
 	}
-	var selected runtimepinrouting.ConnectRoutePlan
-	for _, candidate := range runtimepinrouting.CompileConnectGraph(semanticview.Wrap(bundle)).Plans() {
-		if candidate.ReceiverEndpoint().Readback().Pin == "deploy.done" {
-			selected = candidate
-			break
-		}
-	}
-	if selected.ReceiverEndpoint().Readback().Pin == "" {
-		t.Fatal("compiled connect graph has no deploy.done receiver pin")
-	}
-	recipientNode := identitytest.RootNode(t, subscriberID)
-	target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "consumer-entity"}
+	selected := graph.Plans()[0]
+	recipientNode := identitytest.FlowNode(t, "consumer", subscriberID)
+	target := selected.ReceiverRoute("consumer", "consumer-entity")
 	blueprint := runtimepinrouting.ConnectDeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(recipientNode),
 		Target:    target,

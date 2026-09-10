@@ -45,8 +45,10 @@ import (
 	replycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runcontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runfork "github.com/division-sh/swarm/internal/runtime/runfork"
+	runforkreadiness "github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	semanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 	sessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	startupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	timerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
@@ -635,6 +637,10 @@ func (s *PostgresStore) ListSelectedContractRouteRecoveryRecords(ctx context.Con
 	return s.runForkPostgresOwner.ListSelectedContractRouteRecoveryRecords(ctx)
 }
 
+func (s *PostgresStore) ListSelectedForkRecoveryEntries(ctx context.Context) ([]runfork.SelectedForkRecoveryEntry, error) {
+	return s.runForkPostgresOwner.ListSelectedForkRecoveryEntries(ctx)
+}
+
 func (s *PostgresStore) ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]bus.ActiveTargetDescriptor, error) {
 	return s.pipelinePostgresOwner.ListSelectedRunTargetOwners(ctx, runID)
 }
@@ -807,8 +813,12 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEventModes(ctx context.
 	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, workflowStates []runfork.RunForkSelectedContractWorkflowState) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, workflowStates)
+func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original)
+}
+
+func (s *PostgresStore) LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error) {
+	return s.runForkPostgresOwner.LoadRunForkSourceRunID(ctx, forkRunID)
 }
 
 func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
@@ -883,7 +893,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 	return s.runForkPostgresOwner.MaterializeRunFork(ctx, req)
 }
 
-func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error) {
+func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
 	return s.runForkPostgresOwner.MaterializeRunForkForSelectedContractExecution(ctx, req)
 }
 
@@ -1017,6 +1027,10 @@ func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRe
 
 func (s *PostgresStore) RecoverCompletionContinuation(ctx context.Context, req effects.CompletionContinuationRequest) (effects.Attempt, bool, error) {
 	return s.effectPostgresOwner.RecoverCompletionContinuation(ctx, req)
+}
+
+func (s *PostgresStore) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
+	return s.runForkPostgresOwner.RecoverSelectedFork(ctx, req)
 }
 
 func (s *PostgresStore) RegisterAuthorActivityEventCatalog(scope authoractivity.Scope, descriptors []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error) {
@@ -1183,14 +1197,6 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 	return s.deliveryPostgresOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
-func (s *PostgresStore) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelinePostgresOwner.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
-}
-
-func (s *PostgresStore) SelectActiveWorkflowInstances(ctx context.Context, runID string, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
-	return s.pipelinePostgresOwner.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
-}
-
 func (s *PostgresStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {
 	s.eventPostgresOwner.SetEventPayloadAdmitter(admitter)
 }
@@ -1233,6 +1239,10 @@ func (s *PostgresStore) StartActivityAttempt(ctx context.Context, record pipelin
 
 func (s *PostgresStore) StopRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
 	return s.runLifecyclePostgresOwner.StopRunControl(ctx, req)
+}
+
+func (s *PostgresStore) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
+	return s.runForkPostgresOwner.StopSelectedFork(ctx, req)
 }
 
 func (s *PostgresStore) SumSpendUSD(ctx context.Context, query budgetspend.SpendQuery) (float64, error) {
@@ -1859,6 +1869,10 @@ func (s *SQLiteRuntimeStore) ListSelectedContractRouteRecoveryRecords(ctx contex
 	return s.runForkSQLiteOwner.ListSelectedContractRouteRecoveryRecords(ctx)
 }
 
+func (s *SQLiteRuntimeStore) ListSelectedForkRecoveryEntries(ctx context.Context) ([]runfork.SelectedForkRecoveryEntry, error) {
+	return s.runForkSQLiteOwner.ListSelectedForkRecoveryEntries(ctx)
+}
+
 func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]bus.ActiveTargetDescriptor, error) {
 	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwners(ctx, runID)
 }
@@ -2019,8 +2033,12 @@ func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, workflowStates []runfork.RunForkSelectedContractWorkflowState) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, workflowStates)
+func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original)
+}
+
+func (s *SQLiteRuntimeStore) LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error) {
+	return s.runForkSQLiteOwner.LoadRunForkSourceRunID(ctx, forkRunID)
 }
 
 func (s *SQLiteRuntimeStore) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
@@ -2095,7 +2113,7 @@ func (s *SQLiteRuntimeStore) MaterializeRunFork(ctx context.Context, req runfork
 	return s.runForkSQLiteOwner.MaterializeRunFork(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error) {
+func (s *SQLiteRuntimeStore) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
 	return s.runForkSQLiteOwner.MaterializeRunForkForSelectedContractExecution(ctx, req)
 }
 
@@ -2229,6 +2247,10 @@ func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.Sp
 
 func (s *SQLiteRuntimeStore) RecoverCompletionContinuation(ctx context.Context, req effects.CompletionContinuationRequest) (effects.Attempt, bool, error) {
 	return s.effectSQLiteOwner.RecoverCompletionContinuation(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
+	return s.runForkSQLiteOwner.RecoverSelectedFork(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) RegisterAuthorActivityEventCatalog(scope authoractivity.Scope, descriptors []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error) {
@@ -2395,14 +2417,6 @@ func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, auth
 	return s.deliverySQLiteOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
-func (s *SQLiteRuntimeStore) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelineSQLiteOwner.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
-}
-
-func (s *SQLiteRuntimeStore) SelectActiveWorkflowInstances(ctx context.Context, runID string, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
-	return s.pipelineSQLiteOwner.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
-}
-
 func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventID string, subscriberType string, subscriberID string) (bool, error) {
 	return s.runLifecycleSQLiteOwner.ServeAbandonDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
 }
@@ -2449,6 +2463,10 @@ func (s *SQLiteRuntimeStore) StartActivityAttempt(ctx context.Context, record pi
 
 func (s *SQLiteRuntimeStore) StopRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
 	return s.runLifecycleSQLiteOwner.StopRunControl(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
+	return s.runForkSQLiteOwner.StopSelectedFork(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) SumSpendUSD(ctx context.Context, query budgetspend.SpendQuery) (float64, error) {

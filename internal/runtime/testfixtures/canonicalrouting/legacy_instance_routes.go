@@ -29,6 +29,7 @@ const (
 	TemplateInstanceNodeConsumer TemplateInstanceConsumer = iota
 	TemplateInstanceAgentConsumer
 	TemplateInstanceNodeAndAgentConsumer
+	TemplateInstanceNodeAndTwoAgentConsumer
 )
 
 type TemplateInstanceRouteOptions struct {
@@ -100,7 +101,7 @@ pins:
 
 	consumerNodes := "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n" + secondHandler
 	consumerAgents := ""
-	if opts.Consumer == TemplateInstanceAgentConsumer || opts.Consumer == TemplateInstanceNodeAndAgentConsumer {
+	if opts.Consumer == TemplateInstanceAgentConsumer || opts.Consumer == TemplateInstanceNodeAndAgentConsumer || opts.Consumer == TemplateInstanceNodeAndTwoAgentConsumer {
 		subscriptions := "deploy.done"
 		if opts.SecondPin == TemplateInstanceSecondPinDistinctEvent {
 			subscriptions += ", deploy.audited"
@@ -109,6 +110,9 @@ pins:
 			consumerNodes = ""
 		}
 		consumerAgents = "consumer-agent:\n  id: consumer-agent\n  model: regular\n  intent:\n    inline: Consume connected deployment events.\n  subscriptions: [" + subscriptions + "]\n"
+		if opts.Consumer == TemplateInstanceNodeAndTwoAgentConsumer {
+			consumerAgents += "audit-agent:\n  id: audit-agent\n  model: regular\n  intent:\n    inline: Audit connected deployment events.\n  subscriptions: [" + subscriptions + "]\n"
+		}
 	} else if opts.Consumer != TemplateInstanceNodeConsumer {
 		t.Fatalf("unsupported template instance consumer %d", opts.Consumer)
 	}

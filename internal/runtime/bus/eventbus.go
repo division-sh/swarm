@@ -113,7 +113,6 @@ type DurableDependencies struct {
 	ActiveAgents          ActiveAgentDescriptorLister
 	ActiveFlows           ActiveFlowInstanceDescriptorLister
 	TargetOwners          SelectedRunTargetOwnerLister
-	WorkflowInstances     runtimepipeline.WorkflowInstancePersistenceReader
 	PreparedEvents        PreparedPublishEventReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
 	RunOrigins            RunOriginReader
@@ -135,7 +134,6 @@ func (d DurableDependencies) validate() error {
 		{"active agent descriptor reader", d.ActiveAgents},
 		{"active flow descriptor reader", d.ActiveFlows},
 		{"selected-run target owner reader", d.TargetOwners},
-		{"workflow instance/state reader", d.WorkflowInstances},
 		{"prepared event settlement reader", d.PreparedEvents},
 		{"target failure recorder", d.TargetFailureRecorder},
 		{"run origin reader", d.RunOrigins},
@@ -153,7 +151,7 @@ func (d DurableDependencies) validate() error {
 // publication, the normal generation coordinator, carriers, and attempts.
 type DeliveryContinuationOwner interface {
 	AcceptCommitted([]runtimedelivery.DurableHandoffProof) error
-	Acquire(string) (worklifetime.DeliveryContinuation, error)
+	Acquire(string) (worklifetime.DeliveryAcquisition, error)
 	Retain(runtimedelivery.Snapshot) error
 	Release(string) error
 	OwnsPersistedRecovery() bool
@@ -239,6 +237,9 @@ type PublishRecipientPlan struct {
 	DeliveryRoutes         []events.DeliveryRoute
 	TargetFailure          string
 	canonicalAuthority     bool
+	actualPresent          bool
+	actuals                []PublishRecipientActual
+	actualErr              error
 }
 
 type ExactDirectRouteStatus struct {
@@ -430,10 +431,10 @@ func (eb *EventBus) DeliveryContinuationOwner() DeliveryContinuationOwner {
 	return eb.deliveryContinuations
 }
 
-func (eb *EventBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (eb *EventBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	owner := eb.DeliveryContinuationOwner()
 	if owner == nil {
-		return nil, errors.New("delivery continuation owner is required")
+		return worklifetime.DeliveryAcquisition{}, errors.New("delivery continuation owner is required")
 	}
 	return owner.Acquire(deliveryID)
 }

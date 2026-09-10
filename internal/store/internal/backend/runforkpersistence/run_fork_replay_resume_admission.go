@@ -33,7 +33,7 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 	for _, item := range evidence.Pending {
 		disposition := runForkReplayResumeDispositionForPendingWork(item)
 		dispositions = append(dispositions, disposition)
-		if item.Classification != runfork.RunForkPendingClassificationDeliveredCompleted {
+		if disposition.Disposition != runfork.RunForkReplayResumeDispositionLineageOnly && disposition.Disposition != runfork.RunForkReplayResumeDispositionNoHistoricalAction {
 			hasHistoricalReplayRequirement = true
 		}
 		if disposition.Disposition == runfork.RunForkReplayResumeDispositionForkReplay {
@@ -140,6 +140,13 @@ func runForkReplayResumeDispositionForPendingWork(item runfork.RunForkPendingWor
 		DeliveryID:     strings.TrimSpace(item.DeliveryID),
 		SubscriberType: strings.TrimSpace(item.SubscriberType),
 		SubscriberID:   strings.TrimSpace(item.SubscriberID),
+	}
+	if item.RetainsTerminalBarrierHistory() {
+		disposition.Fact = runfork.RunForkReplayResumeFactDeliveryDeadLetterHistory
+		disposition.Classification = item.Classification
+		disposition.Disposition = runfork.RunForkReplayResumeDispositionLineageOnly
+		disposition.Message = "exact fixed-revision barrier occurrence and failed delivery outcome are terminal lineage; no replay or success conversion"
+		return disposition
 	}
 	switch item.Classification {
 	case runfork.RunForkPendingClassificationDeliveredCompleted:

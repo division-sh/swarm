@@ -215,9 +215,9 @@ func (b *proposedEffectRouteProofBus) DeliveryAuthority() (runtimedelivery.Execu
 	}
 	return b.eventBus.DeliveryAuthority()
 }
-func (b *proposedEffectRouteProofBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (b *proposedEffectRouteProofBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	if b == nil || b.eventBus == nil {
-		return nil, errors.New("proposed-effect proof delivery continuation requires event bus")
+		return worklifetime.DeliveryAcquisition{}, errors.New("proposed-effect proof delivery continuation requires event bus")
 	}
 	return b.eventBus.AcquireDeliveryContinuation(deliveryID)
 }

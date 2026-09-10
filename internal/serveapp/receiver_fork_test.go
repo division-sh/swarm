@@ -88,7 +88,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					}
 				}
 				if surface == "admitted_http" {
-					params := map[string]any{"source_run_id": request.RunID, "fork_event_id": request.EventID, "confirm_source_freeze": true, "idempotency_key": "receiver-fork"}
+					params := map[string]any{"source_run_id": request.RunID, "fork_event_id": request.EventID, "allow_source_freeze": true, "idempotency_key": "receiver-fork"}
 					var fork, duplicate apiv1.RunForkExecutionResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
@@ -102,10 +102,10 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						t.Fatal("missing fork owner")
 					}
 					result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runtimerunforkexecution.SelectedContractExecutionRequest{
-						SourceRunID: request.RunID, At: request.EventID, ConfirmSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+						SourceRunID: request.RunID, At: request.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
-						AgentRuntime:      runtimerunforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
+						AgentRuntime:      rt.ForkRuntime,
 					})
 					if admitted {
 						if err != nil {

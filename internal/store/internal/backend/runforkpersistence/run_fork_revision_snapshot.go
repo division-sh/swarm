@@ -21,30 +21,31 @@ type runForkRevisionedFact struct {
 	Revision      int64
 }
 
-type RunForkRevisionedFact = runForkRevisionedFact
-
 type runForkRevisionEvent struct {
 	runForkRevisionedFact
-	EventID         string               `json:"event_id"`
-	EventName       string               `json:"event_name"`
-	EntityID        string               `json:"entity_id"`
-	FlowInstance    string               `json:"flow_instance"`
-	RoutingSource   events.RoutingSource `json:"routing_source"`
-	TargetRoute     json.RawMessage      `json:"target_route"`
-	TargetSet       json.RawMessage      `json:"target_set"`
-	RouteSettlement json.RawMessage      `json:"route_settlement"`
-	Scope           string               `json:"scope"`
-	Payload         json.RawMessage      `json:"-"`
-	ChainDepth      int                  `json:"chain_depth"`
-	ProducedBy      string               `json:"produced_by"`
-	ProducedByType  string               `json:"produced_by_type"`
-	HandlerNode     string               `json:"handler_node"`
-	IdempotencyKey  string               `json:"idempotency_key"`
-	SourceEventID   string               `json:"source_event_id"`
-	CreatedAt       time.Time            `json:"created_at"`
+	RunID                 string               `json:"run_id"`
+	EventClass            string               `json:"event_class"`
+	InheritedFanOutOrigin json.RawMessage      `json:"inherited_fan_out_origin"`
+	ExecutionMode         string               `json:"execution_mode"`
+	TaskID                string               `json:"task_id"`
+	EventID               string               `json:"event_id"`
+	EventName             string               `json:"event_name"`
+	EntityID              string               `json:"entity_id"`
+	FlowInstance          string               `json:"flow_instance"`
+	RoutingSource         events.RoutingSource `json:"routing_source"`
+	TargetRoute           json.RawMessage      `json:"target_route"`
+	TargetSet             json.RawMessage      `json:"target_set"`
+	RouteSettlement       json.RawMessage      `json:"route_settlement"`
+	Scope                 string               `json:"scope"`
+	Payload               json.RawMessage      `json:"-"`
+	ChainDepth            int                  `json:"chain_depth"`
+	ProducedBy            string               `json:"produced_by"`
+	ProducedByType        string               `json:"produced_by_type"`
+	HandlerNode           string               `json:"handler_node"`
+	IdempotencyKey        string               `json:"idempotency_key"`
+	SourceEventID         string               `json:"source_event_id"`
+	CreatedAt             time.Time            `json:"created_at"`
 }
-
-type RunForkRevisionEvent = runForkRevisionEvent
 
 type runForkRevisionEntityMutation struct {
 	runForkRevisionedFact
@@ -72,8 +73,6 @@ type runForkRevisionDelivery struct {
 	Snapshot runtimedelivery.Snapshot
 }
 
-type RunForkRevisionDelivery = runForkRevisionDelivery
-
 type runForkRevisionCommittedReplayScope struct {
 	runForkRevisionedFact
 	EventID   string    `json:"event_id"`
@@ -96,11 +95,16 @@ type runForkRevisionReceipt struct {
 
 type runForkRevisionDeadLetter struct {
 	runForkRevisionedFact
-	DeadLetterID    string    `json:"dead_letter_id"`
-	OriginalEventID string    `json:"original_event_id"`
-	DeliveryID      string    `json:"delivery_id"`
-	HandlerNode     string    `json:"handler_node"`
-	CreatedAt       time.Time `json:"created_at"`
+	DeadLetterID      string          `json:"dead_letter_id"`
+	OriginalEventID   string          `json:"original_event_id"`
+	DeliveryID        string          `json:"delivery_id"`
+	HandlerNode       string          `json:"handler_node"`
+	CreatedAt         time.Time       `json:"created_at"`
+	ClaimVersion      int64           `json:"claim_version"`
+	Outcome           string          `json:"outcome"`
+	OutcomeReasonCode string          `json:"outcome_reason_code"`
+	OutcomeFailure    json.RawMessage `json:"outcome_failure"`
+	OutcomeSettledAt  *time.Time      `json:"outcome_settled_at"`
 }
 
 type runForkRevisionTimer struct {
@@ -252,9 +256,13 @@ type runForkRevisionSnapshot struct {
 	ConversationAudits    []runForkRevisionConversationAudit
 	ReplyContexts         []runForkRevisionReplyContext
 	FanOutFacts           []runForkRevisionFanOutFact
+	admittedFacts         map[runForkHistoricalFactKey]struct{}
 }
 
-type RunForkRevisionSnapshot = runForkRevisionSnapshot
+type runForkHistoricalFactKey struct {
+	family runforkrevision.Family
+	key    string
+}
 
 func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at string) (runForkEventCursor, error) {
 	if tx == nil {
@@ -271,74 +279,22 @@ func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at stri
 		args = append(args, at)
 	}
 	row := tx.QueryRowContext(ctx, `
-		WITH first_events AS (
-			SELECT DISTINCT ON (fact_key) fact_key, revision, fact
-			FROM run_fork_fact_revisions
-			WHERE run_id = $1::uuid AND family = 'events' `+where+`
-			ORDER BY fact_key, revision ASC
-		)
-		SELECT
-			fact_key,
-			COALESCE(fact->>'event_name', ''),
-			COALESCE(fact->>'source_event_id', ''),
-			COALESCE(fact->>'produced_by', ''),
-			COALESCE(fact->>'produced_by_type', ''),
-			COALESCE((fact->>'created_at')::timestamptz, 'epoch'::timestamptz),
-			revision
-		FROM first_events
-		ORDER BY revision DESC, fact_key DESC
-		LIMIT 1
-	`, args...)
-	var cursor runForkEventCursor
-	if err := row.Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &cursor.CreatedAt, &cursor.Revision); err != nil {
-		if err == sql.ErrNoRows {
-			if at == "" {
-				return runForkEventCursor{}, fmt.Errorf("no revisioned source-run event exists for fork source run %s", runID)
-			}
-			return runForkEventCursor{}, fmt.Errorf("fork point event %s not found in revisioned source run %s", at, runID)
-		}
-		return runForkEventCursor{}, fmt.Errorf("resolve fork event revision: %w", err)
-	}
-	return cursor, nil
-}
-
-func resolveSQLiteRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at string) (runForkEventCursor, error) {
-	if tx == nil {
-		return runForkEventCursor{}, fmt.Errorf("run fork revision point requires a database snapshot")
-	}
-	at = strings.TrimSpace(at)
-	where := ""
-	args := []any{runID}
-	if at != "" {
-		if _, err := uuid.Parse(at); err != nil {
-			return runForkEventCursor{}, fmt.Errorf("run fork selector must be an event UUID: %w", err)
-		}
-		where = "AND fact_key = $2"
-		args = append(args, at)
-	}
-	row := tx.QueryRowContext(ctx, `
 		WITH ranked_events AS (
-			SELECT fact_key, revision, fact,
+			SELECT run_id, fact_key, revision, fact, present,
 			       ROW_NUMBER() OVER (PARTITION BY fact_key ORDER BY revision ASC) AS first_rank
 			FROM run_fork_fact_revisions
 			WHERE run_id = $1 AND family = 'events' `+where+`
 		)
-		SELECT
-			fact_key,
-			COALESCE(CAST(json_extract(fact, '$.event_name') AS TEXT), ''),
-			COALESCE(CAST(json_extract(fact, '$.source_event_id') AS TEXT), ''),
-			COALESCE(CAST(json_extract(fact, '$.produced_by') AS TEXT), ''),
-			COALESCE(CAST(json_extract(fact, '$.produced_by_type') AS TEXT), ''),
-			COALESCE(CAST(json_extract(fact, '$.created_at') AS TEXT), ''),
-			revision
+		SELECT run_id, fact_key, revision, fact, present
 		FROM ranked_events
 		WHERE first_rank = 1
 		ORDER BY revision DESC, fact_key DESC
 		LIMIT 1
 	`, args...)
-	var cursor runForkEventCursor
-	var createdAt string
-	if err := row.Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &createdAt, &cursor.Revision); err != nil {
+	var fact runForkHistoricalFactContext
+	var raw []byte
+	var present bool
+	if err := row.Scan(&fact.RunID, &fact.Key, &fact.Revision, &raw, &present); err != nil {
 		if err == sql.ErrNoRows {
 			if at == "" {
 				return runForkEventCursor{}, fmt.Errorf("no revisioned source-run event exists for fork source run %s", runID)
@@ -347,12 +303,24 @@ func resolveSQLiteRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, a
 		}
 		return runForkEventCursor{}, fmt.Errorf("resolve fork event revision: %w", err)
 	}
-	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(createdAt))
-	if err != nil {
-		return runForkEventCursor{}, fmt.Errorf("decode fork event revision timestamp: %w", err)
+	if !present {
+		return runForkEventCursor{}, fmt.Errorf("fork point event %s has no initial present fact", fact.Key)
 	}
-	cursor.CreatedAt = parsed.UTC()
-	return cursor, nil
+	fact.Family, fact.FirstRevision = runforkrevision.FamilyEvents, fact.Revision
+	snapshot := &runForkRevisionSnapshot{RunID: runID, Revision: fact.Revision}
+	if err := appendRunForkHistoricalFact(snapshot, fact, raw); err != nil {
+		return runForkEventCursor{}, fmt.Errorf("admit fork event revision: %w", err)
+	}
+	event := snapshot.Events[0]
+	return runForkEventCursor{
+		EventID: event.EventID, EventName: event.EventName, SourceEventID: event.SourceEventID,
+		ProducedBy: event.ProducedBy, ProducedByType: event.ProducedByType,
+		CreatedAt: event.CreatedAt.UTC(), Revision: fact.Revision,
+	}, nil
+}
+
+func resolveSQLiteRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at string) (runForkEventCursor, error) {
+	return resolveRunForkRevisionPoint(ctx, tx, runID, at)
 }
 
 func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, revision int64) (*runForkRevisionSnapshot, error) {
@@ -364,13 +332,13 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 	}
 	rows, err := tx.QueryContext(ctx, `
 		WITH bounded AS (
-			SELECT family, fact_key, revision, fact, present,
+			SELECT run_id, family, fact_key, revision, fact, present,
 			       MIN(revision) OVER (PARTITION BY family, fact_key) AS first_revision,
 			       ROW_NUMBER() OVER (PARTITION BY family, fact_key ORDER BY revision DESC) AS latest_rank
 			FROM run_fork_fact_revisions
 			WHERE run_id = $1 AND revision <= $2
 		)
-		SELECT family, first_revision, revision, fact
+		SELECT run_id, family, fact_key, first_revision, revision, fact
 		FROM bounded
 		WHERE latest_rank = 1 AND present
 		ORDER BY family, first_revision, fact_key
@@ -381,14 +349,12 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 	defer rows.Close()
 	snapshot := &runForkRevisionSnapshot{RunID: runID, Revision: revision}
 	for rows.Next() {
-		var family string
-		var firstRevision, factRevision int64
+		var fact runForkHistoricalFactContext
 		var raw []byte
-		if err := rows.Scan(&family, &firstRevision, &factRevision, &raw); err != nil {
+		if err := rows.Scan(&fact.RunID, &fact.Family, &fact.Key, &fact.FirstRevision, &fact.Revision, &raw); err != nil {
 			return nil, fmt.Errorf("scan run fork revision fact: %w", err)
 		}
-		stamp := runForkRevisionedFact{FirstRevision: firstRevision, Revision: factRevision}
-		if err := appendRunForkRevisionFact(snapshot, runforkrevision.Family(family), stamp, raw); err != nil {
+		if err := appendRunForkHistoricalFact(snapshot, fact, raw); err != nil {
 			return nil, err
 		}
 	}
@@ -402,7 +368,51 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 	return snapshot, nil
 }
 
-func appendRunForkRevisionFact(snapshot *runForkRevisionSnapshot, family runforkrevision.Family, stamp runForkRevisionedFact, raw []byte) error {
+// runForkHistoricalFactContext retains the ledger wrapper until typed admission.
+// Absence has already been folded by the reader; this boundary accepts present facts only.
+type runForkHistoricalFactContext struct {
+	RunID         string
+	Family        runforkrevision.Family
+	Key           string
+	FirstRevision int64
+	Revision      int64
+}
+
+func appendRunForkHistoricalFact(snapshot *runForkRevisionSnapshot, context runForkHistoricalFactContext, raw []byte) error {
+	if snapshot == nil || snapshot.RunID == "" || snapshot.Revision <= 0 {
+		return fmt.Errorf("run fork historical admission requires selected run and revision")
+	}
+	if _, err := uuid.Parse(snapshot.RunID); err != nil {
+		return fmt.Errorf("run fork historical selected run identity: %w", err)
+	}
+	if context.RunID != snapshot.RunID || context.FirstRevision <= 0 || context.FirstRevision > context.Revision || context.Revision > snapshot.Revision {
+		return fmt.Errorf("run fork historical fact disagrees with selected run/revision context")
+	}
+	key, err := runforkrevision.FactKey(context.Family, raw)
+	if err != nil {
+		return fmt.Errorf("run fork historical fact identity: %w", err)
+	}
+	if key != context.Key {
+		return fmt.Errorf("run fork historical %s fact key %q disagrees with body identity %q", context.Family, context.Key, key)
+	}
+	identity := runForkHistoricalFactKey{family: context.Family, key: key}
+	if _, duplicate := snapshot.admittedFacts[identity]; duplicate {
+		return fmt.Errorf("duplicate run fork historical %s fact %q", context.Family, key)
+	}
+	switch context.Family {
+	case runforkrevision.FamilyEventDeliveries, runforkrevision.FamilyCommittedReplayScopes, runforkrevision.FamilyTimers:
+		var owner struct {
+			RunID string `json:"run_id"`
+		}
+		if err := json.Unmarshal(raw, &owner); err != nil {
+			return fmt.Errorf("decode run fork historical owning run: %w", err)
+		}
+		if owner.RunID != context.RunID {
+			return fmt.Errorf("run fork historical %s owning run disagrees with ledger run", context.Family)
+		}
+	}
+	family := context.Family
+	stamp := runForkRevisionedFact{FirstRevision: context.FirstRevision, Revision: context.Revision}
 	decode := func(target any) error {
 		if err := json.Unmarshal(raw, target); err != nil {
 			return fmt.Errorf("decode run fork %s revision fact: %w", family, err)
@@ -517,11 +527,11 @@ func appendRunForkRevisionFact(snapshot *runForkRevisionSnapshot, family runfork
 	default:
 		return fmt.Errorf("run fork revision snapshot contains unsupported family %q", family)
 	}
+	if snapshot.admittedFacts == nil {
+		snapshot.admittedFacts = make(map[runForkHistoricalFactKey]struct{})
+	}
+	snapshot.admittedFacts[identity] = struct{}{}
 	return nil
-}
-
-func AppendRunForkRevisionFact(snapshot *RunForkRevisionSnapshot, family runforkrevision.Family, stamp RunForkRevisionedFact, raw []byte) error {
-	return appendRunForkRevisionFact(snapshot, family, stamp, raw)
 }
 
 func (s *runForkRevisionSnapshot) sort() {

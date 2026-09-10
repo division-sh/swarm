@@ -33,13 +33,7 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	"Activity": func(out *[]expressionReference, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendActivityExecutableReaders(out, ctx, "activity", handler.Activity)
 	},
-	"CreateEntity": noHandlerExecutableReaders,
-	"SelectEntity": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendSelectExecutableReaders(out, "select_entity", handler.SelectEntity)
-	},
-	"SelectOrCreateEntity": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendSelectOrCreateExecutableReaders(out, "select_or_create_entity", handler.SelectOrCreateEntity)
-	},
+	"CreateEntity":   noHandlerExecutableReaders,
 	"Description":    noHandlerExecutableReaders,
 	"EvidenceTarget": noHandlerExecutableReaders,
 	// Emit readers are lowered once by HandlerDeclarativeEmitSites below so
@@ -311,25 +305,6 @@ func activityInputResultType(source semanticview.Source, toolID, field string) (
 	}
 	return resolved, !input.IsRequired(field), true, nil
 }
-
-func appendSelectExecutableReaders(out *[]expressionReference, kind string, spec *runtimecontracts.SelectEntitySpec) {
-	if spec == nil {
-		return
-	}
-	for _, binding := range spec.Bindings {
-		appendExecutableReader(out, kind+".by."+strings.TrimSpace(binding.Field), binding.Ref, runtimepipeline.WorkflowEntityFieldLifecycleRule)
-	}
-}
-
-func appendSelectOrCreateExecutableReaders(out *[]expressionReference, kind string, spec *runtimecontracts.SelectOrCreateEntitySpec) {
-	if spec == nil {
-		return
-	}
-	for _, binding := range spec.Bindings {
-		appendExecutableReader(out, kind+".by."+strings.TrimSpace(binding.Field), binding.Ref, runtimepipeline.WorkflowEntityFieldLifecycleRule)
-	}
-}
-
 func appendGuardExecutableReaders(out *[]expressionReference, guard *runtimecontracts.GuardSpec) {
 	if guard == nil {
 		return

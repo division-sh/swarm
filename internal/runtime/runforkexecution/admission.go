@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
@@ -48,6 +47,27 @@ type LoadedSelectedContractSource struct {
 	MockConnectorResponses  *providerconnectors.MockResponsePlan
 	RuntimeProjection       *sourceartifact.RuntimeProjection
 	Cleanup                 func() error
+}
+
+// The selected artifact may be a replacement. Load the original independently
+// through the run-bound loader; only detached semantic evidence leaves here.
+func loadOriginalLoopCarriage(ctx context.Context, loader SelectedContractSourceLoader, sourceRunID string) (_ semanticview.OriginalLoopCarriage, finalErr error) {
+	loaded, err := loadRunForkSelectedContractSource(ctx, loader, SelectedContractSourceLoadRequest{
+		SourceRunID: sourceRunID,
+		Selection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+	})
+	if err != nil {
+		return semanticview.OriginalLoopCarriage{}, fmt.Errorf("load original fork source: %w", err)
+	}
+	defer func() { finalErr = errors.Join(finalErr, cleanupLoadedSelectedContractSource(loaded)) }()
+	carriage, err := semanticview.CompileOriginalLoopCarriage(loaded.Source)
+	if err != nil {
+		return semanticview.OriginalLoopCarriage{}, err
+	}
+	if err := carriage.RequireSource(loaded.SourceArtifactFact.BundleHash()); err != nil {
+		return semanticview.OriginalLoopCarriage{}, err
+	}
+	return carriage, nil
 }
 
 type selectedContractWorkflowModule struct {
@@ -216,84 +236,22 @@ func compileSelectedContractSource(source semanticview.Source, sourceFact runtim
 	return effective, plan, projection.Identity(), nil
 }
 
-type admittedSelectedContractSourceLoader struct {
-	loaded LoadedSelectedContractSource
-}
-
-// NewAdmittedSelectedContractSourceLoader binds selected-contract execution to
-// an already-admitted runtime projection without recomposing external inputs.
-func NewAdmittedSelectedContractSourceLoader(selection runfork.RunForkContractSelection, module runtimepipeline.WorkflowModule, sourceFact runtimecorrelation.SourceArtifactFact, identity scenarioexecution.EffectiveSourceIdentity) (SelectedContractSourceLoader, error) {
-	if module == nil || module.SemanticSource() == nil {
-		return nil, fmt.Errorf("admitted selected-contract source loader requires an executable workflow module")
-	}
-	if err := sourceFact.Validate(); err != nil {
-		return nil, fmt.Errorf("admitted selected-contract source loader bundle fact: %w", err)
-	}
-	if err := identity.Validate(); err != nil {
-		return nil, fmt.Errorf("admitted selected-contract source loader effective identity: %w", err)
-	}
-	if !identity.SourceArtifactFact().Matches(sourceFact) {
-		return nil, fmt.Errorf("admitted selected-contract source loader effective identity does not match bundle fact")
-	}
-	source := module.SemanticSource()
-	if err := validateSelectedContractSelection("admitted selected source loader", selection); err != nil {
-		return nil, err
-	}
-	plan, err := providerconnectors.CompileMockResponsePlan(source)
-	if err != nil {
-		return nil, fmt.Errorf("admitted selected-contract mock response compilation failed: %w", err)
-	}
-	return &admittedSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{
-		Selection: selection, Source: source, Module: module, SourceArtifactFact: sourceFact,
-		EffectiveSourceIdentity: identity, MockConnectorResponses: plan,
-	}}, nil
-}
-
-func (l *admittedSelectedContractSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection runfork.RunForkContractSelection) (LoadedSelectedContractSource, error) {
-	return l.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: selection})
-}
-
-func (l *admittedSelectedContractSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
-	if err := ctx.Err(); err != nil {
-		return LoadedSelectedContractSource{}, err
-	}
-	if l == nil {
-		return LoadedSelectedContractSource{}, fmt.Errorf("admitted selected-contract source loader is required")
-	}
-	selection := req.Selection
-	if err := validateSelectedSourceLoaderSelection(selection); err != nil {
-		return LoadedSelectedContractSource{}, err
-	}
-	switch strings.TrimSpace(selection.Mode) {
-	case runfork.RunForkContractSelectionModeSelectedContracts:
-		if strings.TrimSpace(l.loaded.Selection.Mode) != runfork.RunForkContractSelectionModeSelectedContracts {
-			return LoadedSelectedContractSource{}, fmt.Errorf("admitted selected source mode does not match the admitted runtime")
-		}
-	case runfork.RunForkContractSelectionModeBundleHash:
-		if strings.TrimSpace(selection.BundleHash) != l.loaded.SourceArtifactFact.BundleHash() {
-			return LoadedSelectedContractSource{}, fmt.Errorf("admitted selected source bundle_hash does not match the admitted runtime")
-		}
-	}
-	if err := validateSelectedContractSelection("admitted selected source", selection); err != nil {
-		return LoadedSelectedContractSource{}, err
-	}
-	loaded := l.loaded
-	loaded.Selection = selection
-	return loaded, nil
-}
-
-func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContractSourceLoader, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContractSourceLoader, req SelectedContractSourceLoadRequest) (_ LoadedSelectedContractSource, finalErr error) {
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, req)
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
+	transferred := false
+	defer func() {
+		if !transferred {
+			finalErr = errors.Join(finalErr, cleanupLoadedSelectedContractSource(loaded))
+		}
+	}()
 	loadedFact := loaded.SourceArtifactFact
 	if err := loadedFact.Validate(); err != nil {
-		cleanupLoadedSelectedContractSource(loaded)
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract loader returned invalid bundle source fact: %w", runbundle.CodeBundleDataIntegrityError, err)
 	}
 	if expectedHash := strings.TrimSpace(req.BundleHash); expectedHash != "" && expectedHash != loadedFact.BundleHash() {
-		cleanupLoadedSelectedContractSource(loaded)
 		return LoadedSelectedContractSource{}, fmt.Errorf(
 			"%s: selected-contract bundle_hash mismatch: expected %s loaded %s",
 			runbundle.CodeBundleDataIntegrityError,
@@ -304,21 +262,21 @@ func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContr
 	expectedFact := req.SourceArtifactFact
 	if expectedFact.BundleHash() != "" {
 		if err := expectedFact.Validate(); err != nil {
-			cleanupLoadedSelectedContractSource(loaded)
 			return LoadedSelectedContractSource{}, fmt.Errorf("%s: expected selected-contract bundle source fact is invalid: %w", runbundle.CodeBundleDataIntegrityError, err)
 		}
 		if expectedFact.BundleHash() != loadedFact.BundleHash() {
-			cleanupLoadedSelectedContractSource(loaded)
 			return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected-contract bundle_hash mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedFact.BundleHash(), loadedFact.BundleHash())
 		}
 	}
+	transferred = true
 	return loaded, nil
 }
 
-func cleanupLoadedSelectedContractSource(source LoadedSelectedContractSource) {
+func cleanupLoadedSelectedContractSource(source LoadedSelectedContractSource) error {
 	if source.Cleanup != nil {
-		_ = source.Cleanup()
+		return source.Cleanup()
 	}
+	return nil
 }
 
 type SelectedContractExecutionAdmissionRequest struct {
@@ -326,7 +284,7 @@ type SelectedContractExecutionAdmissionRequest struct {
 	SourceRunID           string
 	SourceArtifactFact    runtimecorrelation.SourceArtifactFact
 	BindingReader         SelectedContractBindingReader
-	SourceLoader          SelectedContractSourceLoader
+	LoadedSource          LoadedSelectedContractSource
 	FrontierAdmission     runfork.RunForkContractFrontierAdmission
 	RouteAdmission        runfork.RunForkSelectedContractRouteAdmission
 	RouteTopology         runfork.RunForkSelectedContractRouteTopology
@@ -335,6 +293,9 @@ type SelectedContractExecutionAdmissionRequest struct {
 }
 
 func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedContractExecutionAdmissionRequest) (runfork.RunForkSelectedContractExecutionAdmission, error) {
+	if err := ctx.Err(); err != nil {
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
+	}
 	forkRunID := strings.TrimSpace(req.ForkRunID)
 	if forkRunID == "" {
 		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires fork run_id")
@@ -352,21 +313,20 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	if err := validateSelectedContractExecutionBinding(forkRunID, binding); err != nil {
 		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
-	if req.SourceLoader == nil {
-		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires selected source loader bound to %s", runfork.RunForkSelectedContractBindingOwner)
+	if req.SourceRunID != "" && req.SourceRunID != binding.SourceRunID {
+		return runfork.RunForkSelectedContractExecutionAdmission{}, errors.New("selected-contract execution source run differs from durable binding")
 	}
-	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:        firstNonEmpty(req.SourceRunID, binding.SourceRunID),
-		BundleHash:         req.SourceArtifactFact.BundleHash(),
-		SourceArtifactFact: req.SourceArtifactFact,
-		Selection:          binding.ContractSelection,
-	})
-	if err != nil {
-		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected semantic source for execution admission: %w", err)
-	}
-	defer cleanupLoadedSelectedContractSource(loadedSource)
+	// Preparation owns this source and its projection until execution disposition.
+	// Admission verifies it; it neither reloads nor releases the artifact.
+	loadedSource := req.LoadedSource
 	if err := validateSelectedContractExecutionSource(binding, loadedSource); err != nil {
 		return runfork.RunForkSelectedContractExecutionAdmission{}, err
+	}
+	if err := loadedSource.SourceArtifactFact.Validate(); err != nil {
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
+	}
+	if req.SourceArtifactFact.BundleHash() != "" && req.SourceArtifactFact != loadedSource.SourceArtifactFact {
+		return runfork.RunForkSelectedContractExecutionAdmission{}, errors.New("selected-contract execution artifact differs from prepared source")
 	}
 	if err := validateSelectedContractExecutionFrontier(binding, req.FrontierAdmission); err != nil {
 		return runfork.RunForkSelectedContractExecutionAdmission{}, err
@@ -507,7 +467,11 @@ func validateSelectedContractExecutionModel(binding runfork.RunForkSelectedContr
 	if model.FrontierEventCount != frontier.FrontierEventCount {
 		return fmt.Errorf("selected-contract execution admission model frontier count mismatch: got %d want %d", model.FrontierEventCount, frontier.FrontierEventCount)
 	}
-	if !reflect.DeepEqual(model.FrontierEvents, selectedContractFrontierEvents(frontier.FrontierEvents)) {
+	equal, err := runfork.EqualSelectedContractFrontierEvents(model.FrontierEvents, selectedContractFrontierEvents(frontier.FrontierEvents))
+	if err != nil {
+		return err
+	}
+	if !equal {
 		return fmt.Errorf("selected-contract execution admission model frontier events do not match durable frontier evidence")
 	}
 	if model.RouteTopology == nil {
@@ -516,7 +480,11 @@ func validateSelectedContractExecutionModel(binding runfork.RunForkSelectedContr
 	if err := validateSelectedContractRouteTopology(frontier, routeAdmission, *model.RouteTopology); err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(*model.RouteTopology, routeTopology) {
+	equal, err = runfork.EqualSelectedContractRouteTopology(*model.RouteTopology, routeTopology)
+	if err != nil {
+		return err
+	}
+	if !equal {
 		return fmt.Errorf("selected-contract execution admission model route topology does not match canonical route topology truth")
 	}
 	if model.RecipientPlanning == nil {

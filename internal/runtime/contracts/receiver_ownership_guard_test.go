@@ -23,13 +23,14 @@ func receiverOwnerConstructorBudget() map[string]int {
 		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute":                   2,
 		"runtime/bus::deliveryTargetOwnershipFromDescriptor":                                   2,
 		"runtime/pipeline::ClassifyDeliveryTargetOwnership":                                    4,
-		"runtime/pipeline::acquireDeliveryTargetByDeclaredKey":                                 1,
-		"runtime/pipeline::acquireSelectOrCreateMaterializingTarget":                           2,
 		"runtime/bus::selectedRunTargetOwnerProjection.withActivationPlans [descriptor]":       1,
 		"runtime/bus::ActiveAgentDescriptor.TargetDescriptor [descriptor]":                     1,
 		"runtime/bus::ActiveFlowInstanceDescriptor.TargetDescriptor [descriptor]":              1,
 		"runtime/bus::ActiveTargetDescriptor.Normalized [descriptor]":                          1,
 		"store/internal/backend/pipelinepersistence::scanSelectedRunTargetOwners [descriptor]": 1,
+		// Approved #2433 fork projection preserves the three admitted target kinds;
+		// it does not elect a new receiver from producer context.
+		"store/internal/backend/runforkpersistence::projectRunForkFanOutExecutionOwnership": 3,
 	}
 }
 
@@ -93,6 +94,24 @@ func hostileDescriptor(unfamiliar events.DeliveryTargetOwnership) ActiveTargetDe
 	violations := receiverOwnerConstructorViolations(t, map[string][]byte{path: hostile})
 	if len(violations) != 1 || !strings.Contains(violations[0], "hostileDescriptor [descriptor]") {
 		t.Fatalf("guard missed synthetic descriptor in approved file: %v", violations)
+	}
+}
+
+func TestReceiverCompositionOwnershipGuardHostileFanOutProjection(t *testing.T) {
+	root := handlerRuleIdentityGuardRepoRoot(t)
+	path := filepath.Join(root, "internal/store/internal/backend/runforkpersistence/run_fork_fan_out_generation.go")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := "delivery.Target, err = events.NewEntitylessReceiverTarget(receiver)"
+	if strings.Count(string(original), from) != 1 {
+		t.Fatal("exact fan-out target projection probe site moved")
+	}
+	hostile := strings.Replace(string(original), from, "_, _ = events.NewExistingEntityTarget(receiver)\n"+from, 1)
+	violations := receiverOwnerConstructorViolations(t, map[string][]byte{path: []byte(hostile)})
+	if len(violations) != 1 || !strings.Contains(violations[0], "projectRunForkFanOutExecutionOwnership has 4 constructors; audited 3") {
+		t.Fatalf("approved fan-out projection admitted another interpretation: %v", violations)
 	}
 }
 

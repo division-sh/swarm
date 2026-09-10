@@ -896,7 +896,7 @@ func BeginStartupProbe(ctx context.Context, adapter string, request []byte, line
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
 	authority, ok := AuthorityFromContext(ctx)
-	if !ok || (authority.Kind != AuthorityStartupProbe && authority.Kind != AuthoritySelectedContractFork) {
+	if !ok || authority.Kind != AuthorityStartupProbe {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_missing", "external-effects", "authorize_startup_probe", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
 	surface, ok := managedcapabilities.FromContext(ctx)
@@ -1184,6 +1184,11 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	if !ok {
 		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_authority_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 	}
+	if authority.StartupProbe.Preparation != nil {
+		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
+			return Attempt{}, err
+		}
+	}
 	if !c.executionPosture.Valid() {
 		return Attempt{}, runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "process_execution_posture_missing", "external-effects", "authorize_attempt", map[string]any{
 			"action": "execute_external_effect", "adapter": strings.TrimSpace(req.Adapter),
@@ -1276,15 +1281,16 @@ func StartupProbeSurfaceMatchesAuthority(surface managedcapabilities.Surface, au
 	}
 	switch authority.Kind {
 	case AuthorityStartupProbe:
+		if preparation := authority.StartupProbe.Preparation; preparation != nil {
+			return authority.Valid() && surface.Authority.Preparation != nil &&
+				*surface.Authority.Preparation == *preparation &&
+				surface.Authority.ID == authority.StartupProbe.ProbeID &&
+				surface.ActorID == authority.StartupProbe.ActorID &&
+				surface.Authority.ExecutionAuthorityID == authority.StartupProbe.ExecutionAuthorityID
+		}
 		return surface.Authority.ID == authority.StartupProbe.ProbeID &&
 			surface.Authority.ExecutionKind == managedcapabilities.ExecutionKind(authority.StartupProbe.ExecutionKind) &&
 			surface.Authority.ExecutionAuthorityID == authority.StartupProbe.ExecutionAuthorityID
-	case AuthoritySelectedContractFork:
-		return surface.Authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork &&
-			surface.Authority.ExecutionAuthorityID == authority.SelectedFork.ExecutionID &&
-			surface.Authority.RunID == authority.SelectedFork.ForkRunID &&
-			surface.Authority.StartupOwnerID == authority.ExecutionOwner &&
-			surface.Authority.StartupGeneration == authority.SelectedFork.Generation
 	default:
 		return false
 	}

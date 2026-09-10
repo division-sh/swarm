@@ -190,6 +190,12 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 			if got := state.effectCount(); got != probe.WantEffects {
 				t.Fatalf("%s side effects after %s = %d, want %d", probe.Method, probe.Code, got, probe.WantEffects)
 			}
+			if probe.Code == "SELECTED_FORK_CONTROL_UNSUPPORTED" {
+				owner := state.selectedControls
+				if owner == nil || owner.calls != 1 || owner.runID != "00000000-0000-0000-0000-000000000101" || string(owner.operation) != probe.Method || state.idempotency.calls != 0 {
+					t.Fatalf("selected refusal borrowed execution or admitted idempotency: owner=%+v idempotency=%d", owner, state.idempotency.calls)
+				}
+			}
 		})
 	}
 }
@@ -408,8 +414,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			SuccessEffects: 2,
 		},
 		"run.fork": {
-			Params:         map[string]any{"source_run_id": runID, "fork_event_id": runForkTestEventID, "confirm_source_freeze": true},
-			ConflictParams: map[string]any{"source_run_id": otherRunID, "fork_event_id": runForkTestEventID, "confirm_source_freeze": true},
+			Params:         map[string]any{"source_run_id": runID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true},
+			ConflictParams: map[string]any{"source_run_id": otherRunID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true},
 			ResultKeys:     []string{"owner", "source_run_id", "fork_run_id", "fork_event_id", "fork_run_status", "bundle_hash", "executed_event_count"},
 			SuccessEffects: 1,
 		},
@@ -612,10 +618,13 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			s.forks.deleteErr = runfork.ErrConversationForkNotFound
 		}}},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": missingRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: RunNotFoundCode},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "confirm_source_freeze": true, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "allow_source_freeze": true, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runFork.err = errors.New("fork point event " + runForkTestEventID + " not found in source run " + runForkTestSourceRunID)
 		}}},
-		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "confirm_source_freeze": true, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode},
+		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "bundle_hash": "bundle-v2:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "allow_source_freeze": true, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			// Artifact availability is decided by selected preparation, not loaded membership.
+			s.runFork.err = errors.New(runbundle.CodeBundleUnavailable + ": selected artifact missing")
+		}}},
 		{Method: "run.fork", Params: map[string]any{"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID, "idempotency_key": "idem-error"}, Code: BundleUnavailableCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.runForkAvailability.rows[runForkTestSourceRunID] = runForkUnavailable(runForkTestSourceRunID, runForkTestBundleHash)
 		}}},
@@ -763,13 +772,29 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		probes = append(probes, mutatingHTTPRuntimeErrorProbe{
 			Method: "run.fork",
 			Params: map[string]any{
-				"source_run_id":         runForkTestSourceRunID,
-				"fork_event_id":         runForkTestEventID,
-				"confirm_source_freeze": true,
+				"source_run_id":       runForkTestSourceRunID,
+				"fork_event_id":       runForkTestEventID,
+				"allow_source_freeze": true,
 			},
 			Code: string(code),
 			Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 				s.runFork.err = durabledata.NewDomainError(code, "simulated durable data fork failure")
+			}},
+		})
+	}
+	fixtures := mutatingHTTPRuntimeFixtures()
+	for _, method := range []string{
+		"agent.replay", "agent.restart", "agent.send_directive", "event.publish", "event.replay",
+		"mailbox.begin_input", "mailbox.cancel_input", "mailbox.decide", "mailbox.defer", "run.continue", "run.pause",
+	} {
+		params := mutatingProbeParamsWithIdempotency(fixtures[method].Params, "selected-control-refusal")
+		if method == "event.publish" {
+			params["run_id"] = runID
+		}
+		probes = append(probes, mutatingHTTPRuntimeErrorProbe{
+			Method: method, Params: params, Code: "SELECTED_FORK_CONTROL_UNSUPPORTED",
+			Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+				s.selectedControls = &selectedControlRefusalFixture{bindingID: "00000000-0000-0000-0000-000000000901"}
 			}},
 		})
 	}
@@ -878,6 +903,7 @@ type mutatingRuntimeProbeState struct {
 	runForkAvailability *recordingRunForkAvailability
 	runControl          *mutatingProbeRunControl
 	agentControl        *mutatingProbeAgentControl
+	selectedControls    *selectedControlRefusalFixture
 	runtimeIngress      *mutatingProbeRuntimeIngress
 	standing            *mutatingProbeStandingController
 	mailbox             *mutatingProbeMailboxStore
@@ -1041,7 +1067,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 		bundle = runStartTestBundle("scan.requested")
 	}
 	source := semanticview.Wrap(bundle)
-	return testOperatorCapabilities{
+	capabilities := testOperatorCapabilities{
 		ExecutionPosture:          executionposture.Live,
 		Now:                       func() time.Time { return s.now },
 		Ready:                     func() bool { return true },
@@ -1075,6 +1101,10 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 			BundleHash:      runStartTestBundleHash,
 		},
 	}
+	if s.selectedControls != nil {
+		capabilities.SelectedForkControls = s.selectedControls
+	}
+	return capabilities
 }
 
 func (s *mutatingRuntimeProbeState) recordEffect() {

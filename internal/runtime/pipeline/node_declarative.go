@@ -269,26 +269,6 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		selectedState = application.State()
 		hasSelectedState = strings.TrimSpace(selectedState.EntityID) != ""
 	}
-	if !exactDelivery && handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
-		selected, err := e.coordinator.selectHandlerEntityForFlow(ctx, flowID, e.nodeRef.Key(), handler, evt)
-		if err != nil {
-			return nil, err
-		}
-		entityID = selected.EntityID
-		evt = selected.Event
-		selectedState = selected.State
-		hasSelectedState = true
-	}
-	if !exactDelivery && handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
-		selected, err := e.coordinator.selectOrCreateHandlerEntityForFlow(ctx, flowID, e.nodeRef.Key(), handler, evt)
-		if err != nil {
-			return nil, err
-		}
-		entityID = selected.EntityID
-		evt = selected.Event
-		selectedState = selected.State
-		hasSelectedState = true
-	}
 	if !exactDelivery {
 		resolvedEntityID, resolvedEvent, err := ensureHandlerEntityIDAtNode(source, e.nodeRef, events.EventType(handlerEventKey), flowID, handler, entityID, evt)
 		if err != nil {
@@ -389,20 +369,6 @@ func canonicalHandlerMaterializationTarget(source semanticview.Source, flowID st
 	want := blueprint
 	want.FlowID = strings.TrimSpace(flowID)
 	want.EntityID = runtimeflowidentity.EntityID(blueprint.FlowInstance)
-	if handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
-		expected, err := selectOrCreateEntityExpectedValues(handler.SelectOrCreateEntity, evt)
-		if err != nil {
-			return events.RouteIdentity{}, fmt.Errorf("select_or_create_entity target: %w", err)
-		}
-		planned, err := selectOrCreateEntityMaterializationTarget(source, flowID, evt, expected)
-		if err != nil {
-			return events.RouteIdentity{}, fmt.Errorf("select_or_create_entity target: %w", err)
-		}
-		if planned.FlowInstance != blueprint.FlowInstance {
-			return events.RouteIdentity{}, fmt.Errorf("select_or_create_entity target flow instance %q disagrees with canonical instance %q", blueprint.FlowInstance, planned.FlowInstance)
-		}
-		want.EntityID = planned.EntityID
-	}
 	if blueprint.EntityID != "" && blueprint.EntityID != want.EntityID {
 		return events.RouteIdentity{}, fmt.Errorf("materializing target entity %q disagrees with canonical future entity %q", blueprint.EntityID, want.EntityID)
 	}

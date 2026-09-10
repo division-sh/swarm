@@ -1195,6 +1195,10 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 			FlowID: ".", FlowInstance: persisted.RunID(), EntityID: runtimeflowidentity.EntityID(persisted.RunID()),
 		}),
 	}
+	wantRoute.Initialization, err = events.AdmitNodeReceiverInitialization(persisted, wantRoute.Target, identitytest.RootNode(t, "test-node"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want typed root node consumer", store.routes[eventID])
 	}

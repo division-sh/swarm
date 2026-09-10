@@ -1,0 +1,134 @@
+package runtimepersistence
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/config"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+)
+
+// Component store tests consume real artifact/readiness/provider preparation.
+// They still invoke the named materialization separately to inject SQL faults.
+func prepareSelectedStoreMaterializationForTest(t *testing.T, ctx context.Context, selected any, sourceRun, at string, selection runfork.RunForkContractSelection, targetHash ...string) runforkreadiness.MaterializeRequest {
+	t.Helper()
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, selected, sourceRun, at, selection, targetHash...)
+	if err != nil {
+		t.Fatalf("prepare selected-store materialization: %v", err)
+	}
+	request, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return request
+}
+
+func prepareSelectedStoreForkForTest(t *testing.T, ctx context.Context, selected any, sourceRun, at string, selection runfork.RunForkContractSelection, targetHash ...string) (*runforkexecution.PreparedSelectedFork, error) {
+	t.Helper()
+	storeTestWorkOwner(t)
+	value, _ := storeTestWorkFixtures.Load(t)
+	work := value.(*storeTestWorkFixture)
+	ctx = worklifetime.WithProcess(ctx, work.process)
+	capability := selectedMaterializationProcessForTest(t, work, selected)
+	sourceStore, ok := selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)
+	if !ok {
+		t.Fatal("selected materialization requires artifact store")
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	owner := selectedStorePreparationOwnerForTest(t, selected)
+	if err := owner.BindSelectedProcess(ctx, work.process, capability); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
+		t.Fatal(err)
+	}
+	var hash string
+	if len(targetHash) > 0 {
+		hash = targetHash[0]
+	}
+	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: sourceRun, At: at, ContractSelection: selection, ExpectedBundleHash: hash,
+		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: sourceStore},
+		AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
+			ProcessCapability: capability, ExecutionPosture: executionposture.Live,
+			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() {
+		if err := prepared.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return prepared, nil
+}
+
+func selectedStorePreparationOwnerForTest(t testing.TB, selected any) runforkexecution.SelectedContractExecutionOwner {
+	t.Helper()
+	switch selected := selected.(type) {
+	case *PostgresStore:
+		durable := runtimebus.DurableDependencies{
+			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+		}
+		roles := runtimemanager.PersistenceRoles{
+			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
+			DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
+			FlowRoutes: selected, StandingRestarts: selected,
+		}
+		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
+			runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
+			selected, durable, selected.PipelineObligations(), selected, roles,
+			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return owner
+	case *SQLiteRuntimeStore:
+		durable := runtimebus.DurableDependencies{
+			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+		}
+		roles := runtimemanager.PersistenceRoles{
+			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
+			DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
+			FlowRoutes: selected, StandingRestarts: selected,
+		}
+		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
+			runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
+			selected, durable, selected.PipelineObligations(), selected, roles,
+			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return owner
+	default:
+		t.Fatalf("unsupported selected preparation store %T", selected)
+		return runforkexecution.SelectedContractExecutionOwner{}
+	}
+}

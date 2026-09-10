@@ -67,6 +67,27 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			bundle := sqliteFlowActivationBundle(t)
 			workflowStore := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle)
 			lifecycle := agentfixture.Lifecycle(t, selected)
+			if _, err := lifecycle.(runtimemanager.RunExecutionOwner).InspectRunExecutionOwnership(ctx, runID); err == nil {
+				t.Fatal("fixture inspection granted ownership before generation admission")
+			}
+			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}
+			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, runtimeagenttopology.SourceCoordinate{}); err == nil {
+				t.Fatal("fixture admitted a missing source coordinate")
+			}
+			capability, err := agentfixture.ProcessCapability(t, ctx, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, exists, err := capability.CurrentSourceSet(ctx); err != nil || exists {
+				t.Fatalf("refused admission changed source plan: exists=%v err=%v", exists, err)
+			}
+			if _, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate); err != nil {
+				t.Fatalf("admit flow fixture generation: %v", err)
+			}
 			manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 				ExecutionPosture:   executionposture.Live,
 				BaseContext:        ctx,

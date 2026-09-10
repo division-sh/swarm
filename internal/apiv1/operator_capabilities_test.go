@@ -34,6 +34,7 @@ type testOperatorCapabilities struct {
 	RunBundleContext          RunBundleContextStore
 	RunForkAvailability       RunForkAvailabilityStore
 	RunFork                   RunForkExecutor
+	SelectedForkControls      SelectedForkControlAdmission
 	AgentControl              AgentControlController
 	Mailbox                   MailboxAPIStore
 	DecisionCards             decisioncard.Store
@@ -115,6 +116,7 @@ func (c testOperatorCapabilities) publication() EventPublicationOptions {
 		Runs: c.Runs, Entities: c.Entities, Observability: c.Observability,
 		RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts,
 		Source: c.Source, Bundle: c.Bundle,
+		SelectedForkControls: c.SelectedForkControls,
 	}
 }
 
@@ -134,6 +136,7 @@ func (c testOperatorCapabilities) decisionCards() DecisionCardHandlerOptions {
 		Mailbox: c.Mailbox, NoticeAcknowledgment: noticeAcknowledgment,
 		Authority: c.DecisionAuthority, SourceArtifact: bundleSource,
 		Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts,
+		SelectedForkControls: c.SelectedForkControls,
 	}
 }
 
@@ -151,7 +154,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorTestSetupHandlers(TestSetupHandlerOptions{Now: c.Now, Setup: c.TestSetup, Idempotency: c.Idempotency, RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts, SourceArtifact: c.publication().SourceArtifact, Source: c.Source}),
 		testOperatorEventReplayHandlers(c),
 		testOperatorRunForkHandlers(c),
-		OperatorRunControlHandlers(RunControlHandlerOptions{Now: c.Now, Controller: c.RunControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
+		OperatorRunControlHandlers(RunControlHandlerOptions{Now: c.Now, Controller: c.RunControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts, SelectedForkControls: c.SelectedForkControls}),
 		OperatorStandingServiceHandlers(StandingServiceHandlerOptions{Controller: c.StandingServices, Idempotency: c.Idempotency}),
 		OperatorRuntimeControlHandlers(RuntimeControlHandlerOptions{Now: c.Now, Ingress: c.RuntimeIngress, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
 		OperatorRuntimeNukeHandlers(RuntimeNukeHandlerOptions{Now: c.Now, Coordinator: c.ResetCoordinator, Idempotency: c.Idempotency}),
@@ -161,7 +164,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorDataHandlers(DataHandlerOptions{Store: c.Data}),
 		OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Effective: c.AgentFrameEffective}),
 		OperatorConversationForkHandlers(ConversationForkHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency}),
-		OperatorAgentControlHandlers(AgentControlHandlerOptions{Now: c.Now, Controller: c.AgentControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
+		OperatorAgentControlHandlers(AgentControlHandlerOptions{Now: c.Now, Controller: c.AgentControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts, SelectedForkControls: c.SelectedForkControls}),
 	)
 }
 
@@ -181,10 +184,9 @@ func testOperatorConversationForkHandlers(c testOperatorCapabilities) map[string
 func testOperatorEventReplayHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 	events, _ := c.Events.(EventReplayOwner)
 	agentIdentities, _ := c.AgentConversations.(AgentIdentityResolver)
-	return OperatorEventReplayHandlers(EventReplayHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Idempotency: c.Idempotency, Events: events, Observability: c.Observability, AgentIdentities: agentIdentities, RuntimeContexts: c.RuntimeContexts})
+	return OperatorEventReplayHandlers(EventReplayHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Idempotency: c.Idempotency, Events: events, Observability: c.Observability, AgentIdentities: agentIdentities, RuntimeContexts: c.RuntimeContexts, SelectedForkControls: c.SelectedForkControls})
 }
 
 func testOperatorRunForkHandlers(c testOperatorCapabilities) map[string]MethodHandler {
-	selector, _ := c.RunFork.(RunForkExecutorSelector)
-	return OperatorRunForkHandlers(RunForkHandlerOptions{Now: c.Now, Availability: c.RunForkAvailability, Executor: c.RunFork, Selector: selector, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts})
+	return OperatorRunForkHandlers(RunForkHandlerOptions{Now: c.Now, Availability: c.RunForkAvailability, Executor: c.RunFork, Idempotency: c.Idempotency})
 }

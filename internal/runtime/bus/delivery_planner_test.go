@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -590,7 +591,7 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 	if got := plan.LiveRecipients; len(got) != 1 || got[0].AgentIdentity != descriptor.Identity {
 		t.Fatalf("exact live recipients = %#v, want exact root agent identity", got)
 	}
-	if got := plan.DeliveryRoutes(); len(got) != 1 || got[0].Normalized() != route.Normalized() {
+	if got := plan.DeliveryRoutes(); len(got) != 1 || !reflect.DeepEqual(got[0].Normalized(), route.Normalized()) {
 		t.Fatalf("exact delivery routes = %#v, want committed route %#v", got, route)
 	}
 
@@ -1088,7 +1089,7 @@ func TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerives
 func deliveryPlannerRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	want = want.Normalized()
 	for _, got := range events.NormalizeDeliveryRoutes(routes) {
-		if got == want {
+		if reflect.DeepEqual(got, want) {
 			return true
 		}
 	}

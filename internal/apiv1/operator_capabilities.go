@@ -83,6 +83,7 @@ type MailboxHandlerOptions struct {
 }
 
 type EventPublicationOptions struct {
+	SelectedForkControls      SelectedForkControlAdmission
 	ExecutionPosture          executionposture.Posture
 	Now                       func() time.Time
 	Idempotency               APIIdempotencyStore
@@ -111,13 +112,14 @@ type EventPublishHandlerOptions struct {
 }
 
 type EventReplayHandlerOptions struct {
-	ExecutionPosture executionposture.Posture
-	Now              func() time.Time
-	Idempotency      APIIdempotencyStore
-	Events           EventReplayOwner
-	Observability    ObservabilityReadStore
-	AgentIdentities  AgentIdentityResolver
-	RuntimeContexts  *runtime.RuntimeContextManager
+	SelectedForkControls SelectedForkControlAdmission
+	ExecutionPosture     executionposture.Posture
+	Now                  func() time.Time
+	Idempotency          APIIdempotencyStore
+	Events               EventReplayOwner
+	Observability        ObservabilityReadStore
+	AgentIdentities      AgentIdentityResolver
+	RuntimeContexts      *runtime.RuntimeContextManager
 }
 
 type ConversationForkHandlerOptions struct {
@@ -130,6 +132,7 @@ type ConversationForkHandlerOptions struct {
 }
 
 type DecisionCardHandlerOptions struct {
+	SelectedForkControls SelectedForkControlAdmission
 	Now                  func() time.Time
 	Cards                decisioncard.Store
 	ProposedEffects      decisioncard.ProposedEffectStore
@@ -142,26 +145,27 @@ type DecisionCardHandlerOptions struct {
 }
 
 type AgentControlHandlerOptions struct {
-	Now             func() time.Time
-	Controller      AgentControlController
-	Idempotency     APIIdempotencyStore
-	RuntimeContexts *runtime.RuntimeContextManager
+	SelectedForkControls SelectedForkControlAdmission
+	Now                  func() time.Time
+	Controller           AgentControlController
+	Idempotency          APIIdempotencyStore
+	RuntimeContexts      *runtime.RuntimeContextManager
 }
 
 type RunControlHandlerOptions struct {
-	Now             func() time.Time
-	Controller      RunControlController
-	Idempotency     APIIdempotencyStore
-	RuntimeContexts *runtime.RuntimeContextManager
+	SelectedForkControls SelectedForkControlAdmission
+	SelectedForkStop     SelectedForkStopOwner
+	Now                  func() time.Time
+	Controller           RunControlController
+	Idempotency          APIIdempotencyStore
+	RuntimeContexts      *runtime.RuntimeContextManager
 }
 
 type RunForkHandlerOptions struct {
-	Now             func() time.Time
-	Availability    RunForkAvailabilityStore
-	Executor        RunForkExecutor
-	Selector        RunForkExecutorSelector
-	Idempotency     APIIdempotencyStore
-	RuntimeContexts *runtime.RuntimeContextManager
+	Now          func() time.Time
+	Availability RunForkAvailabilityStore
+	Executor     RunForkExecutor
+	Idempotency  APIIdempotencyStore
 }
 
 type RuntimeControlHandlerOptions struct {

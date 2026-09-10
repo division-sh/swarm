@@ -68,7 +68,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return modes, err
 }
 
-func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, workflowStates []runfork.RunForkSelectedContractWorkflowState) (out []runfork.RunForkSelectedContractSourceEvent, err error) {
+func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) (out []runfork.RunForkSelectedContractSourceEvent, err error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite store is required")
 	}
@@ -103,6 +103,21 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 		if err := requireSQLiteRunActive(txctx, tx, forkRunID); err != nil {
 			return fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
 		}
+		stateAdmission, err := loadRunForkSourceStateAdmission(txctx, tx, forkRunID, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
+		if err != nil {
+			return err
+		}
+		if stateAdmission.snapshot.RunID != sourceRunID {
+			return fmt.Errorf("source event preparation run disagrees with selected fork binding")
+		}
+		fact, err := s.RunLifecycleSQLiteOwner.RequirePresentSourceTx(txctx, tx, sourceRunID)
+		if err != nil {
+			return err
+		}
+		if err := original.RequireSource(fact.BundleHash()); err != nil {
+			return err
+		}
+		stateAdmission.carriage = original
 		events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, ids)
 		if err != nil {
 			return fmt.Errorf("load selected-contract source events: %w", err)
@@ -114,16 +129,12 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 			}
 			out = append(out, runfork.RunForkSelectedContractSourceEvent{
 				SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
-				EntityID: event.EntityID(), FlowInstance: event.FlowInstance(), Scope: string(event.Scope()),
+				Scope:         string(event.Scope()),
 				RoutingSource: event.RoutingSource(), Payload: event.Payload(),
 			})
 		}
 		for idx := range out {
-			projected, err := projectRunForkSelectedContractSourceEventWorkflowState(sourceRunID, forkRunID, workflowStates, out[idx])
-			if err != nil {
-				return err
-			}
-			prepared, err := prepareRunForkSelectedContractSourceEvent(txctx, tx, story, forkRunID, projected)
+			prepared, err := prepareRunForkSelectedContractSourceEvent(txctx, tx, story, stateAdmission, out[idx])
 			if err != nil {
 				return err
 			}
@@ -148,18 +159,11 @@ func (s *RunForkSQLiteOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(
 		if err := runforkrevision.ValidateCompleteSQLite(txctx, tx, sourceRunID); err != nil {
 			return err
 		}
-		var revision int64
-		if err := tx.QueryRowContext(txctx, `
-			SELECT MIN(revision)
-			FROM run_fork_fact_revisions
-			WHERE run_id = $1 AND family = 'events' AND fact_key = $2 AND present
-		`, sourceRunID, forkEventID).Scan(&revision); err != nil {
+		point, err := resolveRunForkRevisionPoint(txctx, tx, sourceRunID, forkEventID)
+		if err != nil {
 			return fmt.Errorf("resolve committed replay-scope fork revision: %w", err)
 		}
-		if revision <= 0 {
-			return fmt.Errorf("committed replay-scope fork event is not revisioned; recreate the store and retry")
-		}
-		return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(txctx, tx, sourceRunID, revision)
+		return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(txctx, tx, sourceRunID, point.Revision)
 	})
 }
 

@@ -349,8 +349,13 @@ func (*startupRecoveryPipelineOwner) TerminalizeRun(context.Context, string, run
 }
 
 type startupRecoveryManagerStore struct {
+	session *runtimeTestRetainedSession
 	loadErr error
 	agents  []runtimemanager.PersistedAgent
+}
+
+func (s *startupRecoveryManagerStore) runtimeTestStartupSession() *runtimeTestRetainedSession {
+	return s.session
 }
 
 func startupRecoveryLifecycleResult(req runtimemanager.AgentLifecycleTransition) runtimemanager.AgentLifecycleTransitionResult {
@@ -898,13 +903,14 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	if err != nil {
 		t.Fatalf("construct manager snapshot topology: %v", err)
 	}
-	managerStore := &startupRecoveryManagerStore{agents: []runtimemanager.PersistedAgent{{
+	managerStore := &startupRecoveryManagerStore{session: newRuntimeTestRetainedSession(t), agents: []runtimemanager.PersistedAgent{{
 		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: managerIdentity.AgentID(), Identity: managerIdentity,
 			Role: "worker", Type: "managed", Model: "regular",
 		}),
 		Topology: managerTopology,
 	}}}
+	managerStore.session.admitRun(t, managerIdentity.RunID, testSourceArtifactFact(t, runtimeTestBundleHash))
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
@@ -1220,7 +1226,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		t.Fatal("startup readiness test requires an active workflow version")
 	}
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
-	managerStore := &startupRecoveryManagerStore{}
+	managerStore := &startupRecoveryManagerStore{session: newRuntimeTestRetainedSession(t)}
 	eventStore := startupRecoveryMinimalEventStore{}
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
@@ -1251,6 +1257,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		t.Fatal("startup readiness context requires bundle source fact")
 	}
 	bundleHash := sourceFact.BundleHash()
+	managerStore.session.admitRun(t, runID, sourceFact)
 	readinessStore := &startupReadinessFinalizationStore{items: []runtimepipeline.DynamicFlowRuntimeReadiness{{
 		InstancePath:    "review/inst-1",
 		OwningRunSource: sourceFact,

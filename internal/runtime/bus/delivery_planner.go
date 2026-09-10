@@ -63,9 +63,7 @@ func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 }
 
 func (r deliveryRouteResolver) ResolveIndependentPubsub(evt events.Event) deliveryRoutingResult {
-	return r.resolve(evt, func(subscriber Subscriber) bool {
-		return subscriber.routeSource != subscriberRouteSourceConnectRoutePlan
-	})
+	return r.resolve(evt, independentPubsubSubscriber)
 }
 
 func (r deliveryRouteResolver) resolve(evt events.Event, include func(Subscriber) bool) deliveryRoutingResult {
@@ -119,7 +117,6 @@ type deliveryRecipientManifest struct {
 type deliveryRecipientPolicy struct {
 	loadActiveAgentDescriptors  func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
-	workflowInstances           runtimepipeline.WorkflowInstancePersistenceReader
 	semanticSource              semanticview.Source
 	requireTargetOwners         bool
 }
@@ -627,7 +624,6 @@ func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 		deliveryRecipientPolicy{
 			loadActiveAgentDescriptors:  eb.activeAgentDescriptors,
 			loadActiveTargetDescriptors: eb.activeTargetDescriptors,
-			workflowInstances:           eb.durable.WorkflowInstances,
 			semanticSource:              eb.semanticSource,
 			requireTargetOwners:         !eb.ephemeral,
 		},

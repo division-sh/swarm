@@ -11,18 +11,23 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTemplateInstance(t *testing.T) {
@@ -35,12 +40,22 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	ctx := seedRuntimeTestRun(t, db)
+	if bundle.SourceArtifact == nil {
+		t.Fatal("flow activation proof requires its compiled source artifact")
+	}
+	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), fact), templateInstanceDeliveryRunID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var manager *runtimemanager.AgentManager
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle:     source,
+		SourceArtifactFact: fact,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
 				return nil
@@ -88,13 +103,46 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SourceArtifactFact: fact,
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
 		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
+
+	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := pg.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "final-flow-activation-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var grant startupownership.LiveGenerationGrant
+	t.Cleanup(func() {
+		if err := closeExternalManagerTestGeneration(manager, bus, grant, capability); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := capability.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		t.Fatal(err)
+	}
+	grant, err = capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{
+		BundleHash: fact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installExternalManagerTestGeneration(t, ctx, manager, grant)
 
 	evt := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999955",

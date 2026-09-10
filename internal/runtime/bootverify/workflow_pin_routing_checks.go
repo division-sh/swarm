@@ -8,7 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -75,96 +74,6 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowID, site.EventType)
 		if !consumer.HasRuntimeConsumer() {
 			findings = append(findings, pinTargetAgentFinding(site, runtimepinrouting.FailureTargetRequiredMissing.Code()))
-		}
-	}
-	return findings
-}
-
-func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
-	findings := []Finding{}
-	for flowID, schema := range c.source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" || !bootverifyFlowStateful(c.source, flowID, schema) {
-			continue
-		}
-		scope, ok := c.source.FlowScopeByID(flowID)
-		if !ok {
-			continue
-		}
-		for nodeID, node := range scope.Nodes {
-			for eventType, handler := range node.EventHandlers {
-				hasSelect := handler.SelectEntity != nil && !handler.SelectEntity.Empty()
-				hasSelectOrCreate := handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()
-				if !hasSelect && !hasSelectOrCreate {
-					continue
-				}
-				if c.pinRoutingEventExternalSource(flowID, eventType) {
-					continue
-				}
-				if !pinRoutingAllKnownProducersTargeted(c.source, flowID, eventType) {
-					continue
-				}
-				label := "select_entity"
-				if hasSelectOrCreate && !hasSelect {
-					label = "select_or_create_entity"
-				}
-				findings = append(findings, Finding{
-					CheckID:  "redundant_in_topology_select_entity",
-					Severity: SeverityHardInvalidity,
-					Message:  fmt.Sprintf("flow %s handler %s on node %s declares %s for normal in-topology composition; use scalar receiver instance, input resolution.mode, a same-named carry, and parent connect routing instead", flowID, eventType, nodeID, label),
-					Location: flowID,
-				})
-			}
-		}
-	}
-	return findings
-}
-
-func checkMissingExternalSelectEntity(c *checkerContext) []Finding {
-	findings := []Finding{}
-	for flowID, schema := range c.source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" || !bootverifyFlowStateful(c.source, flowID, schema) || strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
-			continue
-		}
-		if retiredStaticMultiEntityAcquisitionFlow(c.source, flowID, schema) {
-			continue
-		}
-		if normalPrimaryEntityFlow(c.source, flowID, schema) {
-			continue
-		}
-		if standingActivatedFlow(c.source, flowID) {
-			continue
-		}
-		inputs := normalizeStringSet(c.source.FlowInputEvents(flowID))
-		if len(inputs) == 0 {
-			continue
-		}
-		scope, ok := c.source.FlowScopeByID(flowID)
-		if !ok {
-			continue
-		}
-		for nodeID, node := range scope.Nodes {
-			for eventType, handler := range node.EventHandlers {
-				eventType = strings.TrimSpace(eventType)
-				if _, ok := inputs[eventType]; !ok {
-					continue
-				}
-				nodeRef, _ := semanticview.ResolveExecutableNodeDeclaration(c.source, flowID, nodeID)
-				policy, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, nodeRef, flowID, events.EventType(eventType), handler)
-				if err == nil && policy.Acquisition != runtimepipeline.DeliveryTargetAcquisitionNone {
-					continue
-				}
-				if !c.pinRoutingEventExternalSource(flowID, eventType) {
-					continue
-				}
-				findings = append(findings, Finding{
-					CheckID:  "missing_external_select_entity",
-					Severity: "error",
-					Message:  fmt.Sprintf("flow %s handler %s on node %s consumes external/no-target event without create_entity, select_entity, or select_or_create_entity", flowID, eventType, nodeID),
-					Location: flowID,
-				})
-			}
 		}
 	}
 	return findings

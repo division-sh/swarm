@@ -814,6 +814,11 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	if err != nil {
 		return err
 	}
+	if topology.Lifetime == runtimeagenttopology.LifetimeDurableManaged {
+		if err := c.requireRunExecutionOwnership(ctx, identity.RunID); err != nil {
+			return err
+		}
+	}
 	agentID := strings.TrimSpace(rec.Config.ID)
 	if !admission.ValidForAgent(agentID) {
 		return fmt.Errorf("agent %s missing subscription admission", agentID)

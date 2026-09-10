@@ -119,6 +119,16 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			})}
 			primary := newStandingRuntimeContextRuntime(t, process, primaryStores, primaryModule, primaryFact, runtimeInstanceID, catalog)
 			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog)
+			capability, _ := installSelectedStoreTestProcessTopology(t, selectedStores, selected, selectedModule.SemanticSource(), selectedFact, runtimeInstanceID)
+			t.Cleanup(func() {
+				if err := selected.Shutdown(); err != nil {
+					t.Error(err)
+					return
+				}
+				if err := capability.Release(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
 
 			selectedCtx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(runtimeInstanceID, selectedHash))
 			selectedCtx = runtimecorrelation.WithSourceArtifactFact(selectedCtx, selectedFact)

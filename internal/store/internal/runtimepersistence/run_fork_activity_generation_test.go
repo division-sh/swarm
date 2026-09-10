@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -37,7 +36,8 @@ func TestSelectedContractForkPreservesActivityRequestAndDerivesRecordedWriteIden
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003100, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
+	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
+	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestSelectedContractForkPreservesActivityRequestAndDerivesRecordedWriteIden
 		"effect_class":  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		"success_event": "write.succeeded", "failure_event": "write.failed",
 		"fork_policy": string(runtimecontracts.ActivityForkReuseRecordedResult),
-		"entity_id":   entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "handler_event_key": "review.accepted",
+		"entity_id":   entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.accepted",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	}
@@ -80,7 +80,7 @@ func TestSelectedContractForkPreservesActivityRequestAndDerivesRecordedWriteIden
 			result_event_id, result_event_type, result_payload, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', $9, 'review.accepted',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a', $9, 'review.accepted',
 			'commit', 'provider.write', 'non_idempotent_write', 1, 'succeeded', 'write.succeeded', 'write.failed',
 			$5::uuid, 'write.succeeded', $6::jsonb, 'input-hash', $7::jsonb, 'review', $8, $8, $8
 		)
@@ -88,14 +88,8 @@ func TestSelectedContractForkPreservesActivityRequestAndDerivesRecordedWriteIden
 		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID, At: requestEventID,
-		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, nil)
+	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
+	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +151,8 @@ func TestSelectedContractForkPreservesReadOnlyActivityRequestForReexecution(t *t
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003200, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
+	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
+	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "reader")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -169,7 +164,7 @@ func TestSelectedContractForkPreservesReadOnlyActivityRequestForReexecution(t *t
 		"effect_class":  string(runtimecontracts.ActivityEffectClassReadOnly),
 		"success_event": "read.succeeded", "failure_event": "read.failed",
 		"fork_policy": string(runtimecontracts.ActivityForkReexecuteRead),
-		"entity_id":   entityID, "node_id": readerOwner.Key(), "flow_id": "flow-a", "handler_event_key": "review.inspect",
+		"entity_id":   entityID, "node_id": readerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.inspect",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	})
@@ -186,14 +181,8 @@ func TestSelectedContractForkPreservesReadOnlyActivityRequestForReexecution(t *t
 		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID, At: requestEventID,
-		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, nil)
+	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +227,8 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003300, 0).UTC()
-	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, requestEventID, at)
+	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
+	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -250,7 +240,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		"effect_class":  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		"success_event": "write.succeeded", "failure_event": "write.failed",
 		"fork_policy": string(runtimecontracts.ActivityForkReuseRecordedResult),
-		"entity_id":   entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "handler_event_key": "review.accepted",
+		"entity_id":   entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.accepted",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
 		"loop_generation": generation, "loop_stage": "review",
 	})
@@ -293,7 +283,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', $10, 'review.accepted',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a', $10, 'review.accepted',
 			'commit', 'provider.write', 'non_idempotent_write', 1, 'failed', 'write.succeeded', 'write.failed',
 			$5::uuid, 'write.failed', $6::jsonb, $7::jsonb, 'input-hash', $8::jsonb, 'review', $9, $9, $9
 		)
@@ -301,14 +291,8 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID: sourceRunID, At: requestEventID,
-		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, nil)
+	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
 	}

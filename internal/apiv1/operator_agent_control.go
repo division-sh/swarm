@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -66,6 +67,9 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts AgentContr
 	if err != nil {
 		return nil, err
 	}
+	if err := requireNormalRunControl(ctx, opts.SelectedForkControls, runID, runfork.ControlAgentDirective); err != nil {
+		return nil, err
+	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
@@ -116,6 +120,9 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts AgentContr
 func executeAgentRestart(ctx context.Context, req Request, opts AgentControlHandlerOptions, now time.Time) (any, error) {
 	runID, err := requiredStringParam(req.Params, "run_id")
 	if err != nil {
+		return nil, err
+	}
+	if err := requireNormalRunControl(ctx, opts.SelectedForkControls, runID, runfork.ControlAgentRestart); err != nil {
 		return nil, err
 	}
 	agentID, err := requiredStringParam(req.Params, "agent_id")

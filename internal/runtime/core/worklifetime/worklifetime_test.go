@@ -229,15 +229,15 @@ func TestChildOccurrencesIgnoreConstructionCancellationAndFollowOwnerRetirement(
 	if err != nil {
 		t.Fatalf("new runtime route: %v", err)
 	}
-	runtimeFork, err := runtime.NewSelectedFork(constructionCtx, SelectedForkIdentity{ExecutionID: "runtime-fork", RunID: "run-2", Generation: 1})
+	siblingFork, err := process.NewSelectedFork(constructionCtx, SelectedForkIdentity{ExecutionID: "sibling-fork", RunID: "run-2", Generation: 1})
 	if err != nil {
-		t.Fatalf("new runtime selected fork: %v", err)
+		t.Fatalf("new sibling selected fork: %v", err)
 	}
 	processFork, err := process.NewSelectedFork(constructionCtx, SelectedForkIdentity{ExecutionID: "process-fork", RunID: "run-3", Generation: 1})
 	if err != nil {
 		t.Fatalf("new process selected fork: %v", err)
 	}
-	forkRoute, err := runtimeFork.NewRoute(constructionCtx, RouteIdentity{
+	forkRoute, err := siblingFork.NewRoute(constructionCtx, RouteIdentity{
 		RuntimeEpoch: 1,
 		Agent:        agentidentitytest.RootRuntime(t, "fork-agent", "worklifetime-test"),
 		Generation:   1,
@@ -254,7 +254,7 @@ func TestChildOccurrencesIgnoreConstructionCancellationAndFollowOwnerRetirement(
 		{name: "runtime", begin: runtime.Begin},
 		{name: "standing", begin: standing.Begin},
 		{name: "runtime route", begin: runtimeRoute.Begin},
-		{name: "runtime selected fork", begin: runtimeFork.Begin},
+		{name: "sibling selected fork", begin: siblingFork.Begin},
 		{name: "process selected fork", begin: processFork.Begin},
 		{name: "selected-fork route", begin: forkRoute.Begin},
 	}
@@ -293,7 +293,7 @@ func TestChildOccurrencesIgnoreConstructionCancellationAndFollowOwnerRetirement(
 		{name: "runtime route", retire: runtimeRoute.RetireAndWait},
 		{name: "selected-fork route", retire: forkRoute.RetireAndWait},
 		{name: "standing", retire: standing.RetireAndWait},
-		{name: "runtime fork", retire: runtimeFork.RetireAndWait},
+		{name: "sibling fork", retire: siblingFork.RetireAndWait},
 		{name: "process fork", retire: processFork.RetireAndWait},
 	}
 	for _, retirement := range retirements {
