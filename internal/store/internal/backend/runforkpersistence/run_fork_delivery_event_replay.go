@@ -451,7 +451,11 @@ func projectRunForkReplayEvent(ctx context.Context, tx *sql.Tx, story runtimeaut
 	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
-	replayed, err = events.ApplyPayloadAdmission(replayed, sourceAdmission)
+	projectedAdmission, err := events.NewPayloadAdmission(projected.Payload, sourceAdmission.Binding())
+	if err != nil {
+		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s payload binding: %w", forkEventID, source.ID(), err)
+	}
+	replayed, err = events.ApplyPayloadAdmission(replayed, projectedAdmission)
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("project fork replay event %s from source event %s payload admission: %w", forkEventID, source.ID(), err)
 	}
