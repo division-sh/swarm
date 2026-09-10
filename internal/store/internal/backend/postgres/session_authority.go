@@ -6,9 +6,12 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 type AdvisoryLockLease struct {
@@ -30,13 +33,12 @@ type SessionAuthority struct {
 	mu                      sync.Mutex
 	conn                    *sql.Conn
 	activeTx                *sql.Tx
-	activeTxCancel          context.CancelFunc
+	activeScope             *pq.OperationScope
 	refs                    int
 	closed                  bool
 	discardPending          bool
 	leases                  map[*AdvisoryLockLease]struct{}
 	pendingLeaseRetirements []*AdvisoryLockLease
-	cancelCurrentOperation  func() error
 	testBeginTx             func(context.Context, *sql.Conn) (*sql.Tx, error)
 	testEndTxError          func() error
 }
@@ -209,17 +211,17 @@ func (a *SessionAuthority) takePendingLeaseRetirementsLocked() []*AdvisoryLockLe
 
 func (a *SessionAuthority) forceDiscardConnectionLocked() error {
 	rawErr := a.conn.Raw(func(any) error { return driver.ErrBadConn })
-	if errors.Is(rawErr, driver.ErrBadConn) {
+	if rawErr == driver.ErrBadConn || rawErr == sql.ErrConnDone {
 		rawErr = nil
 	}
 	closeErr := a.conn.Close()
+	if closeErr == sql.ErrConnDone {
+		closeErr = nil
+	}
 	a.conn = nil
 	a.refs = 0
 	a.closed = true
-	if rawErr != nil || (closeErr != nil && !errors.Is(closeErr, sql.ErrConnDone)) {
-		return errors.Join(rawErr, closeErr)
-	}
-	return nil
+	return errors.Join(rawErr, closeErr)
 }
 
 func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
@@ -245,40 +247,24 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
 		return nil, errors.New("PostgreSQL session authority already has an active transaction")
 	}
 	conn := a.conn
-	cancelCurrent := a.cancelCurrentOperation
+	scope := pq.NewOperationScope(ctx)
 	begin := a.testBeginTx
 	if begin == nil {
+		if err := bindNativeOperation(conn, scope); err != nil {
+			a.mu.Unlock()
+			discard := a.prepareDiscardExcept(nil)
+			a.operationMu.Unlock()
+			return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+		}
 		begin = func(beginCtx context.Context, conn *sql.Conn) (*sql.Tx, error) {
 			return conn.BeginTx(beginCtx, nil)
 		}
 	}
-	// Startup is caller-cancellable, but a successfully retained transaction is
-	// detached and remains owned by this authority until explicit settlement.
-	beginCtx := ctx
-	var (
-		cancelBegin context.CancelFunc
-		completed   chan struct{}
-		cancelDone  chan error
-	)
-	if cancelCurrent != nil && ctx.Done() != nil {
-		beginCtx, cancelBegin = context.WithCancel(context.Background())
-		completed = make(chan struct{})
-		cancelDone = make(chan error, 1)
-		go func() {
-			select {
-			case <-ctx.Done():
-				cancelBegin()
-				cancelDone <- cancelCurrent()
-			case <-completed:
-				cancelDone <- nil
-			}
-		}()
-	}
+	// database/sql must not terminate retained possession independently. The
+	// native operation still observes the real caller carried by this scope.
+	beginCtx := context.WithoutCancel(scope.Context(ctx))
 	tx, err := begin(beginCtx, conn)
-	if completed != nil {
-		close(completed)
-		err = errors.Join(err, <-cancelDone)
-	}
+	err = errors.Join(err, scope.Err())
 	if callerErr := contextError(ctx); callerErr != nil {
 		err = errors.Join(callerErr, err)
 	}
@@ -286,25 +272,32 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
 		err = errors.New("PostgreSQL session transaction start returned no transaction")
 	}
 	if err != nil {
+		var unbindErr error
 		if tx != nil {
 			a.activeTx = tx
-			a.activeTxCancel = cancelBegin
-		} else if cancelBegin != nil {
-			cancelBegin()
+			a.activeScope = scope
+		} else if a.testBeginTx == nil {
+			_ = scope.Wait()
+			err = errors.Join(err, scope.Err())
+			if contextError(ctx) != nil && scope.Err() == nil {
+				unbindErr = bindNativeOperation(conn, nil)
+				err = errors.Join(err, unbindErr)
+			}
 		}
 		a.mu.Unlock()
 		if tx != nil {
 			return nil, errors.Join(err, rollbackSessionTransaction(tx, a))
 		}
-		a.operationMu.Unlock()
-		if callerErr := contextError(ctx); callerErr != nil {
+		if callerErr := contextError(ctx); callerErr != nil && scope.Err() == nil && unbindErr == nil {
+			a.operationMu.Unlock()
 			return nil, err
 		}
 		discard := a.prepareDiscardExcept(nil)
-		return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+		a.operationMu.Unlock()
+		return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()), scope.Err())
 	}
 	a.activeTx = tx
-	a.activeTxCancel = cancelBegin
+	a.activeScope = scope
 	a.mu.Unlock()
 	return tx, nil
 }
@@ -319,18 +312,21 @@ func (a *SessionAuthority) endTx(tx *sql.Tx) error {
 		return errors.New("PostgreSQL transaction does not match private session authority")
 	}
 	a.activeTx = nil
-	cancelTx := a.activeTxCancel
-	a.activeTxCancel = nil
+	scope := a.activeScope
+	a.activeScope = nil
 	var err error
 	if a.discardPending && !a.closed && a.conn != nil {
 		err = a.forceDiscardConnectionLocked()
 	}
+	if scope != nil {
+		_ = scope.Wait()
+		if !a.closed && a.conn != nil {
+			err = errors.Join(err, bindNativeOperation(a.conn, nil))
+		}
+	}
 	retirements := a.takePendingLeaseRetirementsLocked()
 	testEndTxError := a.testEndTxError
 	a.mu.Unlock()
-	if cancelTx != nil {
-		cancelTx()
-	}
 	a.operationMu.Unlock()
 	sessionDiscard{leases: retirements}.drain()
 	if testEndTxError != nil {
@@ -365,41 +361,23 @@ func (a *SessionAuthority) queryRowContext(ctx context.Context, query string, ar
 	return conn.QueryRowContext(ctx, query, args...)
 }
 
-func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run func(context.Context) error) error {
-	a.mu.Lock()
-	cancelCurrent := a.cancelCurrentOperation
-	a.mu.Unlock()
-	return runWithIndependentCallerCancellation(ctx, cancelCurrent, run)
-}
-
-func runWithIndependentCallerCancellation(ctx context.Context, cancelCurrent func() error, run func(context.Context) error) error {
+func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run func(context.Context) error) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if cancelCurrent == nil || ctx.Done() == nil {
-		return run(ctx)
+	a.mu.Lock()
+	scope := a.activeScope
+	a.mu.Unlock()
+	if scope == nil {
+		return errors.New("PostgreSQL transaction operation scope is missing")
 	}
-
-	completed := make(chan struct{})
-	cancelDone := make(chan error, 1)
-	go func() {
-		select {
-		case <-ctx.Done():
-			cancelDone <- cancelCurrent()
-		case <-completed:
-			cancelDone <- nil
-		}
+	defer func() {
+		err = errors.Join(err, ctx.Err(), scope.Err())
 	}()
-	runErr := run(context.WithoutCancel(ctx))
-	close(completed)
-	cancelErr := <-cancelDone
-	if callerErr := ctx.Err(); callerErr != nil {
-		return errors.Join(callerErr, cancelErr)
-	}
-	return errors.Join(runErr, cancelErr)
+	return run(context.WithoutCancel(scope.Context(ctx)))
 }
 
 func (a *SessionAuthority) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
@@ -602,7 +580,6 @@ type AdvisoryLockAcquire func(context.Context, *SessionAuthority, string) (bool,
 
 type ConnectionOwner interface {
 	Conn(context.Context) (*sql.Conn, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func AcquireAdvisoryLockLeaseWith(
@@ -623,32 +600,7 @@ func AcquireAdvisoryLockLeaseWith(
 		return nil, false, fmt.Errorf("acquire advisory lock connection: %w", err)
 	}
 	authority := newSessionAuthority(conn)
-	if err := authority.installCancellation(ctx, db); err != nil {
-		return nil, false, errors.Join(err, authority.release())
-	}
 	return AcquireAdvisoryLockLeaseOnSession(ctx, authority, lockKey, acquire, authority.release)
-}
-
-func (a *SessionAuthority) installCancellation(ctx context.Context, db ConnectionOwner) error {
-	if a == nil || db == nil {
-		return errors.New("PostgreSQL session cancellation authority is required")
-	}
-	var backendPID int
-	if err := a.queryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&backendPID); err != nil {
-		return fmt.Errorf("load retained PostgreSQL backend identity: %w", err)
-	}
-	a.mu.Lock()
-	a.cancelCurrentOperation = func() error {
-		cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		var cancelled bool
-		if err := db.QueryRowContext(cancelCtx, `SELECT pg_cancel_backend($1)`, backendPID).Scan(&cancelled); err != nil {
-			return fmt.Errorf("cancel retained PostgreSQL operation: %w", err)
-		}
-		return nil
-	}
-	a.mu.Unlock()
-	return nil
 }
 
 func AcquireAdvisoryLockLeaseOnSession(
@@ -696,61 +648,55 @@ func AcquireAdvisoryLockLeaseOnSession(
 	return lease, true, nil
 }
 
-func RunSessionTransaction(
-	ctx context.Context,
-	db ConnectionOwner,
-	fn func(context.Context, *sql.Tx) error,
-) (err error) {
-	if db == nil {
-		return errors.New("PostgreSQL store is required")
-	}
-	if fn == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	session := newSessionAuthority(conn)
-	defer func() {
-		err = errors.Join(err, session.release())
-	}()
-	return RunAuthorityTransaction(ctx, session, fn)
-}
-
 func RunAuthorityTransaction(
 	ctx context.Context,
 	session *SessionAuthority,
 	fn func(context.Context, *sql.Tx) error,
-) error {
+) (err error) {
 	if session == nil {
 		return errors.New("PostgreSQL session authority is required")
+	}
+	if fn == nil {
+		return nil
 	}
 	tx, err := session.beginTx(ctx)
 	if err != nil {
 		return err
 	}
+	session.mu.Lock()
+	scope := session.activeScope
+	session.mu.Unlock()
+	defer func() {
+		if tx != nil {
+			cleanupErr := rollbackSessionTransaction(tx, session)
+			if cleanupErr != nil {
+				slog.Error("postgres retained transaction cleanup failed", "error", cleanupErr)
+				err = errors.Join(err, cleanupErr)
+			}
+		}
+		if scope != nil {
+			err = errors.Join(err, scope.Err())
+		}
+	}()
 	if runErr := session.runWithCallerCancellation(ctx, func(operationCtx context.Context) error {
 		return fn(operationCtx, tx)
 	}); runErr != nil {
-		rollbackErr := rollbackSessionTransaction(tx, session)
-		return errors.Join(runErr, rollbackErr)
+		return runErr
 	}
 	if callerErr := contextError(ctx); callerErr != nil {
-		return errors.Join(callerErr, rollbackSessionTransaction(tx, session))
+		return callerErr
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
-		if callerErr := contextError(ctx); callerErr != nil {
-			return errors.Join(callerErr, rollbackSessionTransaction(tx, session))
-		}
+		// Fence possession before endTx releases operationMu. A successor must
+		// never borrow the session between ambiguous settlement and disposal.
+		discardErr := session.prepareDiscardExcept(nil).drain()
 		endErr := session.endTx(tx)
-		discardErr := session.forceDiscard()
-		return errors.Join(commitErr, endErr, wrapAdvisoryDiscardError(discardErr))
+		tx = nil
+		return errors.Join(commitErr, contextError(ctx), endErr, wrapAdvisoryDiscardError(discardErr))
 	}
-	if endErr := session.endTx(tx); endErr != nil {
+	endErr := session.endTx(tx)
+	tx = nil
+	if endErr != nil {
 		return errors.Join(endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
 	}
 	return nil
@@ -777,15 +723,27 @@ func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
 	if tx == nil || session == nil {
 		return errors.New("PostgreSQL session transaction is missing")
 	}
+	session.mu.Lock()
+	scope := session.activeScope
+	session.mu.Unlock()
 	rollbackErr := tx.Rollback()
-	if errors.Is(rollbackErr, sql.ErrTxDone) {
+	settledElsewhere := rollbackErr == sql.ErrTxDone
+	if settledElsewhere {
 		rollbackErr = nil
 	}
-	endErr := session.endTx(tx)
-	if rollbackErr == nil && endErr == nil {
-		return nil
+	var discardErr error
+	if rollbackErr != nil || settledElsewhere {
+		discardErr = session.prepareDiscardExcept(nil).drain()
 	}
-	return errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
+	endErr := session.endTx(tx)
+	if endErr != nil {
+		discardErr = errors.Join(discardErr, session.forceDiscard())
+	}
+	var nativeErr error
+	if scope != nil {
+		nativeErr = scope.Err()
+	}
+	return errors.Join(rollbackErr, endErr, nativeErr, wrapAdvisoryDiscardError(discardErr))
 }
 
 func contextError(ctx context.Context) error {
@@ -811,45 +769,7 @@ const retainedAdvisoryLockProofSQL = `
 // ProveCurrent verifies the exact advisory lock on the retained session.
 // Session liveness alone is not possession evidence.
 func (l *AdvisoryLockLease) ProveCurrent(ctx context.Context) error {
-	if l == nil {
-		return errors.New("advisory lock lease has no current PostgreSQL session")
-	}
-	l.mu.Lock()
-	session := l.session
-	current := !l.released && session != nil
-	l.mu.Unlock()
-	if !current {
-		return errors.New("advisory lock lease has no current PostgreSQL session")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	endOperation, err := session.beginOperation()
-	if err != nil {
-		discard := session.prepareDiscardExcept(nil)
-		return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
-	}
-	var held bool
-	err = session.runWithCallerCancellation(ctx, func(operationCtx context.Context) error {
-		if l.testProve != nil {
-			var proveErr error
-			held, proveErr = l.testProve(operationCtx, session, l.lockKey)
-			return proveErr
-		}
-		return session.queryRowContext(operationCtx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
-	})
-	endOperation()
-	if callerErr := contextError(ctx); callerErr != nil {
-		return callerErr
-	}
-	if err == nil && held {
-		return nil
-	}
-	discard := session.prepareDiscardExcept(nil)
-	if err == nil {
-		err = errors.New("retained PostgreSQL session no longer owns its advisory lock")
-	}
-	return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+	return l.proveCurrent(ctx, 0)
 }
 
 // MonitorProveCurrent starts its deadline only after the exact retained
@@ -862,9 +782,17 @@ func (l *AdvisoryLockLease) MonitorProveCurrent(ctx context.Context, deadline ti
 	if deadline <= 0 {
 		return errors.New("PostgreSQL possession monitor deadline must be positive")
 	}
+	return l.proveCurrent(ctx, deadline)
+}
+
+func (l *AdvisoryLockLease) proveCurrent(ctx context.Context, deadline time.Duration) (err error) {
+	if l == nil {
+		return errors.New("advisory lock lease has no current PostgreSQL session")
+	}
 	l.mu.Lock()
 	session := l.session
 	current := !l.released && session != nil
+	prove := l.testProve
 	l.mu.Unlock()
 	if !current {
 		return errors.New("advisory lock lease has no current PostgreSQL session")
@@ -881,24 +809,82 @@ func (l *AdvisoryLockLease) MonitorProveCurrent(ctx context.Context, deadline ti
 		endOperation()
 		return err
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, deadline)
+	probeCtx := ctx
+	if deadline > 0 {
+		var cancel context.CancelFunc
+		probeCtx, cancel = context.WithTimeout(ctx, deadline)
+		defer cancel()
+	}
+	scope := pq.NewOperationScope(probeCtx)
+	var conn *sql.Conn
+	keep := false
+	defer func() {
+		_ = scope.Wait()
+		if keep {
+			if unbindErr := bindNativeOperation(conn, nil); unbindErr != nil {
+				keep = false
+				if unbindErr != sql.ErrConnDone {
+					err = errors.Join(err, unbindErr)
+				} else if err == nil {
+					err = errors.New("retained PostgreSQL session closed before proof settlement")
+				}
+			}
+		}
+		var discard sessionDiscard
+		if !keep {
+			// Fence and close while serialized, with the exact scope still bound.
+			// Lease callbacks run only after releasing the operation boundary.
+			discard = session.prepareDiscardExcept(nil)
+		}
+		err = errors.Join(err, scope.Err())
+		endOperation()
+		err = errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+	}()
+	conn, err = session.connection()
+	if err != nil {
+		return err
+	}
+	if err := bindNativeOperation(conn, scope); err != nil {
+		return err
+	}
+	queryCtx := context.WithoutCancel(scope.Context(probeCtx))
 	var held bool
-	err = session.runWithCallerCancellation(probeCtx, func(operationCtx context.Context) error {
-		return session.queryRowContext(operationCtx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
+	var proofErr error
+	if deadline == 0 && prove != nil {
+		held, proofErr = prove(queryCtx, session, l.lockKey)
+	} else {
+		proofErr = session.queryRowContext(queryCtx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
+	}
+	err = errors.Join(proofErr, probeCtx.Err(), scope.Wait())
+	// Validity fences physical reuse only. It neither establishes cancellation
+	// provenance nor substitutes for the exact advisory-lock proof.
+	validityErr := conn.Raw(func(raw any) error {
+		validator, ok := raw.(driver.Validator)
+		if !ok || !validator.IsValid() {
+			return errors.New("retained PostgreSQL native session is not reusable")
+		}
+		return nil
 	})
-	cancel()
-	endOperation()
+	if validityErr != nil {
+		if validityErr != sql.ErrConnDone {
+			err = errors.Join(err, validityErr)
+		} else if err == nil {
+			err = errors.New("retained PostgreSQL session closed before proof settlement")
+		}
+		return err
+	}
+	if proofErr == nil && !held {
+		return errors.Join(err, errors.New("retained PostgreSQL session no longer owns its advisory lock"))
+	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		keep = true
+		return errors.Join(ctx.Err(), err)
 	}
 	if err == nil && held {
+		keep = true
 		return nil
 	}
-	discard := session.prepareDiscardExcept(nil)
-	if err == nil {
-		err = errors.New("retained PostgreSQL session no longer owns its advisory lock")
-	}
-	return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+	return err
 }
 
 func RollbackAuthorityTransaction(tx *sql.Tx, session *SessionAuthority) error {
@@ -928,10 +914,22 @@ func (l *AdvisoryLockLease) InstallTerminalOwner(releaseCapacity, onTerminal, re
 }
 
 func (a *SessionAuthority) BeginTx(ctx context.Context) (*sql.Tx, error) { return a.beginTx(ctx) }
-func (a *SessionAuthority) EndTx(tx *sql.Tx) error                       { return a.endTx(tx) }
-func (a *SessionAuthority) Retain() (func() error, bool)                 { return a.retain() }
-func (a *SessionAuthority) ForceDiscard() error                          { return a.forceDiscard() }
-func (a *SessionAuthority) Release() error                               { return a.release() }
+func (a *SessionAuthority) EndTx(tx *sql.Tx) error {
+	if a == nil || tx == nil {
+		return errors.New("PostgreSQL session transaction is missing")
+	}
+	a.mu.Lock()
+	scope := a.activeScope
+	a.mu.Unlock()
+	err := a.endTx(tx)
+	if scope != nil {
+		err = errors.Join(err, scope.Err())
+	}
+	return err
+}
+func (a *SessionAuthority) Retain() (func() error, bool) { return a.retain() }
+func (a *SessionAuthority) ForceDiscard() error          { return a.forceDiscard() }
+func (a *SessionAuthority) Release() error               { return a.release() }
 
 func (a *SessionAuthority) SetEndTxErrorForTest(hook func() error) {
 	if a == nil {

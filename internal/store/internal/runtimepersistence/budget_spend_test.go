@@ -3,13 +3,13 @@ package runtimepersistence
 import (
 	"context"
 	"reflect"
-	"regexp"
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -118,37 +118,35 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 }
 
 func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-	pg := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := admitTestPostgresStore(t, db)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	entityID := uuid.NewString()
 	recordedAt := time.Now().UTC().Truncate(time.Second)
 
-	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid FOR UPDATE")).
-		WithArgs(runID).
-		WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", authorActivityTestBundleHash))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)")).
-		WithArgs(authorActivityTestBundleHash).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-	mock.ExpectQuery("SELECT EXISTS \\(SELECT 1 FROM entity_state").
-		WithArgs(runID, entityID).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: recordedAt})
+	for _, entity := range []struct {
+		id, flow, state string
+	}{{entityID, "flow/1", "active"}, {uuid.NewString(), "flow/done", "done"}} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO entity_state (
+				run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
+				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, $3, 'budget_entity', $2, $2, $4,
+				'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $5, $5, $5)
+		`, runID, entity.id, entity.flow, entity.state, recordedAt); err != nil {
+			t.Fatalf("seed postgres budget entity %s: %v", entity.id, err)
+		}
+	}
 	identity := mustTestAgentIdentityForRun(runID, "agent-1", "flow/1")
+	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO spend_ledger")).
-		WithArgs("live", runID, entityID, "flow/1", "agent-1", fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, "claude-sonnet", "regular", "anthropic", "anthropic", "api", "claude-sonnet", 10, 4, 1.25, "anthropic", "exact", recordedAt).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-	if err := pg.RecordSpend(ctx, budgetspend.SpendRecord{
+	record := budgetspend.SpendRecord{
 		ExecutionMode:   "live",
 		EntityID:        entityID,
 		FlowInstance:    "flow/1",
@@ -166,13 +164,40 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 		InvocationType:  "anthropic",
 		UsageAccounting: "exact",
 		RecordedAt:      recordedAt,
-	}); err != nil {
+	}
+	if err := pg.RecordSpend(ctx, record); err != nil {
 		t.Fatalf("RecordSpend: %v", err)
 	}
 
-	mock.ExpectQuery("FROM entity_state").
-		WithArgs(runID, entityID).
-		WillReturnRows(sqlmock.NewRows([]string{"flow_instance"}).AddRow("flow/1"))
+	var got budgetspend.SpendRecord
+	var gotFields agentidentity.StorageFields
+	if err := db.QueryRowContext(ctx, `
+		SELECT execution_mode, run_id::text, entity_id::text, flow_instance, agent_id,
+			agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
+			model, model_alias, backend_profile, provider, transport, resolved_model,
+			input_tokens, output_tokens, cost_usd, invocation_type, usage_accounting, created_at
+		FROM spend_ledger WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, runID, entityID).Scan(
+		&got.ExecutionMode, &gotFields.RunID, &got.EntityID, &got.FlowInstance, &got.AgentID,
+		&gotFields.NameOwner, &gotFields.NameSource, &gotFields.RoutePresence, &gotFields.FlowScopeKey, &gotFields.FlowInstanceID,
+		&got.Model, &got.ModelAlias, &got.BackendProfile, &got.Provider, &got.Transport, &got.ResolvedModel,
+		&got.InputTokens, &got.OutputTokens, &got.CostUSD, &got.InvocationType, &got.UsageAccounting, &got.RecordedAt,
+	); err != nil {
+		t.Fatalf("read persisted spend: %v", err)
+	}
+	gotFields.AgentID, gotFields.FlowInstancePath = got.AgentID, got.FlowInstance
+	if gotFields != fields {
+		t.Fatalf("persisted agent identity = %#v, want %#v", gotFields, fields)
+	}
+	got.AgentIdentity, err = agentidentity.FromStorageFields(gotFields)
+	if err != nil {
+		t.Fatalf("read persisted agent identity: %v", err)
+	}
+	got.RecordedAt = got.RecordedAt.UTC()
+	if !reflect.DeepEqual(got, record) {
+		t.Fatalf("persisted spend = %#v, want %#v", got, record)
+	}
+
 	flow, err := pg.ResolveFlowInstance(ctx, runID, entityID)
 	if err != nil {
 		t.Fatalf("ResolveFlowInstance: %v", err)
@@ -181,9 +206,6 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 		t.Fatalf("flow = %q, want flow/1", flow)
 	}
 
-	mock.ExpectQuery("SELECT es.run_id::text, es.entity_id::text").
-		WithArgs(sqlmock.AnyArg()).
-		WillReturnRows(sqlmock.NewRows([]string{"run_id", "entity_id"}).AddRow(runID, entityID))
 	targets, err := pg.ListBudgetProjectionTargets(ctx, []string{"done"})
 	if err != nil {
 		t.Fatalf("ListBudgetProjectionTargets: %v", err)
@@ -194,19 +216,12 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	}
 
 	since := recordedAt.Add(-time.Hour)
-	mock.ExpectQuery("FROM spend_ledger").
-		WithArgs(entityID, since, false).
-		WillReturnRows(sqlmock.NewRows([]string{"sum"}).AddRow(1.25))
 	spent, err := pg.SumSpendUSD(ctx, budgetspend.SpendQuery{Scope: budgetspend.ScopeEntity, EntityID: entityID, Since: since})
 	if err != nil {
 		t.Fatalf("SumSpendUSD: %v", err)
 	}
 	if spent != 1.25 {
 		t.Fatalf("spent = %v, want 1.25", spent)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
 

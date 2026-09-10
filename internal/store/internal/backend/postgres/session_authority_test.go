@@ -8,26 +8,22 @@ import (
 	"time"
 )
 
-func TestSessionAuthorityBeginTxInstallsCancellationBeforeDetachedBegin(t *testing.T) {
+func TestSessionAuthorityBeginTxRetainsNativeCancellationWithoutSQLAutoRollback(t *testing.T) {
 	authority := newSessionAuthority(&sql.Conn{})
 	beginEntered := make(chan struct{})
-	backendCancelled := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	authority.mu.Lock()
-	authority.cancelCurrentOperation = func() error {
-		close(backendCancelled)
-		return nil
-	}
 	authority.testBeginTx = func(beginCtx context.Context, _ *sql.Conn) (*sql.Tx, error) {
-		if beginCtx.Done() == nil {
-			return nil, errors.New("retained transaction begin context cannot cancel stalled startup")
+		if beginCtx.Done() != nil {
+			return nil, errors.New("retained begin must not authorize database/sql automatic rollback")
 		}
 		close(beginEntered)
-		<-beginCtx.Done()
-		return nil, beginCtx.Err()
+		<-ctx.Done()
+		return nil, ctx.Err()
 	}
 	authority.mu.Unlock()
 
-	ctx, cancel := context.WithCancel(context.Background())
 	beginDone := make(chan error, 1)
 	go func() {
 		_, err := authority.beginTx(ctx)
@@ -47,12 +43,6 @@ func TestSessionAuthorityBeginTxInstallsCancellationBeforeDetachedBegin(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("caller cancellation did not interrupt transaction start")
 	}
-	select {
-	case <-backendCancelled:
-	default:
-		t.Fatal("caller cancellation did not invoke retained backend cancellation")
-	}
-
 	endOperation, err := authority.beginOperation()
 	if err != nil {
 		t.Fatalf("operation serialization remained held after canceled transaction start: %v", err)

@@ -155,6 +155,8 @@ jobs:
         run: go build ./cmd/swarm
       - name: Check OpenRPC artifact
         run: go run ./cmd/swarm-openrpc-gen --check
+      - name: Prove pinned native PostgreSQL scope
+        run: go test -race github.com/lib/pq -run '^TestNativeScope' -count=1
       - name: Check canonical routing split tracker state
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -182,7 +184,6 @@ jobs:
           payload=$(mktemp)
           printf '{"item_id":"smoke-item"}\n' > "$payload"
           ./swarm run start examples/routing/root-ingress \
-            --config .github/fixtures/sqlite-local-smoke.swarm.yaml \
             --event item.received \
             --payload "$payload" \
             --api-port 18091
