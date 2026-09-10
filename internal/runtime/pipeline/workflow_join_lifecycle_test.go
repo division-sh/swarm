@@ -1159,8 +1159,8 @@ join-node:
 			if loop == "reentrant" {
 				from = "ready"
 			}
-			files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    item.completed:\n      join:", "    item.completed:\n      loop: {admit: revision, from: awaiting}\n      join:", 1)
 		}
+		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    item.completed:\n      join:", "    item.completed:\n      loop: {admit: revision, from: awaiting}\n      join:", 1)
 		if loop == "captured" {
 			for _, replacement := range []struct{ old, new string }{
 				{"on_complete: {advances_to: ready}", "on_complete: {advances_to: awaiting, data_accumulation: {writes: [{target_field: expected, expression: '[loop.revision_id]'}]}}"},
