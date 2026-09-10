@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -363,6 +364,13 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 		{"flow_instance", func(r *persistedEventIdentity) { r.FlowInstance = "flow/changed" }},
 		{"scope", func(r *persistedEventIdentity) { r.Scope = events.EventScopeFlow }},
 		{"payload", func(r *persistedEventIdentity) { r.Payload = []byte(`{"value":2}`) }},
+		{"payload_schema_bundle_hash", func(r *persistedEventIdentity) {
+			r.PayloadSchemaBundleHash = "bundle-v2:sha256:" + strings.Repeat("9", 64)
+		}},
+		{"payload_schema_flow_id", func(r *persistedEventIdentity) { r.PayloadSchemaFlowID = "other/flow" }},
+		{"payload_schema_event_key", func(r *persistedEventIdentity) { r.PayloadSchemaEventKey = "other.event" }},
+		{"payload_schema_digest", func(r *persistedEventIdentity) { r.PayloadSchemaDigest = "sha256:" + strings.Repeat("8", 64) }},
+		{"payload_schema_class", func(r *persistedEventIdentity) { r.PayloadSchemaClass = events.PayloadSchemaImported }},
 		{"execution_mode", func(r *persistedEventIdentity) { r.ExecutionMode = executionmode.Mock }},
 		{"chain_depth", func(r *persistedEventIdentity) { r.ChainDepth++ }},
 		{"produced_by", func(r *persistedEventIdentity) { r.ProducedBy = "other" }},
@@ -405,6 +413,28 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 			outcome, err = commitSemanticEventFixtureOutcome(ctx, store, baseEvent, nil, "direct")
 			if err != nil || outcome != runtimebus.EventAppendExactDuplicate {
 				t.Fatalf("exact duplicate: outcome=%v err=%v", outcome, err)
+			}
+			for _, mutation := range mutations {
+				if !strings.HasPrefix(mutation.name, "payload_schema_") {
+					continue
+				}
+				t.Run(mutation.name, func(t *testing.T) {
+					changed := base.Clone()
+					mutation.mutate(&changed)
+					conflicting, err := changed.Decode()
+					if err != nil {
+						t.Fatalf("valid competing schema binding: %v", err)
+					}
+					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+					for attempt := 0; attempt < 2; attempt++ {
+						if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, store, conflicting, nil, "direct"); !errors.Is(err, events.ErrEventIdentityConflict) {
+							t.Fatalf("attempt %d: conflicting binding error = %v", attempt, err)
+						}
+						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+							t.Fatalf("attempt %d: conflicting binding mutated application tables", attempt)
+						}
+					}
+				})
 			}
 			conflict := eventtest.RunCreatingRootIngress(baseEvent.ID(), baseEvent.Type(), baseEvent.SourceAgent(), baseEvent.TaskID(), []byte(`{"value":2}`), baseEvent.ChainDepth(), baseEvent.RunID(), "", baseEvent.NormalizedEnvelope(), baseEvent.CreatedAt())
 			if _, err := commitSemanticEventFixtureOutcome(ctx, store, conflict, nil, "direct"); !errors.Is(err, events.ErrEventIdentityConflict) {

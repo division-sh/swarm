@@ -234,5 +234,26 @@ func TestInheritedFanOutHistorySnapshotBindingRoundTrip(t *testing.T) {
 		if !bytes.Equal(before, after) {
 			t.Fatal("duplicate rejection changed snapshot")
 		}
+		for _, field := range []string{"payload_schema_bundle_hash", "payload_schema_flow_id", "payload_schema_event_key", "payload_schema_digest", "payload_schema_class"} {
+			var conflict map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &conflict); err != nil {
+				t.Fatal(err)
+			}
+			conflict[field] = json.RawMessage(`"conflicting-evidence"`)
+			conflictingRaw, err := json.Marshal(conflict)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := appendRunForkHistoricalFact(snapshot, context, conflictingRaw); err == nil {
+				t.Fatalf("conflicting historical binding %s accepted", field)
+			}
+			after, err := json.Marshal(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatalf("conflicting %s rejection changed snapshot", field)
+			}
+		}
 	}
 }
