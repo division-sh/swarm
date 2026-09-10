@@ -58,13 +58,6 @@ func (b *Backend) ConstructionHandle() *sql.DB {
 	return b.db
 }
 
-func (b *Backend) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
-	if !b.Valid() {
-		return nil, fmt.Errorf("sqlite backend is required")
-	}
-	return b.db.BeginTx(ctx, opts)
-}
-
 func (b *Backend) Conn(ctx context.Context) (*sql.Conn, error) {
 	if !b.Valid() {
 		return nil, fmt.Errorf("sqlite backend is required")
