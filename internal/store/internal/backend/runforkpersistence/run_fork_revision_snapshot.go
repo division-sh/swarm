@@ -23,28 +23,33 @@ type runForkRevisionedFact struct {
 
 type runForkRevisionEvent struct {
 	runForkRevisionedFact
-	RunID                 string               `json:"run_id"`
-	EventClass            string               `json:"event_class"`
-	InheritedFanOutOrigin json.RawMessage      `json:"inherited_fan_out_origin"`
-	ExecutionMode         string               `json:"execution_mode"`
-	TaskID                string               `json:"task_id"`
-	EventID               string               `json:"event_id"`
-	EventName             string               `json:"event_name"`
-	EntityID              string               `json:"entity_id"`
-	FlowInstance          string               `json:"flow_instance"`
-	RoutingSource         events.RoutingSource `json:"routing_source"`
-	TargetRoute           json.RawMessage      `json:"target_route"`
-	TargetSet             json.RawMessage      `json:"target_set"`
-	RouteSettlement       json.RawMessage      `json:"route_settlement"`
-	Scope                 string               `json:"scope"`
-	Payload               json.RawMessage      `json:"-"`
-	ChainDepth            int                  `json:"chain_depth"`
-	ProducedBy            string               `json:"produced_by"`
-	ProducedByType        string               `json:"produced_by_type"`
-	HandlerNode           string               `json:"handler_node"`
-	IdempotencyKey        string               `json:"idempotency_key"`
-	SourceEventID         string               `json:"source_event_id"`
-	CreatedAt             time.Time            `json:"created_at"`
+	RunID                   string                    `json:"run_id"`
+	EventClass              string                    `json:"event_class"`
+	InheritedFanOutOrigin   json.RawMessage           `json:"inherited_fan_out_origin"`
+	ExecutionMode           string                    `json:"execution_mode"`
+	TaskID                  string                    `json:"task_id"`
+	EventID                 string                    `json:"event_id"`
+	EventName               string                    `json:"event_name"`
+	EntityID                string                    `json:"entity_id"`
+	FlowInstance            string                    `json:"flow_instance"`
+	RoutingSource           events.RoutingSource      `json:"routing_source"`
+	TargetRoute             json.RawMessage           `json:"target_route"`
+	TargetSet               json.RawMessage           `json:"target_set"`
+	RouteSettlement         json.RawMessage           `json:"route_settlement"`
+	Scope                   string                    `json:"scope"`
+	Payload                 json.RawMessage           `json:"-"`
+	PayloadSchemaBundleHash string                    `json:"payload_schema_bundle_hash"`
+	PayloadSchemaFlowID     string                    `json:"payload_schema_flow_id"`
+	PayloadSchemaEventKey   string                    `json:"payload_schema_event_key"`
+	PayloadSchemaDigest     string                    `json:"payload_schema_digest"`
+	PayloadSchemaClass      events.PayloadSchemaClass `json:"payload_schema_class"`
+	ChainDepth              int                       `json:"chain_depth"`
+	ProducedBy              string                    `json:"produced_by"`
+	ProducedByType          string                    `json:"produced_by_type"`
+	HandlerNode             string                    `json:"handler_node"`
+	IdempotencyKey          string                    `json:"idempotency_key"`
+	SourceEventID           string                    `json:"source_event_id"`
+	CreatedAt               time.Time                 `json:"created_at"`
 }
 
 type runForkRevisionEntityMutation struct {

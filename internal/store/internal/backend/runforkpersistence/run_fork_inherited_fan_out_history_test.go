@@ -2,7 +2,10 @@ package runforkpersistence
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -56,6 +60,8 @@ func inheritedFanOutHistoryFixture(t *testing.T) *runForkRevisionSnapshot {
 	}
 	return &runForkRevisionSnapshot{RunID: run, Revision: 5,
 		Events: []runForkRevisionEvent{{RunID: run, EventID: eventID, EventClass: string(events.EventAdmissionInheritedFanOut), EventName: "item.created",
+			PayloadSchemaBundleHash: "bundle-v2:sha256:" + strings.Repeat("1", 64), PayloadSchemaEventKey: "item.created",
+			PayloadSchemaDigest: "sha256:" + strings.Repeat("2", 64), PayloadSchemaClass: events.PayloadSchemaAuthored,
 			ExecutionMode: "live", InheritedFanOutOrigin: originRaw, RoutingSource: capsule.ProducerSource, ProducedBy: node.Key(), ProducedByType: "node", ChainDepth: 1,
 			TargetRoute: json.RawMessage(`{}`), TargetSet: json.RawMessage(`[]`),
 			Payload: json.RawMessage(`{"value":"one"}`), Scope: "global", CreatedAt: time.Now().UTC().Truncate(time.Microsecond), RouteSettlement: settlementRaw}},
@@ -141,5 +147,92 @@ func TestInheritedFanOutHistoryRequiresExactFixedOrdinal(t *testing.T) {
 				t.Fatal("failed admission changed fixed-R evidence")
 			}
 		})
+	}
+}
+
+func TestInheritedFanOutHistoryRejectsPayloadBindingCorruption(t *testing.T) {
+	for _, field := range []string{"bundle", "flow", "event", "digest", "class"} {
+		for _, corruption := range []string{"missing", "malformed"} {
+			if field == "flow" && corruption == "missing" {
+				continue // Empty flow is the lawful root schema scope.
+			}
+			t.Run(field+"/"+corruption, func(t *testing.T) {
+				snapshot := inheritedFanOutHistoryFixture(t)
+				value := ""
+				if corruption == "malformed" {
+					value = " invalid "
+				}
+				fact := &snapshot.Events[0]
+				switch field {
+				case "bundle":
+					fact.PayloadSchemaBundleHash = value
+				case "flow":
+					fact.PayloadSchemaFlowID = value
+				case "event":
+					fact.PayloadSchemaEventKey = value
+				case "digest":
+					fact.PayloadSchemaDigest = value
+				case "class":
+					fact.PayloadSchemaClass = events.PayloadSchemaClass(value)
+				}
+				before, err := json.Marshal(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := admitRunForkInheritedFanOutHistory(snapshot); err == nil {
+					t.Fatal("corrupt historical payload binding accepted")
+				}
+				after, err := json.Marshal(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Fatal("rejection changed historical evidence")
+				}
+			})
+		}
+	}
+}
+
+func TestInheritedFanOutHistorySnapshotBindingRoundTrip(t *testing.T) {
+	source := inheritedFanOutHistoryFixture(t)
+	source.Events[0].PayloadSchemaFlowID = "imported/nested"
+	source.Events[0].Payload = json.RawMessage("{ \"integer\":9007199254740993, \"double\":1.0 }")
+	want := source.Events[0]
+	raw, err := json.Marshal(struct {
+		runForkRevisionEvent
+		PayloadBase64 string `json:"payload_base64"`
+	}{want, base64.StdEncoding.EncodeToString(want.Payload)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for reopen := 0; reopen < 2; reopen++ {
+		snapshot := &runForkRevisionSnapshot{RunID: source.RunID, Revision: source.Revision, FanOutFacts: source.FanOutFacts}
+		context := runForkHistoricalFactContext{RunID: source.RunID, Family: runforkrevision.FamilyEvents, Key: want.EventID, FirstRevision: 2, Revision: 3}
+		if err := appendRunForkHistoricalFact(snapshot, context, raw); err != nil {
+			t.Fatal(err)
+		}
+		got := snapshot.Events[0]
+		got.runForkRevisionedFact = runForkRevisionedFact{}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("snapshot dropped event evidence: got=%+v want=%+v", got, want)
+		}
+		if err := admitRunForkInheritedFanOutHistory(snapshot); err != nil {
+			t.Fatal(err)
+		}
+		before, err := json.Marshal(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := appendRunForkHistoricalFact(snapshot, context, raw); err == nil {
+			t.Fatal("duplicate historical record accepted")
+		}
+		after, err := json.Marshal(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before, after) {
+			t.Fatal("duplicate rejection changed snapshot")
+		}
 	}
 }
