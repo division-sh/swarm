@@ -16603,6 +16603,10 @@ run_model:
       bundle hash, flow ID, event key, schema digest and schema class. Revision capture, snapshot restoration
       and strict event-record reconstruction must transfer that evidence without current-catalog lookup,
       inferred defaults or old-store repair. Missing or malformed binding evidence cannot authorize readback.
+      When an admitted source-to-child projection changes declared lineage fields, replay binds the projected
+      child payload to the exact original persisted schema binding through canonical payload admission. Applying
+      the source payload admission must not overwrite the projected child bytes. Undeclared business fields,
+      exact numeric values, and the original source event remain unchanged.
       Historical source lookup identity and fork-local projection identity are separate mandatory facts. Source
       entity, flow-instance, decision-card, and proposed-effect rows are selected only by their persisted source
       coordinates. Copied fork authority is then re-keyed explicitly to the projected fork entity and flow instance,

@@ -175,12 +175,17 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					if err != nil || !found || string(originalEvent.Event.Event().Payload()) != string(payload) || originalEvent.Event.Event().RoutingSource() != event.RoutingSource() {
 						t.Fatalf("historical replay changed source event: found=%v %v", found, err)
 					}
+					sourcePayloadAdmission, sourceBound := originalEvent.Event.Event().PayloadAdmission()
+					childPayloadAdmission, childBound := readback.PayloadAdmission()
+					if !sourceBound || !childBound || !childPayloadAdmission.Binding().Equal(sourcePayloadAdmission.Binding()) {
+						t.Fatal("historical replay changed the original payload schema binding")
+					}
 					var got map[string]json.RawMessage
 					if err := json.Unmarshal(raw, &got); err != nil {
 						t.Fatal(err)
 					}
 					if string(got["opaque_revision"]) != forkTestJSON(t, want.RevisionID) || string(got["business_revision"]) != forkTestJSON(t, generation.RevisionID) || string(got["large"]) != "9007199254740993" {
-						t.Fatalf("historical payload changed incorrectly: %s", raw)
+						t.Fatalf("historical payload: got %s; want opaque_revision=%s, business_revision=%s, large=9007199254740993", raw, want.RevisionID, generation.RevisionID)
 					}
 					before = snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					if _, err := owner.ActivateRunFork(ctx, request); err == nil {
