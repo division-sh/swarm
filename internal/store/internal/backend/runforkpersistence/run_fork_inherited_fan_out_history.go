@@ -36,7 +36,10 @@ func admitRunForkInheritedFanOutHistory(snapshot *runForkRevisionSnapshot) error
 			ProducedBy: fact.ProducedBy, ProducedByType: events.EventProducerType(fact.ProducedByType), SourceEventID: fact.SourceEventID,
 			CreatedAt: fact.CreatedAt, RoutingSourceKind: fact.RoutingSource.Kind().StorageCode(), RoutingSourceAuthority: fact.RoutingSource.Authority().StorageCode(),
 			SourceRoute: source, TargetRoute: fact.TargetRoute, TargetSet: fact.TargetSet, RouteSettlement: fact.RouteSettlement,
-			InheritedFanOutOrigin: fact.InheritedFanOutOrigin,
+			InheritedFanOutOrigin:   fact.InheritedFanOutOrigin,
+			PayloadSchemaBundleHash: fact.PayloadSchemaBundleHash, PayloadSchemaFlowID: fact.PayloadSchemaFlowID,
+			PayloadSchemaEventKey: fact.PayloadSchemaEventKey, PayloadSchemaDigest: fact.PayloadSchemaDigest,
+			PayloadSchemaClass: fact.PayloadSchemaClass,
 		}
 		admitted, err := record.Decode()
 		if err != nil {

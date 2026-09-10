@@ -16599,6 +16599,10 @@ run_model:
       repository, backend switch, ambient transaction detection, compatibility path, or backend-owned semantic
       state machine is forbidden.
     source_and_fork_projection_identity: >
+      Historical event revisions retain exact payload bytes and the complete persisted schema binding:
+      bundle hash, flow ID, event key, schema digest and schema class. Revision capture, snapshot restoration
+      and strict event-record reconstruction must transfer that evidence without current-catalog lookup,
+      inferred defaults or old-store repair. Missing or malformed binding evidence cannot authorize readback.
       Historical source lookup identity and fork-local projection identity are separate mandatory facts. Source
       entity, flow-instance, decision-card, and proposed-effect rows are selected only by their persisted source
       coordinates. Copied fork authority is then re-keyed explicitly to the projected fork entity and flow instance,
