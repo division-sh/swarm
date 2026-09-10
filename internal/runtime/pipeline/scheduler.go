@@ -97,6 +97,7 @@ type Scheduler struct {
 	transitions         map[*PreparedParkedSetRebind]struct{}
 	stopped             bool
 	owner               worklifetime.Occurrence
+	startupRelease      chan struct{}
 }
 
 type scheduledTask struct {
@@ -193,6 +194,36 @@ func NewSchedulerWithWorkOwner(owner worklifetime.Occurrence) *Scheduler {
 		reservations: make(map[string]*PreparedParkedSetRebind),
 		transitions:  make(map[*PreparedParkedSetRebind]struct{}),
 		owner:        owner,
+	}
+}
+
+// PrepareStartup keeps exact task registration available to topology completion
+// while withholding callbacks until recovery hands off to delivery continuations.
+func (s *Scheduler) PrepareStartup() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || s.startupRelease != nil || len(s.tasks) != 0 || len(s.draining) != 0 || len(s.transitions) != 0 {
+		return errors.New("scheduler startup requires an unused live scheduler")
+	}
+	s.startupRelease = make(chan struct{})
+	return nil
+}
+
+func (s *Scheduler) ReleaseStartup(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.stopped || s.startupRelease == nil {
+		return errors.New("scheduler startup is not prepared or is stopped")
+	}
+	select {
+	case <-s.startupRelease:
+		return errors.New("scheduler startup already released")
+	default:
+		close(s.startupRelease)
+		return nil
 	}
 }
 
@@ -978,6 +1009,18 @@ func (task *scheduledTask) waitForPrior() bool {
 }
 
 func (s *Scheduler) runOnce(task *scheduledTask, key string, projection scheduledProjection) {
+	s.mu.Lock()
+	startupRelease := s.startupRelease
+	s.mu.Unlock()
+	if startupRelease != nil {
+		select {
+		case <-startupRelease:
+		case <-task.stop:
+			return
+		case <-task.lease.Context().Done():
+			return
+		}
+	}
 	delay := time.Until(projection.dueAt())
 	if delay < 0 {
 		delay = 0

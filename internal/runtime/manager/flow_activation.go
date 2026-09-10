@@ -314,6 +314,57 @@ func flowInstanceActivationExecutionMode(ctx context.Context, req runtimepipelin
 	return "", fmt.Errorf("flow activation requires typed execution mode authority")
 }
 
+// PrepareStandingFlowInstance persists and reconstructs topology without arming
+// timers or publishing creation work. The existing finalizer runs only after
+// serve has installed the executable channel publication and started the manager.
+func (am *AgentManager) PrepareStandingFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (bool, func() error, error) {
+	if am == nil || am.workflowInstances == nil || am.roles.FlowActivation == nil {
+		return false, nil, fmt.Errorf("standing preparation requires the flow activation owner")
+	}
+	if _, err := am.dynamicFlowRuntimeReadinessSource(ctx, req.ContractBundle); err != nil {
+		return false, nil, err
+	}
+	runID, err := exactFlowActivationRunID(ctx, req)
+	if err != nil {
+		return false, nil, err
+	}
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, req.Instance.Route())
+	if err != nil {
+		return false, nil, err
+	}
+	stored, found, err := am.workflowInstances.Load(ctx, identity)
+	if err != nil {
+		return false, nil, err
+	}
+	var finish func() error
+	if found {
+		if strings.TrimSpace(stored.WorkflowName) != strings.TrimSpace(req.Instance.TemplateID) {
+			return false, nil, fmt.Errorf("prepared standing flow %s belongs to template %s, not %s", req.Instance.InstancePath, stored.WorkflowName, req.Instance.TemplateID)
+		}
+		finish = func() error { _, err := am.EnsureFlowInstance(ctx, req); return err }
+	} else {
+		plan, err := am.PrepareFlowInstanceActivation(ctx, req)
+		if err != nil {
+			return false, nil, err
+		}
+		committed, err := am.roles.FlowActivation.CommitFlowInstanceActivation(ctx, plan)
+		if err != nil {
+			return false, nil, err
+		}
+		if err := committed.Validate(); err != nil {
+			return false, nil, err
+		}
+		if committed.Plan.Identity != plan.Identity {
+			return false, nil, fmt.Errorf("prepared standing activation identity changed at commit")
+		}
+		finish = func() error { return am.FinalizeCommittedFlowInstanceActivation(ctx, committed) }
+	}
+	if err := am.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, identity); err != nil {
+		return false, nil, err
+	}
+	return !found, finish, nil
+}
+
 func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (bool, error) {
 	if am == nil || am.workflowInstances == nil {
 		return false, fmt.Errorf("workflow instance store is required")
@@ -884,7 +935,7 @@ func ResolveAgentMaterializationBlueprint(options AgentManagerOptions, blueprint
 	if !blueprint.Config.Identity.IsZero() {
 		return AgentMaterializationBlueprint{}, fmt.Errorf("agent materialization blueprint must remain runless during execution selection")
 	}
-	if err := resolveAgentModel(&blueprint.Config, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
+	if err := resolveAgentModel(&blueprint.Config, options.ExecutionPosture, options.LLMBackend, options.ModelAliases, options.RequireModelResolution); err != nil {
 		return AgentMaterializationBlueprint{}, err
 	}
 	return blueprint, nil

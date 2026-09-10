@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -163,6 +164,9 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 		return runtimepipelineobligation.SweepResult{}, errors.Join(err, closeErr)
 	}
 	if paused {
+		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+			slog.WarnContext(ctx, "startup pipeline recovery blocked", "reason", "ingress_paused_before_scan")
+		}
 		if err := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(eb.executionPosture)); err != nil {
 			return runtimepipelineobligation.SweepResult{}, err
 		}
@@ -235,10 +239,16 @@ func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtim
 					continue
 				}
 				if errors.Is(processErr, ErrRunDispatchBlocked) {
+					if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+						slog.WarnContext(ctx, "startup pipeline recovery blocked", "reason", "run_dispatch_blocked", "event_id", work.Event.ID(), "event_type", work.Event.Type(), "run_id", work.Event.RunID(), "purpose", work.Claim.Purpose(), "error", processErr)
+					}
 					state.locallyBlocked = true
 					continue
 				}
 				if errors.Is(processErr, ErrRuntimeIngressPaused) {
+					if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+						slog.WarnContext(ctx, "startup pipeline recovery blocked", "reason", "ingress_paused_during_dispatch", "event_id", work.Event.ID(), "event_type", work.Event.Type(), "run_id", work.Event.RunID(), "purpose", work.Claim.Purpose(), "error", processErr)
+					}
 					result.Blocked = true
 					closeErr := eb.closePipelineScanLocked(context.WithoutCancel(ctx), request)
 					return result, errors.Join(closeErr)
@@ -375,7 +385,10 @@ func (eb *EventBus) processClaimedPipelineWork(
 		eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, disposition.Failure(), recipients)
 		return true, false, nil, nil
 	}
-	if _, retry := outcome.RetryRelease(); retry {
+	if release, retry := outcome.RetryRelease(); retry {
+		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+			slog.WarnContext(ctx, "startup pipeline recovery blocked", "reason", "bounded_retry", "event_id", work.Event.ID(), "event_type", work.Event.Type(), "run_id", work.Event.RunID(), "purpose", work.Claim.Purpose(), "retry_reason", release.ReasonCode(), "failure", release.Failure())
+		}
 		return false, true, standingLease, nil
 	}
 	if disposition, ok := outcome.Disposition(); ok {

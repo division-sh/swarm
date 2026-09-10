@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-//go:embed archetypes archetypes/zero-agent-automation/.swarm/swarm.yaml
+//go:embed archetypes
 var archetypeFiles embed.FS
 
 type admittedArchetype struct {
@@ -104,8 +104,8 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 	if source.WorkingDir != "." {
 		fmt.Fprintf(out, "  cd %s\n", source.WorkingDir)
 	}
-	fmt.Fprintln(out, "  swarm verify --config ./swarm.yaml .")
-	fmt.Fprintln(out, "  swarm serve --config ./swarm.yaml .")
-	fmt.Fprintln(out, "  swarm test --config ./swarm.yaml . tests/smoke.yaml")
+	fmt.Fprintln(out, "  swarm verify .")
+	fmt.Fprintln(out, "  swarm test . tests/smoke.yaml")
+	fmt.Fprintln(out, "  swarm serve . --dev")
 	return nil
 }

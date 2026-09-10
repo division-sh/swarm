@@ -75,7 +75,7 @@ func admitScenarioExecutionSelector(ctx context.Context, opts EventPublicationOp
 	}
 	if opts.ExecutionPosture != executionposture.MockOnly {
 		return ctx, NewInvalidParamsError(map[string]any{
-			"field": "scenario_execution", "reason": "scenario execution profiles require runtime.execution_posture=mock_only",
+			"field": "scenario_execution", "reason": "scenario execution profiles require command-selected mock execution",
 		})
 	}
 	if opts.ScenarioProfileCatalog == nil || opts.EffectiveSourceIdentity.Validate() != nil {

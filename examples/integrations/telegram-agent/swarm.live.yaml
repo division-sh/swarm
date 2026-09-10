@@ -1,9 +1,0 @@
-runtime:
-  execution_posture: live
-  recovery_on_startup: true
-store:
-  backend: sqlite
-  sqlite:
-    path: ./.swarm/swarm.db
-llm:
-  backend: anthropic

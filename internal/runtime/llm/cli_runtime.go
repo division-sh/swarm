@@ -233,7 +233,7 @@ func (r *ClaudeCLIRuntime) ContinueForkChatSession(ctx context.Context, s *Sessi
 	return r.continueSession(ctx, s, message, nil)
 }
 
-func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, message Message, managed *managedProviderCall) (*Response, error) {
+func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, message Message, managed *managedProviderCall) (result *Response, retErr error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
@@ -257,9 +257,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, s.ID, lease.SessionID)
 			s.ID = lease.SessionID
 		}
-		if sid := strings.TrimSpace(lease.ProviderSessionID); sid != "" {
-			s.ProviderSessionID = sid
-		}
+		s.ProviderSessionID = strings.TrimSpace(lease.ProviderSessionID)
 	}
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the reused agent delivery in progress failed", map[string]any{
 		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
@@ -277,7 +275,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if err != nil {
 		return nil, err
 	}
-	target, err := r.resolveWorkspace(ctx)
+	target, err := r.resolveSessionClaudeState(ctx, actor, s)
 	if err != nil {
 		return nil, err
 	}
@@ -326,6 +324,11 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		return nil, err
 	}
 	dispatch := newCompletionDispatch(attempt, "")
+	defer func() {
+		if retErr != nil && dispatch.invocation == completionProviderInvocationStarted {
+			retErr = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, retErr, "continue_session", nil)
+		}
+	}()
 	dispatch.providerModel = providerModel
 	dispatch.request = append([]byte(nil), requestFingerprintInput...)
 	childSessionID := strings.TrimSpace(attempt.Attempt().AttemptID)
@@ -442,11 +445,13 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if surface, ok := managedcapabilities.FromContext(ctx); ok {
 		observed, observeErr := observeCLIResponse(surface, resp)
 		if observeErr != nil {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_observation_invalid", "claude-cli-adapter", "observe_tool_surface", nil, observeErr)
+			observeErr = runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_observation_invalid", "claude-cli-adapter", "observe_tool_surface", nil, observeErr)
+		} else {
+			resp.CapabilitySurface = &observed
+			ctx = managedcapabilities.WithContext(ctx, observed)
 		}
-		resp.CapabilitySurface = &observed
-		ctx = managedcapabilities.WithContext(ctx, observed)
-		if validateErr := ValidateCLIProviderCapabilitySurface(observed, resp); validateErr != nil {
+		if validateErr := errors.Join(observeErr, ValidateCLIProviderCapabilitySurface(observed, resp)); validateErr != nil {
+			validateErr = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, validateErr, "validate_capability_surface", nil)
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
 			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
 				return nil, errors.Join(validateErr, settleErr)
@@ -456,6 +461,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}
 	if _, ok := managedcapabilities.FromContext(ctx); !ok {
 		if validateErr := validateClaudeInvocationProviderBuiltins(toolProjection, resp); validateErr != nil {
+			validateErr = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, validateErr, "validate_capability_surface", nil)
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
 			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
 				return nil, errors.Join(validateErr, settleErr)
@@ -464,6 +470,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		}
 	}
 	if err := validateCLIResponseToolCallsForTurn(ctx, actor, s.Tools, resp); err != nil {
+		err = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, err, "validate_tool_calls", nil)
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_tool_validation")), resp)
 		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_tool_calls", "provider_session_id": strings.TrimSpace(resp.SessionID)}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
@@ -481,8 +488,15 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		}
 		return nil, err
 	}
+	if backingErr := target.ClaudeState.CheckHead(ctx, childSessionID); backingErr != nil {
+		err := claudeFailureForState(runtimeeffects.StateOutcomeUncertain, backingErr, "validate_provider_backing", nil)
+		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(err, "claude_cli_backing_validation")), resp)
+		_, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_provider_backing"})
+		return nil, errors.Join(err, settleErr)
+	}
 
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
+		err = claudeFailureForState(runtimeeffects.StateOutcomeUncertain, err, "project_provider_turn", nil)
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_projection")), resp)
 		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "project_provider_turn", "provider_session_id": childSessionID}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)

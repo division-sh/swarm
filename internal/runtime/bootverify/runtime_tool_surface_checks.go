@@ -41,6 +41,10 @@ func (c *checkerContext) toolResolution() []Finding {
 }
 
 func (c *checkerContext) requiredMCPToolAvailability() []Finding {
+	// Declaration/permission checks are independent of observing a live server.
+	if c.opts.Purpose == StructuralValidation {
+		return nil
+	}
 	if c.requiredMCPLoaded {
 		return c.requiredMCPFindings
 	}

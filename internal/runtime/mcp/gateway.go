@@ -169,7 +169,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: "invalid json body"})
 		return
 	}
-	ctx, err := g.toolExecutionContext(r, toolName)
+	ctx, release, err := g.toolExecutionContext(r, toolName)
 	if err != nil {
 		g.logMCP(r, "warn", "tool.context_error", err, map[string]any{
 			"tool_name": toolName,
@@ -177,6 +177,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: g.formatError(err)})
 		return
 	}
+	defer release()
 	r = r.WithContext(ctx)
 	if !toolAllowedInContext(ctx, toolName) {
 		err := g.newGatewayError(ErrCodeToolNotAllowed, "tool.execute.authorize_tool", nil, map[string]any{"tool": toolName})
@@ -284,7 +285,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
-		ctx, err := g.mcpExecutionContext(r, toolName)
+		ctx, release, err := g.mcpExecutionContext(r, toolName)
 		if err != nil {
 			g.logMCP(r, "warn", "mcp.tools.call.context_error", err, map[string]any{
 				"method":    "tools/call",
@@ -293,6 +294,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
+		defer release()
 		occurrence, err := mcpToolCallOccurrenceCoordinate(ctx, req)
 		if err != nil {
 			if surface, managed := managedcapabilities.FromContext(ctx); managed && surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn && len(surface.BindingNames(managedcapabilities.BindingMCPProvider)) > 0 {
@@ -555,20 +557,31 @@ func clampRunes(s string, maxRunes int) string {
 	return string(runes[:maxRunes]) + "...(truncated)"
 }
 
-func (g *Gateway) mcpExecutionContext(r *http.Request, _ string) (context.Context, error) {
+func (g *Gateway) mcpExecutionContext(r *http.Request, _ string) (context.Context, func(), error) {
 	return g.transportExecutionContext(r, "mcp.context.resolve")
 }
 
-func (g *Gateway) toolExecutionContext(r *http.Request, _ string) (context.Context, error) {
+func (g *Gateway) toolExecutionContext(r *http.Request, _ string) (context.Context, func(), error) {
 	return g.transportExecutionContext(r, "tool.context.resolve")
 }
 
-func (g *Gateway) transportExecutionContext(r *http.Request, operation string) (context.Context, error) {
+func (g *Gateway) transportExecutionContext(r *http.Request, operation string) (context.Context, func(), error) {
 	turn, err := g.runtimeTurnContextForRequest(r, operation)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return g.contextForResolvedTurn(r.Context(), turn), nil
+	ctx, release, err := acquireTurnPresentation(r.Context(), turn)
+	if err != nil {
+		return nil, nil, g.newGatewayError(ErrCodeContextNotFound, operation, err, nil)
+	}
+	return g.contextForResolvedTurn(ctx, turn), release, nil
+}
+
+func acquireTurnPresentation(ctx context.Context, turn TurnContext) (context.Context, func(), error) {
+	if turn.Presentation == nil {
+		return ctx, func() {}, nil
+	}
+	return turn.Presentation.Acquire(ctx)
 }
 
 func (g *Gateway) withToolCapabilities(ctx context.Context, actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) context.Context {
@@ -639,7 +652,12 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) ([]ToolDef, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx := g.baseContextForResolvedTurn(r.Context(), turn)
+	ctx, release, err := acquireTurnPresentation(r.Context(), turn)
+	if err != nil {
+		return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.presentation", err, nil)
+	}
+	defer release()
+	ctx = g.baseContextForResolvedTurn(ctx, turn)
 	if turn.CapabilitySurface == nil {
 		if len(turn.ForkSandboxAllowed) == 0 {
 			return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.forkchat_sandbox", nil, map[string]any{"reason": "sandbox_policy_missing"})
@@ -802,7 +820,7 @@ func (g *Gateway) acquireToolDefinitionsInContext(ctx context.Context, actor mod
 	}
 	pinnedCtx := ctx
 	release := noopRelease
-	definitions := g.executor.ToolDefinitionsForActor(actor)
+	var definitions []llm.ToolDefinition
 	if leased, ok := g.executor.(runtimeGatewayLeasedContextAwareExecutor); ok {
 		var err error
 		pinnedCtx, definitions, release, err = leased.AcquireToolDefinitionsForActorInContext(ctx, actor)
@@ -814,6 +832,8 @@ func (g *Gateway) acquireToolDefinitionsInContext(ctx context.Context, actor mod
 		}
 	} else if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
 		definitions = contextAware.ToolDefinitionsForActorInContext(ctx, actor)
+	} else {
+		definitions = g.executor.ToolDefinitionsForActor(actor)
 	}
 	seen := make(map[string]struct{}, len(definitions))
 	for _, definition := range definitions {
@@ -939,7 +959,7 @@ func (g *Gateway) baseContextForResolvedTurn(ctx context.Context, turn TurnConte
 	if g.hooks.WithCurrentRuntimeEpoch != nil {
 		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 	}
-	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID()))
+	ctx = runtimecorrelation.WithRunID(ctx, turn.RunID)
 	if turn.HasRuntimeLineage {
 		ctx = runtimecorrelation.WithRuntimeLineage(ctx, turn.RuntimeLineage)
 	}

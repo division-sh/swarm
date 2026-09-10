@@ -307,8 +307,18 @@ func newCheckerContext(ctx context.Context, source semanticview.Source, opts Opt
 }
 
 func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agentLabel, model string, mockConfigured bool) []Finding {
-	if c != nil && c.opts.ValidateModelResolution {
+	if c != nil && c.opts.Purpose == StructuralValidation {
+		if _, _, err := llmselection.ResolveDeclaredModelAlias(llmselection.ModelResolution{Model: model, Models: c.opts.ModelAliases}); err != nil {
+			return append(findings, Finding{
+				CheckID: "invalid_field_detection", Severity: SeverityHardInvalidity,
+				Message: fmt.Sprintf("agent %s model alias declaration failed: %v", agentLabel, err), Location: agentLabel,
+			})
+		}
+		return findings
+	}
+	if c != nil && c.opts.Purpose != StructuralValidation && c.opts.ValidateModelResolution {
 		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			Posture:           c.opts.ExecutionPosture,
 			ConfiguredDefault: c.opts.LLMProfile,
 			MockConfigured:    mockConfigured,
 		})

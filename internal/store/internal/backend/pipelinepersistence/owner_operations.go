@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -138,6 +139,7 @@ const pipelineCandidatePageSize = 32
 
 type pipelineCandidate struct {
 	eventID            string
+	runID              string
 	insertionSequence  int64
 	visibilitySnapshot string
 	attemptCount       int
@@ -608,6 +610,9 @@ func claimPipelineBatch(
 			batch.Examined++
 			claim, err := backend.claim(ctx, candidate.eventID, query.Purpose)
 			if errors.Is(err, runtimepipelineobligation.ErrBusy) {
+				if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+					slog.WarnContext(ctx, "startup pipeline recovery blocked", "reason", "claim_busy", "event_id", candidate.eventID, "run_id", candidate.runID, "scan_phase", state.phase, "purpose", query.Purpose, "error", err)
+				}
 				batch.LocallyBlocked = true
 				continue
 			}
@@ -632,6 +637,9 @@ func claimPipelineBatch(
 				return batch, err
 			}
 			batch.Work = append(batch.Work, work)
+			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+				slog.InfoContext(ctx, "startup pipeline recovery claimed", "event_id", candidate.eventID, "run_id", candidate.runID, "scan_phase", state.phase, "purpose", query.Purpose)
+			}
 			if i == len(candidates)-1 && len(candidates) < pageLimit {
 				advancePipelineScanPhase(state)
 				if _, more := state.request.QueryAt(state.phase); !more {
@@ -988,13 +996,19 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEvent(ctx context.Context, 
 		registry.testBeforeClaimRegistryLock()
 	}
 	registry.mu.Lock()
-	for _, state := range registry.claims {
+	for token, state := range registry.claims {
 		if state != nil && state.claim.EventID() == eventID {
+			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+				slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "local_claim", "held_claim", token, "held_purpose", state.claim.Purpose(), "held_scan", state.scanToken)
+			}
 			registry.mu.Unlock()
 			return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
 		}
 	}
 	if _, reserving := registry.acquiring[eventID]; reserving {
+		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+			slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "claim_acquisition")
+		}
 		registry.mu.Unlock()
 		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
 	}
@@ -1030,6 +1044,9 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEvent(ctx context.Context, 
 		return runtimepipelineobligation.Claim{}, err
 	}
 	if !acquired || lease == nil {
+		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+			slog.WarnContext(ctx, "startup pipeline claim held", "backend", "postgres", "event_id", eventID, "requested_purpose", purpose, "held_owner", "advisory_lock_owner_unknown")
+		}
 		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
 	}
 	if registry.testConfigureClaimLease != nil {
@@ -1081,6 +1098,9 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEvent(ctx context.Context, 
 	if !eligible {
 		return runtimepipelineobligation.Claim{}, errors.Join(runtimepipelineobligation.ErrIneligible, s.releasePostgresPipelineClaim(context.WithoutCancel(ctx), claim))
 	}
+	if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+		slog.InfoContext(ctx, "startup pipeline claim acquired", "backend", "postgres", "event_id", eventID, "purpose", purpose, "claim_id", token)
+	}
 	return claim, nil
 }
 
@@ -1130,8 +1150,11 @@ func (s *PipelineSQLiteOwner) claimSQLitePipelineEvent(ctx context.Context, even
 	defer s.mutationMu.Unlock()
 	s.pipelineClaimMu.Lock()
 	issuer, claims := s.pipelineClaimOwner()
-	for _, state := range claims {
+	for token, state := range claims {
 		if state != nil && state.claim.EventID() == eventID {
+			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+				slog.WarnContext(ctx, "startup pipeline claim held", "backend", "sqlite", "event_id", eventID, "requested_purpose", purpose, "held_owner", "local_claim", "held_claim", token, "held_purpose", state.claim.Purpose(), "held_scan", state.scanToken)
+			}
 			s.pipelineClaimMu.Unlock()
 			return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrBusy
 		}
@@ -1154,6 +1177,9 @@ func (s *PipelineSQLiteOwner) claimSQLitePipelineEvent(ctx context.Context, even
 			err = tokenErr
 		} else {
 			claims[token] = &pipelineClaimState{claim: claim}
+			if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
+				slog.InfoContext(ctx, "startup pipeline claim acquired", "backend", "sqlite", "event_id", eventID, "purpose", purpose, "claim_id", token)
+			}
 		}
 	}
 	s.pipelineClaimMu.Unlock()
@@ -1602,6 +1628,7 @@ func (s *PipelinePostgresOwner) postgresPipelineCandidatePage(
 				     , route.next_attempt_at
 				     , route.created_at
 				     , e.execution_mode
+				     , COALESCE(e.run_id::text, '')
 				FROM decision_card_route_obligations route
 				JOIN runs run ON run.run_id = route.run_id
 				JOIN events e ON e.event_id = route.event_id
@@ -1646,7 +1673,7 @@ func (s *PipelinePostgresOwner) postgresPipelineCandidatePage(
 	}
 	args = append(args, limit)
 	rows, err := s.backend.QueryContext(ctx, fmt.Sprintf(`
-			SELECT e.event_id::text, e.insertion_sequence, 0, e.created_at, e.created_at, e.execution_mode
+			SELECT e.event_id::text, e.insertion_sequence, 0, e.created_at, e.created_at, e.execution_mode, COALESCE(e.run_id::text, '')
 			FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt
@@ -1730,6 +1757,7 @@ func (s *PipelineSQLiteOwner) sqlitePipelineCandidatePage(
 				     , route.next_attempt_at
 				     , route.created_at
 				     , e.execution_mode
+				     , COALESCE(e.run_id, '')
 				FROM decision_card_route_obligations route
 				JOIN runs run ON run.run_id = route.run_id
 				JOIN events e ON e.event_id = route.event_id
@@ -1769,7 +1797,7 @@ func (s *PipelineSQLiteOwner) sqlitePipelineCandidatePage(
 	args = append(args, diagnosticDirectReplayEventArgs()...)
 	args = append(args, limit)
 	rows, err := s.backend.QueryContext(ctx, `
-			SELECT e.event_id, e.insertion_sequence, 0, e.created_at, e.created_at, e.execution_mode
+			SELECT e.event_id, e.insertion_sequence, 0, e.created_at, e.created_at, e.execution_mode, COALESCE(e.run_id, '')
 			FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt
@@ -1835,6 +1863,7 @@ func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string
 			&nextRaw,
 			&createdRaw,
 			&candidate.executionMode,
+			&candidate.runID,
 		); err != nil {
 			return nil, fmt.Errorf("%s: %w", operation, err)
 		}

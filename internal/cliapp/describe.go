@@ -25,7 +25,8 @@ type describeCommandOptions struct {
 
 type describeCommandOutput struct {
 	authoringview.View
-	WorkspaceBackend string `json:"workspace_backend"`
+	ValidationScope string `json:"validation_scope"`
+	LiveReadiness   string `json:"live_readiness"`
 }
 
 type describeRoutesCommandOptions struct {
@@ -124,9 +125,16 @@ func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts d
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	source := semanticview.Wrap(bundle)
-	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
-	topology := authoringview.BuildRoutingTopologyWithReport(source, bundle, &report)
+	source, validationOpts, err := admitStructuralSource(repo, opts.configPath, bundle)
+	if err != nil {
+		writeDescribeRoutesError(errOut, "describe routes failed: %v\n", err)
+		return CLIExitValidation
+	}
+	// Describe renders invalid sources too; the structural owner records every
+	// validation failure in BootReport rather than leaving an error-only result.
+	result, _ := verifyBundleResultWithOptions(ctx, source, validationOpts)
+	effectiveBundle, _ := semanticview.Bundle(source)
+	topology := authoringview.BuildRoutingTopologyWithReport(source, effectiveBundle, &result.BootReport)
 	if err := renderCLIOutput(out, errOut, opts.output, topology, func(w io.Writer) {
 		writeRoutingTopologyText(w, topology)
 	}, func() ([]string, error) {
@@ -175,17 +183,15 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	source := semanticview.Wrap(bundle)
-	workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, opts.configPath, source)
+	source, validationOpts, err := admitStructuralSource(repo, opts.configPath, bundle)
 	if err != nil {
 		if errOut != nil {
-			fmt.Fprintf(errOut, "describe failed: resolve workspace backend: %v\n", err)
+			fmt.Fprintf(errOut, "describe failed: admit source: %v\n", err)
 		}
 		return 1
 	}
-	workspaceBackendDetail := workspaceBackendDecisionDetail(workspaceBackend)
-	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
-	view, err := authoringview.Build(ctx, source, authoringview.BuildOptions{BootReport: &report, IncludeStageGraph: opts.graph})
+	result, _ := verifyBundleResultWithOptions(ctx, source, validationOpts)
+	view, err := authoringview.Build(ctx, source, authoringview.BuildOptions{BootReport: &result.BootReport, IncludeStageGraph: opts.graph})
 	if err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "describe failed: %v\n", err)
@@ -193,11 +199,12 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		return 1
 	}
 	output := describeCommandOutput{
-		View:             view,
-		WorkspaceBackend: workspaceBackendDetail,
+		View:            view,
+		ValidationScope: "structural",
+		LiveReadiness:   "not_evaluated",
 	}
 	if err := renderCLIOutput(out, errOut, opts.output, output, func(w io.Writer) {
-		writeDescribeText(w, view, workspaceBackendDetail)
+		writeDescribeText(w, view)
 	}, func() ([]string, error) {
 		return describeQuietValues(view), nil
 	}); err != nil {
@@ -206,15 +213,13 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 	return 0
 }
 
-func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendDetail string) {
+func writeDescribeText(out io.Writer, view authoringview.View) {
 	if out == nil {
 		return
 	}
 	fmt.Fprintf(out, "describe: source=%s\n", view.SourceHash)
 	fmt.Fprintf(out, "source authority: %s\n", view.SourceAuthority)
-	if strings.TrimSpace(workspaceBackendDetail) != "" {
-		fmt.Fprintf(out, "%s\n", workspaceBackendDetail)
-	}
+	fmt.Fprintln(out, "validation: structural; live readiness: not evaluated")
 	if view.Root.PrimaryEntity != nil {
 		fmt.Fprintf(out, "root primary entity: %s\n", view.Root.PrimaryEntity.Type)
 	}

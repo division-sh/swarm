@@ -362,7 +362,7 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	starts, err := startResetServeRuntimeContexts(s.resetRequests[0].Ctx, candidates, s.runtimeContexts)
+	release, err := prepareResetServeRuntimeContexts(s.resetRequests[0].Ctx, candidates, s.runtimeContexts)
 	if err != nil {
 		return err
 	}
@@ -377,10 +377,8 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 	if err := s.runtimeContexts.ReleaseResetExecution(definitions...); err != nil {
 		return err
 	}
-	for _, start := range starts {
-		if err := start.Start(); err != nil {
-			return err
-		}
+	if err := release(); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	s.resetting = false

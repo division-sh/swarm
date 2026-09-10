@@ -87,6 +87,7 @@ type rootCommandOptions struct {
 	input                  io.Reader
 	stdinIsTerminal        func() bool
 	runServe               ServeRunner
+	runTest                TestSessionRunner
 	runReadyTimeout        time.Duration
 	runReadyPoll           time.Duration
 	runStatusPoll          time.Duration

@@ -23,10 +23,11 @@ import (
 )
 
 type Target struct {
-	Container string
-	Workdir   string
-	Backend   string
-	Mounts    []ExecutionMount
+	Container   string
+	Workdir     string
+	Backend     string
+	Mounts      []ExecutionMount
+	ClaudeState ClaudeState
 }
 
 func (t *Target) Enabled() bool {

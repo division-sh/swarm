@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/channelactivation"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -22,6 +23,9 @@ import (
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)
 
 type TurnContext struct {
+	Presentation           *channelactivation.PresentationBinding
+	presentationExpiry     *time.Timer
+	RunID                  string
 	Actor                  models.AgentConfig
 	Inbound                events.Event
 	HasInbound             bool
@@ -119,6 +123,8 @@ func (r *TurnContextRegistry) RegisterTurnContextWithCapabilitySurface(ctx conte
 	differentOwner, _ := runtimeeffects.DifferentOwnerFromContext(ctx)
 	logicalIdentity, hasLogicalIdentity := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
 	r.put(token, TurnContext{
+		Presentation:           channelactivation.BindPresentation(ctx, now.Add(ttl)),
+		RunID:                  runtimecorrelation.RunIDFromContext(ctx),
 		Actor:                  actor,
 		Inbound:                inbound,
 		HasInbound:             hasInbound,
@@ -175,7 +181,11 @@ func (r *TurnContextRegistry) RegisterConversationForkSandboxTurnContext(ctx con
 	token := uuid.NewString()
 	controller, _ := runtimeeffects.ControllerFromContext(ctx)
 	logicalIdentity, hasLogicalIdentity := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
+	source, hasSource := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	inbound, hasInbound := runtimebus.InboundEventFromContext(ctx)
 	r.put(token, TurnContext{
+		Presentation: channelactivation.BindPresentation(ctx, now.Add(ttl)), RunID: runtimecorrelation.RunIDFromContext(ctx),
+		SourceArtifactFact: source, HasSourceArtifactFact: hasSource, Inbound: inbound, HasInbound: hasInbound,
 		Actor: actor, EffectController: controller, EffectAuthority: authority, HasEffectAuthority: true,
 		LogicalIdentity: logicalIdentity, HasLogicalIdentity: hasLogicalIdentity,
 		ForkSandboxAllowed: normalizeForkSandboxTools(allowedTools), CreatedAt: now, ExpiresAt: now.Add(ttl),
@@ -381,6 +391,9 @@ func (r *TurnContextRegistry) put(token string, data TurnContext) {
 	if data.ExpiresAt.IsZero() {
 		data.ExpiresAt = data.CreatedAt.Add(r.defaultTTL)
 	}
+	if data.Presentation != nil {
+		data.presentationExpiry = time.AfterFunc(time.Until(data.ExpiresAt), data.Presentation.Revoke)
+	}
 	if data.CapabilitySurface != nil {
 		data.CapabilitySurface = capabilitySurfacePointer(data.CapabilitySurface.Clone())
 	}
@@ -466,25 +479,44 @@ func (r *TurnContextRegistry) delete(token string) {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	turn := r.data[token]
+	turn.revokePresentation()
 	delete(r.data, token)
+	r.mu.Unlock()
+	turn.Presentation.Close()
 }
 
 func (r *TurnContextRegistry) reset() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	previous := r.data
+	for _, turn := range previous {
+		turn.revokePresentation()
+	}
 	r.data = make(map[string]TurnContext)
+	r.mu.Unlock()
+	for _, turn := range previous {
+		turn.Presentation.Close()
+	}
+}
+
+func (turn TurnContext) revokePresentation() {
+	if turn.presentationExpiry != nil {
+		turn.presentationExpiry.Stop()
+	}
+	turn.Presentation.Revoke()
 }
 
 func (r *TurnContextRegistry) pruneLocked(now time.Time) {
 	for k, v := range r.data {
 		if !v.ExpiresAt.IsZero() {
 			if !v.ExpiresAt.After(now) {
+				v.revokePresentation()
 				delete(r.data, k)
 			}
 			continue
 		}
 		if v.CreatedAt.Before(now.Add(-r.defaultTTL)) {
+			v.revokePresentation()
 			delete(r.data, k)
 		}
 	}
