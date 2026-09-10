@@ -2049,6 +2049,16 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	if err := rt.shutdownGate.Wait(drainCtx); err != nil {
 		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime ingress admission drain timed out after %s: %w", grace, err))
 	}
+	// Continuation dispatch may finalize agent readiness. Join that producer
+	// before manager teardown invalidates its lifecycle dependency.
+	if rt.deliveryContinuations != nil {
+		if err := rt.deliveryContinuations.Retire(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
+			if err := rt.deliveryContinuations.Retire(context.Background()); err != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator join: %w", err))
+			}
+		}
+	}
 	if rt.Manager != nil {
 		deadline, _ := drainCtx.Deadline()
 		remaining := time.Until(deadline)
@@ -2089,11 +2099,6 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 		}
 	}
 	if rt.Bus != nil {
-		if rt.deliveryContinuations != nil {
-			if err := rt.deliveryContinuations.Retire(drainCtx); err != nil {
-				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
-			}
-		}
 		if rt.deliverySignalRegistration != nil {
 			rt.deliverySignalRegistration.Release()
 			rt.deliverySignalRegistration = nil

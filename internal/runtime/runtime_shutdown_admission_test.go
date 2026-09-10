@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -37,6 +38,27 @@ type runtimeShutdownTestAgent struct {
 	id            string
 	subscriptions []events.EventType
 	onEvent       func(context.Context, events.Event) ([]events.Event, error)
+}
+
+type shutdownContinuationPage struct {
+	runtimedelivery.Store
+	item runtimedelivery.ContinuationItem
+}
+
+func (s *shutdownContinuationPage) ScanDeliveryContinuations(context.Context, runtimedelivery.ExecutionAuthority, runtimedelivery.ContinuationCursor, int) (runtimedelivery.ContinuationPage, error) {
+	return runtimedelivery.ContinuationPage{Items: []runtimedelivery.ContinuationItem{s.item}, Exhausted: true}, nil
+}
+
+type shutdownBlockedDispatcher struct {
+	entered, canceled, release chan struct{}
+}
+
+func (d *shutdownBlockedDispatcher) DispatchDeliveryContinuation(ctx context.Context, _ events.Event, _ events.DeliveryRoute) runtimedeliverycontinuation.DispatchResult {
+	close(d.entered)
+	<-ctx.Done()
+	close(d.canceled)
+	<-d.release
+	return runtimedeliverycontinuation.Fatal(ctx.Err())
 }
 
 func bindRuntimeShutdownAgentReadinessFinalizer(bus *runtimebus.EventBus) {
@@ -456,10 +478,64 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		t.Fatal("timed out waiting for in-flight work to start")
 	}
 
+	// Hold a real coordinator dispatch across shutdown. Its manager dependency
+	// must outlive it, even though retirement has already canceled dispatch.
+	dispatcher := &shutdownBlockedDispatcher{entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	releaseDispatch := func() { releaseOnce.Do(func() { close(dispatcher.release) }) }
+	defer releaseDispatch()
+	continuationEvent := eventtest.ExistingRunRootIngress(eventtest.UUID("shutdown-continuation"), "test.in", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.id), AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission")}
+	deliveryID, err := runtimedelivery.DeliveryID(continuationEvent.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := &shutdownContinuationPage{item: runtimedelivery.ContinuationItem{
+		DeliveryID: deliveryID, Event: continuationEvent, Disposition: runtimedelivery.ClaimAcquired,
+		Snapshot: runtimedelivery.Snapshot{DeliveryID: deliveryID, Route: route, Status: runtimedelivery.StatusPending, Authority: deliveryStore.authority},
+	}}
+	coordinator, err := runtimedeliverycontinuation.New(page, startupRecoveryDispositionMap{}, deliveryStore.authority, workOwner, dispatcher, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.deliveryContinuations = coordinator
+	startResult := make(chan error, 1)
+	go func() { startResult <- coordinator.Start(context.Background()) }()
+	select {
+	case <-dispatcher.entered:
+	case <-time.After(time.Second):
+		t.Fatal("continuation dispatch not entered")
+	}
+
 	shutdownErrCh := make(chan error, 1)
 	go func() {
 		shutdownErrCh <- rt.Shutdown()
 	}()
+
+	select {
+	case <-dispatcher.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("continuations not retired before manager")
+	}
+	select {
+	case <-canceled:
+		t.Fatal("manager retired before continuation dispatch joined")
+	default:
+	}
+	select {
+	case err := <-shutdownErrCh:
+		t.Fatalf("shutdown detached continuation: %v", err)
+	default:
+	}
+	releaseDispatch()
+	select {
+	case err := <-startResult:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("startup retirement: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("initial dispatch not joined")
+	}
 
 	select {
 	case <-canceled:
