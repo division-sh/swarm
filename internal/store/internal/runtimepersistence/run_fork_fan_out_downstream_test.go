@@ -28,13 +28,9 @@ import (
 
 type forkFanOutConsumerModule struct {
 	runForkGateWorkflowModule
-	definition *pipeline.WorkflowDefinition
-	nodes      []pipeline.WorkflowNode
+	nodes []pipeline.WorkflowNode
 }
 
-func (m forkFanOutConsumerModule) WorkflowDefinition() *pipeline.WorkflowDefinition {
-	return m.definition
-}
 func (m forkFanOutConsumerModule) WorkflowNodes() []pipeline.WorkflowNode {
 	return append([]pipeline.WorkflowNode(nil), m.nodes...)
 }
@@ -106,16 +102,12 @@ func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixtu
 		}
 		t.Fatalf("commit ordinal plans: cursor=%d err=%v", committed.Intent.Cursor, err)
 	}
-	definition, err := pipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatal(err)
-	}
 	nodes, err := pipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatal(err)
 	}
 	coordinator := pipeline.NewPipelineCoordinatorWithOptions(eventBus, pipeline.PipelineCoordinatorOptions{
-		Module: forkFanOutConsumerModule{runForkGateWorkflowModule{source: source}, definition, nodes}, Persistence: pipeline.NewWorkflowPersistence(workflow), DeliveryStore: workflow,
+		Module: forkFanOutConsumerModule{runForkGateWorkflowModule{source: source}, nodes}, Persistence: pipeline.NewWorkflowPersistence(workflow), DeliveryStore: workflow,
 		DeadLetters: workflow, PipelineObligations: workflow.PipelineObligations(), DecisionCards: workflow, ProposedEffects: workflow, HumanTasks: workflow,
 		DecisionCardDraftExpiry: workflow, HumanTaskExpiry: workflow, DeliveryRuntime: eventBus, RunLifecycle: workflow,
 		SourceArtifactFact: fact, ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: work,

@@ -57,16 +57,12 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			definition, err := pipeline.LoadWorkflowDefinition(source)
-			if err != nil {
-				t.Fatal(err)
-			}
 			nodes, err := pipeline.LoadWorkflowNodes(source)
 			if err != nil {
 				t.Fatal(err)
 			}
 			coordinator := pipeline.NewPipelineCoordinatorWithOptions(eventBus, pipeline.PipelineCoordinatorOptions{
-				Module: forkFanOutConsumerModule{runForkGateWorkflowModule{source: source}, definition, nodes}, Persistence: pipeline.NewWorkflowPersistence(workflow), DeliveryStore: workflow,
+				Module: forkFanOutConsumerModule{runForkGateWorkflowModule{source: source}, nodes}, Persistence: pipeline.NewWorkflowPersistence(workflow), DeliveryStore: workflow,
 				DeadLetters: workflow, PipelineObligations: workflow.PipelineObligations(), DecisionCards: workflow, ProposedEffects: workflow, HumanTasks: workflow,
 				DecisionCardDraftExpiry: workflow, HumanTaskExpiry: workflow, DeliveryRuntime: eventBus, RunLifecycle: workflow,
 				SourceArtifactFact: fact, ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(), WorkOwner: work,
