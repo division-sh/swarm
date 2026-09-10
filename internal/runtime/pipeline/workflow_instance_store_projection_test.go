@@ -60,20 +60,14 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 		ParentFlowID:       parentFlowID,
 		ParentFlowInstance: parentFlowInstance,
 		ParentEntityID:     parentID,
-		WorkflowName:       "projection-flow",
+		WorkflowName:       "review",
 		WorkflowVersion:    "1.0.0",
 		CurrentState:       "active",
 		EnteredStageAt:     now,
 		Config: map[string]any{
 			"custom_threshold": float64(3),
 		},
-		TransitionHistory: []WorkflowTransitionRecord{{
-			TransitionID:   "tr-1",
-			From:           "queued",
-			To:             "active",
-			TriggerEventID: "evt-1",
-			FiredAt:        now,
-		}},
+		TransitionHistory: []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "review", "queued", "active", "evt-1", now)},
 		StateBuckets: map[string]any{
 			"evidence": map[string]any{
 				"audit": []any{
@@ -127,8 +121,8 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if !loaded.Gates["g_ready"] {
 		t.Fatalf("Gates = %#v, want g_ready=true", loaded.Gates)
 	}
-	if len(loaded.TransitionHistory) != 1 || loaded.TransitionHistory[0].TransitionID != "tr-1" {
-		t.Fatalf("TransitionHistory = %#v, want tr-1", loaded.TransitionHistory)
+	if len(loaded.TransitionHistory) != 1 || loaded.TransitionHistory[0].TransitionID != instance.TransitionHistory[0].TransitionID {
+		t.Fatalf("TransitionHistory = %#v, want admitted cause %s", loaded.TransitionHistory, instance.TransitionHistory[0].TransitionID)
 	}
 	gotEvidence, ok := workflowStateBucketObject(loaded, "evidence")
 	if !ok {

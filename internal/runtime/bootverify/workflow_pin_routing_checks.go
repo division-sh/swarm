@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -51,172 +49,24 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 			})
 		}
 	}
-	for _, site := range pinRoutingEmitSites(c.source) {
-		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowPathIdentity(), site.Spec.EventType()) {
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(c.source).Producers() {
+		if endpoint.Kind == semanticview.EventEndpointExternal || endpoint.Kind == semanticview.EventEndpointPlatform {
 			continue
 		}
-		eventType := site.Spec.EventType()
-		if runtimepinrouting.OutputHarnessSink(c.source, site.FlowPathIdentity(), eventType) {
+		eventType := endpoint.Event.Authored
+		if !runtimepinrouting.PinDeclaredOutput(c.source, endpoint.FlowID, eventType) {
 			continue
 		}
-		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowPathIdentity(), eventType)
+		if runtimepinrouting.OutputHarnessSink(c.source, endpoint.FlowID, eventType) {
+			continue
+		}
+		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, endpoint.FlowID, eventType)
 		if !consumer.HasRuntimeConsumer() {
-			findings = append(findings, pinTargetFinding(site, runtimepinrouting.FailureTargetRequiredMissing.Code()))
-		}
-	}
-	for _, site := range pinRoutingAgentEmitSites(c.source) {
-		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowID, site.EventType) {
-			continue
-		}
-		if runtimepinrouting.OutputHarnessSink(c.source, site.FlowID, site.EventType) {
-			continue
-		}
-		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowID, site.EventType)
-		if !consumer.HasRuntimeConsumer() {
-			findings = append(findings, pinTargetAgentFinding(site, runtimepinrouting.FailureTargetRequiredMissing.Code()))
+			findings = append(findings, Finding{
+				CheckID: "pin_target_resolution", Severity: "error", Location: endpoint.FlowID,
+				Message: fmt.Sprintf("%s emits pin-declared output %s without valid target mechanism: %s", endpoint.ProducerDescription(), eventType, runtimepinrouting.FailureTargetRequiredMissing.Code()),
+			})
 		}
 	}
 	return findings
-}
-
-func pinRoutingEmitSites(source semanticview.Source) []semanticview.AuthoredEmitSite {
-	return semanticview.AuthoredEmitSites(source)
-}
-
-type pinRoutingAgentEmitSite struct {
-	FlowID    string
-	AgentID   string
-	EventType string
-}
-
-func pinRoutingAgentEmitSites(source semanticview.Source) []pinRoutingAgentEmitSite {
-	if source == nil {
-		return nil
-	}
-	sites := []pinRoutingAgentEmitSite{}
-	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).Producers() {
-		if endpoint.Kind != semanticview.EventEndpointAgent {
-			continue
-		}
-		sites = append(sites, pinRoutingAgentEmitSite{FlowID: endpoint.FlowID, AgentID: endpoint.AgentID, EventType: endpoint.Event.Authored})
-	}
-	return sites
-}
-
-func pinTargetFinding(site semanticview.AuthoredEmitSite, reason string) Finding {
-	flowID := site.FlowPathIdentity()
-	scope := fmt.Sprintf("flow %s", flowID)
-	location := flowID
-	if flowID == "." {
-		scope = "root"
-		location = "root"
-	}
-	return Finding{
-		CheckID:  "pin_target_resolution",
-		Severity: "error",
-		Message:  fmt.Sprintf("%s %s on node %s emits pin-declared output %s without valid target mechanism: %s", scope, site.Site, site.Node.Key(), site.Spec.EventType(), reason),
-		Location: location,
-	}
-}
-
-func pinTargetAgentFinding(site pinRoutingAgentEmitSite, reason string) Finding {
-	scope := fmt.Sprintf("flow %s", site.FlowID)
-	location := site.FlowID
-	if strings.TrimSpace(site.FlowID) == "" {
-		scope = "root"
-		location = "root"
-	}
-	return Finding{
-		CheckID:  "pin_target_resolution",
-		Severity: "error",
-		Message:  fmt.Sprintf("%s agent emit_events on agent %s emits pin-declared output %s without valid target mechanism: %s", scope, site.AgentID, site.EventType, reason),
-		Location: location,
-	}
-}
-
-func (c *checkerContext) pinRoutingEventExternalSource(flowID, eventType string) bool {
-	if c.source == nil {
-		return false
-	}
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
-		return false
-	}
-	if resolution, ok := c.resolveDeclaredInputProducerSource(flowID, eventType); ok {
-		return inputProducerSourceIsExternalNoTarget(resolution)
-	}
-	entry, _, ok := c.source.ResolveFlowEventCatalogEntry(flowID, eventType)
-	return ok && nonInputEventMetadataProducerSource(entry)
-}
-
-func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eventType string) bool {
-	producers := 0
-	targeted := 0
-	census := semanticview.BuildAuthoredEventEndpointCensus(source)
-	graph := runtimepinrouting.CompileConnectGraph(source)
-	sites := pinRoutingEmitSites(source)
-	for _, endpoint := range pinRoutingKnownProducers(census, graph, flowID, eventType) {
-		if endpoint.Kind != semanticview.EventEndpointNodeHandler {
-			continue
-		}
-		site, ok := pinRoutingEmitSiteForEndpoint(sites, endpoint)
-		if !ok {
-			continue
-		}
-		if !runtimepinrouting.PinDeclaredOutput(source, site.FlowPathIdentity(), site.Spec.EventType()) {
-			continue
-		}
-		producers++
-		connectedToReceiver := compiledConnectsProducerToReceiver(graph, endpoint, flowID)
-		consumer := runtimepinrouting.ClassifyOutputConsumer(source, site.FlowPathIdentity(), site.Spec.EventType())
-		if connectedToReceiver || consumer.Has(runtimepinrouting.OutputConsumerStructuralParent) {
-			targeted++
-		}
-	}
-	return producers > 0 && targeted == producers
-}
-
-func pinRoutingKnownProducers(census semanticview.AuthoredEventEndpointCensus, graph runtimepinrouting.CompiledConnectGraph, flowID, eventType string) []semanticview.AuthoredEventEndpoint {
-	byID := map[string]semanticview.AuthoredEventEndpoint{}
-	for _, endpoint := range census.MatchingProducers(flowID, eventType) {
-		byID[endpoint.ID] = endpoint
-	}
-	for _, edge := range graph.Edges() {
-		if !edge.Consumer().Matches(flowID, events.EventType(eventType)) {
-			continue
-		}
-		producer := edge.Producer()
-		for _, endpoint := range census.Producers() {
-			if producer.MatchesAuthoredEndpoint(endpoint) {
-				byID[endpoint.ID] = endpoint
-			}
-		}
-	}
-	out := make([]semanticview.AuthoredEventEndpoint, 0, len(byID))
-	for _, endpoint := range byID {
-		out = append(out, endpoint)
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
-func pinRoutingEmitSiteForEndpoint(sites []semanticview.AuthoredEmitSite, endpoint semanticview.AuthoredEventEndpoint) (semanticview.AuthoredEmitSite, bool) {
-	for _, site := range sites {
-		if site.Node.Equal(endpoint.Node) && strings.TrimSpace(site.SiteKey) == strings.TrimSpace(endpoint.Site) {
-			return site, true
-		}
-	}
-	return semanticview.AuthoredEmitSite{}, false
-}
-
-func compiledConnectsProducerToReceiver(graph runtimepinrouting.CompiledConnectGraph, producer semanticview.AuthoredEventEndpoint, receiverFlowID string) bool {
-	for _, edge := range graph.Edges() {
-		if !edge.Consumer().BelongsToFlow(strings.TrimSpace(receiverFlowID)) {
-			continue
-		}
-		if edge.Producer().MatchesAuthoredEndpoint(producer) {
-			return true
-		}
-	}
-	return false
 }

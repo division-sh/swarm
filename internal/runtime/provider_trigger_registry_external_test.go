@@ -190,6 +190,9 @@ func boundedStandingConnectorBundle(t *testing.T, bundle *runtimecontracts.Workf
 	if !ok {
 		t.Fatalf("admitted bounded connector source omitted flow %q", boundedProviderFlowID)
 	}
+	// Keep the admitted lifecycle used by the shared inbound state fixture.
+	flow.Schema = admittedFlow.Schema
+	flow.Schema.Pins.Inputs.EventPins = inputs
 	admittedFlow.Schema = flow.Schema
 	admittedFlow.Nodes = flow.Nodes
 	admittedFlow.Events = flow.Events

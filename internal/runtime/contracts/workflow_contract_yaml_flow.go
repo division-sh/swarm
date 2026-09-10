@@ -712,38 +712,3 @@ func (v *FlowVariable) UnmarshalYAML(node *yaml.Node) error {
 	*v = FlowVariable(aux)
 	return nil
 }
-
-func (t *WorkflowTransitionContract) UnmarshalYAML(node *yaml.Node) error {
-	if t == nil {
-		return nil
-	}
-	type shadow struct {
-		ID                string                   `yaml:"id"`
-		From              yaml.Node                `yaml:"from"`
-		To                string                   `yaml:"to"`
-		Trigger           string                   `yaml:"trigger"`
-		Node              string                   `yaml:"node"`
-		Guards            []string                 `yaml:"guards"`
-		Actions           []string                 `yaml:"actions"`
-		DataAccumulation  WorkflowDataAccumulation `yaml:"data_accumulation"`
-		AllowTerminalExit bool                     `yaml:"allow_terminal_exit"`
-	}
-	var aux shadow
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	t.ID = aux.ID
-	t.To = aux.To
-	t.Trigger = aux.Trigger
-	t.Node = aux.Node
-	t.Guards = aux.Guards
-	t.Actions = aux.Actions
-	t.DataAccumulation = aux.DataAccumulation
-	t.AllowTerminalExit = aux.AllowTerminalExit
-	from, err := decodeStringListNode(&aux.From)
-	if err != nil {
-		return err
-	}
-	t.From = from
-	return nil
-}

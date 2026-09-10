@@ -42,14 +42,10 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					source, node := targetedDeclaredKeyExecutionSource(t, acquisition)
 					module := proposedEffectProofModule{
 						source: source,
-						workflow: runtimepipeline.NewWorkflowDefinition("review", []runtimepipeline.WorkflowStage{
-							{Name: "active"},
-							{Name: "done", Terminal: true},
-						}, nil),
 						nodes: []runtimepipeline.WorkflowNode{{
-							Node: node, Subscriptions: []events.EventType{"work.keyed"},
+							Node: node, Subscriptions: []events.EventType{"review/work.keyed"},
 							ExecutionType: runtimecontracts.SystemNodeExecutionType,
-							Policies:      map[string]runtimepipeline.WorkflowEventPolicy{"work.keyed": {Consume: true}},
+							Policies:      map[string]runtimepipeline.WorkflowEventPolicy{"review/work.keyed": {Consume: true}},
 						}},
 					}
 					eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})

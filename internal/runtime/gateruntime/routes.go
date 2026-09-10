@@ -1,6 +1,7 @@
 package gateruntime
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -32,18 +33,23 @@ func (e FrozenEmit) Empty() bool {
 }
 
 type Route struct {
+	Transition runtimecontracts.CompiledTransition
 	AdvancesTo string
 	Emit       FrozenEmit
 	EmitSchema semanticvalue.Value
 }
 
-func FreezeRoutes(outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (string, error) {
+func FreezeRoutes(outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan, transitions map[string]runtimecontracts.CompiledTransition) (string, error) {
+	if len(outcomes) != len(transitions) {
+		return "", fmt.Errorf("gate outcomes and compiled transitions must agree exactly")
+	}
 	routes := make(map[string]semanticvalue.Value, len(outcomes))
 	for verdict, outcome := range outcomes {
 		if verdict == "" || verdict != strings.TrimSpace(verdict) {
 			return "", fmt.Errorf("gate continuation verdict %q is not canonical", verdict)
 		}
 		route := Route{
+			Transition: transitions[verdict],
 			AdvancesTo: strings.TrimSpace(outcome.AdvancesTo),
 			Emit:       FrozenEmit{Event: strings.TrimSpace(outcome.Emit.Event), Fields: make(map[string]FrozenExpression, len(outcome.Emit.Fields))},
 			EmitSchema: semanticvalue.EmptyObject(),
@@ -106,6 +112,9 @@ func RouteFor(routesJSON, verdict string) (Route, error) {
 	if err != nil {
 		return Route{}, fmt.Errorf("decode gate route %s: %w", verdict, err)
 	}
+	if err := validateTransition(verdict, route); err != nil {
+		return Route{}, err
+	}
 	return route, nil
 }
 
@@ -122,8 +131,12 @@ func ValidateRoutes(routesJSON string) error {
 		if verdict == "" || verdict != strings.TrimSpace(verdict) {
 			return fmt.Errorf("gate continuation verdict %q is not canonical", verdict)
 		}
-		if _, err := routeFromSemanticValue(encoded); err != nil {
+		route, err := routeFromSemanticValue(encoded)
+		if err != nil {
 			return fmt.Errorf("decode gate route %s: %w", verdict, err)
+		}
+		if err := validateTransition(verdict, route); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -172,7 +185,21 @@ func BuildRoutePayload(route Route, fields semanticvalue.Value) (semanticvalue.V
 	return value, nil
 }
 
+func validateTransition(verdict string, route Route) error {
+	if err := route.Transition.Validate(); err != nil {
+		return err
+	}
+	edge := route.Transition.Edge()
+	if edge.Source != "gate" || edge.Verdict != verdict || edge.To != route.AdvancesTo {
+		return fmt.Errorf("gate route contradicts frozen transition")
+	}
+	return nil
+}
+
 func validateRoute(verdict string, route Route, inputs map[string]runtimecontracts.WorkflowGateInputField) error {
+	if err := validateTransition(verdict, route); err != nil {
+		return err
+	}
 	if route.AdvancesTo == "" {
 		return fmt.Errorf("gate route %s advances_to is required", verdict)
 	}
@@ -252,6 +279,14 @@ func decisionField(expression FrozenExpression) (string, error) {
 }
 
 func routeSemanticValue(route Route) (semanticvalue.Value, error) {
+	rawTransition, err := json.Marshal(route.Transition)
+	if err != nil {
+		return semanticvalue.Value{}, err
+	}
+	var transition any
+	if err := json.Unmarshal(rawTransition, &transition); err != nil {
+		return semanticvalue.Value{}, err
+	}
 	fields := make(map[string]any, len(route.Emit.Fields))
 	for name, expression := range route.Emit.Fields {
 		var literal any
@@ -261,6 +296,7 @@ func routeSemanticValue(route Route) (semanticvalue.Value, error) {
 		fields[name] = map[string]any{"kind": string(expression.Kind), "ref": expression.Ref, "cel": expression.CEL, "literal": literal}
 	}
 	return canonicaljson.FromGo(map[string]any{
+		"transition":  transition,
 		"advances_to": route.AdvancesTo,
 		"emit":        map[string]any{"event": route.Emit.Event, "fields": fields},
 		"emit_schema": route.EmitSchema.Interface(),
@@ -272,7 +308,7 @@ func routeFromSemanticValue(value semanticvalue.Value) (Route, error) {
 	if !ok {
 		return Route{}, fmt.Errorf("route must be an object")
 	}
-	if err := exactFields(root, "route", "advances_to", "emit", "emit_schema"); err != nil {
+	if err := exactFields(root, "route", "advances_to", "emit", "emit_schema", "transition"); err != nil {
 		return Route{}, err
 	}
 	advancesTo, ok := root["advances_to"].String()
@@ -321,7 +357,15 @@ func routeFromSemanticValue(value semanticvalue.Value) (Route, error) {
 	if schema.Kind() != semanticvalue.KindObject {
 		return Route{}, fmt.Errorf("route emit_schema must be an object")
 	}
-	return Route{AdvancesTo: advancesTo, Emit: FrozenEmit{Event: event, Fields: fields}, EmitSchema: schema}, nil
+	var transition runtimecontracts.CompiledTransition
+	rawTransition, err := json.Marshal(root["transition"].Interface())
+	if err != nil {
+		return Route{}, err
+	}
+	if err := json.Unmarshal(rawTransition, &transition); err != nil {
+		return Route{}, err
+	}
+	return Route{Transition: transition, AdvancesTo: advancesTo, Emit: FrozenEmit{Event: event, Fields: fields}, EmitSchema: schema}, nil
 }
 
 func exactFields(values map[string]semanticvalue.Value, label string, expected ...string) error {

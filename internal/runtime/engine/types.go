@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
 const DefaultMaxChainDepth = 50
@@ -435,6 +436,7 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 }
 
 type StateMutation struct {
+	Transition       *runtimeworkflowlifecycle.Transition
 	NextState        string
 	TriggerEventID   string
 	TriggerEventType string

@@ -821,10 +821,6 @@ func (s conformanceSemanticOnlyWorkflowRuntime) SemanticSource() runtimesemantic
 	return s.source
 }
 
-func (conformanceSemanticOnlyWorkflowRuntime) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
-
 func (conformanceSemanticOnlyWorkflowRuntime) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return nil
 }
@@ -836,19 +832,14 @@ func (conformanceSemanticOnlyWorkflowRuntime) ActionRegistry() runtimepipeline.A
 }
 
 type conformanceLoadedWorkflowModule struct {
-	source   runtimesemanticview.Source
-	workflow *runtimepipeline.WorkflowDefinition
-	nodes    []runtimepipeline.WorkflowNode
-	guards   runtimepipeline.GuardRegistry
-	actions  runtimepipeline.ActionRegistry
+	source  runtimesemanticview.Source
+	nodes   []runtimepipeline.WorkflowNode
+	guards  runtimepipeline.GuardRegistry
+	actions runtimepipeline.ActionRegistry
 }
 
 func (m conformanceLoadedWorkflowModule) SemanticSource() runtimesemanticview.Source {
 	return m.source
-}
-
-func (m conformanceLoadedWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
 }
 
 func (m conformanceLoadedWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
@@ -988,20 +979,15 @@ func loadConformanceWorkflowFixtureModule(t *testing.T, fixtureRoot string) conf
 		t.Fatalf("load bundle: %v", err)
 	}
 	source := runtimesemanticview.Wrap(bundle)
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	return conformanceLoadedWorkflowModule{
-		source:   source,
-		workflow: workflow,
-		nodes:    nodes,
-		guards:   runtimepipeline.NewContractGuardRegistry(source),
-		actions:  runtimepipeline.NewContractActionRegistry(source),
+		source:  source,
+		nodes:   nodes,
+		guards:  runtimepipeline.NewContractGuardRegistry(source),
+		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 }
 

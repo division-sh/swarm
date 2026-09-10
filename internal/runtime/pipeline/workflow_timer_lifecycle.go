@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -115,14 +116,27 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{RunID: evt.RunID(), Route: route}.Normalize(),
 		EntityID:     identity.NormalizeEntityID(entityID),
 	}
+	graph, ok := semanticview.WorkflowStageTopology(source, timer.FlowID)
+	if !ok {
+		return true, false, fmt.Errorf("stage timer requires compiled flow topology")
+	}
+	compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{TimerID: timer.ID}, currentStage, nextStage)
+	if err != nil {
+		return true, false, err
+	}
+	cause, err := runtimeworkflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
+	if err != nil {
+		return true, false, err
+	}
 	prepared, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, address, runtimeengine.StateMutation{
-		NextState: nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
+		Transition: &cause,
+		NextState:  nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
 		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
 	})
 	if err != nil {
 		return true, false, err
 	}
-	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(route, address.EntityID, evt, currentStage, nextStage)
+	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(route, address.EntityID, evt, currentStage, nextStage, &cause)
 	if err != nil {
 		return true, false, err
 	}

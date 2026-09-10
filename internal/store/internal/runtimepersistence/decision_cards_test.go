@@ -35,14 +35,30 @@ import (
 
 func testGateRoutes(t *testing.T) string {
 	t.Helper()
-	routes, err := gateruntime.FreezeRoutes(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {Verdict: "approve", AdvancesTo: "operating"},
 		"reject":  {Verdict: "reject", AdvancesTo: "building"},
-	})
+	}
+	routes, err := gateruntime.FreezeRoutes(outcomes, compiledGateRoutesForTest(t, "launch", "awaiting_review", "launch_review", []string{"awaiting_review", "operating", "building"}, outcomes))
 	if err != nil {
 		t.Fatalf("FreezeRoutes: %v", err)
 	}
 	return routes
+}
+
+func compiledGateRoutesForTest(t *testing.T, flowID, stage, decision string, stages []string, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) map[string]runtimecontracts.CompiledTransition {
+	t.Helper()
+	gate := runtimecontracts.WorkflowGatePlan{FlowID: flowID, Stage: stage, Decision: decision, Outcomes: outcomes}
+	graph := runtimecontracts.BuildWorkflowStageTopology(flowID, stage, stages, nil, nil, nil, nil, []runtimecontracts.WorkflowGatePlan{gate})
+	compiled := make(map[string]runtimecontracts.CompiledTransition, len(outcomes))
+	for verdict, outcome := range outcomes {
+		transition, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{DecisionID: decision, Verdict: verdict}, stage, outcome.AdvancesTo)
+		if err != nil {
+			t.Fatalf("admit declared gate route %s: %v", verdict, err)
+		}
+		compiled[verdict] = transition
+	}
+	return compiled
 }
 
 func TestDecisionCardStoreLifecycleParity(t *testing.T) {

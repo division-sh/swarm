@@ -88,6 +88,7 @@ func (e *Executor) stepLoop(frame *executionFrame) error {
 				return err
 			}
 			if escaped {
+				frame.loopEscaped = true
 				activation.CurrentStage = strings.TrimSpace(plan.Escape.AdvancesTo)
 				escape := runtimecontracts.HandlerRuleEntry{AdvancesTo: plan.Escape.AdvancesTo, Emit: plan.Escape.Emit}
 				frame.rule = &escape

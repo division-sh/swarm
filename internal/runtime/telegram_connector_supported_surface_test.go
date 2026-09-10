@@ -396,10 +396,6 @@ func (m telegramConnectorSupportedSurfaceModule) SemanticSource() semanticview.S
 	return m.source
 }
 
-func (m telegramConnectorSupportedSurfaceModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
-
 func (m telegramConnectorSupportedSurfaceModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }

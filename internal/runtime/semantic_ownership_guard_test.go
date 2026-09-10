@@ -62,11 +62,67 @@ func TestRegisteredToolSemanticReconstructionIsAbsent(t *testing.T) {
 				}
 			case *ast.FuncDecl:
 				if _, forbidden := forbiddenFunctions[typed.Name.Name]; forbidden {
+					if approvedEventCatalogCloneSeam(path, typed) {
+						continue
+					}
 					t.Errorf("%s declares retired semantic reconstruction function %s", path, typed.Name.Name)
 				}
 			}
 		}
 	})
+}
+
+// The projection seam may delegate to the contracts clone owner, never rebuild
+// its schema semantics. All other retired clone declarations remain forbidden.
+func approvedEventCatalogCloneSeam(path string, fn *ast.FuncDecl) bool {
+	if path != "internal/runtime/contracts/event_catalog_clone.go" || fn.Name.Name != "CloneEventCatalogEntry" || fn.Recv != nil || fn.Type.TypeParams != nil || fn.Body == nil || len(fn.Body.List) != 1 {
+		return false
+	}
+	if fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
+		return false
+	}
+	param, result := fn.Type.Params.List[0], fn.Type.Results.List[0]
+	inputType, inputOK := param.Type.(*ast.Ident)
+	outputType, outputOK := result.Type.(*ast.Ident)
+	if !inputOK || !outputOK || inputType.Name != "EventCatalogEntry" || outputType.Name != "EventCatalogEntry" || len(param.Names) != 1 || len(result.Names) != 0 {
+		return false
+	}
+	ret, ok := fn.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return false
+	}
+	call, ok := ret.Results[0].(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 || call.Ellipsis.IsValid() {
+		return false
+	}
+	callee, calleeOK := call.Fun.(*ast.Ident)
+	arg, argOK := call.Args[0].(*ast.Ident)
+	return calleeOK && argOK && callee.Name == "cloneEventCatalogEntry" && arg.Name == param.Names[0].Name
+}
+
+func TestCanonicalEventCatalogCloneSeamRejectsReconstruction(t *testing.T) {
+	const owner = "internal/runtime/contracts/event_catalog_clone.go"
+	for _, tc := range []struct {
+		name, path, declaration string
+		allowed                 bool
+	}{
+		{"delegate", owner, "func CloneEventCatalogEntry(entry EventCatalogEntry) EventCatalogEntry { return cloneEventCatalogEntry(entry) }", true},
+		{"wrong_owner", "internal/runtime/tools/clone.go", "func CloneEventCatalogEntry(entry EventCatalogEntry) EventCatalogEntry { return cloneEventCatalogEntry(entry) }", false},
+		{"shallow_copy", owner, "func CloneEventCatalogEntry(entry EventCatalogEntry) EventCatalogEntry { return entry }", false},
+		{"reconstruction", owner, "func CloneEventCatalogEntry(entry EventCatalogEntry) EventCatalogEntry { entry.Payload = EventPayloadSpec{}; return cloneEventCatalogEntry(entry) }", false},
+		{"second_owner", owner, "func CloneEventCatalogEntry(entry EventCatalogEntry) EventCatalogEntry { return duplicateClone(entry) }", false},
+		{"wrong_argument", owner, "func CloneEventCatalogEntry(entry EventCatalogEntry) EventCatalogEntry { return cloneEventCatalogEntry(other) }", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), tc.path, "package contracts\n"+tc.declaration, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := approvedEventCatalogCloneSeam(tc.path, file.Decls[0].(*ast.FuncDecl)); got != tc.allowed {
+				t.Fatalf("clone seam admission=%v, want %v", got, tc.allowed)
+			}
+		})
+	}
 }
 
 func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *testing.T) {

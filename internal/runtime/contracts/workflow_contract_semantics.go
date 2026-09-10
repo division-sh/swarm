@@ -35,7 +35,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		EntitySchema:           entitySchema,
 		Stages:                 deriveWorkflowStages(bundle.RootSchema, bundle.FlowSchemas),
 		TerminalStages:         deriveWorkflowTerminalStages(bundle.RootSchema, bundle.FlowSchemas),
-		Transitions:            deriveStageTimerTransitions(bundle),
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
 		Joins:                  nil,
 		Loops:                  nil,
@@ -239,11 +238,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 				Clear:            handler.Clear,
 			}
 			semantics.HandlerTransitions = append(semantics.HandlerTransitions, transition)
-			if derivedTransition, ok := deriveWorkflowTransitionContract(transition); ok {
-				semantics.Transitions = append(semantics.Transitions, derivedTransition)
-			}
-			semantics.Transitions = append(semantics.Transitions, deriveRuleTransitions(transition)...)
-			semantics.Transitions = append(semantics.Transitions, deriveJoinTransitions(transition)...)
 			if semantics.HandlerTransitionIndex[nodeRef.Key()] == nil {
 				semantics.HandlerTransitionIndex[nodeRef.Key()] = map[string]HandlerTransitionSemantic{}
 			}
@@ -252,7 +246,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		semantics.NodeHandlers[nodeRef.Key()] = handlers
 	}
 	semantics.Loops = deriveWorkflowLoopPlans(bundle, semantics.HandlerTransitions)
-	semantics.StageTopologies = deriveWorkflowStageTopologies(semantics)
+	semantics.StageTopologies = deriveWorkflowStageTopologies(bundle.RootSchema, semantics)
 	semantics.Loops = BindWorkflowLoopRegions(semantics.Loops, semantics.StageTopologies)
 	bundle.Semantics = semantics
 	populateEventSchemaOwnershipIndex(bundle)
@@ -338,14 +332,8 @@ func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []Handl
 	return plans
 }
 
-func deriveWorkflowStageTopologies(semantics WorkflowSemanticView) map[string]WorkflowStageTopology {
+func deriveWorkflowStageTopologies(root *FlowSchemaDocument, semantics WorkflowSemanticView) map[string]WorkflowStageTopology {
 	out := map[string]WorkflowStageTopology{}
-	rootStages := make([]string, 0, len(semantics.Stages))
-	for _, stage := range semantics.Stages {
-		if id := strings.TrimSpace(stage.ID); id != "" {
-			rootStages = append(rootStages, id)
-		}
-	}
 	build := func(flowID, initial string, stages, terminal []string) {
 		timers := make([]WorkflowTimerContract, 0)
 		for _, timer := range semantics.Timers {
@@ -361,8 +349,12 @@ func deriveWorkflowStageTopologies(semantics WorkflowSemanticView) map[string]Wo
 		}
 		out[flowID] = BuildWorkflowStageTopology(flowID, initial, stages, terminal, semantics.HandlerTransitions, timers, semantics.Loops, semantics.Gates)
 	}
-	build(".", semantics.InitialStage, rootStages, semantics.TerminalStages)
+	// Aggregate stage metadata includes other flows and cannot authorize root edges.
+	build(".", semantics.InitialStage, rootSchemaStates(root), rootSchemaTerminalStates(root))
 	for flowID, stages := range semantics.FlowStates {
+		if flowID == "." {
+			continue
+		}
 		build(flowID, semantics.FlowInitial[flowID], stages, semantics.FlowTerminal[flowID])
 	}
 	return out
@@ -490,132 +482,6 @@ func sortedGuardActionEntries(entries map[string]GuardActionEntry) []GuardAction
 	}
 	return out
 }
-func deriveWorkflowTransitionContract(transition HandlerTransitionSemantic) (WorkflowTransitionContract, bool) {
-	to := handlerLevelAdvanceTarget(transition)
-	if to == "" {
-		return WorkflowTransitionContract{}, false
-	}
-	out := WorkflowTransitionContract{
-		ID:               strings.TrimSpace(transition.ID),
-		From:             []string{"*"},
-		To:               to,
-		Trigger:          strings.TrimSpace(transition.EventType),
-		ExecutableNode:   transition.Node,
-		DataAccumulation: transition.DataAccumulation,
-	}
-	if transition.Loop != nil && strings.TrimSpace(transition.Loop.From) != "" {
-		out.From = []string{strings.TrimSpace(transition.Loop.From)}
-	}
-	if guardID := strings.TrimSpace(firstTransitionGuardID(transition.Guard)); guardID != "" {
-		out.Guards = []string{guardID}
-	}
-	if actionID := strings.TrimSpace(transition.Action.ID); actionID != "" {
-		out.Actions = []string{actionID}
-	}
-	return out, strings.TrimSpace(out.ID) != "" && strings.TrimSpace(out.Trigger) != ""
-}
-
-func handlerLevelAdvanceTarget(transition HandlerTransitionSemantic) string {
-	for _, carrier := range HandlerTransitionAdvanceCarriers(transition) {
-		if carrier.Kind == HandlerAdvanceCarrierHandler {
-			return strings.TrimSpace(carrier.AdvancesTo)
-		}
-	}
-	return ""
-}
-
-func deriveJoinTransitions(transition HandlerTransitionSemantic) []WorkflowTransitionContract {
-	if transition.Join == nil {
-		return nil
-	}
-	join := transition.Join
-	from := []string{strings.TrimSpace(join.Stage)}
-	out := make([]WorkflowTransitionContract, 0, 2)
-	if target := strings.TrimSpace(join.OnComplete.AdvancesTo); target != "" {
-		out = append(out, WorkflowTransitionContract{
-			ID:             strings.TrimSpace(transition.ID) + ":join:" + join.EffectiveID() + ":complete",
-			From:           from,
-			To:             target,
-			Trigger:        strings.TrimSpace(transition.EventType),
-			ExecutableNode: transition.Node,
-		})
-	}
-	if target := strings.TrimSpace(join.Timeout.Outcome.AdvancesTo); target != "" {
-		out = append(out, WorkflowTransitionContract{
-			ID:             strings.TrimSpace(transition.ID) + ":join:" + join.EffectiveID() + ":timeout",
-			From:           from,
-			To:             target,
-			Trigger:        "platform.join_timeout",
-			ExecutableNode: transition.Node,
-		})
-	}
-	return out
-}
-
-func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTransitionContract {
-	carriers := HandlerTransitionAdvanceCarriers(transition)
-	out := make([]WorkflowTransitionContract, 0, len(carriers))
-	defaultIDIndex := 0
-	for _, carrier := range carriers {
-		switch carrier.Kind {
-		case HandlerAdvanceCarrierOnComplete, HandlerAdvanceCarrierRules:
-		default:
-			continue
-		}
-		rule := carrier.Rule
-		id := strings.TrimSpace(rule.ID)
-		if id == "" {
-			id = fmt.Sprintf("%s:rule:%d", strings.TrimSpace(transition.ID), defaultIDIndex)
-		}
-		defaultIDIndex++
-		out = append(out, WorkflowTransitionContract{
-			ID:             id,
-			From:           []string{"*"},
-			To:             strings.TrimSpace(carrier.AdvancesTo),
-			Trigger:        strings.TrimSpace(transition.EventType),
-			ExecutableNode: transition.Node,
-			Actions:        actionIDsForRule(rule),
-		})
-	}
-	handlerAdvanceTo := handlerLevelAdvanceTarget(transition)
-	for _, rule := range transition.Rules {
-		if strings.TrimSpace(rule.AdvancesTo) != "" || strings.TrimSpace(rule.Action.ID) == "" {
-			continue
-		}
-		to := handlerAdvanceTo
-		if to == "" {
-			continue
-		}
-		id := strings.TrimSpace(rule.ID)
-		if id == "" {
-			id = fmt.Sprintf("%s:rule:%d", strings.TrimSpace(transition.ID), defaultIDIndex)
-		}
-		defaultIDIndex++
-		out = append(out, WorkflowTransitionContract{
-			ID:             id,
-			From:           []string{"*"},
-			To:             to,
-			Trigger:        strings.TrimSpace(transition.EventType),
-			ExecutableNode: transition.Node,
-			Actions:        actionIDsForRule(rule),
-		})
-	}
-	return out
-}
-
-func actionIDsForRule(rule HandlerRuleEntry) []string {
-	if id := strings.TrimSpace(rule.Action.ID); id != "" {
-		return []string{id}
-	}
-	return nil
-}
-
-func firstTransitionGuardID(guard *GuardSpec) string {
-	if guard == nil {
-		return ""
-	}
-	return strings.TrimSpace(guard.ID)
-}
 func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTimerContract {
 	if bundle == nil {
 		return nil
@@ -705,25 +571,6 @@ func stageWorkflowTimerSemanticID(flowID, rowID string) string {
 		return rowID
 	}
 	return flowID + "." + rowID
-}
-
-func deriveStageTimerTransitions(bundle *WorkflowContractBundle) []WorkflowTransitionContract {
-	timers := deriveStageWorkflowTimers(bundle)
-	out := make([]WorkflowTransitionContract, 0, len(timers))
-	for _, timer := range timers {
-		if strings.TrimSpace(timer.AdvancesTo) == "" {
-			continue
-		}
-		out = append(out, WorkflowTransitionContract{
-			ID:            "timer:" + strings.TrimSpace(timer.ID),
-			From:          []string{strings.TrimSpace(timer.Stage)},
-			To:            strings.TrimSpace(timer.AdvancesTo),
-			Trigger:       "timer:" + strings.TrimSpace(timer.ID),
-			FlowID:        strings.TrimSpace(timer.FlowID),
-			InternalOwner: "runtime",
-		})
-	}
-	return out
 }
 
 func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerContract {
@@ -940,10 +787,10 @@ func rootSchemaInitialStage(root *FlowSchemaDocument) string {
 
 func deriveWorkflowStages(root *FlowSchemaDocument, schemas map[string]FlowSchemaDocument) []WorkflowStageContract {
 	out := make([]WorkflowStageContract, 0)
-	seen := make(map[string]struct{})
+	seen := make(map[[2]string]struct{})
 	if root != nil {
 		for _, stage := range root.LoweredWorkflowStages(".") {
-			key := strings.TrimSpace(stage.ID)
+			key := [2]string{strings.TrimSpace(stage.Phase), strings.TrimSpace(stage.ID)}
 			if _, exists := seen[key]; exists {
 				continue
 			}
@@ -959,7 +806,7 @@ func deriveWorkflowStages(root *FlowSchemaDocument, schemas map[string]FlowSchem
 	for _, flowID := range flowIDs {
 		schema := schemas[flowID]
 		for _, stage := range schema.LoweredWorkflowStages(flowID) {
-			key := strings.TrimSpace(stage.ID)
+			key := [2]string{strings.TrimSpace(stage.Phase), strings.TrimSpace(stage.ID)}
 			if _, exists := seen[key]; exists {
 				continue
 			}

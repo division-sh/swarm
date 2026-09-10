@@ -200,7 +200,6 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceSt
 	}
 	bus := &recordingPipelineBus{}
 	deliveryStore := newPipelineTestDeliveryOwner(t, db, store.isSQLite())
-	node := pipelineSourceNode(t, source, "validation", "w-node")
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Persistence:         workflowPersistenceForTest(store),
 		DeliveryStore:       deliveryStore,
@@ -211,12 +210,6 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceSt
 		Module: &previewWorkflowModule{
 			bundle:        bundle,
 			workflowNodes: nodes,
-			workflow: NewWorkflowDefinition("validation", []WorkflowStage{
-				{Name: "new"},
-				{Name: "done", Terminal: true},
-			}, []WorkflowTransition{
-				{Name: "complete", From: []WorkflowStateID{"new"}, To: "done", Trigger: "thing.created", Node: node},
-			}),
 		},
 	})
 	configurePipelineTestDeliveryOwner(t, pc)

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -24,10 +26,12 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 		MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 2},
 		Escape:      runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"},
 		EntryStage:  "drafting", RegionStages: []string{"drafting", "review"},
+		Operations: []runtimecontracts.WorkflowLoopOperationPlan{{Kind: runtimecontracts.LoopOperationRepeat, Node: testFlowExecutableNode(t, "validation", "loop-node"), HandlerEvent: "loop.event", From: "review", AdvancesTo: "drafting"}},
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-		Loops:  []runtimecontracts.WorkflowLoopPlan{plan},
-		Stages: []runtimecontracts.WorkflowStageContract{{ID: "queued"}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated"}},
+		FlowStates: map[string][]string{"validation": {"queued", "drafting", "review", "escalated"}},
+		Loops:      []runtimecontracts.WorkflowLoopPlan{plan},
+		Stages:     []runtimecontracts.WorkflowStageContract{{ID: "queued"}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated"}},
 	}})
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{},
@@ -187,7 +191,7 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 		},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+		Source: sourceWithFixtureStages(source, "validation", "drafting", "drafting", "review", "escalated"), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -277,4 +281,89 @@ func loopCarrierTestRequest(t testing.TB, state StateSnapshot, handler runtimeco
 
 func uuidForLoopCarrier(name string, ordinal int) string {
 	return activityidentity.ForkLineageEventID("00000000-0000-0000-0000-000000000010", fmt.Sprintf("%s:%d", name, ordinal))
+}
+
+func TestExecutorCompiledLoopOperationsRetainExactCarrier(t *testing.T) {
+	node := testFlowExecutableNode(t, "validation", "loop-node")
+	plan := runtimecontracts.WorkflowLoopPlan{
+		FlowID: "validation", ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 2},
+		EntryStage: "drafting", RegionStages: []string{"drafting", "review"}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"},
+		Operations: []runtimecontracts.WorkflowLoopOperationPlan{{Node: node, HandlerEvent: "work.repeat", Kind: runtimecontracts.LoopOperationRepeat, LoopID: "revision", From: "review", AdvancesTo: "drafting"}},
+	}
+	handlers := map[string]runtimecontracts.SystemNodeEventHandler{
+		"work.start":    {Loop: &runtimecontracts.LoopOperationSpec{Start: "revision", From: "queued"}, AdvancesTo: "drafting"},
+		"work.rule":     {Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}, Rules: []runtimecontracts.HandlerRuleEntry{{ID: "review", Condition: "else", AdvancesTo: "review"}}},
+		"work.complete": {Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}, OnComplete: []runtimecontracts.HandlerRuleEntry{{ID: "review", Condition: "else", AdvancesTo: "review"}}},
+		"work.repeat":   {Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "review"}, AdvancesTo: "drafting", Emit: runtimecontracts.EmitSpec{Event: "draft.requested"}},
+		"work.close":    {Loop: &runtimecontracts.LoopOperationSpec{Close: "revision", From: "review"}, AdvancesTo: "done"},
+	}
+	var transitions []runtimecontracts.HandlerTransitionSemantic
+	for event, handler := range handlers {
+		qualified, err := completeSemanticFixtureHandlerRuleIdentity(node, event, handler)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handlers[event] = qualified
+		transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{Node: node, EventType: event, Loop: qualified.Loop, AdvancesTo: qualified.AdvancesTo, Rules: qualified.Rules, OnComplete: qualified.OnComplete})
+	}
+	graph := runtimecontracts.BuildWorkflowStageTopology("validation", "queued", []string{"queued", "drafting", "review", "done", "escalated"}, []string{"done", "escalated"}, transitions, nil, []runtimecontracts.WorkflowLoopPlan{plan})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Loops: []runtimecontracts.WorkflowLoopPlan{plan}, StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"validation": graph},
+	}})
+	exec, recorder := transitionTestExecutor(t, source)
+	execute := func(state StateSnapshot, event string, ordinal int, revision string) ExecutionResult {
+		t.Helper()
+		req := loopCarrierTestRequest(t, state, handlers[event], event, uuidForLoopCarrier(event, ordinal), map[string]any{"revision_id": revision})
+		req.Route = flowidentity.DeriveRoute("validation", req.Event.RunID())
+		result, err := exec.ExecuteSemanticFixture(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cause := result.StateMutation.Transition
+		if cause == nil {
+			t.Fatalf("%s has no transition", event)
+		}
+		compiled, ok := cause.Compiled()
+		kind, _, _ := handlers[event].Loop.Operation()
+		if !ok || compiled.Edge().Node != node || compiled.Edge().HandlerEvent != event || compiled.Edge().LoopID != "revision" || compiled.Edge().LoopOperation != kind {
+			t.Fatalf("%s carrier = %#v", event, compiled.Edge())
+		}
+		if err := cause.ValidateAgainst(graph); err != nil {
+			t.Fatal(err)
+		}
+		if result.HandlerRuleSelection.Ref().Valid() && !compiled.Edge().RuleRef.Equal(result.HandlerRuleSelection.Ref()) {
+			t.Fatalf("%s lost underlying selected rule: %#v", event, compiled.Edge())
+		}
+		return result
+	}
+	started := execute(testStateSnapshot("queued", nil, nil, nil), "work.start", 1, "")
+	revision := started.LoopTrace.RevisionID
+	for _, event := range []string{"work.rule", "work.complete"} {
+		// The activation is valid, but cannot authorize a graph source different
+		// from the compiled loop.from even when the target is otherwise declared.
+		wrongStage := loopTestNextState(started)
+		wrongStage.CurrentState = "review"
+		before := len(recorder.mutations)
+		_, err := exec.ExecuteSemanticFixture(context.Background(), loopCarrierTestRequest(t, wrongStage, handlers[event], event, uuidForLoopCarrier(event, 9), map[string]any{"revision_id": revision}))
+		if !errors.Is(err, ErrInvalidTransition) || len(recorder.mutations) != before {
+			t.Fatalf("%s wrong source: err=%v mutations=%d/%d", event, err, len(recorder.mutations), before)
+		}
+	}
+	admitted := execute(loopTestNextState(started), "work.rule", 1, revision)
+	repeated := execute(loopTestNextState(admitted), "work.repeat", 1, revision)
+	if len(repeated.EmitIntents) != 1 || repeated.LoopTrace.Attempt != 2 {
+		t.Fatalf("ordinary repeat = %#v", repeated)
+	}
+	revision = repeated.LoopTrace.RevisionID
+	completed := execute(loopTestNextState(repeated), "work.complete", 1, revision)
+	closed := execute(loopTestNextState(completed), "work.close", 1, revision)
+	if closed.LoopTrace.Status != loopruntime.StatusClosed || closed.NextState != "done" {
+		t.Fatalf("close = %#v", closed)
+	}
+	// Independent cap branch uses the same fixed graph and accepted revision.
+	escaped := execute(loopTestNextState(completed), "work.repeat", 2, revision)
+	compiled, _ := escaped.StateMutation.Transition.Compiled()
+	if compiled.Edge().Source != "loop.escape" || compiled.Edge().AdvanceCarrier != "" || compiled.Edge().RuleRef.Valid() || escaped.NextState != "escalated" || len(escaped.EmitIntents) != 0 || escaped.LoopTrace.CloseReason != loopruntime.CloseReasonEscaped {
+		t.Fatalf("cap selected ordinary work instead of escape: %#v", escaped)
+	}
 }

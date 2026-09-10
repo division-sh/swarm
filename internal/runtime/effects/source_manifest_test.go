@@ -120,6 +120,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:writeFixtureFile:filesystem_write:2":                                       ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:removeClosedVariantFiles:filesystem_write:1":                               ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:writeYAMLDocument:filesystem_write:1":                                      ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/lifecycle_emitter_static.go:CopyLifecycleEmitterStatic:filesystem_write:1":            ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/root_connect.go:CopyRootOutputSingletonArc:filesystem_write:1":                        ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/resolution_variants.go:CopyNestedProducerTemplateSelectResolution:filesystem_write:1": ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/resolution_variants.go:CopyNestedProducerTemplateSelectResolution:filesystem_write:2": ownerBuildTest,
