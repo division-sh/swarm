@@ -17,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -37,12 +36,12 @@ type forkOrdinalUnusedDependencies struct {
 	engine.PostCommitDispatcher
 }
 
-func TestSelectedForkFanOutDeferredWorkRefusalBothStores(t *testing.T) {
+func TestForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T) {
 	testForkFanOutGenerationWriterEvaluatorBothStores(t, true, false)
 }
 
 // Ordinary fork execution is a separate supported path. It does not change the
-// archived selected-execution proof or grant that path deferred-work authority.
+// retained selected-execution proof or grant that path deferred-work authority.
 func TestOrdinaryForkFanOutOriginWriterEvaluatorBothStores(t *testing.T) {
 	testForkFanOutGenerationWriterEvaluatorBothStores(t, false, false)
 }
@@ -181,31 +180,12 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					forkOwner := fixture.store.(selectedActivityProjectionStore)
 					var materialize func() (runfork.RunForkMaterialization, error)
 					if selectedExecution {
-						if _, err := forkOwner.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
-							t.Fatal(err)
+						request := selectedSourceMaterializationRequest(t, ctx, forkOwner, runID, point.ID(), source)
+						request.OriginalLoopCarriage = original
+						request.FanOutPlanRefs = []contracts.FanOutPlanRef{plans[0].Ref}
+						materialize = func() (runfork.RunForkMaterialization, error) {
+							return forkOwner.MaterializeRunForkForSelectedContractExecution(ctx, request)
 						}
-						// Establish the normal process capability before measuring the
-						// first request. Startup is not a fork preparation mutation.
-						storeTestWorkOwner(t)
-						work, _ := storeTestWorkFixtures.Load(t)
-						selectedMaterializationProcessForTest(t, work.(*storeTestWorkFixture), forkOwner)
-						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						for attempt := 0; attempt < 2; attempt++ {
-							prepared, err := prepareSelectedStoreForkForTest(t, ctx, forkOwner, runID, point.ID(),
-								runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundle.SourceArtifact.BundleHash()}, bundle.SourceArtifact.BundleHash())
-							failure, classified := runtimefailures.EnvelopeFromError(err)
-							if prepared != nil || !classified || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "selected_contract_deferred_work_owner_unavailable" {
-								t.Fatalf("attempt %d: want exact selected deferred-work refusal and no prepared child; got prepared=%v failure=%+v err=%v", attempt, prepared, failure, err)
-							}
-							capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
-							if !ok || !reflect.DeepEqual(capabilities, []string{"fan_out_delivery_barrier"}) {
-								t.Fatalf("attempt %d: unexpected deferred capabilities: %#v", attempt, failure.Detail.Attributes["capabilities"])
-							}
-							if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
-								t.Fatalf("attempt %d: selected deferred refusal mutated application tables", attempt)
-							}
-						}
-						return
 					} else {
 						request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original}
 						materialize = func() (runfork.RunForkMaterialization, error) {
