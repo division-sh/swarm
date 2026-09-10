@@ -472,10 +472,6 @@ func (m slackManagedConnectorModule) SemanticSource() semanticview.Source {
 	return m.source
 }
 
-func (m slackManagedConnectorModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
-
 func (m slackManagedConnectorModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }

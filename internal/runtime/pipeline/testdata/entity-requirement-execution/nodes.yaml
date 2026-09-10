@@ -1,0 +1,10 @@
+node-a:
+  id: node-a
+  execution_type: system_node
+  event_handlers:
+    work.ready:
+      accumulate: {into: items, from: payload}
+    work.clear:
+      clear: {targets: [accumulator_state, pending_dedup, revision_count]}
+    work.kill:
+      guard: {id: stop-work, check: 'false', on_fail: kill}

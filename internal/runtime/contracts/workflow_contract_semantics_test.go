@@ -83,27 +83,17 @@ func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) 
 
 	populateWorkflowSemantics(bundle)
 
-	var found bool
-	for _, transition := range bundle.WorkflowTransitions() {
-		if transition.ID != "needs-human" {
-			continue
-		}
-		found = true
-		if transition.To != "awaiting_review" {
-			t.Fatalf("rule transition To = %q, want handler advances_to fallback", transition.To)
-		}
-		if got, want := transition.Actions, []string{"request_review"}; len(got) != len(want) || got[0] != want[0] {
-			t.Fatalf("rule transition Actions = %#v, want %#v", got, want)
-		}
+	transitions := bundle.DerivedHandlerTransitions()
+	if len(transitions) != 1 {
+		t.Fatalf("handler transitions = %#v", transitions)
 	}
-	if !found {
-		t.Fatalf("missing rule transition for rule-level action using handler advances_to fallback")
+	carriers := HandlerTransitionAdvanceCarriers(transitions[0])
+	if len(carriers) != 1 || carriers[0].Kind != HandlerAdvanceCarrierHandler || carriers[0].AdvancesTo != "awaiting_review" {
+		t.Fatalf("inherited target must remain handler-owned, not a fabricated rule advance: %#v", carriers)
 	}
-
-	for _, transition := range bundle.WorkflowTransitions() {
-		if transition.ID == "auto-approve" {
-			t.Fatalf("derived fallback transition for rule without action: %#v", transition)
-		}
+	rules := transitions[0].Rules
+	if len(rules) != 2 || rules[0].Action.ID != "request_review" || rules[1].Action.ID != "" {
+		t.Fatalf("handler owner lost rule actions: %#v", rules)
 	}
 }
 
@@ -163,12 +153,13 @@ func TestWorkflowSemanticsDerivesTopLevelCompletionTransitions(t *testing.T) {
 
 	populateWorkflowSemantics(bundle)
 
-	transitions := map[string]WorkflowTransitionContract{}
-	for _, transition := range bundle.WorkflowTransitions() {
-		transitions[transition.ID] = transition
+	transitions := bundle.DerivedHandlerTransitions()
+	if len(transitions) != 1 {
+		t.Fatalf("handler transitions = %#v", transitions)
 	}
-	if got := transitions["top-complete"].To; got != "top_review" {
-		t.Fatalf("top-level on_complete transition To = %q, want top_review; transitions=%#v", got, transitions)
+	carriers := HandlerTransitionAdvanceCarriers(transitions[0])
+	if len(carriers) != 1 || carriers[0].Kind != HandlerAdvanceCarrierOnComplete || carriers[0].AdvancesTo != "top_review" || carriers[0].Rule.ID != "top-complete" {
+		t.Fatalf("top-level on_complete carrier = %#v", carriers)
 	}
 }
 
@@ -192,8 +183,8 @@ func TestStreamAccumulatorDerivesNoIntrinsicTimeoutSubscriptionOrTransition(t *t
 	if got := bundle.Semantics.EffectiveNodes[collector.Key()].RuntimeSubscriptions; !reflect.DeepEqual(got, []string{"item.arrived"}) {
 		t.Fatalf("stream accumulator subscriptions = %#v, want only authored arrival", got)
 	}
-	for _, transition := range bundle.WorkflowTransitions() {
-		if transition.Trigger == "accumulate.timeout" || transition.Trigger == "platform.join_timeout" {
+	for _, transition := range bundle.DerivedHandlerTransitions() {
+		if transition.EventType == "accumulate.timeout" || transition.EventType == "platform.join_timeout" || transition.Join != nil {
 			t.Fatalf("stream accumulator derived finite timeout transition: %#v", transition)
 		}
 	}
@@ -248,21 +239,25 @@ func TestWorkflowSemanticsDerivesStageTimersAndTimedTransitionEdges(t *testing.T
 		t.Fatalf("advance timer = %#v, want internal event + advances_to lowering", advanceTimer)
 	}
 
+	topology, ok := bundle.WorkflowStageTopology(".")
+	if !ok {
+		t.Fatal("missing stage topology")
+	}
 	var foundTransition bool
-	for _, transition := range bundle.WorkflowTransitions() {
-		if transition.ID != "timer:awaiting_review.expired" {
+	for _, transition := range topology.Edges {
+		if transition.TimerID != "awaiting_review.expired" {
 			continue
 		}
 		foundTransition = true
-		if got, want := transition.From, []string{"awaiting_review"}; !reflect.DeepEqual(got, want) {
+		if got, want := transition.From, "awaiting_review"; got != want {
 			t.Fatalf("timer transition From = %#v, want %#v", got, want)
 		}
-		if transition.To != "expired" || transition.Trigger != "timer:awaiting_review.expired" || transition.InternalOwner != "runtime" || transition.FlowID != "." {
+		if transition.To != "expired" || transition.EventType != "timer:awaiting_review.expired" || transition.InternalOwner != "runtime" || topology.FlowID != "." || transition.Source != "timer" || transition.Node.Valid() {
 			t.Fatalf("timer transition = %#v, want runtime timed edge to expired", transition)
 		}
 	}
 	if !foundTransition {
-		t.Fatalf("missing timed transition edge: %#v", bundle.WorkflowTransitions())
+		t.Fatalf("missing timed transition edge: %#v", topology.Edges)
 	}
 }
 

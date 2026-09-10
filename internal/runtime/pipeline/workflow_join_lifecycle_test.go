@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -118,6 +117,7 @@ func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
+			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Mock)
 			bundle := workflowJoinLifecycleBundle(t)
 			schedules := &recordingGenericScheduleWakeupOwner{}
 			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
@@ -142,12 +142,14 @@ func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T
 			}
 			instance.CurrentState = "awaiting"
 			instance.EnteredStageAt = enteredAt
-			transition, err := runtimeworkflowlifecycle.NewTransition("dispatching", "awaiting", "dispatching->awaiting")
+			transition, err := compiledLifecycleTransitionForTest(pc, instance.WorkflowName, "dispatching", "awaiting", "order.accepted")
 			if err != nil {
 				t.Fatal(err)
 			}
+			inbound := workflowLifecycleEventForTest(t, store, ctx, "orders", path, entityID, "orders/order.accepted", enteredAt)
+			ctx = runtimecorrelation.WithInboundEvent(ctx, inbound)
 			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(
-				route, identity.NormalizeEntityID(entityID), uuid.NewString(), "order.accepted", executionmode.Mock, enteredAt, &transition,
+				route, identity.NormalizeEntityID(entityID), inbound.ID(), string(inbound.Type()), inbound.ExecutionMode(), inbound.CreatedAt(), transition,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -284,14 +286,14 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle(t)
-			node := bundle.Nodes["join-node"]
+			node := bundle.FlowTree.ByID["orders"].Nodes["join-node"]
 			handler := node.EventHandlers["item.completed"]
 			spec := *handler.Join
 			spec.CompleteWhen = "join.completed >= 1"
 			spec.Remaining = runtimecontracts.JoinRemainingIgnore
 			handler.Join = &spec
 			node.EventHandlers["item.completed"] = handler
-			bundle.Nodes["join-node"] = node
+			bundle.FlowTree.ByID["orders"].Nodes["join-node"] = node
 			bundle.Semantics.Joins[0].Spec = spec
 			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
 
@@ -337,14 +339,14 @@ func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T)
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	bundle := workflowJoinLifecycleBundle(t)
-	node := bundle.Nodes["join-node"]
+	node := bundle.FlowTree.ByID["orders"].Nodes["join-node"]
 	handler := node.EventHandlers["item.completed"]
 	spec := *handler.Join
 	spec.CompleteWhen = "join.results[0] > 1"
 	spec.Remaining = runtimecontracts.JoinRemainingIgnore
 	handler.Join = &spec
 	node.EventHandlers["item.completed"] = handler
-	bundle.Nodes["join-node"] = node
+	bundle.FlowTree.ByID["orders"].Nodes["join-node"] = node
 	bundle.Semantics.Joins[0].Spec = spec
 	bundle.Semantics.Joins[0].ResultType = runtimecontracts.CatalogTypeReference{
 		Type: "JoinResult",
@@ -378,27 +380,7 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
-			bundle := workflowJoinLifecycleBundle(t)
-			node := bundle.Nodes["join-node"]
-			first := *node.EventHandlers["item.completed"].Join
-			first.ID = "shared"
-			first.Stage = "awaiting"
-			second := first
-			second.Stage = "reviewing"
-			node.EventHandlers["item.completed"] = runtimecontracts.SystemNodeEventHandler{Join: &first}
-			node.EventHandlers["approval.completed"] = runtimecontracts.SystemNodeEventHandler{Join: &second}
-			bundle.Nodes["join-node"] = node
-			bundle.Events["approval.completed"] = bundle.Events["item.completed"]
-			bundle.RootSchema.StageDeclarations.Entries = append(bundle.RootSchema.StageDeclarations.Entries, runtimecontracts.FlowStageDeclaration{ID: "reviewing"})
-			bundle.Semantics.Stages = append(bundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: "reviewing"})
-			resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
-			bundle.Semantics.Joins = []runtimecontracts.WorkflowJoinPlan{
-				{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: first, ResultType: resultType},
-				{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "approval.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: second, ResultType: resultType},
-			}
-			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
-			bundle.Semantics.EffectiveNodes["join-node"] = runtimecontracts.SystemNodeEffectiveSemantics{ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)}
-
+			bundle := workflowJoinLifecycleBundleWithReview(t, true)
 			schedules := &recordingGenericScheduleWakeupOwner{}
 			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:           &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
@@ -418,11 +400,13 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			transitionAt := time.Now().UTC()
-			transition, err := runtimeworkflowlifecycle.NewTransition("awaiting", "reviewing", "test-stage-transition")
+			transition, err := compiledLifecycleTransitionForTest(pc, "orders", "awaiting", "reviewing", "review.requested")
 			if err != nil {
 				t.Fatal(err)
 			}
-			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(testWorkflowInstanceRoute(path), identity.NormalizeEntityID(entityID), uuid.NewString(), "approval.completed", executionmode.Live, transitionAt, &transition)
+			inbound := workflowLifecycleEventForTest(t, store, ctx, "orders", path, entityID, "orders/review.requested", transitionAt)
+			ctx = runtimecorrelation.WithInboundEvent(ctx, inbound)
+			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(testWorkflowInstanceRoute(path), identity.NormalizeEntityID(entityID), inbound.ID(), string(inbound.Type()), executionmode.Live, inbound.CreatedAt(), transition)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -597,7 +581,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
-			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
+			handler := pc.SemanticSource().ExecutableNodeEventHandlers(mustPipelineNode("orders", "join-node"))["item.completed"]
 			member := eventtest.RunCreatingRootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), now)
 			timeout := workflowJoinTimerEventForTest(t, "timeout-a", joinTimeoutEvent, handle, runtimecorrelation.RunIDFromContext(ctx), workflowJoinTestEnvelope(path, entityID), now.Add(time.Hour))
 			triggerState := mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)
@@ -687,7 +671,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
-			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
+			handler := pc.SemanticSource().ExecutableNodeEventHandlers(mustPipelineNode("orders", "join-node"))["item.completed"]
 			arrival := eventtest.RunCreatingRootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 			triggerState := mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)
 			start := make(chan struct{})
@@ -773,7 +757,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
-			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
+			handler := pc.SemanticSource().ExecutableNodeEventHandlers(mustPipelineNode("orders", "join-node"))["item.completed"]
 			deliver := func(coordinator *PipelineCoordinator, id, member, result string) error {
 				evt := eventtest.RunCreatingRootIngress(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": result}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 				_, err := coordinator.executeNodeContractHandler(ctx, mustPipelineNode("orders", "join-node"), handler, workflowTriggerContext{Event: evt, State: mustCurrentWorkflowState(t, coordinator, ctx, testWorkflowInstanceRoute(path), entityID), HandlerEventKey: "item.completed"}, false)
@@ -872,7 +856,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
-			dispatchHandler := bundle.Nodes["dispatcher"].EventHandlers["order.accepted"]
+			dispatchHandler := pc.SemanticSource().ExecutableNodeEventHandlers(mustPipelineNode("orders", "dispatcher"))["order.accepted"]
 			dispatch := eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-empty"), events.EventType("order.accepted"), "", "", json.RawMessage(`{"line_items":[]}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 			if dispatchHandler.FanOut == nil {
 				t.Fatal("dispatcher fixture lost fan_out")
@@ -1077,82 +1061,115 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 
 func workflowJoinLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	orders := runtimecontracts.FlowContractView{
-		Path:   "orders",
-		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "orders"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+	return workflowJoinLifecycleBundleWithReview(t, false)
+}
+
+func workflowJoinLifecycleBundleWithReview(t *testing.T, review bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return workflowJoinLifecycleBundleWithOptions(t, review, "")
+}
+
+func workflowJoinLifecycleBundleWithOptions(t *testing.T, review bool, loop string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	bundle := loadWorkflowTempBundle(t, workflowJoinLifecycleFixtureFiles(review, loop))
+	// Existing fixture consumers select the child plan for explicit scope tests.
+	for i, plan := range bundle.Semantics.Joins {
+		if plan.Node.FlowPath() == "orders" {
+			bundle.Semantics.Joins[0], bundle.Semantics.Joins[i] = bundle.Semantics.Joins[i], bundle.Semantics.Joins[0]
+			break
+		}
 	}
-	root := runtimecontracts.FlowContractView{
-		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Children: []runtimecontracts.FlowContractView{orders},
+	return bundle
+}
+
+func workflowJoinLifecycleFixtureFiles(review bool, loop string) map[string]string {
+	files := map[string]string{
+		"schema.yaml":   "name: workflow-join-lifecycle\n",
+		"entities.yaml": "test_entity: {}\n",
+		"orders/schema.yaml": `name: orders
+mode: template
+stages:
+  dispatching: {}
+  awaiting: {initial: true}
+  ready: {terminal: true}
+  attention: {terminal: true}
+`,
+		"orders/entities.yaml": "test_entity:\n  expected: list<text>\n",
+		"orders/types.yaml":    "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",
+		"orders/events.yaml": `item.completed:
+  member_id: text
+  result: ItemResult
+order.accepted:
+  line_items: list<LineItem>
+line_item.requested:
+  line_item_id: text
+dispatch.completed: {}
+manual.abort: {}
+`,
+		"orders/nodes.yaml": `dispatcher:
+  execution_type: system_node
+  event_handlers:
+    order.accepted:
+      fan_out:
+        items_from: payload.line_items
+        as: line_item
+        identity: line_item.id
+        emit:
+          event: line_item.requested
+          fields:
+            line_item_id: {cel: line_item.id}
+      advances_to: awaiting
+    dispatch.completed:
+      advances_to: awaiting
+    manual.abort:
+      advances_to: dispatching
+join-node:
+  execution_type: system_node
+  event_handlers:
+    item.completed:
+      join:
+        id: awaiting
+        stage: awaiting
+        members: {from: entity.expected, by: payload.member_id}
+        output: payload.result
+        on_complete: {advances_to: ready}
+        timeout: {after: 1h, advances_to: attention}
+`,
 	}
-	resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
-	spec := runtimecontracts.JoinSpec{
-		ID: "awaiting", Stage: "awaiting",
-		Members: runtimecontracts.JoinMembersSpec{From: "entity.expected", FromPath: runtimepaths.Parse("entity.expected"), By: "payload.member_id", ByPath: runtimepaths.Parse("payload.member_id")},
-		Output:  "payload.result", OutputPath: runtimepaths.Parse("payload.result"), OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"}, OnCompleteFound: true,
-		Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}}, TimeoutFound: true,
+	if review {
+		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  awaiting: {initial: true}", "  awaiting: {initial: true}\n  reviewing: {}", 1)
+		files["orders/events.yaml"] += "review.requested: {}\napproval.completed:\n  member_id: text\n  result: ItemResult\n"
+		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    manual.abort:", "    review.requested:\n      advances_to: reviewing\n    manual.abort:", 1)
+		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "id: awaiting", "id: shared", 1)
+		files["orders/nodes.yaml"] += `    approval.completed:
+      join:
+        id: shared
+        stage: reviewing
+        members: {from: entity.expected, by: payload.member_id}
+        output: payload.result
+        on_complete: {advances_to: ready}
+        timeout: {after: 1h, advances_to: attention}
+`
 	}
-	fanOut := runtimecontracts.FanOutSpec{
-		ItemsFrom: "payload.line_items", ItemsPath: runtimepaths.Parse("payload.line_items"), As: "line_item", Identity: "line_item.id",
-		Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{"line_item_id": runtimecontracts.CELExpression("line_item.id")}},
+	if loop != "" {
+		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  ready: {terminal: true}", "  ready: {}", 1)
+		files["orders/schema.yaml"] += "loops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: attention}\n"
+		from := "awaiting"
+		if loop == "reentrant" {
+			from = "ready"
+			files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    item.completed:\n      join:", "    item.completed:\n      loop: {admit: revision, from: awaiting}\n      join:", 1)
+		}
+		files["orders/events.yaml"] += "loop.start: {}\nloop.repeat:\n  revision_id: text\n"
+		files["orders/events.yaml"] = strings.Replace(files["orders/events.yaml"], "item.completed:\n", "item.completed:\n  revision_id: text\n", 1)
+		files["orders/nodes.yaml"] += "observer:\n  execution_type: system_node\n  event_handlers:\n    loop.start:\n      loop: {start: revision, from: dispatching}\n      advances_to: awaiting\n    loop.repeat:\n      loop: {repeat: revision, from: " + from + "}\n      advances_to: awaiting\n"
 	}
-	joinNode := runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-		"item.completed": {Join: &spec},
-	}}
-	dispatchHandler, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(
-		mustPipelineNode("orders", "dispatcher"),
-		"order.accepted",
-		runtimecontracts.SystemNodeEventHandler{FanOut: &fanOut, AdvancesTo: "awaiting"},
-	)
-	if err != nil {
-		t.Fatal(err)
+	// Root and child executions use independently compiled declarations, even
+	// when the fixture deliberately gives them identical local names.
+	for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
+		files[name] = files["orders/"+name]
 	}
-	dispatcher := runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-		"order.accepted": dispatchHandler,
-	}}
-	eventCatalog := map[string]runtimecontracts.EventCatalogEntry{
-		"item.completed":      {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "jsonb"}}}},
-		"order.accepted":      {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"line_items": {Type: "list<jsonb>"}}}},
-		"line_item.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"line_item_id": {Type: "text"}}}},
-	}
-	root.Events = eventCatalog
-	root.Children[0].Events = eventCatalog
-	root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"join-node": joinNode, "dispatcher": dispatcher,
-	}
-	base := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "orders": &root.Children[0]},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"orders": orders.Schema,
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "dispatching", Initial: true}, {ID: "awaiting"}, {ID: "ready", Terminal: true}, {ID: "attention", Terminal: true}}}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"join-node":  joinNode,
-			"dispatcher": dispatcher,
-		},
-		Events: eventCatalog,
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "workflow-join-lifecycle", Version: "1.0.0", InitialStage: "dispatching", Stages: []runtimecontracts.WorkflowStageContract{{ID: "dispatching"}, {ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}}, TerminalStages: []string{"ready", "attention"},
-			Joins: []runtimecontracts.WorkflowJoinPlan{{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec, ResultType: resultType}},
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				"join-node":  {ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(joinNode)},
-				"dispatcher": {ID: "dispatcher", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(dispatcher)},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"join-node":  joinNode.EventHandlers,
-				"dispatcher": dispatcher.EventHandlers,
-			},
-			EventOwners: map[string][]string{
-				"item.completed": {"join-node"},
-				"order.accepted": {"dispatcher"},
-			},
-		},
-	}
-	return admitSyntheticEntityContractsForTest(t, base, "test_entity", map[string]string{"orders": "test_entity"})
+	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "name: orders\nmode: template", "name: workflow-join-lifecycle", 1)
+	return files
 }
 
 func workflowJoinActivationKey() string {

@@ -11,7 +11,6 @@ import (
 type genericTestModule struct {
 	once           sync.Once
 	contractBundle *runtimecontracts.WorkflowContractBundle
-	workflow       *WorkflowDefinition
 	workflowNodes  []WorkflowNode
 	guardRegistry  GuardRegistry
 	actionRegistry ActionRegistry
@@ -32,10 +31,6 @@ func (m *genericTestModule) init() {
 			return
 		}
 		source := semanticview.Wrap(m.contractBundle)
-		m.workflow, m.loadErr = LoadWorkflowDefinition(source)
-		if m.loadErr != nil {
-			return
-		}
 		m.workflowNodes, m.loadErr = LoadWorkflowNodes(source)
 		if m.loadErr != nil {
 			return
@@ -51,11 +46,6 @@ func (m *genericTestModule) init() {
 func (m *genericTestModule) SemanticSource() semanticview.Source {
 	m.init()
 	return semanticview.Wrap(m.contractBundle)
-}
-
-func (m *genericTestModule) WorkflowDefinition() *WorkflowDefinition {
-	m.init()
-	return m.workflow
 }
 
 func (m *genericTestModule) WorkflowNodes() []WorkflowNode {

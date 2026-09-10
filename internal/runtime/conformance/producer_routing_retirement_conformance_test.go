@@ -19,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -201,7 +202,7 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-proof", "", payload, 0,
 					"00000000-0000-0000-0000-000000000001", "", envelope, time.Now().UTC(),
 				),
-				runtimepipeline.WorkflowState{Stage: runtimepipeline.NormalizeWorkflowStateID(source.FlowInitialStage(tc.flowID))}, nil,
+				runtimeengine.StateSnapshot{CurrentState: source.FlowInitialStage(tc.flowID)}, nil,
 			)
 			if err != nil {
 				t.Fatalf("execute emitting handler: %v", err)
@@ -329,7 +330,7 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-harness", "", payload, 0,
 					"00000000-0000-0000-0000-000000000001", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "fixture-entity"), time.Now().UTC(),
 				),
-				runtimepipeline.WorkflowState{Stage: runtimepipeline.NormalizeWorkflowStateID(source.WorkflowInitialStage())},
+				runtimeengine.StateSnapshot{CurrentState: source.WorkflowInitialStage()},
 				nil,
 			)
 			if err != nil {

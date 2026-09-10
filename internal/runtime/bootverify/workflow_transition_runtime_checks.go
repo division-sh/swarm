@@ -18,65 +18,70 @@ func (c *checkerContext) transitionReferences() []Finding {
 		return c.transitionRefFindings
 	}
 	c.transitionRefLoaded = true
-	for _, transition := range c.source.WorkflowTransitions() {
-		id := strings.TrimSpace(transition.ID)
-		if id == "" {
+	// Handler declarations own action and guard references even without an advance.
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		if strings.TrimSpace(transition.Trigger) == "" {
-			c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-				CheckID:  "transition_reference_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("transition %s missing trigger", id),
-				Location: id,
-			})
-		} else if transitionTriggerIsTimerReference(c.source, transition) {
-			// Timer-triggered transitions are derived from stage timer rows and are
-			// not event catalog entries. The timer owner is validated separately.
-		} else if !flowEventExists(c.source, transitionOwningFlowID(transition), strings.TrimSpace(transition.Trigger)) {
-			c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-				CheckID:  "transition_reference_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("transition %s trigger %s missing from event catalog", id, transition.Trigger),
-				Location: id,
-			})
-		}
-		for _, actionID := range transition.Actions {
-			actionID = strings.TrimSpace(actionID)
-			if actionID == "" {
-				continue
+		for event, handler := range c.source.ExecutableNodeEventHandlers(node) {
+			location := node.Key() + ":" + event
+			c.checkTransitionEventReference(node.FlowPath(), location, event)
+			actions := []runtimecontracts.ActionSpec{handler.Action}
+			for _, rule := range runtimecontracts.HandlerRuleEntries(handler) {
+				actions = append(actions, rule.Action)
 			}
-			action, ok := c.source.ActionInstructionByID(actionID)
-			if !ok {
-				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-					CheckID:  "transition_reference_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("transition %s references unknown action %s", id, actionID),
-					Location: id,
-				})
-				continue
+			for _, spec := range actions {
+				actionID := strings.TrimSpace(spec.ID)
+				if actionID == "" {
+					continue
+				}
+				action, ok := c.source.ActionInstructionByID(actionID)
+				if !ok {
+					if !isSupportedWorkflowHandlerActionID(actionID) {
+						c.transitionReferenceFinding(location, "references unknown action %s", actionID)
+					}
+					continue
+				}
+				if emits := strings.TrimSpace(action.Emits); emits != "" && !flowEventExists(c.source, node.FlowPath(), emits) {
+					c.transitionReferenceFinding(location, "action %s emits missing event %s", actionID, emits)
+				}
 			}
-			if emits := strings.TrimSpace(action.Emits); emits != "" && !flowEventExists(c.source, transitionOwningFlowID(transition), emits) {
-				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-					CheckID:  "transition_reference_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("transition %s action %s emits missing event %s", id, actionID, emits),
-					Location: id,
-				})
+			for _, check := range handler.Guard.EffectiveChecks() {
+				// Inline expressions are executable declarations, not registry references.
+				if strings.TrimSpace(check.Check) != "" || strings.TrimSpace(check.ID) == "" {
+					continue
+				}
+				if _, ok := c.source.GuardInstructionByID(check.ID); !ok {
+					c.transitionReferenceFinding(location, "references unknown guard %s", check.ID)
+				}
 			}
 		}
-		for _, guardID := range transition.Guards {
-			guardID = strings.TrimSpace(guardID)
-			if guardID == "" {
-				continue
-			}
-			if _, ok := c.source.GuardInstructionByID(guardID); !ok {
-				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
-					CheckID:  "transition_reference_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("transition %s references unknown guard %s", id, guardID),
-					Location: id,
-				})
+	}
+	for _, flow := range lifecycleFlowSchemas(c.source) {
+		topology, ok := semanticview.WorkflowStageTopology(c.source, flow.flowID)
+		if !ok {
+			continue
+		}
+		for _, edge := range topology.Edges {
+			location := fmt.Sprintf("%s:%s:%s->%s", flow.flowID, edge.Source, edge.From, edge.To)
+			switch edge.Source {
+			case "timer":
+				timer, ok := c.source.WorkflowStageTimerByID(flow.flowID, edge.TimerID)
+				if !ok || !timer.StageOwned || timer.Stage != edge.From || timer.AdvancesTo != edge.To {
+					c.transitionReferenceFinding(location, "references unknown or mismatched stage timer %s", edge.TimerID)
+				}
+			case "gate":
+				gate, ok := c.source.WorkflowGateForStage(flow.flowID, edge.From)
+				outcome, verdictOK := gate.Outcomes[edge.Verdict]
+				if !ok || gate.Decision != edge.DecisionID || !verdictOK || outcome.AdvancesTo != edge.To {
+					c.transitionReferenceFinding(location, "references unknown or mismatched gate %s verdict %s", edge.DecisionID, edge.Verdict)
+				}
+			default:
+				c.checkTransitionEventReference(flow.flowID, location, edge.EventType)
+				if edge.HandlerEvent != edge.EventType {
+					c.checkTransitionEventReference(flow.flowID, location, edge.HandlerEvent)
+				}
 			}
 		}
 	}
@@ -132,27 +137,19 @@ func flowEventExists(source semanticview.Source, flowID, eventType string) bool 
 	return false
 }
 
-func transitionOwningFlowID(transition runtimecontracts.WorkflowTransitionContract) string {
-	if flowID := strings.TrimSpace(transition.FlowID); flowID != "" {
-		return flowID
-	}
-	if transition.ExecutableNode.Valid() {
-		return transition.ExecutableNode.FlowPath()
-	}
-	return ""
+func (c *checkerContext) transitionReferenceFinding(location, format string, args ...any) {
+	c.transitionRefFindings = append(c.transitionRefFindings, Finding{
+		CheckID: "transition_reference_validation", Severity: "error",
+		Message: "transition " + location + " " + fmt.Sprintf(format, args...), Location: location,
+	})
 }
 
-func transitionTriggerIsTimerReference(source semanticview.Source, transition runtimecontracts.WorkflowTransitionContract) bool {
-	trigger := strings.TrimSpace(transition.Trigger)
-	if !strings.HasPrefix(trigger, "timer:") {
-		return false
+func (c *checkerContext) checkTransitionEventReference(flowID, location, event string) {
+	if strings.TrimSpace(event) == "" {
+		c.transitionReferenceFinding(location, "missing trigger")
+	} else if !flowEventExists(c.source, flowID, event) {
+		c.transitionReferenceFinding(location, "trigger %s missing from event catalog", event)
 	}
-	timerID := strings.TrimSpace(strings.TrimPrefix(trigger, "timer:"))
-	if timerID == "" || source == nil {
-		return false
-	}
-	timer, ok := source.WorkflowStageTimerByID(transitionOwningFlowID(transition), timerID)
-	return ok && timer.StageOwned
 }
 
 func (c *checkerContext) transitionOwnership() []Finding {
@@ -160,91 +157,71 @@ func (c *checkerContext) transitionOwnership() []Finding {
 		return c.transitionOwnerFindings
 	}
 	c.transitionOwnerLoaded = true
-	transitions := c.source.WorkflowTransitions()
-	transitionByID := make(map[string]runtimecontracts.WorkflowTransitionContract, len(transitions))
-	for _, transition := range transitions {
-		id := strings.TrimSpace(transition.ID)
-		if id != "" {
-			transitionByID[id] = transition
-		}
-	}
-	usesOwningNodeModel := contractBundleUsesOwningNodeModel(c.source)
-	consumerEventsByNode := map[string]map[string]struct{}{}
-	producerEventsByNode := map[string]map[string]struct{}{}
-	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
-	for _, endpoint := range census.Consumers() {
-		if endpoint.Node.Valid() {
-			addTransitionEndpointEvent(consumerEventsByNode, endpoint.Node.Key(), endpoint.Event)
-		}
-	}
-	for _, endpoint := range census.Producers() {
-		if endpoint.Node.Valid() {
-			addTransitionEndpointEvent(producerEventsByNode, endpoint.Node.Key(), endpoint.Event)
-		}
-	}
-	for _, record := range c.source.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err != nil {
+	for _, flow := range lifecycleFlowSchemas(c.source) {
+		topology, ok := semanticview.WorkflowStageTopology(c.source, flow.flowID)
+		if !ok {
 			continue
 		}
-		nodeID := node.Key()
-		nodeLabel := executableNodeDiagnostic(node)
-		subs := consumerEventsByNode[nodeID]
-		produces := producerEventsByNode[nodeID]
-		for _, transitionID := range record.Entry.OwnedTransitions {
-			transitionID = strings.TrimSpace(transitionID)
-			if transitionID == "" {
-				continue
-			}
-			transition, ok := transitionByID[transitionID]
-			if !ok {
-				c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
-					CheckID:  "transition_ownership_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("%s owns unknown transition %s", nodeLabel, transitionID),
-					Location: nodeID,
-				})
-				continue
-			}
-			if owner := transition.ExecutableNode; !owner.Equal(node) {
-				c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
-					CheckID:  "transition_ownership_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("%s owns transition %s but workflow owner is %s", nodeLabel, transitionID, executableNodeDiagnostic(owner)),
-					Location: nodeID,
-				})
-			}
-			trigger := strings.TrimSpace(transition.Trigger)
-			if trigger != "" && !usesOwningNodeModel {
-				if _, ok := subs[trigger]; !ok {
-					if _, emitted := produces[trigger]; !emitted {
-						c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
-							CheckID:  "transition_ownership_validation",
-							Severity: "error",
-							Message:  fmt.Sprintf("node %s cannot see trigger %s for owned transition %s", nodeID, trigger, transitionID),
-							Location: nodeID,
-						})
+		for _, edge := range topology.Edges {
+			location := fmt.Sprintf("%s:%s:%s->%s", flow.flowID, edge.Source, edge.From, edge.To)
+			var problem string
+			// Admission owns carrier shape/protocol validation, not declaration existence.
+			compiled, admissionErr := topology.AdmitTransition(edge.Site(), edge.From, edge.To)
+			switch {
+			case topology.FlowID != flow.flowID:
+				problem = "compiled topology belongs to another flow"
+			case admissionErr != nil:
+				problem = fmt.Sprintf("invalid compiled carrier: %v", admissionErr)
+			case compiled.Edge() != edge:
+				problem = "compiled carrier differs from admitted evidence"
+			case edge.Source == "timer" || edge.Source == "gate":
+				// Runtime carriers have no executable handler declaration.
+			default:
+				if _, ok := c.source.ExecutableNode(edge.Node); !ok {
+					problem = "compiled carrier executable owner is missing"
+				} else if handler, ok := c.source.ExecutableNodeEventHandler(edge.Node, edge.HandlerEvent); !ok {
+					problem = fmt.Sprintf("workflow owner is %s but originating handler %s is missing", executableNodeDiagnostic(edge.Node), edge.HandlerEvent)
+				} else if edge.Source == "loop.escape" {
+					if !compiledLoopEscapeOwnsEdge(c.source, flow.flowID, edge) {
+						problem = "compiled loop escape does not belong to its originating repeat operation"
+					}
+				} else {
+					matched := false
+					for _, carrier := range runtimecontracts.HandlerAdvanceCarriers(handler) {
+						if carrier.Kind == edge.AdvanceCarrier && carrier.RuleRef == edge.RuleRef && carrier.AdvancesTo == edge.To {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						problem = "compiled advance carrier does not belong to its originating handler"
 					}
 				}
+			}
+			if problem != "" {
+				c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
+					CheckID: "transition_ownership_validation", Severity: "error",
+					Message: "transition " + location + " " + problem, Location: location,
+				})
 			}
 		}
 	}
 	return c.transitionOwnerFindings
 }
 
-func addTransitionEndpointEvent(byNode map[string]map[string]struct{}, nodeID string, proof semanticview.FlowEventProof) {
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
-		return
-	}
-	if byNode[nodeID] == nil {
-		byNode[nodeID] = map[string]struct{}{}
-	}
-	for _, value := range []string{proof.Authored, proof.Local, proof.Canonical, proof.CatalogKey} {
-		if value = strings.TrimSpace(value); value != "" {
-			byNode[nodeID][value] = struct{}{}
+func compiledLoopEscapeOwnsEdge(source semanticview.Source, flowID string, edge runtimecontracts.WorkflowStageTopologyEdge) bool {
+	for _, plan := range semanticview.WorkflowLoops(source) {
+		if plan.FlowID != flowID || plan.ID != edge.LoopID || plan.Escape.AdvancesTo != edge.To {
+			continue
+		}
+		for _, operation := range plan.Operations {
+			if operation.Kind == runtimecontracts.LoopOperationRepeat && edge.LoopOperation == operation.Kind &&
+				operation.Node.Equal(edge.Node) && operation.HandlerEvent == edge.HandlerEvent && operation.From == edge.From {
+				return true
+			}
 		}
 	}
+	return false
 }
 
 func (c *checkerContext) eventRuntimeWiring() []Finding {

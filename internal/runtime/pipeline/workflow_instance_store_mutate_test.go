@@ -320,7 +320,7 @@ func TestUpdateEntityState_RejectsCompetingStaleCallbackSnapshot(t *testing.T) {
 
 	pc := &PipelineCoordinator{
 		workflowStore: store,
-		module:        NewGenericTestWorkflowModule(),
+		module:        &previewWorkflowModule{bundle: lifecycleStateFixtureForTest(t, "mutation-flow", "queued", "done", "workflow.completed")},
 		entityLocks:   map[string]*sync.Mutex{},
 	}
 

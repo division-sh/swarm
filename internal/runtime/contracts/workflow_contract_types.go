@@ -79,7 +79,6 @@ type WorkflowSemanticView struct {
 	EntitySchema           EntitySchema
 	Stages                 []WorkflowStageContract
 	TerminalStages         []string
-	Transitions            []WorkflowTransitionContract
 	Timers                 []WorkflowTimerContract
 	Joins                  []WorkflowJoinPlan
 	Loops                  []WorkflowLoopPlan
@@ -412,20 +411,22 @@ type WorkflowHandlerStageScope struct {
 }
 
 type WorkflowStageTopologyEdge struct {
-	From          string
-	To            string
-	Source        string
-	Node          runtimeidentity.ExecutableNode
-	InternalOwner string
-	HandlerEvent  string
-	EventType     string
-	LoopID        string
-	LoopOperation LoopOperationKind
-	TimerID       string
-	After         string
-	Timed         bool
-	DecisionID    string
-	Verdict       string
+	From           string
+	To             string
+	Source         string
+	Node           runtimeidentity.ExecutableNode
+	InternalOwner  string
+	HandlerEvent   string
+	EventType      string
+	LoopID         string
+	LoopOperation  LoopOperationKind
+	TimerID        string
+	After          string
+	Timed          bool
+	DecisionID     string
+	Verdict        string
+	AdvanceCarrier HandlerAdvanceCarrierKind
+	RuleRef        runtimeidentity.DeclarationIdentity
 }
 
 type WorkflowLoopOperationPlan struct {
@@ -1510,20 +1511,6 @@ type WorkflowStageContract struct {
 	Phase       string `yaml:"phase"`
 	Description string `yaml:"description"`
 }
-type WorkflowTransitionContract struct {
-	ID                string                         `yaml:"id"`
-	From              []string                       `yaml:"from"`
-	To                string                         `yaml:"to"`
-	Trigger           string                         `yaml:"trigger"`
-	Node              string                         `yaml:"node"`
-	ExecutableNode    runtimeidentity.ExecutableNode `yaml:"-"`
-	FlowID            string                         `yaml:"-"`
-	InternalOwner     string                         `yaml:"-"`
-	Guards            []string                       `yaml:"guards"`
-	Actions           []string                       `yaml:"actions"`
-	DataAccumulation  WorkflowDataAccumulation       `yaml:"data_accumulation"`
-	AllowTerminalExit bool                           `yaml:"allow_terminal_exit"`
-}
 type WorkflowDataAccumulation struct {
 	Writes      []WorkflowDataWrite `yaml:"writes"`
 	SourceEvent string              `yaml:"source_event"`
@@ -1720,7 +1707,6 @@ type SystemNodeContract struct {
 	SubscribesTo     []string                          `yaml:"subscribes_to"`
 	Produces         []string                          `yaml:"produces"`
 	ProducesDeclared bool                              `yaml:"-" json:"-"`
-	OwnedTransitions []string                          `yaml:"-"`
 	StateTable       string                            `yaml:"state_table"`
 	IdempotencyTable string                            `yaml:"-"`
 	Timers           []WorkflowTimerContract           `yaml:"timers"`

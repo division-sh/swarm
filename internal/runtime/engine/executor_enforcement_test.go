@@ -17,6 +17,7 @@ import (
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
@@ -80,12 +81,6 @@ func (r *persistentStateRepo) SaveState(_ context.Context, address StateAddress,
 		r.snapshot.StateCarrier.Gates = cloneBoolMap(mutation.StateCarrier.Gates)
 	}
 	return nil
-}
-
-type rejectingTransitionValidator struct{}
-
-func (rejectingTransitionValidator) ValidateTransition(_, _ string) error {
-	return ErrInvalidTransition
 }
 
 type terminalGuardRunner struct{}
@@ -240,12 +235,15 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:              stubSource(),
-		StateRepo:           repo,
-		MutationOwner:       stubMutationOwner{state: repo},
-		Locker:              stubLocker{},
-		Dispatcher:          stubDispatcher{},
-		TransitionValidator: rejectingTransitionValidator{},
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+				"flow-1": runtimecontracts.BuildWorkflowStageTopology("flow-1", "pending", []string{"pending", "unreachable_state"}, nil, nil, nil, nil),
+			},
+		}}),
+		StateRepo:     repo,
+		MutationOwner: stubMutationOwner{state: repo},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -264,6 +262,9 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 	if result.Status != OutcomeRejected {
 		t.Fatalf("Status = %q, want %q", result.Status, OutcomeRejected)
 	}
+	if repo.snapshot.CurrentState != "pending" || result.StateMutation.Transition != nil {
+		t.Fatalf("absent carrier changed state or created a cause: %#v / %#v", repo.snapshot, result.StateMutation.Transition)
+	}
 	if result.Failure == nil || result.Failure.Class != failures.ClassInternalFailure || result.FailureDisposition != FailureDispositionTerminal {
 		t.Fatalf("failure = %#v disposition=%q", result.Failure, result.FailureDisposition)
 	}
@@ -278,7 +279,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "active", "active", "done"),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -317,8 +318,8 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 	newExecutor := func(score int, allowed bool) *Executor {
 		exec, err := NewExecutor(RuntimeDependencies{
-			Source:        stubSource(),
-			StateRepo:     &persistentStateRepo{found: true, snapshot: StateSnapshot{StateCarrier: NewStateCarrier(map[string]any{"score": score}, nil, map[string]map[string]any{})}},
+			Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending", "approved"),
+			StateRepo:     &persistentStateRepo{found: true, snapshot: StateSnapshot{CurrentState: "pending", StateCarrier: NewStateCarrier(map[string]any{"score": score}, nil, map[string]map[string]any{})}},
 			MutationOwner: stubMutationOwner{},
 			Locker:        stubLocker{},
 			Dispatcher:    stubDispatcher{},
@@ -391,7 +392,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        sourceWithFixtureStages(stubSource(), ".", "pending", "pending", "passed"),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -403,8 +404,9 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "ent-1",
-		Node:     testRootExecutableNode(t, "node-1"),
+		ExecutionFlowID: identity.NormalizeFlowID("."),
+		EntityID:        "ent-1",
+		Node:            testRootExecutableNode(t, "node-1"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"item.evaluated", "", "", json.RawMessage(`{"entity_id":"ent-1","score":80}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
@@ -457,7 +459,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "active", "active"),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},

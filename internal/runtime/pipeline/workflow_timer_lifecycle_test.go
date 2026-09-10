@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -26,54 +25,14 @@ func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeupWithRecovery(_ cont
 	return false, nil
 }
 
-func stageTimerTemplateLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
-	review := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Path:  "review",
-		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-			"sla_hours": {Value: 2},
-		}},
-	}
-	return &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &runtimecontracts.FlowContractView{
-				Children: []runtimecontracts.FlowContractView{review},
-			},
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"review": &review,
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"review": {Mode: "template"},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "stage-timer-test",
-			Version:      "1.0.0",
-			InitialStage: "awaiting_review",
-			FlowInitial: map[string]string{
-				"review": "awaiting_review",
-			},
-			FlowTerminal: map[string][]string{
-				"review": {"expired"},
-			},
-			FlowPrefix: map[string]string{
-				"review": "review",
-			},
-			Timers: []runtimecontracts.WorkflowTimerContract{
-				{
-					ID:         "review.awaiting_review.expired",
-					Stage:      "awaiting_review",
-					Event:      runtimecontracts.WorkflowStageTimerInternalEvent,
-					Owner:      "runtime",
-					FlowID:     "review",
-					StageOwned: true,
-					AdvancesTo: "expired",
-					Delay:      "{{sla_hours}}h",
-					StartOn:    "state:awaiting_review",
-				},
-			},
-		},
-	}
+func stageTimerTemplateLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return loadWorkflowTempBundle(t, map[string]string{
+		"schema.yaml":          "name: stage-timer-test\n",
+		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  awaiting_review:\n    initial: true\n    timers:\n      - {id: awaiting_review.expired, after: '{{sla_hours}}h', advances_to: expired}\n  expired: {terminal: true}\n",
+		"review/entities.yaml": "test_entity: {}\n",
+		"review/policy.yaml":   "sla_hours: 2\n",
+	})
 }
 
 func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {

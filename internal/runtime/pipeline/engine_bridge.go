@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
 type HandlerOutcomeStatus string
@@ -48,7 +49,6 @@ type handlerExecutionOutcome struct {
 
 type contractHandlerExecutionResult struct {
 	Committed                 bool
-	Transition                WorkflowTransition
 	Plan                      handlerExecutionPlan
 	Outcome                   *handlerExecutionOutcome
 	GuardsEvaluated           []string
@@ -58,6 +58,7 @@ type contractHandlerExecutionResult struct {
 	SettledDeliveryClaim      *runtimedelivery.Claim
 	Handled                   bool
 	RuleSelection             handlerselection.HandlerRuleSelectionFact
+	Transition                *workflowlifecycle.Transition
 }
 
 func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Context, evt events.Event, triggerCtx workflowTriggerContext) (contractHandlerExecutionResult, error) {
@@ -226,7 +227,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		}
 		plan := handlerExecutionPlanFromNodeHandler(source, node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 		return contractHandlerExecutionResult{
-			Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, node, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
 			Plan:            plan,
 			Outcome:         outcome,
 			GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
@@ -306,6 +306,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			SettledDeliveryClaim: result.SettledDeliveryClaim,
 			Handled:              runtimeengine.IsHandledOutcome(result.Status),
 			RuleSelection:        admittedHandlerRuleSelection(result.HandlerRuleSelection),
+			Transition:           result.StateMutation.Transition,
 		}, err
 	}
 	if handler.CreateEntity && result.StateMutation.StateCarrier.Fields == nil {
@@ -342,6 +343,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Emissions:            emissions.immutableEvents(),
 			SettledDeliveryClaim: result.SettledDeliveryClaim,
 			RuleSelection:        admittedHandlerRuleSelection(result.HandlerRuleSelection),
+			Transition:           result.StateMutation.Transition,
 		}, err
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
@@ -359,7 +361,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	plan.DataAccumulation = outcome.DataAccumulation
 	return contractHandlerExecutionResult{
 		Committed:                 result.Committed,
-		Transition:                workflowTransitionFromHandlerOutcome(triggerCtx.State, node, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
 		Plan:                      plan,
 		Outcome:                   outcome,
 		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
@@ -369,6 +370,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		SettledDeliveryClaim:      result.SettledDeliveryClaim,
 		Handled:                   handled,
 		RuleSelection:             admittedHandlerRuleSelection(result.HandlerRuleSelection),
+		Transition:                result.StateMutation.Transition,
 	}, err
 }
 
@@ -599,76 +601,10 @@ func handlerOutcomeStatusFromEngine(status runtimeengine.OutcomeStatus) HandlerO
 }
 
 func terminalStateHandlerRejected(pc *PipelineCoordinator, flowID string, state WorkflowState, _ runtimecontracts.SystemNodeEventHandler) bool {
-	if pc == nil {
+	if pc == nil || pc.SemanticSource() == nil || state.Stage == "" {
 		return false
 	}
-	currentState := strings.TrimSpace(string(state.Stage))
-	if currentState == "" {
-		return false
-	}
-	source := pc.SemanticSource()
-	if source != nil {
-		for _, candidateFlowID := range terminalStateFlowCandidates(source, flowID, state) {
-			if terminalStageContains(source.FlowTerminalStages(candidateFlowID), currentState) {
-				return true
-			}
-			if stageSetContains(source.FlowStates(candidateFlowID), currentState) {
-				return false
-			}
-		}
-	}
-	workflow := pc.WorkflowDefinition()
-	if workflow != nil {
-		if stage, ok := workflow.Stage(state.Stage); ok {
-			return stage.Terminal
-		}
-	}
-	return false
-}
-
-func terminalStateFlowCandidates(source semanticview.Source, flowID string, state WorkflowState) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	add := func(candidate string) {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			return
-		}
-		if _, ok := seen[candidate]; ok {
-			return
-		}
-		seen[candidate] = struct{}{}
-		out = append(out, candidate)
-	}
-	add(flowIDForWorkflowState(source, state))
-	add(flowID)
-	return out
-}
-
-func flowIDForWorkflowState(source semanticview.Source, state WorkflowState) string {
-	if source == nil {
-		return ""
-	}
-	flowPath := strings.Trim(strings.TrimSpace(state.Control.FlowPath), "/")
-	if flowPath == "" {
-		return ""
-	}
-	bestID := ""
-	bestLen := -1
-	for _, scope := range source.FlowScopes() {
-		path := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if path == "" {
-			continue
-		}
-		if flowPath != path && !strings.HasPrefix(flowPath, path+"/") {
-			continue
-		}
-		if len(path) > bestLen {
-			bestLen = len(path)
-			bestID = strings.TrimSpace(scope.ID)
-		}
-	}
-	return bestID
+	return terminalStageContains(pc.SemanticSource().FlowTerminalStages(flowID), string(state.Stage))
 }
 
 func terminalStageContains(stages []string, current string) bool {
@@ -681,27 +617,9 @@ func stageSetContains(stages []string, current string) bool {
 		return false
 	}
 	for _, stage := range stages {
-		if strings.EqualFold(strings.TrimSpace(stage), current) {
+		if strings.TrimSpace(stage) == current {
 			return true
 		}
 	}
 	return false
-}
-
-func workflowTransitionFromHandlerOutcome(state WorkflowState, node identity.ExecutableNode, eventType string, outcome *handlerExecutionOutcome) WorkflowTransition {
-	target := strings.TrimSpace(string(state.Stage))
-	if outcome != nil && strings.TrimSpace(outcome.AdvancesTo) != "" {
-		target = strings.TrimSpace(outcome.AdvancesTo)
-	}
-	transition := WorkflowTransition{
-		Name:    node.Key() + ":" + strings.TrimSpace(eventType),
-		From:    []WorkflowStateID{NormalizeWorkflowStateID(string(state.Stage))},
-		To:      NormalizeWorkflowStateID(target),
-		Trigger: strings.TrimSpace(eventType),
-		Node:    node,
-	}
-	if outcome != nil {
-		transition.DataAccumulation = outcome.DataAccumulation
-	}
-	return transition
 }

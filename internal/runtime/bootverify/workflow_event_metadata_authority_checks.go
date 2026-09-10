@@ -131,6 +131,11 @@ func eventMetadataInternalActorNames(source semanticview.Source) eventMetadataNa
 	for _, timer := range source.WorkflowTimers() {
 		names.add(timer.ID, fmt.Sprintf("timer %s", strings.TrimSpace(timer.ID)))
 	}
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).Producers() {
+		if endpoint.Kind == semanticview.EventEndpointGateOutcome || endpoint.Kind == semanticview.EventEndpointLoopEscape {
+			eventMetadataAddEndpointRole(source, names, endpoint)
+		}
+	}
 	return names
 }
 
@@ -261,6 +266,16 @@ func eventMetadataAddEndpointRole(source semanticview.Source, names eventMetadat
 		names.add("sys:runtime", "runtime timer "+role)
 	case semanticview.EventEndpointAutoEmit:
 		eventMetadataAddFlowRole(names, endpoint.FlowID, "", "auto_emit_on_create producer")
+	case semanticview.EventEndpointGateOutcome:
+		names.add(endpoint.StageID, endpoint.ProducerDescription())
+		names.add(endpoint.DecisionID, endpoint.ProducerDescription())
+		names.add(endpoint.Verdict, endpoint.ProducerDescription())
+		names.add(endpoint.Site, endpoint.ProducerDescription())
+		eventMetadataAddFlowRole(names, endpoint.FlowID, endpoint.DecisionID, "gate outcome producer")
+	case semanticview.EventEndpointLoopEscape:
+		names.add(endpoint.LoopID, endpoint.ProducerDescription())
+		names.add(endpoint.Site, endpoint.ProducerDescription())
+		eventMetadataAddFlowRole(names, endpoint.FlowID, endpoint.LoopID, "loop escape producer")
 	case semanticview.EventEndpointExternal, semanticview.EventEndpointPlatform:
 		// Authored external/platform metadata is evidence, not an internal role.
 		return

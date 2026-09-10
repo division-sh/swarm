@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -116,7 +118,70 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 			ctx = runtimedelivery.WithClaim(ctx, claim)
 		}
 	}
+	// Isolated handler fixtures may omit the rest of the authored node document,
+	// but stage membership must come from the fixture source, never runtime state
+	// or the requested target. Existing compiled graphs remain authoritative.
+	flowID := req.ExecutionFlowID.String()
+	if _, exists := semanticview.WorkflowStageTopology(e.deps.Source, flowID); !exists && len(e.deps.Source.FlowStates(flowID)) > 0 {
+		bundle, ok := semanticview.Bundle(e.deps.Source)
+		if !ok {
+			return ExecutionResult{}, fmt.Errorf("isolated handler fixture requires a contract bundle")
+		}
+		copyBundle := *bundle
+		copyBundle.Semantics.StageTopologies = maps.Clone(bundle.Semantics.StageTopologies)
+		if copyBundle.Semantics.StageTopologies == nil {
+			copyBundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{}
+		}
+		h := req.Handler
+		copyBundle.Semantics.StageTopologies[flowID] = runtimecontracts.BuildWorkflowStageTopology(
+			flowID, e.deps.Source.FlowInitialStage(flowID), e.deps.Source.FlowStates(flowID), e.deps.Source.FlowTerminalStages(flowID),
+			[]runtimecontracts.HandlerTransitionSemantic{{Node: req.Node, EventType: req.HandlerEventKey,
+				CreateEntity: h.CreateEntity, AdvancesTo: h.AdvancesTo, Rules: h.Rules, OnComplete: h.OnComplete, Join: h.Join, Loop: h.Loop}},
+			nil, bundle.Semantics.Loops,
+		)
+		copyExecutor := *e
+		copyExecutor.deps.Source = semanticview.Wrap(&copyBundle)
+		return copyExecutor.Execute(ctx, req)
+	}
 	return e.Execute(ctx, req)
+}
+
+// sourceWithFixtureStages declares membership for an isolated handler fixture.
+// It does not add targets, source stages, or carriers based on execution results.
+func sourceWithFixtureStages(source semanticview.Source, flowID, initial string, stages ...string) semanticview.Source {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		panic("fixture stages require a contract bundle")
+	}
+	copyBundle := *bundle
+	copyBundle.Semantics.FlowStates = maps.Clone(bundle.Semantics.FlowStates)
+	copyBundle.Semantics.FlowInitial = maps.Clone(bundle.Semantics.FlowInitial)
+	if copyBundle.Semantics.FlowStates == nil {
+		copyBundle.Semantics.FlowStates = map[string][]string{}
+	}
+	if copyBundle.Semantics.FlowInitial == nil {
+		copyBundle.Semantics.FlowInitial = map[string]string{}
+	}
+	copyBundle.Semantics.FlowStates[flowID] = append([]string(nil), stages...)
+	copyBundle.Semantics.FlowInitial[flowID] = initial
+	if flowID == "." {
+		schema := runtimecontracts.FlowSchemaDocument{}
+		if bundle.RootSchema != nil {
+			schema = *bundle.RootSchema
+		}
+		schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
+		terminals := source.FlowTerminalStages(flowID)
+		copyBundle.Semantics.InitialStage = initial
+		copyBundle.Semantics.Stages = nil
+		for _, stage := range stages {
+			schema.StageDeclarations.Entries = append(schema.StageDeclarations.Entries, runtimecontracts.FlowStageDeclaration{
+				ID: stage, Initial: stage == initial, Terminal: slices.Contains(terminals, stage),
+			})
+			copyBundle.Semantics.Stages = append(copyBundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: stage})
+		}
+		copyBundle.RootSchema = &schema
+	}
+	return semanticview.Wrap(&copyBundle)
 }
 
 func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) (runtimecontracts.SystemNodeEventHandler, error) {

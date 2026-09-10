@@ -119,14 +119,6 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				}
 				module := proposedEffectProofModule{
 					source: source,
-					workflow: runtimepipeline.NewWorkflowDefinition(workflowName, []runtimepipeline.WorkflowStage{
-						{Name: "awaiting"},
-						{Name: "ready", Terminal: true},
-						{Name: "attention", Terminal: true},
-					}, []runtimepipeline.WorkflowTransition{{
-						Name: "complete-join", From: []runtimepipeline.WorkflowStateID{"awaiting"}, To: "ready",
-						Trigger: "item.completed", Node: joinNode,
-					}}),
 					nodes: []runtimepipeline.WorkflowNode{{
 						Node: joinNode, Subscriptions: []events.EventType{events.EventType(subscriptionType)},
 						ExecutionType: runtimecontracts.SystemNodeExecutionType,
@@ -305,20 +297,6 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 
 					module := proposedEffectProofModule{
 						source: source,
-						workflow: runtimepipeline.NewWorkflowDefinition(workflowName, []runtimepipeline.WorkflowStage{
-							{Name: "awaiting"},
-							{Name: "ready", Terminal: true},
-							{Name: "attention", Terminal: true},
-						}, []runtimepipeline.WorkflowTransition{
-							{
-								Name: "complete-join", From: []runtimepipeline.WorkflowStateID{"awaiting"}, To: "ready",
-								Trigger: "item.completed", Node: joinNode,
-							},
-							{
-								Name: "timeout-join", From: []runtimepipeline.WorkflowStateID{"awaiting"}, To: "attention",
-								Trigger: "item.completed", Node: joinNode,
-							},
-						}),
 						nodes: []runtimepipeline.WorkflowNode{{
 							Node: joinNode, ExecutionType: runtimecontracts.SystemNodeExecutionType,
 							Subscriptions: []events.EventType{"item.completed"},

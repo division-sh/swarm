@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -21,13 +20,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 	pc := &PipelineCoordinator{
 		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
 		module: &previewWorkflowModule{
-			bundle: &runtimecontracts.WorkflowContractBundle{
-				RootEntities: testEntityContractsForType("test_entity"),
-				Semantics: runtimecontracts.WorkflowSemanticView{
-					Name:    "mutation-flow",
-					Version: "1.0.0",
-				},
-			},
+			bundle: lifecycleStateFixtureForTest(t, "mutation-flow", "queued", "done", "flow.transitioned"),
 		},
 	}
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -232,7 +225,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	entityID := uuid.NewString()
-	pc := testMutationLoggingCoordinator(db)
+	pc := testMutationLoggingCoordinator(t, db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
 	if err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID), "workflow.ready", "g_ready", false); err != nil {
@@ -251,7 +244,7 @@ func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	entityID := uuid.NewString()
-	pc := testMutationLoggingCoordinator(db)
+	pc := testMutationLoggingCoordinator(t, db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
 	if err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"}); err != nil {
@@ -270,7 +263,7 @@ func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
 func TestMutationLogSchemaRejectsMissingDomainPath(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	entityID := uuid.NewString()
-	pc := testMutationLoggingCoordinator(db)
+	pc := testMutationLoggingCoordinator(t, db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
 	var runID string
@@ -292,7 +285,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 	t.Run("state transition", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		entityID := uuid.NewString()
-		pc := testMutationLoggingCoordinator(db)
+		pc := testMutationLoggingCoordinator(t, db)
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
@@ -308,7 +301,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 	t.Run("gate mutation", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		entityID := uuid.NewString()
-		pc := testMutationLoggingCoordinator(db)
+		pc := testMutationLoggingCoordinator(t, db)
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
@@ -322,7 +315,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 	t.Run("evidence write", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		entityID := uuid.NewString()
-		pc := testMutationLoggingCoordinator(db)
+		pc := testMutationLoggingCoordinator(t, db)
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
@@ -334,10 +327,10 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 	})
 }
 
-func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
+func testMutationLoggingCoordinator(t *testing.T, db *sql.DB) *PipelineCoordinator {
 	return &PipelineCoordinator{
 		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
-		module:        &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("mutation-flow", "test_entity")},
+		module:        &previewWorkflowModule{bundle: lifecycleStateFixtureForTest(t, ".", "queued", "done", "flow.transitioned")},
 	}
 }
 

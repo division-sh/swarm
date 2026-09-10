@@ -27,6 +27,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -1264,13 +1265,19 @@ func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipelin
 		return runtimepipeline.HandlerPreview{}, false
 	}
 	entityID := strings.TrimSpace(evt.EntityID())
-	state := runtimepipeline.WorkflowState{
-		EntityID: entityID,
+	state := runtimeengine.StateSnapshot{
+		EntityID: runtimeidentity.NormalizeEntityID(entityID),
 	}
 	if strings.TrimSpace(entityID) != "" && h.workflow != nil {
 		if instance, ok, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute()); err == nil && ok {
-			state.Stage = runtimepipeline.NormalizeWorkflowStateID(instance.CurrentState)
-			state.Metadata = cloneStringAnyMap(instance.Fields)
+			state.CurrentState = instance.CurrentState
+			state.WorkflowName = instance.WorkflowName
+			state.WorkflowVersion = instance.WorkflowVersion
+			state.EnteredStateAt = instance.EnteredStageAt
+			state.StateCarrier, err = runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+			if err != nil {
+				return runtimepipeline.HandlerPreview{}, false
+			}
 		}
 	}
 	preview, err := runtimepipeline.PreviewContractHandlerExecution(h.ctx, h.bundle, node, evt, state, nil)

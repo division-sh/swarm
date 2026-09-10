@@ -13,9 +13,7 @@ const runtimeWorkflowID = "workflow-runtime"
 
 type WorkflowRuntime interface {
 	SemanticSource() semanticview.Source
-	WorkflowDefinition() *WorkflowDefinition
 	WorkflowNodes() []WorkflowNode
-	TransitionEvaluator() TransitionEvaluator
 	GuardRegistry() GuardRegistry
 	ActionRegistry() ActionRegistry
 }
@@ -44,11 +42,6 @@ type BackgroundWorkflowExecutorProvider interface {
 	BackgroundWorkflowExecutor() WorkflowNodeExecutor
 }
 
-type TransitionEvaluator interface {
-	Transition(state WorkflowState, to WorkflowStateID) (WorkflowTransition, bool)
-	CanTransition(state WorkflowState, to WorkflowStateID) bool
-}
-
 type GuardRegistry interface {
 	HasGuard(id identity.GuardKey) bool
 	IsExecutable(id identity.GuardKey) bool
@@ -70,22 +63,11 @@ func (pc *PipelineCoordinator) SemanticSource() semanticview.Source {
 	return pc.module.SemanticSource()
 }
 
-func (pc *PipelineCoordinator) WorkflowDefinition() *WorkflowDefinition {
-	if pc == nil || pc.module == nil {
-		return nil
-	}
-	return pc.module.WorkflowDefinition()
-}
-
 func (pc *PipelineCoordinator) WorkflowNodes() []WorkflowNode {
 	if pc == nil || pc.module == nil {
 		return nil
 	}
 	return pc.module.WorkflowNodes()
-}
-
-func (pc *PipelineCoordinator) TransitionEvaluator() TransitionEvaluator {
-	return pc.WorkflowDefinition()
 }
 
 func (pc *PipelineCoordinator) GuardRegistry() GuardRegistry {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -129,34 +128,4 @@ func (pc *PipelineCoordinator) lockWorkflowEntity(entityID string) func() {
 	pc.entityLockMu.Unlock()
 	lock.Lock()
 	return lock.Unlock
-}
-
-func workflowTransitionRecord(workflow *WorkflowDefinition, fromState, toState, sourceEventID, sourceEventType string, firedAt time.Time) WorkflowTransitionRecord {
-	fromState = strings.TrimSpace(string(NormalizeWorkflowStateID(fromState)))
-	toState = strings.TrimSpace(string(NormalizeWorkflowStateID(toState)))
-	sourceEventID = strings.TrimSpace(sourceEventID)
-	sourceEventType = strings.TrimSpace(sourceEventType)
-	state := WorkflowState{Stage: NormalizeWorkflowStateID(fromState)}
-	transition, ok := WorkflowStateTransition(workflow, state.Stage, NormalizeWorkflowStateID(toState))
-	record := WorkflowTransitionRecord{
-		From:            fromState,
-		To:              toState,
-		TriggerEventID:  sourceEventID,
-		GuardsEvaluated: nil,
-		FiredAt:         firedAt.UTC(),
-	}
-	if ok {
-		record.TransitionID = strings.TrimSpace(transition.Name)
-		record.GuardsEvaluated = append([]string{}, transition.GuardIDs...)
-	} else {
-		record.TransitionID = firstNonEmptyString(
-			sourceEventType,
-			"legacy_"+strings.ReplaceAll(fromState, "-", "_")+"_to_"+strings.ReplaceAll(toState, "-", "_"),
-		)
-	}
-	return record
-}
-
-func workflowTransitionIdentity(workflow *WorkflowDefinition, fromState, toState, sourceEventType string) string {
-	return workflowTransitionRecord(workflow, fromState, toState, "", sourceEventType, time.Unix(0, 0)).TransitionID
 }

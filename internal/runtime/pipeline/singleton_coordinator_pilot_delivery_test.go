@@ -125,10 +125,6 @@ func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *
 
 func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *workflowInstanceStore) {
 	t.Helper()
-	workflow, err := LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	nodes, err := LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
@@ -140,7 +136,6 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:         bundle,
-			workflow:       workflow,
 			workflowNodes:  nodes,
 			guardRegistry:  NewContractGuardRegistry(source),
 			actionRegistry: NewContractActionRegistry(source),

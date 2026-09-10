@@ -31,6 +31,8 @@ const (
 	EventEndpointRequiredAgentRole EventEndpointKind = "required_agent_role"
 	EventEndpointTimer             EventEndpointKind = "timer"
 	EventEndpointAutoEmit          EventEndpointKind = "auto_emit_on_create"
+	EventEndpointGateOutcome       EventEndpointKind = "gate_outcome"
+	EventEndpointLoopEscape        EventEndpointKind = "loop_escape"
 	EventEndpointExternal          EventEndpointKind = "external"
 	EventEndpointPlatform          EventEndpointKind = "platform"
 	EventEndpointFlowInputPin      EventEndpointKind = "flow_input_pin"
@@ -52,6 +54,10 @@ type AuthoredEventEndpoint struct {
 	AgentID        string                                   `json:"agent_id,omitempty"`
 	Role           string                                   `json:"role,omitempty"`
 	TimerID        string                                   `json:"timer_id,omitempty"`
+	StageID        string                                   `json:"stage_id,omitempty"`
+	DecisionID     string                                   `json:"decision_id,omitempty"`
+	Verdict        string                                   `json:"verdict,omitempty"`
+	LoopID         string                                   `json:"loop_id,omitempty"`
 	PinName        string                                   `json:"pin_name,omitempty"`
 	Site           string                                   `json:"site,omitempty"`
 	SourceFile     string                                   `json:"source_file,omitempty"`
@@ -119,6 +125,7 @@ func BuildAuthoredEventEndpointCensus(source Source) AuthoredEventEndpointCensus
 		builder.addRequiredAgentEndpoints()
 		builder.addTimerEndpoints()
 		builder.addAutoEmitEndpoints()
+		builder.addLifecycleEndpoints()
 		builder.addPinEndpoints()
 		builder.addMetadataBoundaryEndpoints()
 	}
@@ -152,7 +159,10 @@ func (c AuthoredEventEndpointCensus) ProducerAssertions() []NodeProducerAssertio
 
 func (c AuthoredEventEndpointCensus) Endpoint(id string) (AuthoredEventEndpoint, bool) {
 	endpoint, ok := c.endpointByID[strings.TrimSpace(id)]
-	return endpoint, ok
+	if !ok {
+		return AuthoredEventEndpoint{}, false
+	}
+	return cloneEventEndpoint(endpoint), true
 }
 
 func (c AuthoredEventEndpointCensus) MatchingProducers(flowID, eventType string) []AuthoredEventEndpoint {
@@ -222,8 +232,10 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubConsumerMatches(producer 
 		if consumer.Pattern {
 			kind = TypedPubSubMatchPattern
 		}
+		matchProof := proof
+		matchProof.Entry = runtimecontracts.CloneEventCatalogEntry(proof.Entry)
 		matches = append(matches, TypedPubSubConsumerMatch{
-			Producer: producer, Consumer: consumer, Event: proof, Kind: kind,
+			Producer: cloneEventEndpoint(producer), Consumer: cloneEventEndpoint(consumer), Event: matchProof, Kind: kind,
 			Boundary: TypedPubSubBoundarySameFlow,
 		})
 	}
@@ -256,7 +268,7 @@ func (c AuthoredEventEndpointCensus) InvalidAuthoredSubscriptions() []InvalidAut
 		if !classified || admission.Admitted() || admission.Authored() == "" {
 			continue
 		}
-		invalid := InvalidAuthoredSubscription{Consumer: consumer, Admission: admission}
+		invalid := InvalidAuthoredSubscription{Consumer: cloneEventEndpoint(consumer), Admission: admission}
 		invalid.ID = invalidAuthoredSubscriptionID(invalid)
 		out = append(out, invalid)
 	}
@@ -827,7 +839,7 @@ func (b *endpointCensusBuilder) build() AuthoredEventEndpointCensus {
 	index := map[string]AuthoredEventEndpoint{}
 	for _, endpoints := range [][]AuthoredEventEndpoint{b.producers, b.consumers, b.inputPins, b.outputPins} {
 		for _, endpoint := range endpoints {
-			index[endpoint.ID] = endpoint
+			index[endpoint.ID] = cloneEventEndpoint(endpoint)
 		}
 	}
 	return AuthoredEventEndpointCensus{
@@ -971,6 +983,9 @@ func eventEndpointID(endpoint AuthoredEventEndpoint) string {
 		endpoint.NodeID, endpoint.HandlerEvent, endpoint.AgentID, endpoint.Role,
 		endpoint.TimerID, endpoint.PinName, endpoint.Site, endpoint.SourceLocation,
 	}
+	if endpoint.Kind == EventEndpointGateOutcome || endpoint.Kind == EventEndpointLoopEscape {
+		parts = append(parts, endpoint.StageID, endpoint.DecisionID, endpoint.Verdict, endpoint.LoopID)
+	}
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
@@ -990,8 +1005,15 @@ func cloneEventEndpoints(in []AuthoredEventEndpoint) []AuthoredEventEndpoint {
 		return nil
 	}
 	out := make([]AuthoredEventEndpoint, len(in))
-	copy(out, in)
+	for i, endpoint := range in {
+		out[i] = cloneEventEndpoint(endpoint)
+	}
 	return out
+}
+
+func cloneEventEndpoint(endpoint AuthoredEventEndpoint) AuthoredEventEndpoint {
+	endpoint.Event.Entry = runtimecontracts.CloneEventCatalogEntry(endpoint.Event.Entry)
+	return endpoint
 }
 
 func sortEventEndpoints(endpoints []AuthoredEventEndpoint) {

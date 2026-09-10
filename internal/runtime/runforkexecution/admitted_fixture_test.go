@@ -67,17 +67,12 @@ func (l admittedFixtureSelectedContractSourceLoader) LoadRunForkSelectedContract
 	if err := validateSelectedContractSelection("admitted fixture source", selection); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		return LoadedSelectedContractSource{}, err
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
 	module := selectedContractWorkflowModule{
 		source:         source,
-		workflow:       workflow,
 		nodes:          nodes,
 		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 		actionRegistry: runtimepipeline.NewContractActionRegistry(source),

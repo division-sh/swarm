@@ -160,7 +160,7 @@ func appendInternalTopologyEvidence(census AuthoredEventEndpointCensus, flowID, 
 		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform {
 			continue
 		}
-		detail := endpointProducerEvidenceDetail(endpoint)
+		detail := endpoint.ProducerDescription()
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerInternalTopology,
 			FlowID:    endpoint.FlowID,
@@ -186,7 +186,7 @@ func flowInputPinsForEvent(source Source, census AuthoredEventEndpointCensus, fl
 	return []runtimecontracts.CompiledFlowInputPin{pin}
 }
 
-func endpointProducerEvidenceDetail(endpoint AuthoredEventEndpoint) string {
+func (endpoint AuthoredEventEndpoint) ProducerDescription() string {
 	switch endpoint.Kind {
 	case EventEndpointNodeHandler:
 		return fmt.Sprintf("node %s handler %s emits", endpoint.NodeID, endpoint.HandlerEvent)
@@ -206,6 +206,10 @@ func endpointProducerEvidenceDetail(endpoint AuthoredEventEndpoint) string {
 			return "root auto_emit_on_create"
 		}
 		return fmt.Sprintf("flow %s auto_emit_on_create", endpoint.FlowID)
+	case EventEndpointGateOutcome:
+		return fmt.Sprintf("flow %s stage %s gate %s verdict %s", endpoint.FlowID, endpoint.StageID, endpoint.DecisionID, endpoint.Verdict)
+	case EventEndpointLoopEscape:
+		return fmt.Sprintf("flow %s loop %s escape", endpoint.FlowID, endpoint.LoopID)
 	case EventEndpointPlatform:
 		return "platform event catalog"
 	case EventEndpointExternal:

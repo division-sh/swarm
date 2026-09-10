@@ -29,7 +29,7 @@ func (o pipelineWorkflowLifecycleOwner) FinalizeWorkflowLifecycleMutation(ctx co
 	return o.coordinator.finalizeWorkflowLifecycleMutation(ctx, committed)
 }
 
-func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(route runtimeflowidentity.Route, entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error) {
+func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(route runtimeflowidentity.Route, entityID identity.EntityID, event events.Event, fromState, toState string, transition *runtimeworkflowlifecycle.Transition) (runtimeworkflowlifecycle.Effect, error) {
 	pc := o.coordinator
 	if pc == nil {
 		return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("workflow lifecycle owner is unavailable")
@@ -44,20 +44,12 @@ func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(route runtimeflowide
 	}
 	fromState = strings.TrimSpace(fromState)
 	toState = strings.TrimSpace(toState)
-	var transition *runtimeworkflowlifecycle.Transition
 	if toState != "" && toState != fromState {
-		if fromState == "" {
-			return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("accepted workflow transition requires the persisted source state")
+		if transition == nil || transition.From() != fromState || transition.To() != toState {
+			return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("accepted workflow transition requires the selected cause matching persisted stages")
 		}
-		value, err := runtimeworkflowlifecycle.NewTransition(
-			fromState,
-			toState,
-			workflowTransitionIdentity(pc.WorkflowDefinition(), fromState, toState, string(event.Type())),
-		)
-		if err != nil {
-			return runtimeworkflowlifecycle.Effect{}, err
-		}
-		transition = &value
+	} else if transition != nil {
+		return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("unchanged workflow stage cannot carry a transition")
 	}
 	return runtimeworkflowlifecycle.NewAcceptedEvent(
 		route,

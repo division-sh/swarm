@@ -455,8 +455,7 @@ func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDe
 func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerBeforeDeclaredKeyAcquisition(t *testing.T) {
 	bundle := workflowJoinLifecycleBundle(t)
 
-	plan := bundle.Semantics.Joins[0]
-	plan.Node = mustPipelineNode("", "join-node")
+	plan := exactCompiledJoinPlanForTest(bundle, ".")
 	source := exactWorkflowJoinSource{
 		Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
 		nodeFlowID: "", overrideNodeOwner: true,

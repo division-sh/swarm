@@ -19,47 +19,6 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 		return c.handlerFindings
 	}
 	c.handlerLoaded = true
-	for _, transition := range c.source.WorkflowTransitions() {
-		id := strings.TrimSpace(transition.ID)
-		if id == "" {
-			continue
-		}
-		for _, actionID := range transition.Actions {
-			actionID = strings.TrimSpace(actionID)
-			if actionID == "" {
-				continue
-			}
-			action, ok := c.source.ActionInstructionByID(actionID)
-			if !ok {
-				continue
-			}
-			if action.Executable() || isSupportedWorkflowHandlerActionID(firstNonEmptyString(action.Builtin, action.Key.String())) {
-				continue
-			}
-			c.handlerFindings = append(c.handlerFindings, Finding{
-				CheckID:  "handler_field_compliance",
-				Severity: "error",
-				Message:  fmt.Sprintf("transition %s action %s has no executable runtime implementation", id, actionID),
-				Location: id,
-			})
-		}
-		for _, guardID := range transition.Guards {
-			guardID = strings.TrimSpace(guardID)
-			if guardID == "" {
-				continue
-			}
-			guard, ok := c.source.GuardInstructionByID(guardID)
-			if !ok || guard.Executable() {
-				continue
-			}
-			c.handlerFindings = append(c.handlerFindings, Finding{
-				CheckID:  "handler_field_compliance",
-				Severity: "error",
-				Message:  fmt.Sprintf("transition %s guard %s has no executable runtime implementation", id, guardID),
-				Location: id,
-			})
-		}
-	}
 	for _, record := range c.source.ExecutableNodeRecords() {
 		node, err := record.Identity()
 		if err != nil {
@@ -67,6 +26,15 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 		}
 		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
+			for _, check := range handler.Guard.EffectiveChecks() {
+				if strings.TrimSpace(check.Check) != "" || strings.TrimSpace(check.ID) == "" {
+					continue
+				}
+				if guard, ok := c.source.GuardInstructionByID(check.ID); ok && !guard.Executable() {
+					c.handlerFindings = append(c.handlerFindings, handlerActionFinding(node.Key(), eventType,
+						fmt.Sprintf("guard %s has no executable runtime implementation", check.ID)))
+				}
+			}
 			if runtimecontracts.HandlerHasAmbiguousTopLevelAction(handler) {
 				c.handlerFindings = append(c.handlerFindings, handlerActionFinding(node.Key(), eventType, "handler-level action is invalid when rules are present; move action ownership to the active rule"))
 			}
@@ -95,6 +63,9 @@ func rejectUnsupportedRuleActions(nodeID, eventType string, handler runtimecontr
 	findings := []Finding{}
 	for idx, rule := range handler.OnComplete {
 		findings = append(findings, rejectRule(handlerRuleContext("handler.on_complete", idx, rule.ID), rule)...)
+	}
+	for _, rule := range runtimecontracts.HandlerRuleEntries(runtimecontracts.SystemNodeEventHandler{Join: handler.Join}) {
+		findings = append(findings, rejectRule("handler.join outcome", rule)...)
 	}
 	return findings
 }

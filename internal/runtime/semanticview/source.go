@@ -21,7 +21,6 @@ type Source interface {
 	WorkflowEntitySchema() runtimecontracts.EntitySchema
 	WorkflowStages() []runtimecontracts.WorkflowStageContract
 	WorkflowTerminalStages() []string
-	WorkflowTransitions() []runtimecontracts.WorkflowTransitionContract
 	WorkflowInitialStage() string
 	WorkflowTimers() []runtimecontracts.WorkflowTimerContract
 	WorkflowJoins() []runtimecontracts.WorkflowJoinPlan

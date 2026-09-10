@@ -79,8 +79,8 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 		t.Fatalf("FlowStates(child) = %#v, want %#v", got, want)
 	}
 	stages := bundle.WorkflowStages()
-	if len(stages) != 2 {
-		t.Fatalf("WorkflowStages length = %d, want runtime-safe deduped aggregate", len(stages))
+	if len(stages) != 4 {
+		t.Fatalf("WorkflowStages length = %d, want phase-preserving metadata projection", len(stages))
 	}
 	var childReady bool
 	for _, stage := range stages {
@@ -88,8 +88,8 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 			childReady = true
 		}
 	}
-	if childReady {
-		t.Fatalf("WorkflowStages = %#v, want child duplicate hidden from global runtime aggregate", stages)
+	if !childReady {
+		t.Fatalf("WorkflowStages = %#v, want child descriptor retained independently of root", stages)
 	}
 }
 

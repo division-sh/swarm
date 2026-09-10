@@ -11,7 +11,6 @@ import (
 type swarmWorkflowModule struct {
 	bundle         *runtimecontracts.WorkflowContractBundle
 	source         semanticview.Source
-	workflow       *runtimepipeline.WorkflowDefinition
 	nodes          []runtimepipeline.WorkflowNode
 	guardRegistry  runtimepipeline.GuardRegistry
 	actionRegistry runtimepipeline.ActionRegistry
@@ -70,10 +69,6 @@ func loadConfiguredCLIWorkflowModule(repoRoot string, opts CLISourcePlatformSpec
 
 func NewSwarmWorkflowModuleForBundle(bundle *runtimecontracts.WorkflowContractBundle) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
 	source := semanticview.Wrap(bundle)
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		return nil, nil, err
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		return nil, nil, err
@@ -81,7 +76,6 @@ func NewSwarmWorkflowModuleForBundle(bundle *runtimecontracts.WorkflowContractBu
 	return &swarmWorkflowModule{
 		bundle:         bundle,
 		source:         source,
-		workflow:       workflow,
 		nodes:          nodes,
 		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
@@ -89,9 +83,6 @@ func NewSwarmWorkflowModuleForBundle(bundle *runtimecontracts.WorkflowContractBu
 }
 
 func (m *swarmWorkflowModule) SemanticSource() semanticview.Source { return m.source }
-func (m *swarmWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
-}
 func (m *swarmWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }

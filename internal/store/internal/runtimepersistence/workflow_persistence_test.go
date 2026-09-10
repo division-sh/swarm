@@ -63,10 +63,9 @@ func (workflowTestModule) SemanticSource() semanticview.Source {
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "persistence-proof", Version: "1"},
 	})
 }
-func (workflowTestModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition { return nil }
-func (workflowTestModule) WorkflowNodes() []runtimepipeline.WorkflowNode           { return nil }
-func (workflowTestModule) GuardRegistry() runtimepipeline.GuardRegistry            { return nil }
-func (workflowTestModule) ActionRegistry() runtimepipeline.ActionRegistry          { return nil }
+func (workflowTestModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { return nil }
+func (workflowTestModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
+func (workflowTestModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
 
 func newPostgresWorkflowTestCoordinator(
 	t *testing.T,
