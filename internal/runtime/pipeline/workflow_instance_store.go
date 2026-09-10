@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -497,6 +498,9 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
+	if err := validateWorkflowTransitionHistoryFlow(projection.Control.TransitionHistory, strings.TrimSpace(record.WorkflowName)); err != nil {
+		return WorkflowInstance{}, err
+	}
 	if got := strings.TrimSpace(projection.Control.InstanceID); got != route.InstanceID {
 		return WorkflowInstance{}, fmt.Errorf("decode workflow instance %s identity: persisted instance_id %q disagrees with exact route instance_id %q", route.InstancePath, got, route.InstanceID)
 	}
@@ -569,12 +573,13 @@ const (
 )
 
 type WorkflowTransitionRecord struct {
-	TransitionID    string    `json:"transition_id"`
-	From            string    `json:"from"`
-	To              string    `json:"to"`
-	TriggerEventID  string    `json:"trigger_event_id"`
-	FiredAt         time.Time `json:"fired_at"`
-	GuardsEvaluated []string  `json:"guards_evaluated"`
+	Evidence        runtimeworkflowlifecycle.Transition `json:"evidence"`
+	TransitionID    string                              `json:"transition_id"`
+	From            string                              `json:"from"`
+	To              string                              `json:"to"`
+	TriggerEventID  string                              `json:"trigger_event_id"`
+	FiredAt         time.Time                           `json:"fired_at"`
+	GuardsEvaluated []string                            `json:"guards_evaluated"`
 }
 
 type workflowInstancePersistedProjection struct {
@@ -1172,6 +1177,9 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	if control.EntityType == "" {
 		return workflowInstancePersistedProjection{}, fmt.Errorf("workflow instance entity_type is required")
 	}
+	if err := validateWorkflowTransitionHistoryFlow(control.TransitionHistory, strings.TrimSpace(instance.WorkflowName)); err != nil {
+		return workflowInstancePersistedProjection{}, err
+	}
 	return workflowInstancePersistedProjection{
 		Fields:      cloneStringAnyMap(instance.Fields),
 		Bookkeeping: cloneStringAnyMap(instance.Bookkeeping),
@@ -1380,7 +1388,34 @@ func workflowInstanceTransitionHistoryFromConfig(config map[string]any) ([]Workf
 	if err := json.Unmarshal(encoded, &out); err != nil {
 		return nil, fmt.Errorf("flow_instances.config transition_history must be an array of workflow transition records: %w", err)
 	}
+	for _, record := range out {
+		if err := validateWorkflowTransitionRecord(record); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
+}
+
+func validateWorkflowTransitionRecord(record WorkflowTransitionRecord) error {
+	if err := record.Evidence.Validate(); err != nil {
+		return err
+	}
+	if record.TransitionID != record.Evidence.ID() || record.From != record.Evidence.From() || record.To != record.Evidence.To() || !slices.Equal(record.GuardsEvaluated, record.Evidence.GuardsEvaluated()) || record.TriggerEventID == "" || record.FiredAt.IsZero() {
+		return fmt.Errorf("workflow transition record contradicts admitted evidence")
+	}
+	return nil
+}
+
+func validateWorkflowTransitionHistoryFlow(history []WorkflowTransitionRecord, flowID string) error {
+	for _, record := range history {
+		if err := validateWorkflowTransitionRecord(record); err != nil {
+			return err
+		}
+		if record.Evidence.FlowID() != flowID {
+			return fmt.Errorf("workflow transition evidence flow %q contradicts persisted workflow flow %q", record.Evidence.FlowID(), flowID)
+		}
+	}
+	return nil
 }
 
 func workflowInstanceMode(instance WorkflowInstance) string {

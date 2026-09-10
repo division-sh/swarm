@@ -41,12 +41,6 @@ func (b *WorkflowContractBundle) WorkflowTerminalStages() []string {
 	}
 	return b.Semantics.TerminalStages
 }
-func (b *WorkflowContractBundle) WorkflowTransitions() []WorkflowTransitionContract {
-	if b == nil {
-		return nil
-	}
-	return b.Semantics.Transitions
-}
 func (b *WorkflowContractBundle) WorkflowInitialStage() string {
 	if b == nil {
 		return ""
@@ -94,6 +88,13 @@ func (b *WorkflowContractBundle) WorkflowStageTopology(flowID string) (WorkflowS
 		return WorkflowStageTopology{}, false
 	}
 	topology, ok := b.Semantics.StageTopologies[strings.TrimSpace(flowID)]
+	topology.Stages = append([]string(nil), topology.Stages...)
+	topology.TerminalStages = append([]string(nil), topology.TerminalStages...)
+	topology.Edges = append([]WorkflowStageTopologyEdge(nil), topology.Edges...)
+	topology.Handlers = append([]WorkflowHandlerStageScope(nil), topology.Handlers...)
+	for i := range topology.Handlers {
+		topology.Handlers[i].Stages = append([]string(nil), topology.Handlers[i].Stages...)
+	}
 	return topology, ok
 }
 func (b *WorkflowContractBundle) WorkflowTimerForNode(node runtimeidentity.ExecutableNode, id string) (WorkflowTimerContract, bool) {
@@ -779,35 +780,12 @@ func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
 	}
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "." {
-		if b.RootSchema == nil {
-			return workflowSemanticRootStates(b.Semantics)
-		}
 		return rootSchemaStates(b.RootSchema)
 	}
 	if states := b.Semantics.FlowStates[flowID]; len(states) > 0 {
 		return append([]string{}, states...)
 	}
 	return nil
-}
-
-func workflowSemanticRootStates(semantics WorkflowSemanticView) []string {
-	out := make([]string, 0, len(semantics.Stages))
-	seen := make(map[string]struct{}, len(semantics.Stages))
-	for _, stage := range semantics.Stages {
-		if strings.TrimSpace(stage.Phase) != "" {
-			continue
-		}
-		id := strings.TrimSpace(stage.ID)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out
 }
 
 func rootSchemaStates(root *FlowSchemaDocument) []string {
@@ -823,9 +801,6 @@ func (b *WorkflowContractBundle) FlowTerminalStages(flowID string) []string {
 	}
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "." {
-		if b.RootSchema == nil {
-			return append([]string{}, b.Semantics.TerminalStages...)
-		}
 		return rootSchemaTerminalStates(b.RootSchema)
 	}
 	if terminal := b.Semantics.FlowTerminal[flowID]; len(terminal) > 0 {
@@ -1257,22 +1232,5 @@ func (b *WorkflowContractBundle) DerivedHandlerTransitions() []HandlerTransition
 	}
 	out := make([]HandlerTransitionSemantic, len(b.Semantics.HandlerTransitions))
 	copy(out, b.Semantics.HandlerTransitions)
-	return out
-}
-func (b *WorkflowContractBundle) TransitionIDsByOwner() map[string][]string {
-	out := map[string][]string{}
-	if b == nil {
-		return out
-	}
-	for _, transition := range b.WorkflowTransitions() {
-		owner := strings.TrimSpace(transition.Node)
-		if owner == "" {
-			continue
-		}
-		out[owner] = append(out[owner], strings.TrimSpace(transition.ID))
-	}
-	for owner := range out {
-		sort.Strings(out[owner])
-	}
 	return out
 }

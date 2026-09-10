@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		FanOut:         cloneStringAnyMap(ctx.FanOut.Raw()),
 		Join:           cloneStringAnyMap(ctx.Join.Raw()),
 		Loop:           cloneStringAnyMap(ctx.Loop.Raw()),
-		WorkflowName:   firstNonEmptyString(strings.TrimSpace(ctx.FlowID), e.workflowName()),
+		WorkflowName:   ctx.FlowID,
 	}
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
@@ -59,13 +60,6 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		}
 	}
 	return e.evaluator.EvalBoolWithOptions(expression, queryCtx, options)
-}
-
-func (e pipelineEngineEvaluator) workflowName() string {
-	if e.coordinator == nil || e.coordinator.module == nil || e.coordinator.module.WorkflowDefinition() == nil {
-		return ""
-	}
-	return strings.TrimSpace(e.coordinator.module.WorkflowDefinition().Name)
 }
 
 func accumulatedItemsForCEL(raw map[string]any) any {
@@ -161,6 +155,9 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			resultErr = errors.Join(resultErr, fmt.Errorf("workflow engine mutation panic: %v", recovered))
 		}
 	}()
+	if err := mutation.ValidateTransitionEvidence(); err != nil {
+		return runtimeengine.CommittedEngineMutation{}, err
+	}
 	if o.store != nil && o.store.enabled() {
 		if o.store.engineMutations == nil {
 			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("selected workflow engine mutation owner is required")
@@ -736,12 +733,21 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		if strings.TrimSpace(mutation.TriggerEventID) == "" || strings.TrimSpace(mutation.TriggerEventType) == "" || mutation.TriggeredAt.IsZero() {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow state transition requires exact trigger event identity")
 		}
+		if mutation.Transition == nil || mutation.Transition.From() != fromState || mutation.Transition.To() != nextState {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow state transition requires exact admitted carrier evidence")
+		}
+		if err := r.validateMutationTransition(ctx, current, mutation, flowID); err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
 		current.CurrentState = nextState
 		current.EnteredStageAt = mutation.TriggeredAt.UTC()
-		current.TransitionHistory = append(current.TransitionHistory, workflowTransitionRecord(
-			r.coordinator.WorkflowDefinition(), fromState, nextState,
-			mutation.TriggerEventID, mutation.TriggerEventType, mutation.TriggeredAt,
-		))
+		current.TransitionHistory = append(current.TransitionHistory, WorkflowTransitionRecord{
+			TransitionID: mutation.Transition.ID(), From: fromState, To: nextState,
+			TriggerEventID: mutation.TriggerEventID, FiredAt: mutation.TriggeredAt.UTC(),
+			GuardsEvaluated: mutation.Transition.GuardsEvaluated(), Evidence: *mutation.Transition,
+		})
+	} else if mutation.Transition != nil {
+		return preparedWorkflowEngineState{}, fmt.Errorf("unchanged workflow stage cannot carry transition evidence")
 	}
 	if current.CreatedAt.IsZero() {
 		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires persisted creation time")
@@ -765,6 +771,9 @@ func (r pipelineEngineStateRepo) prepareMutation(
 func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
 	if r.coordinator == nil {
 		return runtimeengine.StateSnapshot{}, false, nil
+	}
+	if r.coordinator.previewState != nil {
+		return loadPreviewEngineState(*r.coordinator.previewState, address)
 	}
 	entityID := identity.NormalizeEntityID(address.EntityID.String())
 	if entityID.IsZero() {
@@ -987,29 +996,28 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		dispatcher = pc.bus.EngineDispatcher()
 	}
 	var lifecycleOwner runtimeengine.WorkflowLifecycleEffectOwner
-	if pc.workflowStore != nil && pc.workflowStore.enabled() {
+	if (pc.workflowStore != nil && pc.workflowStore.enabled()) || pc.previewState != nil {
 		lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	}
 	stateRepo := pipelineEngineStateRepo{coordinator: pc}
 	activityWriter := pipelineActivityIntentWriter{coordinator: pc}
 	publicationPlanner, _ := pc.bus.(EnginePublicationPlanner)
 	return runtimeengine.RuntimeDependencies{
-		Source:              source,
-		StateRepo:           stateRepo,
-		EntityCollections:   pipelineEngineEntityCollectionReader{coordinator: pc},
-		MutationOwner:       pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
-		Locker:              pipelineEngineLocker{coordinator: pc},
-		WorkflowLifecycle:   lifecycleOwner,
-		Dispatcher:          dispatcher,
-		ActivityDispatcher:  pipelineActivityDispatcher{coordinator: pc},
-		GuardRegistry:       pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
-		GuardRunner:         pipelineEngineGuardRunner{coordinator: pc},
-		ActionRegistry:      pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
-		ActionRunner:        pipelineEngineActionRunner{coordinator: pc},
-		PayloadShaper:       pipelineEnginePayloadShaper{coordinator: pc},
-		TransitionValidator: pipelineEngineTransitionValidator{coordinator: pc},
-		EmitNow:             pc.testEngineEmitNow,
-		MaxChainDepth:       workflowMaxChainDepthPolicy(source),
+		Source:             source,
+		StateRepo:          stateRepo,
+		EntityCollections:  pipelineEngineEntityCollectionReader{coordinator: pc},
+		MutationOwner:      pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
+		Locker:             pipelineEngineLocker{coordinator: pc},
+		WorkflowLifecycle:  lifecycleOwner,
+		Dispatcher:         dispatcher,
+		ActivityDispatcher: pipelineActivityDispatcher{coordinator: pc},
+		GuardRegistry:      pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
+		GuardRunner:        pipelineEngineGuardRunner{coordinator: pc},
+		ActionRegistry:     pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
+		ActionRunner:       pipelineEngineActionRunner{coordinator: pc},
+		PayloadShaper:      pipelineEnginePayloadShaper{coordinator: pc},
+		EmitNow:            pc.testEngineEmitNow,
+		MaxChainDepth:      workflowMaxChainDepthPolicy(source),
 	}
 }
 
@@ -1064,27 +1072,6 @@ func workflowMaxChainDepthPolicy(source semanticview.Source) int {
 		}
 	}
 	return runtimeengine.DefaultMaxChainDepth
-}
-
-type pipelineEngineTransitionValidator struct {
-	coordinator *PipelineCoordinator
-}
-
-func (v pipelineEngineTransitionValidator) ValidateTransition(currentState, nextState string) error {
-	pc := v.coordinator
-	if pc == nil {
-		return nil
-	}
-	workflow := pc.WorkflowDefinition()
-	if workflow == nil {
-		return nil
-	}
-	current := NormalizeWorkflowStateID(currentState)
-	next := NormalizeWorkflowStateID(nextState)
-	if workflow.CanTransition(WorkflowState{Stage: current}, next) {
-		return nil
-	}
-	return fmt.Errorf("%w: %s -> %s", runtimeengine.ErrInvalidTransition, strings.TrimSpace(string(current)), strings.TrimSpace(string(next)))
 }
 
 type pipelineEngineGuardRegistry struct{ registry GuardRegistry }
@@ -1155,38 +1142,20 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 			return true, true, nil
 		}
 		return strings.TrimSpace(asString(payload["mailbox_decision_id"])) != "", true, nil
-	case "not_in_terminal_state", "not_in_terminal_stage":
-		source := pc.SemanticSource()
-		if source == nil {
-			return true, true, nil
-		}
-		currentState := strings.TrimSpace(string(state.Stage))
-		if currentState == "" {
-			return true, true, nil
-		}
-		flowID := execCtx.Request.Node.FlowPath()
-		for _, candidateFlowID := range terminalStateFlowCandidates(source, flowID, *state) {
-			if terminalStageContains(source.FlowTerminalStages(candidateFlowID), currentState) {
-				return false, true, nil
-			}
-			if stageSetContains(source.FlowStates(candidateFlowID), currentState) {
-				return true, true, nil
-			}
-		}
-		workflow := pc.WorkflowDefinition()
-		if workflow != nil {
-			if stage, ok := workflow.Stage(state.Stage); ok {
-				return !stage.Terminal, true, nil
-			}
-		}
-		return true, true, nil
-	case "state_in_phase":
-		if pc.WorkflowDefinition() == nil {
-			return false, true, nil
-		}
-		stage, ok := pc.WorkflowDefinition().Stage(state.Stage)
+	case "not_in_terminal_state", "not_in_terminal_stage", "state_in_phase":
+		graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), execCtx.Request.ExecutionFlowID.String())
 		if !ok {
-			return false, true, nil
+			return false, true, fmt.Errorf("%w: execution flow has no stage topology", runtimeengine.ErrInvalidConfig)
+		}
+		currentState := string(state.Stage)
+		if currentState == "" && builtin != "state_in_phase" {
+			return true, true, nil
+		}
+		if !slices.Contains(graph.Stages, currentState) {
+			return false, true, fmt.Errorf("%w: stage %q is not declared in flow %s", runtimeengine.ErrInvalidConfig, currentState, graph.FlowID)
+		}
+		if builtin != "state_in_phase" {
+			return !slices.Contains(graph.TerminalStages, currentState), true, nil
 		}
 		required := strings.TrimSpace(entry.PolicyRef)
 		if required != "" {
@@ -1200,7 +1169,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 		if required == "" {
 			return false, true, runtimeengine.ErrInvalidConfig
 		}
-		return strings.EqualFold(strings.TrimSpace(stage.Phase), required), true, nil
+		return graph.FlowID == required, true, nil
 	default:
 		return false, false, nil
 	}
@@ -1516,27 +1485,8 @@ func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
 	if pc == nil {
 		return false
 	}
-	state = strings.TrimSpace(state)
-	if state == "" {
-		return false
-	}
-	source := pc.SemanticSource()
-	if source != nil {
-		for _, terminal := range source.FlowTerminalStages(flowID) {
-			if strings.EqualFold(strings.TrimSpace(terminal), state) {
-				return true
-			}
-		}
-		if len(source.FlowStates(flowID)) > 0 {
-			return false
-		}
-	}
-	workflow := pc.WorkflowDefinition()
-	if workflow == nil {
-		return false
-	}
-	stage, ok := workflow.Stage(NormalizeWorkflowStateID(state))
-	return ok && stage.Terminal
+	graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), flowID)
+	return ok && slices.Contains(graph.TerminalStages, state)
 }
 
 func cloneEvent(evt events.Event) events.Event {

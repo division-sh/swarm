@@ -63,29 +63,35 @@ func BuildWorkflowStageTopology(
 			if loopKind != "" {
 				edgeSource = "loop." + string(loopKind)
 			}
-			if transition.Loop == nil && transition.Join != nil && transition.Join.Mode() == WorkflowJoinModeArrival {
+			if transition.Join != nil && transition.Join.Mode() == WorkflowJoinModeArrival {
 				switch carrier.Kind {
 				case HandlerAdvanceCarrierJoinOnComplete:
-					from = []string{strings.TrimSpace(transition.Join.Stage)}
+					if transition.Loop == nil {
+						from = []string{strings.TrimSpace(transition.Join.Stage)}
+					}
 				case HandlerAdvanceCarrierJoinTimeout:
-					from = []string{strings.TrimSpace(transition.Join.Stage)}
+					if transition.Loop == nil {
+						from = []string{strings.TrimSpace(transition.Join.Stage)}
+					}
 					eventType = "platform.join_timeout"
 					timed = true
 				}
 			}
 			for _, sourceStage := range normalizedStrings(from) {
 				topology.Edges = appendTopologyEdge(topology.Edges, stageSet, WorkflowStageTopologyEdge{
-					From:          sourceStage,
-					To:            strings.TrimSpace(carrier.AdvancesTo),
-					Source:        edgeSource,
-					Node:          transition.Node,
-					HandlerEvent:  strings.TrimSpace(transition.EventType),
-					EventType:     eventType,
-					LoopID:        loopID,
-					LoopOperation: loopKind,
-					TimerID:       joinTimerID(transition, carrier),
-					After:         joinTimerDelay(transition, carrier),
-					Timed:         timed,
+					From:           sourceStage,
+					To:             strings.TrimSpace(carrier.AdvancesTo),
+					Source:         edgeSource,
+					Node:           transition.Node,
+					HandlerEvent:   strings.TrimSpace(transition.EventType),
+					EventType:      eventType,
+					LoopID:         loopID,
+					LoopOperation:  loopKind,
+					TimerID:        joinTimerID(transition, carrier),
+					After:          joinTimerDelay(transition, carrier),
+					Timed:          timed,
+					AdvanceCarrier: carrier.Kind,
+					RuleRef:        carrier.RuleRef,
 				})
 			}
 		}
@@ -230,9 +236,8 @@ func appendTopologyEdge(edges []WorkflowStageTopologyEdge, stages map[string]str
 	if _, ok := stages[edge.To]; !ok {
 		return edges
 	}
-	key := topologyEdgeSortKey(edge)
 	for _, existing := range edges {
-		if topologyEdgeSortKey(existing) == key {
+		if existing == edge {
 			return edges
 		}
 	}
@@ -278,7 +283,7 @@ func joinTimerDelay(transition HandlerTransitionSemantic, carrier HandlerAdvance
 }
 
 func topologyEdgeSortKey(edge WorkflowStageTopologyEdge) string {
-	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.Node.Key(), edge.InternalOwner, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After, edge.DecisionID, edge.Verdict}, "\x00")
+	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.Node.Key(), edge.InternalOwner, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After, edge.DecisionID, edge.Verdict, string(edge.AdvanceCarrier), edge.RuleRef.Key()}, "\x00")
 }
 
 func normalizedStringSet(values []string) map[string]struct{} {

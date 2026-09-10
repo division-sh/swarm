@@ -250,8 +250,7 @@ request.received:
 	})
 	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{
-			source:   source,
-			workflow: NewWorkflowDefinition("runtime-test", []WorkflowStage{{Name: "ready"}}, nil),
+			source: source,
 		},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
@@ -473,8 +472,7 @@ func TestPrepareTerminalFlowInstanceDeactivationIgnoresRootWorkflowEntity(t *tes
 	deactivated := false
 	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{
-			source:   semanticview.Wrap(bundle),
-			workflow: NewWorkflowDefinition("root", []WorkflowStage{{Name: "pending"}, {Name: "done", Terminal: true}}, nil),
+			source: semanticview.Wrap(bundle),
 		},
 		InstanceDeactivationPreparer: func(context.Context, FlowInstanceDeactivationRequest) (PreparedFlowInstanceDeactivation, error) {
 			deactivated = true
@@ -507,27 +505,16 @@ func TestPrepareTerminalFlowInstanceDeactivationPassesTerminalState(t *testing.T
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "root",
-			InitialStage: "pending",
-			FlowTerminal: map[string][]string{
-				"review": {"completed"},
-			},
-			FlowPrefix: map[string]string{
-				"review": "review",
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"review": {Mode: "template"},
-		},
-	}
+	bundle := loadWorkflowTempBundle(t, map[string]string{
+		"schema.yaml":          "name: root\n",
+		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  pending: {initial: true}\n  completed: {terminal: true}\n",
+		"review/entities.yaml": "test_entity: {}\n",
+	})
 	var got FlowInstanceDeactivationRequest
 	called := false
 	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{
-			source:   semanticview.Wrap(bundle),
-			workflow: NewWorkflowDefinition("root", []WorkflowStage{{Name: "pending"}, {Name: "completed", Terminal: true}}, nil),
+			source: semanticview.Wrap(bundle),
 		},
 		InstanceDeactivationPreparer: func(_ context.Context, req FlowInstanceDeactivationRequest) (PreparedFlowInstanceDeactivation, error) {
 			called = true

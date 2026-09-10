@@ -6679,7 +6679,9 @@ func TestRun_DoesNotReportSingleNodePerEventForWildcardOnlyOverlap(t *testing.T)
 
 func TestRun_ReportsMissingTransitionTriggerEvent(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	bundle.Semantics.Transitions[0].Trigger = "ticket.missing"
+	topology := bundle.Semantics.StageTopologies["."]
+	topology.Edges[0].EventType = "ticket.missing"
+	bundle.Semantics.StageTopologies["."] = topology
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -6746,7 +6748,9 @@ func TestArtifactRepoResultEventEntryDoesNotUseAnotherFlowDeclaration(t *testing
 
 func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	bundle.Semantics.Transitions[0].ExecutableNode = identitytest.RootNode(t, "projector")
+	topology := bundle.Semantics.StageTopologies["."]
+	topology.Edges[0].Node = identitytest.RootNode(t, "projector")
+	bundle.Semantics.StageTopologies["."] = topology
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -7914,9 +7918,12 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 	}
 	nodes := map[string]runtimecontracts.SystemNodeContract{
 		"dispatcher": {
-			OwnedTransitions: []string{"ticket-open"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"ticket.created": {},
+				"ticket.created": {
+					AdvancesTo: "opened",
+					Action:     runtimecontracts.ActionSpec{ID: "emit_opened"},
+					Guard:      &runtimecontracts.GuardSpec{ID: "allow_ticket"},
+				},
 			},
 		},
 		"projector": {
@@ -7941,19 +7948,18 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: ".",
 		},
-		Nodes:  nodes,
-		Events: events,
+		Nodes: nodes, Events: events,
+		Schema: runtimecontracts.FlowSchemaDocument{
+			InitialState: "created", States: []string{"created", "opened"}, TerminalStates: []string{"opened"},
+		},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Transitions: []runtimecontracts.WorkflowTransitionContract{{
-				ID:             "ticket-open",
-				Trigger:        "ticket.created",
-				Node:           "dispatcher",
-				ExecutableNode: dispatcher,
-				Actions:        []string{"emit_opened"},
-				Guards:         []string{"allow_ticket"},
-			}},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+				".": runtimecontracts.BuildWorkflowStageTopology(".", "created", []string{"created", "opened"}, []string{"opened"},
+					[]runtimecontracts.HandlerTransitionSemantic{{Node: dispatcher, EventType: "ticket.created", AdvancesTo: "opened"}}, nil, nil),
+			},
 			ActionByID: map[string]runtimecontracts.GuardActionEntry{
 				"emit_opened": {
 					ID:    "emit_opened",
@@ -7967,12 +7973,7 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 				},
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"dispatcher": {
-					"ticket.created": {},
-				},
-				"projector": {
-					"ticket.opened": {},
-				},
+				dispatcher.Key(): nodes["dispatcher"].EventHandlers,
 			},
 		},
 		Nodes:  nodes,

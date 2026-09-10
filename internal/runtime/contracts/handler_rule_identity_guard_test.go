@@ -27,10 +27,6 @@ type handlerRuleDisplayLabelAllowance struct {
 }
 
 func TestHandlerRuleDisplayLabelReaderBoundary(t *testing.T) {
-	transitionKey := "internal/runtime/contracts/workflow_contract_semantics.go::deriveRuleTransitions"
-	if allowance := allowedHandlerRuleDisplayLabelReaders()[transitionKey]; !strings.Contains(allowance.Reason, "#1769/#1775") {
-		t.Fatalf("transition-lowering display authority is not explicitly tracked: %#v", allowance)
-	}
 	for _, activityKey := range []string{
 		"internal/runtime/contracts/workflow_contract_activity.go::ActivitySitesForNode",
 		"internal/runtime/engine/executor.go::(*Executor).stepActivity",
@@ -118,7 +114,6 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 		"internal/runtime/contracts/workflow_contract_emit.go::HandlerRuleEmitTemplateSites":                                       {Count: 1, Reason: "emit-template presentation label"},
 		"internal/runtime/contracts/workflow_contract_policy_sheet.go::lowerPolicySheetRuleNode":                                   {Count: 9, Reason: "decode diagnostics and presentation metadata"},
 		"internal/runtime/contracts/workflow_contract_rule_identity.go::QualifySystemNodeHandlerRuleRefsForEvent":                  {Count: 1, Reason: "path-derived identity-admission diagnostic label only"},
-		"internal/runtime/contracts/workflow_contract_semantics.go::deriveRuleTransitions":                                         {Count: 2, Reason: "deferred transition identity authority tracked by #1769/#1775"},
 		"internal/runtime/contracts/workflow_contract_yaml_handlers.go::decodeHandlerRuleEntriesNode":                              {Count: 2, Reason: "keyed-map presentation projection"},
 		"internal/runtime/contracts/workflow_contract_yaml_handlers.go::decodeHandlerRuleEntryNode":                                {Count: 1, Reason: "non-empty presentation field check"},
 		"internal/runtime/contracts/workflow_fan_out_semantics.go::HandlerFanOutSites":                                             {Count: 2, Reason: "fan-out-site presentation label"},

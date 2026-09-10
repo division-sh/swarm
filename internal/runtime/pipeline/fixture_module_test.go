@@ -26,17 +26,12 @@ func (noopPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 
 func newPipelineFixtureWorkflowModule(bundle *runtimecontracts.WorkflowContractBundle) (WorkflowModule, error) {
 	source := semanticview.Wrap(bundle)
-	workflow, err := LoadWorkflowDefinition(source)
-	if err != nil {
-		return nil, err
-	}
 	workflowNodes, err := LoadWorkflowNodes(source)
 	if err != nil {
 		return nil, err
 	}
 	return &pipelineFixtureWorkflowModule{
 		source:         source,
-		workflow:       workflow,
 		workflowNodes:  workflowNodes,
 		guardRegistry:  NewContractGuardRegistry(source),
 		actionRegistry: NewContractActionRegistry(source),
@@ -45,16 +40,12 @@ func newPipelineFixtureWorkflowModule(bundle *runtimecontracts.WorkflowContractB
 
 type pipelineFixtureWorkflowModule struct {
 	source         semanticview.Source
-	workflow       *WorkflowDefinition
 	workflowNodes  []WorkflowNode
 	guardRegistry  GuardRegistry
 	actionRegistry ActionRegistry
 }
 
 func (m *pipelineFixtureWorkflowModule) SemanticSource() semanticview.Source { return m.source }
-func (m *pipelineFixtureWorkflowModule) WorkflowDefinition() *WorkflowDefinition {
-	return m.workflow
-}
 func (m *pipelineFixtureWorkflowModule) WorkflowNodes() []WorkflowNode {
 	return append([]WorkflowNode(nil), m.workflowNodes...)
 }

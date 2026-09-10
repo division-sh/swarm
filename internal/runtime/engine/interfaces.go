@@ -121,7 +121,7 @@ type EntityLocker interface {
 }
 
 type WorkflowLifecycleEffectOwner interface {
-	AcceptedEventEffect(route runtimeflowidentity.Route, entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error)
+	AcceptedEventEffect(route runtimeflowidentity.Route, entityID identity.EntityID, event events.Event, fromState, toState string, transition *runtimeworkflowlifecycle.Transition) (runtimeworkflowlifecycle.Effect, error)
 	ApplyWorkflowLifecycleEffects(ctx context.Context, effects []runtimeworkflowlifecycle.Effect) error
 }
 
@@ -167,25 +167,20 @@ type PayloadShaper interface {
 	ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error)
 }
 
-type TransitionValidator interface {
-	ValidateTransition(currentState, nextState string) error
-}
-
 type RuntimeDependencies struct {
-	Source              semanticview.Source
-	StateRepo           StateRepository
-	EntityCollections   EntityCollectionReader
-	MutationOwner       EngineMutationOwner
-	Locker              EntityLocker
-	WorkflowLifecycle   WorkflowLifecycleEffectOwner
-	Dispatcher          PostCommitDispatcher
-	ActivityDispatcher  ActivityDispatcher
-	GuardRegistry       GuardRegistry
-	GuardRunner         GuardRunner
-	ActionRegistry      ActionRegistry
-	ActionRunner        ActionRunner
-	PayloadShaper       PayloadShaper
-	TransitionValidator TransitionValidator
-	EmitNow             func() time.Time
-	MaxChainDepth       int
+	Source             semanticview.Source
+	StateRepo          StateRepository
+	EntityCollections  EntityCollectionReader
+	MutationOwner      EngineMutationOwner
+	Locker             EntityLocker
+	WorkflowLifecycle  WorkflowLifecycleEffectOwner
+	Dispatcher         PostCommitDispatcher
+	ActivityDispatcher ActivityDispatcher
+	GuardRegistry      GuardRegistry
+	GuardRunner        GuardRunner
+	ActionRegistry     ActionRegistry
+	ActionRunner       ActionRunner
+	PayloadShaper      PayloadShaper
+	EmitNow            func() time.Time
+	MaxChainDepth      int
 }

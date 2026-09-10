@@ -520,7 +520,7 @@ func (s connectorPackSource) ResolveFlowEventCatalogEntry(flowID, eventType stri
 	if entry, resolved, ok := s.Source.ResolveFlowEventCatalogEntry(flowID, eventType); ok {
 		return entry, resolved, true
 	}
-	eventType = strings.TrimSpace(eventType)
+	eventType = s.Source.ResolveFlowEventReference(strings.TrimSpace(flowID), strings.TrimSpace(eventType))
 	entry, ok := s.generatedActivityEventEntries()[eventType]
 	return entry, eventType, ok
 }
