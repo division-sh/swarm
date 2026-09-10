@@ -1,0 +1,164 @@
+internal/store/internal/operatorsurface/agents_list.go:36:	rows, err := s.backend.QueryContext(ctx, query, runID)
+internal/store/internal/operatorsurface/agents_list.go:71:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/startupownership/owner.go:353:	err = s.owner.backend.QueryRowContext(ctx, `SELECT snapshot FROM runtime_startup_authority_facts WHERE authority_id = ? ORDER BY transition_ordinal DESC LIMIT 1`, authority.AuthorityID).Scan(&snapshot)
+internal/store/internal/budgetspend/owner.go:108:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/budgetspend/owner.go:123:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/budgetspend/owner.go:147:		err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/budgetspend/owner.go:154:		err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/budgetspend/owner.go:165:		err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/budgetspend/owner.go:241:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/budgetspend/owner.go:273:	rows, err := s.backend.QueryContext(ctx, query, args...)
+internal/store/internal/budgetspend/owner.go:290:		err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/budgetspend/owner.go:297:		err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/budgetspend/owner.go:308:		err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/operator_agent_conversation_read_surface.go:223:	rows, err := r.backend.QueryContext(ctx, fmt.Sprintf(`
+internal/store/internal/operatorsurface/operator_agent_delivery_diagnostics_read_surface.go:92:	if err := r.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/operator_agent_delivery_lifecycle_read_surface.go:146:	if err := r.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/operator_agent_delivery_lifecycle_read_surface.go:176:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_stalled_read_surface.go:21:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_stalled_read_surface.go:47:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_stalled_read_surface.go:71:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_stalled_read_surface.go:97:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/operator_agent_usage_read_surface.go:125:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/operator_agent_usage_read_surface.go:155:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/operator_agent_usage_read_surface.go:192:	rows, err := s.backend.QueryContext(ctx, fmt.Sprintf(`
+internal/store/internal/operatorsurface/operator_agent_usage_read_surface.go:297:	rows, err := s.backend.QueryContext(ctx, fmt.Sprintf(`
+internal/store/internal/operatorsurface/sqlite_operator_agent_conversation_read_surface.go:195:	rows, err := r.backend.QueryContext(ctx, fmt.Sprintf(`
+internal/store/internal/operatorsurface/sqlite_operator_agent_conversation_read_surface.go:594:	if err := r.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/operator_entity_read_surface.go:104:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_entity_read_surface.go:230:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_entity_read_surface.go:297:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_entity_read_surface.go:347:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_entity_read_surface.go:405:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_entity_read_surface.go:460:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_entity_read_surface.go:490:	row := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/operator_entity_read_surface.go:567:	row := s.backend.QueryRowContext(ctx, `
+internal/store/internal/workflowentityquery/reader.go:36:		return o.backend.QueryContext(ctx, `
+internal/store/internal/workflowentityquery/reader.go:47:		return o.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go:34:	row := s.backend.QueryRowContext(ctx, sqliteRunHeaderSelectSQL()+`
+internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go:87:	rows, err := s.backend.QueryContext(ctx, sqliteRunHeaderSelectSQL()+`
+internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go:227:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go:363:	if err := s.backend.QueryRowContext(ctx, `SELECT MAX(created_at) FROM events WHERE run_id = ?`, runID).Scan(&raw); err != nil {
+internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go:370:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go:432:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go:476:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go:533:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_observability_read_surface.go:121:		rows, err := r.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_observability_read_surface.go:349:	rows, err := r.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_observability_read_surface.go:388:	rows, err := r.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/operator_observability_read_surface.go:468:	rows, err := r.backend.QueryContext(ctx, fmt.Sprintf(`
+internal/store/internal/operatorsurface/operator_observability_read_surface.go:545:	rows, err := r.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_runtime_observability.go:22:	if err := s.backend.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ?)`, runID).Scan(&exists); err != nil {
+internal/store/internal/operatorsurface/sqlite_runtime_observability.go:97:		rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_runtime_observability.go:243:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_runtime_observability.go:318:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/sqlite_runtime_observability.go:356:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/workflowroute/reader.go:38:	return scanActive(o.backend.QueryRowContext(ctx, `
+internal/store/internal/workflowroute/reader.go:61:	return scanActive(o.backend.QueryRowContext(ctx, `
+internal/store/internal/ingresspersistence/owner.go:50:	if _, err := s.backend.ExecContext(ctx, `
+internal/store/internal/ingresspersistence/owner.go:67:	state, err := scanRuntimeIngressState(s.backend.QueryRowContext(ctx, `
+internal/store/internal/ingresspersistence/owner.go:141:	res, err := s.backend.ExecContext(ctx, `
+internal/store/internal/ingresspersistence/owner.go:185:	state, err := scanRuntimeIngressState(s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_api_read_surface.go:54:	row := s.backend.QueryRowContext(ctx, runHeaderSelectSQL()+`
+internal/store/internal/operatorsurface/run_api_read_surface.go:114:	rows, err := s.backend.QueryContext(ctx, query, args...)
+internal/store/internal/routingrules/owner.go:48:		res, err := s.backend.ExecContext(ctx, deactivateQ,
+internal/store/internal/routingrules/owner.go:67:		if _, err := s.backend.ExecContext(ctx, insertDeactivatedQ,
+internal/store/internal/routingrules/owner.go:98:	if _, err := s.backend.ExecContext(ctx, q,
+internal/store/internal/routingrules/owner.go:126:	rows, err := s.backend.QueryContext(ctx, q)
+internal/store/internal/routingrules/owner.go:161:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:86:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:119:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:222:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:233:	eventCountRows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:271:	eventRows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:302:	deadRows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:336:	turnRows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:358:	mutationRows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:454:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:586:	if err := s.backend.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&exists); err != nil {
+internal/store/internal/operatorsurface/run_debug_read_surface.go:684:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:694:	logSummaryRows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/operatorsurface/run_debug_read_surface.go:723:	logRows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/llmpersistence/postgres.go:249:	err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/mailboxpersistence/postgres.go:112:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/mailboxpersistence/postgres.go:197:	_, err := s.backend.ExecContext(ctx, `
+internal/store/internal/mailboxpersistence/postgres.go:217:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/mailboxpersistence/postgres.go:248:	if err := s.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE `+where, arg).Scan(out); err != nil {
+internal/store/internal/mailboxpersistence/postgres.go:255:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/mailboxpersistence/postgres.go:290:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/mailboxpersistence/postgres.go:332:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/mailboxpersistence/postgres.go:364:	result, err := s.backend.ExecContext(ctx, `
+internal/store/internal/mailboxpersistence/v1_postgres.go:39:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/runbundle/owner.go:121:	rows, err := o.backend.QueryContext(ctx, `
+internal/store/internal/runbundle/owner.go:139:	rows, err := o.backend.QueryContext(ctx, `
+internal/store/internal/mailboxpersistence/v1_sqlite.go:35:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/llmpersistence/sqlite.go:173:	err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/mailboxpersistence/sqlite.go:72:	rows, err := s.backend.QueryContext(ctx, sqliteMailboxSelectSQL(`status = ?`)+` ORDER BY created_at ASC LIMIT ?`, status, limit)
+internal/store/internal/mailboxpersistence/sqlite.go:88:	if err := s.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE status = ?`, status).Scan(&n); err != nil {
+internal/store/internal/mailboxpersistence/sqlite.go:99:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/mailboxpersistence/sqlite.go:120:	rows, err := s.backend.QueryContext(ctx, sqliteMailboxSelectSQL(`item_id = ?`), id)
+internal/store/internal/mailboxpersistence/sqlite.go:181:	rows, err := s.backend.QueryContext(ctx, sqliteMailboxSelectSQL(`status = 'pending' AND severity = 'critical' AND COALESCE(notified, false) = false`)+` ORDER BY created_at ASC LIMIT ?`, limit)
+internal/store/internal/backend/agentpersistence/catalog.go:27:	rows, err := s.backend.QueryContext(ctx, postgresAgentRegistryQuery)
+internal/store/internal/backend/agentpersistence/directive_operations.go:738:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/agentpersistence/directive_operations.go:764:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/agentpersistence/directive_operations.go:814:			res, err := s.backend.ExecContext(ctx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
+internal/store/internal/backend/runlifecycle/run_control.go:45:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/runlifecycle/run_control_sqlite.go:42:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/entityruntime/persistence.go:91:	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(`run_id = $1::uuid AND entity_id = $2::uuid`), runID, entityID)
+internal/store/internal/backend/entityruntime/persistence.go:114:	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(`run_id = ? AND entity_id = ?`), runID, entityID)
+internal/store/internal/backend/entityruntime/persistence.go:141:	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(where)+order, args...)
+internal/store/internal/backend/entityruntime/persistence.go:161:	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(where)+order, args...)
+internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go:717:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go:753:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go:789:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go:811:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/agentpersistence/lifecycle.go:45:	err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/agentpersistence/lifecycle.go:105:	err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/agentpersistence/lifecycle.go:158:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/agentpersistence/lifecycle.go:183:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/agentpersistence/lifecycle.go:277:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/agentpersistence/lifecycle.go:298:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/agentpersistence/sqlite_catalog.go:15:	rows, err := s.backend.QueryContext(ctx, sqliteAgentRegistryQuery)
+internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go:367:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go:416:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/eventpersistence/compute_module_replay_evidence.go:20:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/eventpersistence/compute_module_replay_evidence.go:45:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/runtimepersistence/postgres.go:149:	return s.backend.Ping(ctx)
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:198:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:218:	err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:249:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:270:	err = s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:1558:	if err := s.backend.QueryRowContext(ctx, `SELECT pg_current_snapshot()::text`).Scan(&visibilitySnapshot); err != nil {
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:1624:		rows, err := s.backend.QueryContext(ctx, fmt.Sprintf(`
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:1675:	rows, err := s.backend.QueryContext(ctx, fmt.Sprintf(`
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:1753:		rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:1799:	rows, err := s.backend.QueryContext(ctx, `
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:2611:	err := s.backend.QueryRowContext(ctx, fmt.Sprintf(`
+internal/store/internal/backend/pipelinepersistence/owner_operations.go:2650:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/eventpersistence/inbound_publication.go:188:	rows, err := s.backend.QueryContext(ctx, `SELECT provider, entity_id::text, provider_event_id FROM inbound_publications ORDER BY provider, entity_id::text, provider_event_id`)
+internal/store/internal/backend/eventpersistence/runtime_log_persistence.go:156:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/eventpersistence/runtime_log_persistence.go:204:	if err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/eventpersistence/sqlite_inbound_publication.go:91:	rows, err := s.backend.QueryContext(ctx, `SELECT provider, entity_id, provider_event_id FROM inbound_publications ORDER BY provider, entity_id, provider_event_id`)
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:26:	row := s.backend.QueryRowContext(ctx, postgresWorkflowInstanceSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:51:	record, err := scanPostgresWorkflowEntityState(s.backend.QueryRowContext(ctx, postgresWorkflowEntityStateSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:72:	return scanPostgresWorkflowTargetPersistence(s.backend.QueryRowContext(ctx, postgresWorkflowTargetPersistenceSelect, identity.RunID, entityID.String(), identity.Route.InstancePath), identity.Route, entityID)
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:86:	rows, err := s.backend.QueryContext(ctx, postgresWorkflowEntityStateSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:117:	rows, err := s.backend.QueryContext(ctx, postgresWorkflowEntityStateSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:145:	rows, err := s.backend.QueryContext(ctx, postgresWorkflowInstanceSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:197:	rows, err := s.backend.QueryContext(ctx, postgresWorkflowInstanceSelect+where.String(), args...)
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:442:	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowInstanceSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:467:	record, err := scanSQLiteWorkflowEntityState(s.backend.QueryRowContext(ctx, sqliteWorkflowEntityStateSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:488:	return scanSQLiteWorkflowTargetPersistence(s.backend.QueryRowContext(ctx, sqliteWorkflowTargetPersistenceSelect, identity.RunID, entityID.String(), identity.Route.InstancePath), identity.Route, entityID)
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:527:	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowEntityStateSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:558:	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowEntityStateSelect+`
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:586:	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowInstanceSelect+` WHERE es.run_id = ? ORDER BY es.created_at ASC`, runID)
+internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go:601:	if err := s.backend.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN (?, ?))`, runID, string(activeStates[0]), string(activeStates[1])).Scan(&active); err != nil {
+internal/store/internal/schemastore/sqlite.go:136:	return s.backend.Ping(ctx)
+internal/store/internal/schemastore/sqlite.go:154:	if _, err := s.backend.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+internal/store/internal/schemastore/sqlite.go:157:	if _, err := s.backend.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout = %d`, sqliteDriverBusyTimeoutMillis)); err != nil {
+internal/store/internal/schemastore/sqlite.go:160:	return s.backend.Ping(ctx)
+internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go:564:	if err := s.backend.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_route_recovery.go:230:	rows, err := s.backend.QueryContext(ctx, runForkSelectedContractRouteRecoverySelect()+`
+internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_route_recovery.go:258:	rows, err := s.backend.QueryContext(ctx, runForkSelectedContractRouteRecoverySelect()+`
+internal/store/internal/backend/effectpersistence/runtime_external_effects.go:140:	err := s.backend.QueryRowContext(ctx, `
+internal/store/internal/backend/effectpersistence/runtime_external_effects.go:159:	err := s.backend.QueryRowContext(ctx, `
