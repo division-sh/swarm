@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -209,17 +210,17 @@ func (a *SessionAuthority) takePendingLeaseRetirementsLocked() []*AdvisoryLockLe
 
 func (a *SessionAuthority) forceDiscardConnectionLocked() error {
 	rawErr := a.conn.Raw(func(any) error { return driver.ErrBadConn })
-	if errors.Is(rawErr, driver.ErrBadConn) {
+	if rawErr == driver.ErrBadConn || rawErr == sql.ErrConnDone {
 		rawErr = nil
 	}
 	closeErr := a.conn.Close()
+	if closeErr == sql.ErrConnDone {
+		closeErr = nil
+	}
 	a.conn = nil
 	a.refs = 0
 	a.closed = true
-	if rawErr != nil || (closeErr != nil && !errors.Is(closeErr, sql.ErrConnDone)) {
-		return errors.Join(rawErr, closeErr)
-	}
-	return nil
+	return errors.Join(rawErr, closeErr)
 }
 
 func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
@@ -372,7 +373,7 @@ func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run fu
 	return runWithIndependentCallerCancellation(ctx, cancelCurrent, run)
 }
 
-func runWithIndependentCallerCancellation(ctx context.Context, cancelCurrent func() error, run func(context.Context) error) error {
+func runWithIndependentCallerCancellation(ctx context.Context, cancelCurrent func() error, run func(context.Context) error) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -393,13 +394,15 @@ func runWithIndependentCallerCancellation(ctx context.Context, cancelCurrent fun
 			cancelDone <- nil
 		}
 	}()
-	runErr := run(context.WithoutCancel(ctx))
-	close(completed)
-	cancelErr := <-cancelDone
-	if callerErr := ctx.Err(); callerErr != nil {
-		return errors.Join(callerErr, cancelErr)
-	}
-	return errors.Join(runErr, cancelErr)
+	defer func() {
+		close(completed)
+		cancelErr := <-cancelDone
+		if cancelErr != nil {
+			slog.Error("postgres operation cancellation failed", "error", cancelErr)
+		}
+		err = errors.Join(err, ctx.Err(), cancelErr)
+	}()
+	return run(context.WithoutCancel(ctx))
 }
 
 func (a *SessionAuthority) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
@@ -696,61 +699,49 @@ func AcquireAdvisoryLockLeaseOnSession(
 	return lease, true, nil
 }
 
-func RunSessionTransaction(
-	ctx context.Context,
-	db ConnectionOwner,
-	fn func(context.Context, *sql.Tx) error,
-) (err error) {
-	if db == nil {
-		return errors.New("PostgreSQL store is required")
-	}
-	if fn == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	session := newSessionAuthority(conn)
-	defer func() {
-		err = errors.Join(err, session.release())
-	}()
-	return RunAuthorityTransaction(ctx, session, fn)
-}
-
 func RunAuthorityTransaction(
 	ctx context.Context,
 	session *SessionAuthority,
 	fn func(context.Context, *sql.Tx) error,
-) error {
+) (err error) {
 	if session == nil {
 		return errors.New("PostgreSQL session authority is required")
+	}
+	if fn == nil {
+		return nil
 	}
 	tx, err := session.beginTx(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if tx != nil {
+			cleanupErr := rollbackSessionTransaction(tx, session)
+			if cleanupErr != nil {
+				slog.Error("postgres retained transaction cleanup failed", "error", cleanupErr)
+				err = errors.Join(err, cleanupErr)
+			}
+		}
+	}()
 	if runErr := session.runWithCallerCancellation(ctx, func(operationCtx context.Context) error {
 		return fn(operationCtx, tx)
 	}); runErr != nil {
-		rollbackErr := rollbackSessionTransaction(tx, session)
-		return errors.Join(runErr, rollbackErr)
+		return runErr
 	}
 	if callerErr := contextError(ctx); callerErr != nil {
-		return errors.Join(callerErr, rollbackSessionTransaction(tx, session))
+		return callerErr
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
-		if callerErr := contextError(ctx); callerErr != nil {
-			return errors.Join(callerErr, rollbackSessionTransaction(tx, session))
-		}
+		// Fence possession before endTx releases operationMu. A successor must
+		// never borrow the session between ambiguous settlement and disposal.
+		discardErr := session.prepareDiscardExcept(nil).drain()
 		endErr := session.endTx(tx)
-		discardErr := session.forceDiscard()
-		return errors.Join(commitErr, endErr, wrapAdvisoryDiscardError(discardErr))
+		tx = nil
+		return errors.Join(commitErr, contextError(ctx), endErr, wrapAdvisoryDiscardError(discardErr))
 	}
-	if endErr := session.endTx(tx); endErr != nil {
+	endErr := session.endTx(tx)
+	tx = nil
+	if endErr != nil {
 		return errors.Join(endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
 	}
 	return nil
@@ -778,14 +769,19 @@ func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
 		return errors.New("PostgreSQL session transaction is missing")
 	}
 	rollbackErr := tx.Rollback()
-	if errors.Is(rollbackErr, sql.ErrTxDone) {
+	settledElsewhere := rollbackErr == sql.ErrTxDone
+	if settledElsewhere {
 		rollbackErr = nil
 	}
-	endErr := session.endTx(tx)
-	if rollbackErr == nil && endErr == nil {
-		return nil
+	var discardErr error
+	if rollbackErr != nil || settledElsewhere {
+		discardErr = session.prepareDiscardExcept(nil).drain()
 	}
-	return errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
+	endErr := session.endTx(tx)
+	if endErr != nil {
+		discardErr = errors.Join(discardErr, session.forceDiscard())
+	}
+	return errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(discardErr))
 }
 
 func contextError(ctx context.Context) error {
