@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -83,18 +84,19 @@ func (b *Backend) RunTransaction(ctx context.Context, label string, operation fu
 
 		if callerErr := ctx.Err(); callerErr != nil {
 			b.observeFirstCancellation(current, "attempt", callerErr)
-			return callerErr
+			return errors.Join(callerErr, err)
 		}
 		if err == nil {
 			return nil
 		}
 		if attemptErr != nil {
 			if recovering && errors.Is(attemptErr, context.DeadlineExceeded) {
-				return mutationBudgetError(label, lastBusy)
+				return errors.Join(mutationBudgetError(label, lastBusy), err)
 			}
-			return attemptErr
+			return errors.Join(attemptErr, err)
 		}
-		if !mutationBusyError(err) {
+		var terminal *transactionTerminationError
+		if errors.As(err, &terminal) || !mutationBusyError(err) {
 			return err
 		}
 
@@ -130,7 +132,10 @@ func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return b.runTransactionOnce(ctx, &sql.TxOptions{ReadOnly: true}, operation)
+	err := b.runTransactionOnce(ctx, &sql.TxOptions{ReadOnly: true}, operation)
+	// database/sql may report ErrTxDone after its cancellation rollback wins.
+	// Retain the caller's cause without dropping callback or cleanup failures.
+	return errors.Join(ctx.Err(), err)
 }
 
 func (b *Backend) acquireMutation(ctx context.Context, operation mutationOperation) error {
@@ -224,29 +229,85 @@ func waitMutationBackoff(ctx context.Context, deadline time.Time, delay time.Dur
 	}
 }
 
-func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) error {
-	tx, err := b.db.BeginTx(ctx, opts)
+func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (err error) {
+	conn, err := b.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	if operationErr := operation(ctx, tx); operationErr != nil {
-		return errors.Join(operationErr, rollback(tx))
+	var tx *sql.Tx
+	discard := false
+	defer func() {
+		var cleanupErr error
+		if tx != nil {
+			rollbackErr := tx.Rollback()
+			// ErrTxDone describes Go's handle, not the physical transaction. A
+			// concurrent cancellation may already be disposing this connection.
+			if rollbackErr != nil {
+				discard = true
+				if !errors.Is(rollbackErr, sql.ErrTxDone) {
+					cleanupErr = rollbackErr
+				}
+			}
+		}
+		cleanupErr = errors.Join(cleanupErr, CloseConnection(conn, discard))
+		if cleanupErr != nil {
+			// This also reports cleanup failure while the original callback panic
+			// unwinds. No recover here: the original panic remains authoritative.
+			slog.Error("sqlite transaction cleanup failed", "error", cleanupErr)
+			err = &transactionTerminationError{errors.Join(err, cleanupErr)}
+		}
+	}()
+	tx, err = conn.BeginTx(ctx, opts)
+	if err != nil {
+		discard = true
+		return err
 	}
-	if commitErr := tx.Commit(); commitErr != nil {
-		return errors.Join(commitErr, rollback(tx))
+	if err = ctx.Err(); err != nil {
+		return err
 	}
+	if err = operation(ctx, tx); err != nil {
+		return err
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		discard = true
+		// Only this owner's Commit result is classified here. Automatic rollback
+		// can win after the context check; callback and cleanup errors stay intact.
+		if err == sql.ErrTxDone && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		var coded interface{ Code() int }
+		if !errors.As(err, &coded) || (coded.Code()&255 != 5 && coded.Code()&255 != 6) {
+			return &transactionTerminationError{err}
+		}
+		return err
+	}
+	tx = nil
 	return nil
 }
 
-func rollback(tx *sql.Tx) error {
-	if tx == nil {
-		return errors.New("SQLite transaction is missing")
+// A failed cleanup or an uncertain commit never grants busy-policy replay.
+type transactionTerminationError struct{ error }
+
+func (e *transactionTerminationError) Unwrap() error { return e.error }
+
+// CloseConnection releases a pinned connection only after its transaction owner
+// has finished the sql.Tx or raw bootstrap transaction. Discard is exact, not pool-wide.
+func CloseConnection(conn *sql.Conn, discard bool) error {
+	var err error
+	if discard {
+		err = conn.Raw(func(any) error { return driver.ErrBadConn })
+		if errors.Is(err, driver.ErrBadConn) || errors.Is(err, sql.ErrConnDone) {
+			err = nil
+		}
 	}
-	err := tx.Rollback()
-	if errors.Is(err, sql.ErrTxDone) {
-		return nil
+	closeErr := conn.Close()
+	if errors.Is(closeErr, sql.ErrConnDone) {
+		closeErr = nil
 	}
-	return err
+	return errors.Join(err, closeErr)
 }
 
 func mutationBudgetError(label string, lastErr error) error {

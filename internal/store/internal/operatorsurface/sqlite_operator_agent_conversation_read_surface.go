@@ -28,28 +28,26 @@ func (s *AgentSQLite) ListAgentDeliveryLifecycleFacts(ctx context.Context, ident
 	if len(normalized) == 0 {
 		return out, nil
 	}
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	err = s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
+		if err != nil {
+			return err
+		}
+		records, err := s.listSQLiteAgentLifecycleRecords(ctx, tx, normalized, asOf)
+		if err != nil {
+			return err
+		}
+		grouped := make(map[agentidentity.Identity][]agentLifecycleDeliveryRecord, len(normalized))
+		for _, record := range records {
+			grouped[record.AgentIdentity] = append(grouped[record.AgentIdentity], record)
+		}
+		for _, identity := range normalized {
+			out[identity] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[identity])
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	defer tx.Rollback()
-	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	records, err := s.listSQLiteAgentLifecycleRecords(ctx, tx, normalized, asOf)
-	if err != nil {
-		return nil, err
-	}
-	grouped := make(map[agentidentity.Identity][]agentLifecycleDeliveryRecord, len(normalized))
-	for _, record := range records {
-		grouped[record.AgentIdentity] = append(grouped[record.AgentIdentity], record)
-	}
-	for _, identity := range normalized {
-		out[identity] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[identity])
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit sqlite agent lifecycle facts snapshot: %w", err)
 	}
 	return out, nil
 }
@@ -73,21 +71,20 @@ func (r *AgentSQLite) readOperatorAgentSummarySnapshot(ctx context.Context, opts
 	if err := r.requireAgentAccess(); err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
-	tx, err := r.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var result operatorread.OperatorAgentListResult
+	err := r.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result, err = r.loadOperatorAgentSummariesTx(ctx, tx, opts, asOf)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return operatorread.OperatorAgentListResult{}, err
-	}
-	defer tx.Rollback()
-	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
-	if err != nil {
-		return operatorread.OperatorAgentListResult{}, err
-	}
-	result, err := r.loadOperatorAgentSummariesTx(ctx, tx, opts, asOf)
-	if err != nil {
-		return operatorread.OperatorAgentListResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return operatorread.OperatorAgentListResult{}, fmt.Errorf("commit sqlite agent summary snapshot: %w", err)
 	}
 	return result, nil
 }
@@ -121,41 +118,40 @@ func (r *AgentSQLite) LoadOperatorAgentDiagnosis(ctx context.Context, identity a
 	if err := r.requireAgentAccess(); err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
 	}
-	tx, err := r.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var diagnosis operatorread.OperatorAgentDiagnosis
+	err := r.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result, err := r.loadOperatorAgentSummariesTx(ctx, tx, operatorread.OperatorAgentListOptions{}, asOf)
+		if err != nil {
+			return err
+		}
+		detail, err := operatorAgentDetailFromSnapshot(result, identity)
+		if err != nil {
+			return err
+		}
+		diagnosis, err = operatorAgentDiagnosisFromDetail(detail)
+		if err != nil {
+			return err
+		}
+		queue, err := r.listPendingAgentDeliveryDetailsTx(ctx, tx, operatorread.PendingAgentDeliveryListOptions{
+			AgentIdentity: identity,
+			Limit:         opts.QueueLimit,
+			Cursor:        opts.QueueCursor,
+		}, asOf)
+		if err != nil {
+			return err
+		}
+		diagnosis.Queue = operatorAgentDiagnosisQueueFromPendingPage(queue)
+		if err := validateOperatorAgentDiagnosis(diagnosis); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
-	}
-	defer tx.Rollback()
-	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
-	if err != nil {
-		return operatorread.OperatorAgentDiagnosis{}, err
-	}
-	result, err := r.loadOperatorAgentSummariesTx(ctx, tx, operatorread.OperatorAgentListOptions{}, asOf)
-	if err != nil {
-		return operatorread.OperatorAgentDiagnosis{}, err
-	}
-	detail, err := operatorAgentDetailFromSnapshot(result, identity)
-	if err != nil {
-		return operatorread.OperatorAgentDiagnosis{}, err
-	}
-	diagnosis, err := operatorAgentDiagnosisFromDetail(detail)
-	if err != nil {
-		return operatorread.OperatorAgentDiagnosis{}, err
-	}
-	queue, err := r.listPendingAgentDeliveryDetailsTx(ctx, tx, operatorread.PendingAgentDeliveryListOptions{
-		AgentIdentity: identity,
-		Limit:         opts.QueueLimit,
-		Cursor:        opts.QueueCursor,
-	}, asOf)
-	if err != nil {
-		return operatorread.OperatorAgentDiagnosis{}, err
-	}
-	diagnosis.Queue = operatorAgentDiagnosisQueueFromPendingPage(queue)
-	if err := validateOperatorAgentDiagnosis(diagnosis); err != nil {
-		return operatorread.OperatorAgentDiagnosis{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return operatorread.OperatorAgentDiagnosis{}, fmt.Errorf("commit sqlite agent diagnosis snapshot: %w", err)
 	}
 	return diagnosis, nil
 }

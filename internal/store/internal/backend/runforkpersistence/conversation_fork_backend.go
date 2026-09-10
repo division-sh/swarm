@@ -24,6 +24,7 @@ type conversationForkStore struct {
 	db        conversationForkDatabase
 	dialect   conversationForkDialect
 	sqlite    *RunForkSQLiteOwner
+	postgres  *RunForkPostgresOwner
 	admission schemaAdmissionOwner
 	effects   conversationForkEffectOwner
 	sources   conversationForkSourceReader
@@ -42,7 +43,6 @@ type conversationForkQueryer interface {
 
 type conversationForkDatabase interface {
 	conversationForkQueryer
-	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	Conn(context.Context) (*sql.Conn, error)
 }
 
@@ -67,7 +67,7 @@ func postgresConversationForkStore(s *RunForkPostgresOwner) (conversationForkSto
 	if s == nil || s.backend == nil {
 		return conversationForkStore{}, fmt.Errorf("postgres store is required")
 	}
-	return conversationForkStore{db: s.backend, dialect: conversationForkPostgres, admission: s, effects: s.EffectPostgresOwner, sources: s.conversations}, nil
+	return conversationForkStore{db: s.backend, dialect: conversationForkPostgres, postgres: s, admission: s, effects: s.EffectPostgresOwner, sources: s.conversations}, nil
 }
 
 func sqliteConversationForkStore(s *RunForkSQLiteOwner) (conversationForkStore, error) {
@@ -132,7 +132,7 @@ func (s conversationForkStore) runMutation(ctx context.Context, serializable boo
 	if s.dialect == conversationForkSQLite {
 		return s.sqlite.runRuntimeMutation(ctx, "sqlite conversation fork mutation", fn)
 	}
-	return s.runPostgresMutation(ctx, s.db, serializable, fn)
+	return s.runPostgresMutation(ctx, s.postgres.backend, serializable, fn)
 }
 
 func (s conversationForkStore) runForkMutation(ctx context.Context, forkID string, serializable bool, fn func(context.Context, *sql.Tx) error) (err error) {
