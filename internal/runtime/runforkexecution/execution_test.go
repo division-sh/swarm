@@ -2569,7 +2569,7 @@ func proveSelectedForkPreparedPreflight(t *testing.T, db *sql.DB, selected inter
 		t.Fatal(err)
 	}
 	agentCfg.Identity = agentidentity.Identity{}
-	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(runtimemanager.AgentManagerOptions{LLMBackend: llmselection.BackendClaudeCLI}, runtimemanager.AgentMaterializationBlueprint{Identity: plan, Config: agentCfg})
+	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live, LLMBackend: llmselection.BackendClaudeCLI}, runtimemanager.AgentMaterializationBlueprint{Identity: plan, Config: agentCfg})
 	if err != nil {
 		t.Fatal(err)
 	}
