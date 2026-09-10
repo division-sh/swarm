@@ -438,7 +438,7 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 printf '%s\n' '{"result":"done"}'
 `)
 	cfg.Workspace.DockerBin = scriptPath
-	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
+	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace", ClaudeState: claudeStateStub{}}
 	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 
@@ -484,7 +484,7 @@ fi
 printf '%s\n' '{"result":"done"}'
 `)
 	cfg.Workspace.DockerBin = scriptPath
-	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
+	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace", ClaudeState: claudeStateStub{}}
 	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 
@@ -492,8 +492,12 @@ printf '%s\n' '{"result":"done"}'
 	_, fallback, err := runtime.runWithPreparedPrompt(completionCtx, []string{"--print"}, target, "hello", MonitorTurnMeta{}, dispatch, profile, model)
 	settleClaudeTestCompletionFailure(t, harness, completionCtx, dispatch, err)
 	failure, ok := runtimefailures.As(err)
-	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
-		t.Fatalf("failure = %#v, want generic connector failure", failure)
+	if !ok || failure.Failure.Class != runtimefailures.ClassOutcomeUncertain || failure.Failure.Retryable {
+		t.Fatalf("failure = %#v, want nonretryable uncertainty after launch", failure)
+	}
+	cause, ok := runtimefailures.As(failure.Unwrap())
+	if !ok || cause.Failure.Class != runtimefailures.ClassConnectorFailure || cause.Failure.Detail.Code != "claude_cli_process_failed" {
+		t.Fatalf("cause = %#v, want original generic connector failure", cause)
 	}
 	if fallback.Attempted || fallback.Used {
 		t.Fatalf("fallback = %#v, want no prose-triggered retry", fallback)

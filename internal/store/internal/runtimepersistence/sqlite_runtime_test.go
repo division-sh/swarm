@@ -401,7 +401,7 @@ func TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction(t *testi
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), uuid.NewString())
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 
-	tx, err := store.backend.BeginTx(ctx, nil)
+	tx, err := store.backend.ConstructionHandle().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin sqlite tx: %v", err)
 	}

@@ -77,15 +77,16 @@ type fakeDockerState struct {
 }
 
 type fakeDockerRecord struct {
-	Class      string   `json:"class"`
-	Args       []string `json:"args,omitempty"`
-	SessionID  string   `json:"session_id,omitempty"`
-	ToolName   string   `json:"tool_name,omitempty"`
-	ToolStatus string   `json:"tool_status,omitempty"`
-	MailboxID  string   `json:"mailbox_id,omitempty"`
-	RawMCPURL  string   `json:"raw_mcp_url,omitempty"`
-	MCPURL     string   `json:"mcp_url,omitempty"`
-	Reason     string   `json:"reason,omitempty"`
+	ContainerID string   `json:"container_id,omitempty"`
+	Class       string   `json:"class"`
+	Args        []string `json:"args,omitempty"`
+	SessionID   string   `json:"session_id,omitempty"`
+	ToolName    string   `json:"tool_name,omitempty"`
+	ToolStatus  string   `json:"tool_status,omitempty"`
+	MailboxID   string   `json:"mailbox_id,omitempty"`
+	RawMCPURL   string   `json:"raw_mcp_url,omitempty"`
+	MCPURL      string   `json:"mcp_url,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
 }
 
 type fakeClaudeInvocation struct {
@@ -343,13 +344,16 @@ func validateReleaseDockerCommand(root string, args []string) error {
 }
 
 type releaseDockerCreate struct {
-	name       string
-	network    string
-	workdir    string
-	privileged bool
-	labels     map[string]string
-	mounts     []string
-	command    []string
+	name          string
+	network       string
+	workdir       string
+	privileged    bool
+	labels        map[string]string
+	mounts        []string
+	command       []string
+	volumesFrom   string
+	providerMount string
+	providerTmpfs string
 }
 
 func validateReleaseDockerCreate(root string, args []string) error {
@@ -365,6 +369,12 @@ func validateReleaseDockerCreate(root string, args []string) error {
 	}
 	if !equalStrings(create.command, []string{releaseE2EWorkspaceImage, "sleep", "infinity"}) {
 		return fmt.Errorf("unexpected create image or command")
+	}
+	if base, provider := releaseProviderContainerBase(create.name); provider {
+		return validateReleaseProviderCreate(root, base, create)
+	}
+	if create.volumesFrom != "" || create.providerMount != "" || create.providerTmpfs != "" {
+		return fmt.Errorf("provider mounts on ordinary workspace")
 	}
 
 	type expectation struct {
@@ -449,7 +459,7 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 	}
 	for index := 1; index < len(args); {
 		switch args[index] {
-		case "--name", "--network", "-w", "-v", "--label":
+		case "--name", "--network", "-w", "-v", "--label", "--volumes-from", "--mount", "--tmpfs":
 			if index+1 >= len(args) {
 				return create, fmt.Errorf("create option %s omitted its value", args[index])
 			}
@@ -472,6 +482,21 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 				create.workdir = value
 			case "-v":
 				create.mounts = append(create.mounts, value)
+			case "--volumes-from":
+				if create.volumesFrom != "" {
+					return create, fmt.Errorf("duplicate --volumes-from")
+				}
+				create.volumesFrom = value
+			case "--mount":
+				if create.providerMount != "" {
+					return create, fmt.Errorf("duplicate --mount")
+				}
+				create.providerMount = value
+			case "--tmpfs":
+				if create.providerTmpfs != "" {
+					return create, fmt.Errorf("duplicate --tmpfs")
+				}
+				create.providerTmpfs = value
 			case "--label":
 				key, labelValue, ok := strings.Cut(value, "=")
 				if !ok || key == "" || labelValue == "" {
@@ -774,6 +799,9 @@ func releaseE2EContainerName(name string) bool {
 }
 
 func releaseE2EContainerIdentity(name string) (kind, bundleScope string, ok bool) {
+	if base, provider := releaseProviderContainerBase(name); provider {
+		return releaseE2EContainerIdentity(base)
+	}
 	const prefix = "swarm-bundle-"
 	if !strings.HasPrefix(name, prefix) {
 		return "", "", false
@@ -811,6 +839,9 @@ func releaseE2EContainerIdentity(name string) (kind, bundleScope string, ok bool
 }
 
 func releaseE2EAgentContainerFingerprint(name string) (string, bool) {
+	if base, provider := releaseProviderContainerBase(name); provider {
+		name = base
+	}
 	kind, scope, ok := releaseE2EContainerIdentity(name)
 	if !ok || kind != "agent" {
 		return "", false
@@ -923,7 +954,7 @@ func fakeDockerCreate(root string, args []string) int {
 		state.ContainerIDs[id] = name
 		state.Containers[name] = fakeDockerContainer{ID: id, Labels: labels}
 	})
-	recordFakeDocker(root, fakeDockerRecord{Class: "container_create", Args: redactDockerArgs(args)})
+	recordFakeDocker(root, fakeDockerRecord{Class: "container_create", ContainerID: id, Args: redactDockerArgs(args)})
 	fmt.Fprintln(os.Stdout, id)
 	return 0
 }
@@ -1058,7 +1089,15 @@ target:
 	}
 	container := args[index]
 	invocation.commandArgs = append([]string(nil), args[index+1:]...)
-	if len(env) != 2 || env["SWARM_TOOL_GATEWAY_URL"] != releaseE2ERawMCPURL ||
+	_, providerContainer := releaseProviderContainerBase(container)
+	wantEnv := 2
+	if providerContainer {
+		wantEnv = 3
+		if env["CLAUDE_CONFIG_DIR"] != "/opt/swarm/provider/claude" {
+			return invocation, fmt.Errorf("Claude provider directory is not isolated")
+		}
+	}
+	if len(env) != wantEnv || env["SWARM_TOOL_GATEWAY_URL"] != releaseE2ERawMCPURL ||
 		env["CLAUDE_CODE_OAUTH_TOKEN"] != releaseE2EOAuthToken {
 		return invocation, fmt.Errorf("Claude Docker exec environment is incomplete or invalid")
 	}
@@ -1221,6 +1260,9 @@ func fakeDockerExec(root string, args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read Docker exec stdin: %v\n", err)
 		return 97
+	}
+	if handled, code := fakeReleaseProviderStateExec(root, args, input); handled {
+		return code
 	}
 	invocation, err := validateReleaseDockerExec(args, input)
 	if err != nil {

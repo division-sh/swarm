@@ -232,15 +232,32 @@ func newManagedHITLProviderFixture(t *testing.T, backend string, actor models.Ag
 	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "test-key")
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	registry := sessions.NewInMemoryRegistry(time.Second)
-	controller := runtimeeffects.NewCompletionController(fixture.harness, fixture.harness, fixture.harness, fixture.harness).WithExecutionPosture(executionposture.Live)
-	runtime, err := (llm.RuntimeFactory{
+	posture := executionposture.Live
+	if backend == llmselection.BackendMock {
+		posture = executionposture.MockOnly
+		cfg.LLM.Backend = llmselection.BackendAnthropic
+	}
+	profile, err := llmselection.ResolveLiveBackend(cfg.LLM.Backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := llm.ResolveAgentExecution(posture, profile, nil, actor)
+	if err != nil {
+		t.Fatalf("select %s execution: %v", backend, err)
+	}
+	controller := runtimeeffects.NewCompletionController(fixture.harness, fixture.harness, fixture.harness, fixture.harness).WithExecutionPosture(posture)
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{
 		Cfg: cfg, Sessions: registry, LiveSessions: llm.NewTransientLiveSessionAcquirer(registry), LockOwner: "hitl-provider-test",
 		Credentials: runtimecredentials.NewEnvStore(), CompletionController: controller,
-	}).Build()
+	}, nil)
 	if err != nil {
 		t.Fatalf("build %s runtime: %v", backend, err)
 	}
-	fixture.runtime = runtime
+	resolved, err := runtimes.ResolveAgentRuntime(descriptor.Actor)
+	if err != nil {
+		t.Fatalf("resolve %s runtime: %v", backend, err)
+	}
+	fixture.runtime = resolved.Runtime
 	return fixture
 }
 

@@ -41,10 +41,10 @@ steps:
 				{label: "tests/root-alias.yaml", wantError: "resolves to root entity"},
 			} {
 				var stdout, stderr bytes.Buffer
-				code := executeCLI(context.Background(), []string{
-					"test", root, tc.label, "--api-server", strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "--config", configPath,
+				code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
+					"test", root, tc.label, "--config", configPath,
 					"--timeout", "20s", "--poll-interval", "10ms",
-				}, &stdout, &stderr, Run)
+				}, rt.Endpoint, &stdout, &stderr)
 				if tc.wantError == "" && code != 0 {
 					t.Fatalf("%s: code=%d stderr=%s stdout=%s", tc.label, code, stderr.String(), stdout.String())
 				}

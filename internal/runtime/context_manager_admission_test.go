@@ -18,6 +18,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -176,7 +177,6 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	}
 	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
 	cfg := &config.Config{}
-	cfg.Runtime.ExecutionPosture = "live"
 	rt, err := NewRuntime(testAuthorActivityContext(ctx), RuntimeDeps{
 		Config: cfg,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
@@ -184,6 +184,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		},
 		Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
+			ExecutionPosture:   executionposture.Live,
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			SourceArtifactFact: fact,
 			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),

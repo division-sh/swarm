@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -99,13 +100,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		return 1
 	}
 	cfg := cfgResult.Config
-	posture, err := cfg.ProcessExecutionPosture()
-	if err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "fork failed: resolve execution posture: %v\n", err)
-		}
-		return 1
-	}
+	posture := executionposture.Live
 	storeSelection, err := cliapp.ResolveRuntimeStoreSelection(repo, *storeMode, storeModeSet, cfg)
 	if err != nil {
 		if out != nil {
@@ -328,7 +323,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaceBackend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, loaded.Source)
+		workspaceBackend, err := cliapp.DecideWorkspaceBackend(executionposture.Live, workspaceBackendPreference, cfg, loaded.Source)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: resolve workspace backend: %v\n", err)

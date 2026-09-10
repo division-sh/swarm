@@ -20,6 +20,17 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
+func ownedDataProjectionTestRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	t.Cleanup(func() {
+		if err := removePrivateTestRoot(root); err != nil {
+			t.Errorf("release immutable test data projection: %v", err)
+		}
+	})
+	return root
+}
+
 func TestConfigureWorkspaceDataProjectionMaterializesCanonicalEmptyDataForGrantFreeBundle(t *testing.T) {
 	sourceRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(sourceRoot, "schema.yaml"), []byte("name: data-free\n"), 0o600); err != nil {
@@ -46,7 +57,7 @@ func TestConfigureWorkspaceDataProjectionMaterializesCanonicalEmptyDataForGrantF
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	manager.SetSemanticSource(source)
 
-	if err := configureWorkspaceDataProjection(manager, source, serveRuntimePersistence{}); err != nil {
+	if err := configureWorkspaceDataProjection(manager, source, serveRuntimePersistence{}, ownedDataProjectionTestRoot(t)); err != nil {
 		t.Fatalf("configureWorkspaceDataProjection: %v", err)
 	}
 	actor := models.AgentConfig{
@@ -97,7 +108,7 @@ func TestConfigureWorkspaceDataProjectionRejectsMissingStoreForDataBearingBundle
 	if !source.DataProjectionRequired() {
 		t.Fatal("data-bearing fixture does not require a projection")
 	}
-	err = configureWorkspaceDataProjection(workspace.NewHostManager(), source, serveRuntimePersistence{})
+	err = configureWorkspaceDataProjection(workspace.NewHostManager(), source, serveRuntimePersistence{}, t.TempDir())
 	if err == nil || err.Error() != "selected store does not expose durable data access projection" {
 		t.Fatalf("configureWorkspaceDataProjection error = %v", err)
 	}
@@ -140,7 +151,7 @@ func TestConfigureWorkspaceDataProjectionMountsCanonicalEmptyDataInDocker(t *tes
 		return "", nil
 	})
 
-	if err := configureWorkspaceDataProjection(manager, source, serveRuntimePersistence{}); err != nil {
+	if err := configureWorkspaceDataProjection(manager, source, serveRuntimePersistence{}, ownedDataProjectionTestRoot(t)); err != nil {
 		t.Fatalf("configureWorkspaceDataProjection: %v", err)
 	}
 	const runID = "82828282-8282-8282-8282-828282828282"

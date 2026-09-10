@@ -19,6 +19,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -88,11 +90,20 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		t.Fatalf("derive test agent prompt: %v", err)
 	}
 	rec := runtimemanager.PersistedAgent{
-		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: agent.id, Identity: identity, Role: "test", Model: "regular", Intent: intent, Prompt: prompt},
+		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Identity: identity, Role: "test", Model: "regular", Intent: intent, Prompt: prompt},
 		Status:    "active",
 		HiredBy:   "destructive-reset-test",
 		StartedAt: time.Now().UTC(),
 	}
+	profile, err := selection.ResolveLiveBackend("anthropic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, rec.Config)
+	if err != nil {
+		t.Fatalf("select directive fixture execution: %v", err)
+	}
+	rec.Config = descriptor.Actor
 	if err := agentfixture.UpsertStatic(t, ctx, pg, rec); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}

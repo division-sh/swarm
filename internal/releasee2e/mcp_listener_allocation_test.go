@@ -45,7 +45,7 @@ func TestReleaseServeAllocatesMCPAtBind(t *testing.T) {
 	if err := process.waitReady(ctx); err != nil {
 		t.Fatal(err)
 	}
-	goldenServedBundleHash(t, process.rpc)
+	goldenServedBundleHash(t, process.rpc, "live")
 	if err := process.stopAndWait(10 * time.Second); err != nil {
 		t.Fatal(err)
 	}

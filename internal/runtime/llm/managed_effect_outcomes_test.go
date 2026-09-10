@@ -164,7 +164,7 @@ func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
 				dispatch := newCompletionDispatch(attempt, "")
 				dispatch.providerModel = model
 				_, err = runtime.runWithPreparedInput(
-					ctx, nil, &workspace.Target{Backend: workspace.BackendDocker, Container: "effect-test", Workdir: "/workspace"},
+					ctx, nil, &workspace.Target{Backend: workspace.BackendDocker, Container: "effect-test", Workdir: "/workspace", ClaudeState: claudeStateStub{}},
 					"request", MonitorTurnMeta{}, dispatch, profile, model,
 				)
 				if _, statErr := os.Stat(marker); statErr == nil {
@@ -419,7 +419,7 @@ func settleEffectTestCompletionFailure(t *testing.T, ctx context.Context, dispat
 func TestManagedRelayEffectOutcomes(t *testing.T) {
 	harness := effecttest.New()
 	runtime := &ClaudeCLIRuntime{cfg: &config.Config{Workspace: config.WorkspaceConfig{DockerBin: "/definitely/missing/swarm-docker"}}}
-	target := &workspace.Target{Backend: workspace.BackendDocker, Container: "effect-container", Workdir: workspace.LogicalWorkspaceMount}
+	target := &workspace.Target{Backend: workspace.BackendDocker, Container: "effect-container", Workdir: workspace.LogicalWorkspaceMount, ClaudeState: claudeStateStub{}}
 	if _, _, _, err := runtime.runWorkspaceCommand(harness.CompletionContext("claude-relay"), target, "payload", "sh", "-lc", "true"); err == nil {
 		t.Fatal("missing relay process returned nil")
 	}

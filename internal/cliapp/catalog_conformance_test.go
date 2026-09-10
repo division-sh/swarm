@@ -159,7 +159,7 @@ func TestCatalogRequiredVerifyGateRejectsDiscoveredPresentZeroOptionalFile(t *te
 	}
 }
 
-func TestCatalogRequiredVerifyGateRejectsInvalidGeneratedArchetypeConfig(t *testing.T) {
+func TestCatalogRequiredVerifyGateRejectsAddedDeploymentArtifact(t *testing.T) {
 	setRequiredConformanceCredentials(t)
 	repoRoot := RepoRoot()
 	bundles := materializeRequiredArchetypeBundles(t)
@@ -173,12 +173,21 @@ func TestCatalogRequiredVerifyGateRejectsInvalidGeneratedArchetypeConfig(t *test
 	if mutated == nil {
 		t.Fatal("zero-agent-automation is missing from admittedArchetypes")
 	}
-	if err := os.WriteFile(mutated.ConfigPath, []byte("runtime:\n  execution_posture: invalid\n"), 0o600); err != nil {
-		t.Fatalf("mutate generated archetype config: %v", err)
-	}
-	failures := verifyRequiredPassingBundles(context.Background(), repoRoot, []requiredConformanceBundle{*mutated})
-	if len(failures) != 1 || !strings.Contains(failures[0], mutated.ID) || !strings.Contains(failures[0], `runtime.execution_posture must be exactly live or mock_only`) {
-		t.Fatalf("generated-config mutation failures = %#v, want named archetype and exact config evidence", failures)
+	for _, name := range []string{"swarm.yaml", "swarm.live.yaml", ".swarm/swarm.yaml"} {
+		path := filepath.Join(mutated.Root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		failures := verifyRequiredPassingBundles(context.Background(), repoRoot, []requiredConformanceBundle{*mutated})
+		if len(failures) != 1 || !strings.Contains(failures[0], mutated.ID) || !strings.Contains(failures[0], "forbidden deployment artifact") {
+			t.Fatalf("added-artifact failures = %#v, want named archetype and deployment refusal", failures)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -222,9 +231,8 @@ func materializeRequiredArchetypeBundles(t testing.TB) []requiredConformanceBund
 			t.Fatalf("materialize required archetype %s: %v", id, err)
 		}
 		bundles = append(bundles, requiredConformanceBundle{
-			ID:         "archetypes/" + id,
-			Root:       filepath.Clean(filepath.Join(destination, admittedArchetypes[id].WorkingDir)),
-			ConfigPath: filepath.Clean(filepath.Join(destination, admittedArchetypes[id].WorkingDir, "swarm.yaml")),
+			ID:   "archetypes/" + id,
+			Root: filepath.Clean(filepath.Join(destination, admittedArchetypes[id].WorkingDir)),
 		})
 	}
 	return bundles
@@ -233,6 +241,18 @@ func materializeRequiredArchetypeBundles(t testing.TB) []requiredConformanceBund
 func verifyRequiredPassingBundles(ctx context.Context, repoRoot string, bundles []requiredConformanceBundle) []string {
 	var failures []string
 	for _, bundle := range bundles {
+		if strings.HasPrefix(bundle.ID, "archetypes/") {
+			invalid := false
+			for _, name := range []string{"swarm.yaml", "swarm.live.yaml", ".swarm"} {
+				if _, err := os.Lstat(filepath.Join(bundle.Root, name)); !os.IsNotExist(err) {
+					failures = append(failures, fmt.Sprintf("%s contains forbidden deployment artifact %s", bundle.ID, name))
+					invalid = true
+				}
+			}
+			if invalid {
+				continue
+			}
+		}
 		opts := defaultVerifyCommandOptions()
 		opts.sourceRoot = bundle.Root
 		opts.configPath = bundle.ConfigPath

@@ -210,7 +210,7 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 		)
 		err := db.QueryRowContext(ctx, `
 			SELECT
-				(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid),
+				(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name <> 'platform.runtime_log'),
 				(SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress'))
 		`, runID).Scan(&eventCount, &activeDeliveries)
 		if err == nil && eventCount >= wantEvents && activeDeliveries == 0 {
@@ -328,8 +328,12 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	if status != "running" {
 		t.Fatalf("in-flight run status = %q, want running", status)
 	}
-	if eventCount != 1 {
-		t.Fatalf("in-flight event_count = %d, want 1 root event", eventCount)
+	var semanticCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1::uuid AND event_name <> 'platform.runtime_log'`, runID).Scan(&semanticCount); err != nil {
+		t.Fatal(err)
+	}
+	if semanticCount != 1 || eventCount < semanticCount {
+		t.Fatalf("in-flight total/semantic events = %d/%d, want one semantic root plus durable diagnostics", eventCount, semanticCount)
 	}
 	if entityCount != 1 {
 		t.Fatalf("in-flight entity_count = %d, want 1", entityCount)

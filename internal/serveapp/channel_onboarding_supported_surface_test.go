@@ -1062,7 +1062,6 @@ func writeChannelOnboardingPostgresRuntimeConfig(t *testing.T, dsn string) strin
 	parameters := connection.Parameters()
 	t.Setenv("PGPASSWORD", parameters.Password)
 	configText := fmt.Sprintf(`runtime:
-  execution_posture: live
   recovery_on_startup: false
 workspace:
   backend: host
@@ -1178,14 +1177,15 @@ func TestServeRebindsChannelRecoveryAfterRuntimeContextLoadBeforeChannelPublicat
 	teardownBarrier := strings.Index(source, "activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive")
 	apiServing := strings.Index(source, "apiServerLease, err := processWorkOwner.Begin(ctx)")
 	mcpServing := strings.Index(source, "mcpServerLease, err := processWorkOwner.Begin(ctx)")
-	runtimeActivation := strings.Index(source, "if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)")
+	runtimeActivation := strings.Index(source, "releaseRuntimeContexts, err = prepareServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)")
 	localReconciliation := strings.Index(source, "}, channelOnboarding); err != nil")
 	channelPublication := strings.Index(source, "if err := channelActivationRefresher.publishChannelActivations(ctx)")
+	businessRelease := strings.Index(source, "if err := releaseRuntimeContexts()")
 	effectRecovery := strings.Index(source, "if err := channelOnboarding.Recover(ctx)")
-	if teardownBarrier < 0 || apiServing < 0 || mcpServing < 0 || runtimeActivation < 0 || localReconciliation < 0 || channelPublication < 0 || effectRecovery < 0 {
+	if teardownBarrier < 0 || apiServing < 0 || mcpServing < 0 || runtimeActivation < 0 || localReconciliation < 0 || channelPublication < 0 || businessRelease < 0 || effectRecovery < 0 {
 		t.Fatalf("serve startup lifecycle markers missing: teardown=%d api=%d mcp=%d runtime=%d local=%d publication=%d recovery=%d", teardownBarrier, apiServing, mcpServing, runtimeActivation, localReconciliation, channelPublication, effectRecovery)
 	}
-	if !(teardownBarrier < apiServing && apiServing < mcpServing && mcpServing < runtimeActivation && runtimeActivation < localReconciliation && localReconciliation < channelPublication && channelPublication < effectRecovery) {
+	if !(teardownBarrier < apiServing && apiServing < mcpServing && mcpServing < runtimeActivation && runtimeActivation < localReconciliation && localReconciliation < channelPublication && channelPublication < businessRelease && businessRelease < effectRecovery) {
 		t.Fatalf("serve startup order teardown=%d api=%d mcp=%d runtime=%d local=%d publication=%d recovery=%d", teardownBarrier, apiServing, mcpServing, runtimeActivation, localReconciliation, channelPublication, effectRecovery)
 	}
 }

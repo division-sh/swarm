@@ -58,116 +58,70 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 	}
 }
 
-func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(t *testing.T) {
+func TestBootFloorStructuralReadersDoNotClaimNativeWorkspaceReadiness(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	t.Setenv("PATH", t.TempDir())
 	sourceRoot := writeServeRuntimeNativeBashFixture(t)
 	configPath := writeTestVerifyRuntimeConfig(t)
-
-	t.Run("verify text", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", sourceRoot, "--config", configPath}, &stdout, &stderr, Run)
-		if code != 0 {
-			t.Fatalf("verify code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	for _, command := range []string{"verify", "describe"} {
+		for _, asJSON := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/json=%t", command, asJSON), func(t *testing.T) {
+				args := []string{command, sourceRoot, "--config", configPath}
+				if asJSON {
+					args = append(args, "--json")
+				}
+				var stdout, stderr bytes.Buffer
+				if code := executeCLIFrom(context.Background(), repoRootForTest(), args, &stdout, &stderr, Run); code != 0 {
+					t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+				}
+				if asJSON {
+					var output map[string]any
+					if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+						t.Fatal(err)
+					}
+					if output["validation_scope"] != "structural" || output["live_readiness"] != "not_evaluated" {
+						t.Fatalf("structural classification missing: %v", output)
+					}
+					for _, retired := range []string{"workspace_backend", "capability_subjects"} {
+						if _, exists := output[retired]; exists {
+							t.Fatalf("structural output still claims %s", retired)
+						}
+					}
+				} else if !strings.Contains(stdout.String(), "validation: structural; live readiness: not evaluated") {
+					t.Fatalf("structural classification missing: %s", stdout.String())
+				}
+				if strings.Contains(stdout.String(), "workspace backend:") {
+					t.Fatal("structural read performed deployment workspace selection")
+				}
+			})
 		}
-		assertBootFloorWorkspaceRequirementOutput(t, stdout.String())
-	})
-
-	t.Run("verify json", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", sourceRoot, "--config", configPath, "--json"}, &stdout, &stderr, Run)
-		if code != 0 {
-			t.Fatalf("verify --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-		}
-		if strings.TrimSpace(stderr.String()) != "" {
-			t.Fatalf("verify --json stderr = %q, want empty", stderr.String())
-		}
-		var output struct {
-			WorkspaceBackend string `json:"workspace_backend"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
-			t.Fatalf("decode verify output: %v", err)
-		}
-		assertBootFloorWorkspaceRequirementOutput(t, output.WorkspaceBackend)
-	})
-
-	t.Run("describe text", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-			"describe",
-			sourceRoot,
-			"--config", configPath,
-		}, &stdout, &stderr, Run)
-		if code != 0 {
-			t.Fatalf("describe code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-		}
-		assertBootFloorWorkspaceRequirementOutput(t, stdout.String())
-	})
-
-	t.Run("describe json", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-			"describe",
-			sourceRoot,
-			"--config", configPath,
-			"--json",
-		}, &stdout, &stderr, Run)
-		if code != 0 {
-			t.Fatalf("describe --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-		}
-		if strings.TrimSpace(stderr.String()) != "" {
-			t.Fatalf("describe --json stderr = %q, want empty", stderr.String())
-		}
-		var output struct {
-			WorkspaceBackend string `json:"workspace_backend"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
-			t.Fatalf("decode describe output: %v", err)
-		}
-		assertBootFloorWorkspaceRequirementOutput(t, output.WorkspaceBackend)
-	})
+	}
 }
 
-func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
+func TestBootFloorExplicitHostRefusalIsLiveAdmissionNotStructuralValidity(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	configPath := writeDoctorClaudeHostConfig(t, "")
-	sourceRoot := doctorAgentContractsPath
-
+	sourceRoot := writeServeRuntimeNativeBashFixture(t)
 	t.Run("serve", func(t *testing.T) {
 		var out lockedBuffer
-		swarmDir := t.TempDir()
 		code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-			ConfigPath:       configPath,
-			SourceRoot:       sourceRoot,
-			PlatformSpecPath: defaultPlatformSpecPath,
-			StoreMode:        storebackend.ActiveDefaultBackend().String(),
-			SwarmDir:         swarmDir,
-			SwarmDirSet:      true,
-			APIListenAddr:    "127.0.0.1:0",
-			MCPListenAddr:    "127.0.0.1:0",
-			SelfCheck:        true,
-			Output:           &out,
+			ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
+			StoreMode: storebackend.ActiveDefaultBackend().String(), SwarmDir: t.TempDir(), SwarmDirSet: true,
+			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Output: &out,
 		})
 		if code == 0 {
-			t.Fatalf("serve unexpectedly succeeded\n%s", out.String())
+			t.Fatalf("live host admission unexpectedly succeeded: %s", out.String())
 		}
 		assertClaudeHostRefusal(t, out.String())
 	})
-
-	t.Run("verify", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", sourceRoot, "--config", configPath}, &stdout, &stderr, Run); code == 0 {
-			t.Fatalf("verify unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
-		}
-		assertClaudeHostRefusal(t, stderr.String())
-	})
-
-	t.Run("describe", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-		if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"describe", sourceRoot, "--config", configPath}, &stdout, &stderr, Run); code == 0 {
-			t.Fatalf("describe unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
-		}
-		assertClaudeHostRefusal(t, stderr.String())
-	})
+	for _, command := range []string{"verify", "describe"} {
+		t.Run(command, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{command, sourceRoot, "--config", configPath}, &stdout, &stderr, Run); code != 0 {
+				t.Fatalf("structural read confused deployment readiness with validity: code=%d stderr=%s", code, stderr.String())
+			}
+		})
+	}
 }
 
 func assertClaudeHostRefusal(t *testing.T, output string) {
@@ -175,15 +129,6 @@ func assertClaudeHostRefusal(t *testing.T, output string) {
 	for _, want := range []string{"uses claude_cli backend", "Use Docker", "llm.backend: anthropic", "Docker-free local run"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("explicit-host refusal missing %q:\n%s", want, output)
-		}
-	}
-}
-
-func assertBootFloorWorkspaceRequirementOutput(t *testing.T, output string) {
-	t.Helper()
-	for _, want := range []string{"workspace backend: docker", "agent native-bash-worker", "native_tools.bash"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("output missing %q:\n%s", want, output)
 		}
 	}
 }

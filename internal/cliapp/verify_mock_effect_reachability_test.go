@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestVerifyConsumesCanonicalMockEffectReachability(t *testing.T) {
+func TestVerifySeparatesStructuralValidityFromEffectReadiness(t *testing.T) {
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	unsetSecretEnvForTest(t, "provider_credential")
@@ -22,16 +22,15 @@ func TestVerifyConsumesCanonicalMockEffectReachability(t *testing.T) {
 		includeActivity bool
 		wantFailure     []string
 	}{
-		{name: "global live with all exact mocks needs no outbound credential"},
+		{name: "all exact mocks do not select verification purpose"},
 		{
-			name:        "mixed source retains exact live actor and effect requirement",
+			name:        "mixed source remains structurally valid without live credentials",
 			includeLive: true,
-			wantFailure: []string{"live-agent", "provider_credential", "tool provider.send"},
 		},
 		{
-			name:            "all mocks retain effect reachable from live workflow activity",
+			name:            "invalid activity declaration remains structural failure",
 			includeActivity: true,
-			wantFailure:     []string{"provider_credential", "tool provider.send", "stub-agent-node", "task.requested"},
+			wantFailure:     []string{"activity and authored emit/on_success emit are mutually exclusive"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

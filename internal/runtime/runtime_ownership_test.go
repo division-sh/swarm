@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -17,10 +18,10 @@ import (
 func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := &config.Config{}
-	cfg.Runtime.ExecutionPosture = "live"
 	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{
 		Config: cfg, Options: RuntimeOptions{
-			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
+			ExecutionPosture: executionposture.Live,
+			SelfCheck:        false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			SourceArtifactFact: testSourceArtifactFact(t, runtimeTestBundleHash),
 			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),
@@ -42,7 +43,6 @@ func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
 func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := &config.Config{}
-	cfg.Runtime.ExecutionPosture = "live"
 	fact := testSourceArtifactFact(t, runtimeTestBundleHash)
 	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
@@ -57,7 +57,8 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 			LifecycleCensus: selected,
 		},
 		Options: RuntimeOptions{
-			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
+			ExecutionPosture: executionposture.Live,
+			SelfCheck:        false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
 			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
 			SourceArtifactFact: fact, ProcessWorkOwner: runtimeTestProcessWorkOwner(t),
 		},

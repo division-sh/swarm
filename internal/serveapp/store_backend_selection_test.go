@@ -393,7 +393,7 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dev.db")
-	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{}}
 	stores, err := buildStores(ctx, storebackend.Selection{
 		Backend:          storebackend.BackendSQLite,
 		BackendSource:    storebackend.SourceFlag,
@@ -425,6 +425,7 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 	processWorkOwner := newSupervisorTestProcessOwner(t)
 	runtimeDeps.Config = cfg
 	runtimeDeps.Options = runtime.RuntimeOptions{
+		ExecutionPosture:       executionposture.Live,
 		SelfCheck:              true,
 		ProcessWorkOwner:       processWorkOwner,
 		RuntimeInstanceID:      "11111111-1111-4111-8111-111111111111",
@@ -494,7 +495,6 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 	}
 	if strings.TrimSpace(backend) != "" || strings.TrimSpace(sqlitePath) != "" {
@@ -532,7 +532,6 @@ func writeStoreBackendRuntimeConfigWithoutPasswordSource(t *testing.T, backend s
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	contents := withTestProviderTriggerPlatformInventory(t, strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"store:",
 		"  backend: " + backend,

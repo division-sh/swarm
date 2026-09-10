@@ -601,7 +601,7 @@ func TestDirectiveExecutionAdmitsExactPersistedModeBeforeTransitionOnSQLiteAndPo
 			if _, err := store.AdmitDirectiveExecution(ctx, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
 				OperationID: live.Operation.OperationID, OwnerID: "mock-only-owner", Now: now.Add(time.Second), Lease: time.Minute,
 				ExecutionPosture: executionposture.MockOnly,
-			}); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+			}); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 				t.Fatalf("live directive admission error = %v, want mock-only rejection", err)
 			}
 			persisted, found, err := store.LoadDirectiveOperation(ctx, live.Operation.OperationID)

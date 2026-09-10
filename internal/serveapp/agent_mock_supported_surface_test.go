@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -43,7 +44,8 @@ func TestMockAgentSupportedSurfaceSQLitePostgres(t *testing.T) {
 func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 	harness := effecttest.New()
 	runtimes, err := buildForkChatSandboxLLMRuntimes(
-		&config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.MockOnly}, LLM: config.LLMConfig{Backend: "claude_cli"}},
+		executionposture.MockOnly,
+		&config.Config{Runtime: config.RuntimeConfig{}, LLM: config.LLMConfig{Backend: "claude_cli"}},
 		nil,
 		toolgateway.Binding{},
 		nil,
@@ -55,13 +57,21 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build fork-chat mock runtime: %v", err)
 	}
-	resolved, err := runtimes.ResolveAgentRuntime(runtimeactors.AgentConfig{
+	profile, err := selection.ResolveLiveBackend("claude_cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := runtimellm.ResolveAgentExecution(executionposture.MockOnly, profile, nil, runtimeactors.AgentConfig{
 		ID: "forkchat-mock",
 		Mock: mockperformance.Performance{
 			Kind: mockperformance.KindPython, Module: "mocks/forkchat.py",
 			Source: []byte("def handle(input):\n    return {'text': 'mock'}\n"), Digest: "sha256:forkchat-canonical-mock",
 		},
 	})
+	if err != nil {
+		t.Fatalf("select fork-chat mock descriptor: %v", err)
+	}
+	resolved, err := runtimes.ResolveAgentRuntime(descriptor.Actor)
 	if err != nil {
 		t.Fatalf("resolve fork-chat mock runtime: %v", err)
 	}
@@ -143,7 +153,8 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	}
 
 	servedPathStarted := time.Now()
-	first := startServeRuntimeTestProcess(t, opts)
+	retainedRoot := t.TempDir()
+	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 	entityID := sendStandingTelegramUpdate(t, firstURL, 301, 42)
@@ -161,7 +172,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	if prepareRestart != nil {
 		prepareRestart()
 	}
-	second := startServeRuntimeTestProcess(t, opts)
+	second := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	waitForMockConnectorAttempts(t, backend, location, 1)
@@ -211,7 +222,6 @@ func writeMockAgentRuntimeConfig(t *testing.T, backend, sqlitePath string) strin
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  execution_posture: mock_only",
 		"  recovery_on_startup: true",
 		"store:",
 		"  backend: " + backend,

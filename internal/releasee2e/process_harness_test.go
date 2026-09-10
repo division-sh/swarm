@@ -3,14 +3,19 @@ package releasee2e
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -21,6 +26,19 @@ func buildReleaseBinary(t *testing.T, outputRoot string) string {
 
 func buildRaceReleaseBinary(t *testing.T, outputRoot string) string {
 	return buildReleaseBinaryWithArgs(t, outputRoot, "-race")
+}
+
+func buildOwnedMockLifecycleBinary(t *testing.T, outputRoot string, buildArgs ...string) string {
+	t.Helper()
+	path := filepath.Join(outputRoot, "internal-mock-lifecycle.test")
+	args := append([]string{"test", "-c"}, buildArgs...)
+	args = append(args, "-o", path, "./internal/serveapp")
+	cmd := exec.Command("go", args...)
+	cmd.Dir = releaseE2ERepoRoot(t)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build internal retained lifecycle binary: %v\n%s", err, output)
+	}
+	return path
 }
 
 func buildReleaseBinaryWithArgs(t *testing.T, outputRoot string, buildArgs ...string) string {
@@ -37,8 +55,9 @@ func buildReleaseBinaryWithArgs(t *testing.T, outputRoot string, buildArgs ...st
 }
 
 type releaseProcessOutput struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu      sync.Mutex
+	buf     bytes.Buffer
+	secrets []string
 }
 
 func (o *releaseProcessOutput) Write(p []byte) (int, error) {
@@ -50,46 +69,70 @@ func (o *releaseProcessOutput) Write(p []byte) (int, error) {
 func (o *releaseProcessOutput) String() string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return o.buf.String()
+	output := o.buf.String()
+	for _, secret := range o.secrets {
+		if secret != "" {
+			output = strings.ReplaceAll(output, secret, "[REDACTED]")
+		}
+	}
+	return output
 }
 
 type releaseProcessSpec struct {
-	BinaryPath           string
-	WorkingDir           string
-	ConfigPath           string
-	Source               string
-	Store                string
-	Dev                  bool
-	APIPort              int
-	PublicWebhookBaseURL string
-	PublicWebhookListen  string
-	TokenFile            string
-	Token                string
-	Env                  []string
+	BinaryPath                  string
+	InternalMockLifecycleBinary string
+	WorkingDir                  string
+	ConfigPath                  string
+	Source                      string
+	Store                       string
+	Dev                         bool
+	APIPort                     int
+	MCPListenHost               string
+	PublicWebhookBaseURL        string
+	PublicWebhookListen         string
+	TokenFile                   string
+	Token                       string
+	Env                         []string
+	WorkspaceBackend            string
+	DefaultExecutionSelection   bool
+	RedactValues                []string
 }
 
 type releaseServeProcess struct {
-	cmd      *exec.Cmd
-	output   *releaseProcessOutput
-	exited   chan struct{}
-	waitMu   sync.Mutex
-	waitErr  error
-	apiBase  string
-	rpc      *releaseRPCClient
-	stopOnce sync.Once
+	cmd               *exec.Cmd
+	output            *releaseProcessOutput
+	exited            chan struct{}
+	waitMu            sync.Mutex
+	waitErr           error
+	apiBase           string
+	rpc               *releaseRPCClient
+	stopOnce          sync.Once
+	internalLifecycle bool
 }
 
 func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServeProcess {
 	t.Helper()
-	output := &releaseProcessOutput{}
-	args := []string{
-		"serve",
-		"--backend", "claude_cli",
-		"--workspace-backend", "host",
+	output := &releaseProcessOutput{secrets: append([]string{options.Token}, options.RedactValues...)}
+	workspaceBackend := options.WorkspaceBackend
+	if workspaceBackend == "" {
+		workspaceBackend = "host"
+	}
+	args := []string{"serve"}
+	if !options.DefaultExecutionSelection {
+		args = append(args, "--backend", "claude_cli", "--workspace-backend", workspaceBackend)
+	}
+	args = append(args,
 		"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.APIPort),
 		"--mcp-listen-addr", "127.0.0.1:0",
 		"--shutdown-grace", "2s",
 		"--no-color",
+	)
+	if options.MCPListenHost != "" {
+		for i := range args {
+			if args[i] == "--mcp-listen-addr" {
+				args[i+1] = net.JoinHostPort(options.MCPListenHost, "0")
+			}
+		}
 	}
 	if options.ConfigPath != "" {
 		args = append(args, "--config", options.ConfigPath)
@@ -112,9 +155,30 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	if options.PublicWebhookListen != "" {
 		args = append(args, "--public-webhook-listen", options.PublicWebhookListen)
 	}
-	cmd := exec.Command(options.BinaryPath, args...)
+	binary := options.BinaryPath
+	env := append([]string(nil), options.Env...)
+	if options.InternalMockLifecycleBinary != "" {
+		if options.PublicWebhookBaseURL != "" || options.PublicWebhookListen != "" {
+			t.Fatal("internal mock lifecycle does not own public exposure/registration proof")
+		}
+		request, err := json.Marshal(struct {
+			ConfigPath string
+			Source     string
+			Store      string
+			Dev        bool
+			APIPort    int
+			Token      string
+		}{options.ConfigPath, options.Source, options.Store, options.Dev, options.APIPort, options.Token})
+		if err != nil {
+			t.Fatal(err)
+		}
+		binary = options.InternalMockLifecycleBinary
+		args = []string{"-test.run=^TestOwnedMockLifecycleProcessEntry$", "-test.v", "-test.timeout=10m"}
+		env = append(env, "SWARM_INTERNAL_MOCK_LIFECYCLE_REQUEST="+string(request))
+	}
+	cmd := exec.Command(binary, args...)
 	cmd.Dir = options.WorkingDir
-	cmd.Env = options.Env
+	cmd.Env = env
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Start(); err != nil {
@@ -122,14 +186,17 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", options.APIPort)
 	process := &releaseServeProcess{
-		cmd:     cmd,
-		output:  output,
-		exited:  make(chan struct{}),
-		apiBase: baseURL,
+		cmd:               cmd,
+		output:            output,
+		exited:            make(chan struct{}),
+		apiBase:           baseURL,
+		internalLifecycle: options.InternalMockLifecycleBinary != "",
 		rpc: &releaseRPCClient{
-			endpoint: baseURL + "/v1/rpc",
-			token:    options.Token,
-			client:   &http.Client{Timeout: 5 * time.Second},
+			endpoint:     baseURL + "/v1/rpc",
+			token:        options.Token,
+			client:       &http.Client{Timeout: 5 * time.Second},
+			processID:    cmd.Process.Pid,
+			redactValues: append([]string{options.Token}, options.RedactValues...),
 		},
 	}
 	go func() {
@@ -164,7 +231,37 @@ func (p *releaseServeProcess) waitReady(ctx context.Context) error {
 		case <-p.exited:
 			return fmt.Errorf("serve exited before readiness: %v\n%s", p.waitError(), p.output.String())
 		case <-ctx.Done():
+			p.collectStartupEvidence()
 			return fmt.Errorf("wait for release readiness: %w\n%s", ctx.Err(), p.output.String())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (p *releaseServeProcess) collectStartupEvidence() {
+	if !p.internalLifecycle {
+		return
+	}
+	if !strings.Contains(p.output.String(), fmt.Sprintf("lifecycle evidence available pid=%d", p.cmd.Process.Pid)) {
+		fmt.Fprintf(p.output, "lifecycle evidence unavailable before handler installation pid=%d\n", p.cmd.Process.Pid)
+		return
+	}
+	if err := p.cmd.Process.Signal(syscall.SIGUSR1); err != nil {
+		fmt.Fprintf(p.output, "lifecycle evidence signal pid=%d: %v\n", p.cmd.Process.Pid, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	marker := fmt.Sprintf("lifecycle evidence end pid=%d", p.cmd.Process.Pid)
+	for !strings.Contains(p.output.String(), marker) {
+		select {
+		case <-p.exited:
+			return
+		case <-ctx.Done():
+			fmt.Fprintf(p.output, "lifecycle evidence capture incomplete pid=%d\n", p.cmd.Process.Pid)
+			return
 		case <-ticker.C:
 		}
 	}
@@ -239,9 +336,11 @@ func (p *releaseServeProcess) waitError() error {
 }
 
 type releaseRPCClient struct {
-	endpoint string
-	token    string
-	client   *http.Client
+	endpoint     string
+	token        string
+	client       *http.Client
+	processID    int
+	redactValues []string
 }
 
 func (c *releaseRPCClient) call(ctx context.Context, method string, params map[string]any, result any) error {
@@ -267,12 +366,13 @@ func (c *releaseRPCClient) call(ctx context.Context, method string, params map[s
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return fmt.Errorf("read %s response: %w", method, err)
+		return fmt.Errorf("read %s response: %w; %s", method, err, c.failureEvidence(method, response.StatusCode, body))
 	}
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s returned HTTP %d: %s", method, response.StatusCode, body)
+		return fmt.Errorf("%s returned HTTP %d; %s", method, response.StatusCode, c.failureEvidence(method, response.StatusCode, body))
 	}
 	var envelope struct {
+		ID     json.RawMessage `json:"id"`
 		Result json.RawMessage `json:"result"`
 		Error  *struct {
 			Code    any             `json:"code"`
@@ -281,18 +381,106 @@ func (c *releaseRPCClient) call(ctx context.Context, method string, params map[s
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return fmt.Errorf("decode %s response: %w: %s", method, err, body)
+		return fmt.Errorf("decode %s response: %w; %s", method, err, c.failureEvidence(method, response.StatusCode, body))
+	}
+	var responseID string
+	if json.Unmarshal(envelope.ID, &responseID) != nil || responseID != method {
+		return fmt.Errorf("%s response identity mismatch; %s", method, c.failureEvidence(method, response.StatusCode, body))
 	}
 	if envelope.Error != nil {
-		return fmt.Errorf("%s failed (%v): %s data=%s", method, envelope.Error.Code, envelope.Error.Message, envelope.Error.Data)
+		return fmt.Errorf("%s failed; %s", method, c.failureEvidence(method, response.StatusCode, body))
 	}
 	if len(envelope.Result) == 0 || string(envelope.Result) == "null" {
-		return fmt.Errorf("%s returned no result", method)
+		return fmt.Errorf("%s returned no result; %s", method, c.failureEvidence(method, response.StatusCode, body))
 	}
 	if err := json.Unmarshal(envelope.Result, result); err != nil {
-		return fmt.Errorf("decode %s result: %w: %s", method, err, envelope.Result)
+		return fmt.Errorf("decode %s result: %w; %s", method, err, c.failureEvidence(method, response.StatusCode, body))
 	}
 	return nil
+}
+
+// Failure-only protocol evidence: retain envelope identity, never arbitrary result
+// or error-data payloads. Non-JSON bodies retain size/hash, not free-form secrets.
+func (c *releaseRPCClient) failureEvidence(method string, status int, body []byte) string {
+	sanitize := func(value string) string {
+		for _, secret := range append([]string{c.token}, c.redactValues...) {
+			if secret != "" {
+				value = strings.ReplaceAll(value, secret, "[REDACTED]")
+			}
+		}
+		if len(value) > 256 {
+			value = value[:256] + "[TRUNCATED]"
+		}
+		return value
+	}
+	endpoint := "invalid endpoint"
+	if parsed, err := url.Parse(c.endpoint); err == nil {
+		endpoint = sanitize(parsed.Scheme + "://" + parsed.Host + parsed.EscapedPath())
+	}
+	evidence := map[string]any{
+		"http_status": status, "endpoint": endpoint, "process_id": c.processID,
+		"request_id": method, "body_bytes": len(body), "body_sha256": fmt.Sprintf("%x", sha256.Sum256(body)),
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope != nil {
+		projection := map[string]any{}
+		for _, key := range []string{"jsonrpc", "id", "result", "error"} {
+			value, present := envelope[key]
+			if !present {
+				continue
+			}
+			if string(value) == "null" {
+				projection[key] = nil
+				continue
+			}
+			switch key {
+			case "jsonrpc", "id":
+				var decoded any
+				_ = json.Unmarshal(value, &decoded)
+				switch v := decoded.(type) {
+				case string:
+					projection[key] = sanitize(v)
+				case float64:
+					projection[key] = v
+				default:
+					projection[key] = "[INVALID TYPE]"
+				}
+			case "error":
+				var fields map[string]json.RawMessage
+				if json.Unmarshal(value, &fields) != nil || fields == nil {
+					projection[key] = "[INVALID TYPE]"
+					continue
+				}
+				safeError := map[string]any{}
+				for _, field := range []string{"code", "message"} {
+					if raw, ok := fields[field]; ok {
+						var decoded any
+						_ = json.Unmarshal(raw, &decoded)
+						switch v := decoded.(type) {
+						case string:
+							safeError[field] = sanitize(v)
+						case float64:
+							safeError[field] = v
+						default:
+							safeError[field] = "[INVALID TYPE]"
+						}
+					}
+				}
+				if _, ok := fields["data"]; ok {
+					safeError["data"] = "[OMITTED]"
+				}
+				projection[key] = safeError
+			default:
+				projection[key] = "[OMITTED]"
+			}
+		}
+		evidence["response_envelope"] = projection
+		evidence["envelope_field_count"] = len(envelope)
+	} else {
+		evidence["response_envelope"] = "[NON-OBJECT OR INVALID JSON]"
+	}
+	encoded, _ := json.Marshal(evidence)
+	return string(encoded)
 }
 
 func pollReleaseCondition(ctx context.Context, interval time.Duration, check func() (bool, error)) error {

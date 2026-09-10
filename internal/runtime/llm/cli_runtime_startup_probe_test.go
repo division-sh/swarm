@@ -376,6 +376,53 @@ exit 2
 	}
 }
 
+func TestClaudeCLIStartupInventoryPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name, inventory string
+		valid           bool
+	}{
+		{"empty", `[]`, true}, {"controls", `["ExitPlanMode"]`, true},
+		{"missing", "", false}, {"null", `null`, false},
+		{"wrong_type", `"Bash"`, false}, {"malformed", `[42]`, false},
+		{"unexpected_native", `["Bash"]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			scriptPath := filepath.Join(dir, "fake-docker")
+			marker := filepath.Join(dir, "launches")
+			line := `{"type":"system","subtype":"init"`
+			if tc.inventory != "" {
+				line += `,"tools":` + tc.inventory
+			}
+			line += `}`
+			script := "#!/bin/sh\nset -eu\ncat >/dev/null\nprintf 'launch\\n' >> " + shellQuote(marker) + "\nprintf '%s\\n' " + shellQuote(line) + "\n"
+			if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cfg := &config.Config{}
+			cfg.Workspace.DockerBin = scriptPath
+			cfg.LLM.ClaudeCLI.Command = "claude"
+			cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
+			runtime := NewClaudeCLIRuntimeWithOptions(cfg, sessions.NewInMemoryRegistry(0), "inventory-worker",
+				workspaceResolverStub{target: &workspace.Target{Container: "inventory-test", Workdir: "/workspace"}}, nil, nil,
+				ClaudeCLIRuntimeOptions{ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")})
+			actor := runtimeactors.AgentConfig{ID: "inventory-agent", ExecutionMode: "live"}
+			actor.Identity = testAgentIdentity(actor.ID, "")
+			resp, err := runtime.ProbeStartupVisibleToolSurface(managedStartupProbeTestContext(t, actor, nil), actor, "system", nil)
+			if (err == nil) != tc.valid {
+				t.Fatalf("startup error=%v, want valid=%v", err, tc.valid)
+			}
+			if tc.valid && (resp == nil || resp.CLIInventory != CLIInventoryValid) {
+				t.Fatal("startup lost valid empty observation")
+			}
+			calls, err := os.ReadFile(marker)
+			if err != nil || string(calls) != "launch\n" {
+				t.Fatalf("startup launches=%q, err=%v", calls, err)
+			}
+		})
+	}
+}
+
 func managedStartupProbeTestContext(t *testing.T, actor runtimeactors.AgentConfig, tools []ToolDefinition) context.Context {
 	t.Helper()
 	ctx, surface := testManagedCLISurfaceContext(t, actor, tools)

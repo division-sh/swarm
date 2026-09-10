@@ -90,7 +90,7 @@ func TestSourceInvocationCommandsShareSelectedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := filepath.Join(base, "swarm.yaml")
-	if err := os.WriteFile(config, []byte("runtime:\n  execution_posture: mock_only\nworkspace:\n  backend: host\n"), 0o600); err != nil {
+	if err := os.WriteFile(config, []byte("workspace:\n  backend: host\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, command := range [][]string{
