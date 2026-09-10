@@ -3,6 +3,9 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +75,30 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 				t.Fatal(err)
 			}
 
+			// The lifecycle write follows all card, draft, held-continuation and
+			// route-obligation supersessions in the same named operation.
+			trigger := fmt.Sprintf(`CREATE TRIGGER freeze_effect_failure BEFORE UPDATE ON runs WHEN OLD.run_id='%s' AND NEW.status='forked' BEGIN SELECT RAISE(ABORT, 'freeze_effect_failure'); END`, fixture.sourceRun)
+			drop := `DROP TRIGGER freeze_effect_failure`
+			var lifecycle storerunlifecycle.OperationOwner = fixture.sqlite
+			if fixture.postgres != nil {
+				lifecycle = fixture.postgres
+				trigger = fmt.Sprintf(`CREATE FUNCTION freeze_effect_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'freeze_effect_failure'; END $$; CREATE TRIGGER freeze_effect_failure BEFORE UPDATE ON runs FOR EACH ROW WHEN (OLD.run_id='%s' AND NEW.status='forked') EXECUTE FUNCTION freeze_effect_failure()`, fixture.sourceRun)
+				drop = `DROP TRIGGER freeze_effect_failure ON runs`
+			}
+			if _, err := fixture.db.ExecContext(ctx, trigger); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshotForkHistoricalExecutionTables(t, fixture.db, fixture.postgres != nil)
+			_, _, err = lifecycle.ForkRunSource(ctx, storerunlifecycle.ForkSourceRequest{RunID: fixture.sourceRun, ContinuedAsRunID: fixture.continued, EndedAt: fixture.forkedAt})
+			if err == nil || !strings.Contains(err.Error(), "freeze_effect_failure") {
+				t.Fatalf("freeze did not reach injected post-supersession fault: %v", err)
+			}
+			if after := snapshotForkHistoricalExecutionTables(t, fixture.db, fixture.postgres != nil); !reflect.DeepEqual(before, after) {
+				t.Fatal("failed freeze retained partial lifecycle, decision, draft, task, effect, route or story changes")
+			}
+			if _, err := fixture.db.ExecContext(ctx, drop); err != nil {
+				t.Fatal(err)
+			}
 			fixture.freeze(t)
 
 			newCard := newDecisionCardTestCard(t, fixture.sourceRun, now.Add(time.Minute))

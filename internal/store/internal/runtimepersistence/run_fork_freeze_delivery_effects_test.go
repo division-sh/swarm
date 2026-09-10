@@ -139,6 +139,32 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 	}
 }
 
+func TestForkMaterializationLiveClaimRefusalBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			f := newForkContentionFixture(t, backend)
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "item.received", "freeze-test", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
+			if err := insertCanonicalEventRecordFixture(f.ctx, f.store, event); err != nil {
+				t.Fatal(err)
+			}
+			seedDeliveryStateFixture(t, f.ctx, f.store.(deliverylifecycle.Store), event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("held-source-agent")}, deliverylifecycle.StateLaunching, nil)
+			f.eventID = uuid.NewString()
+			frontier := eventtest.ExistingRunRootIngress(f.eventID, "item.received", "freeze-frontier", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
+			if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, frontier); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
+			result, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+			if err == nil || !strings.Contains(err.Error(), "delivery_history_unproven") || result.ForkRunID != "" {
+				t.Fatalf("live source claim did not refuse materialization: %+v %v", result, err)
+			}
+			if after := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres"); !reflect.DeepEqual(before, after) {
+				t.Fatal("live-authority refusal mutated source or child")
+			}
+		})
+	}
+}
+
 func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		for _, selected := range []bool{false, true} {
