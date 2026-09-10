@@ -19,20 +19,12 @@ completion-candidate writes to `runs.completion_due_at`. With those writers join
 the tests assert both exact blockers and no database mutation on first and repeated
 store-only refusal, on SQLite and PostgreSQL. No table or column is excluded.
 
-To reproduce the original oracle without changing production code or the checkout,
-use a Go overlay with these absolute paths (replace `<checkout>`):
-
-```json
-{
-  "Replace": {
-    "<checkout>/internal/serveapp/fork_retained_join_test.go":
-      "<checkout>/internal/serveapp/testdata/future_capabilities/fork_retained_join_success_test.go.txt"
-  }
-}
-```
+To reproduce the original oracle from the repository root without changing
+production code or the checkout, use the checked-in overlay:
 
 ```sh
-go test -overlay /tmp/g19-future-overlay.json ./internal/serveapp \
+go run ./cmd/swarm-test -- \
+  -overlay=internal/serveapp/testdata/future_capabilities/fork_retained_join_overlay.json ./internal/serveapp \
   -run '^TestServedJoinWriterForkRetainedGenerations(BothStores|SeparateCheckpointBothStores)$' \
   -count=1 -timeout=5m
 ```
