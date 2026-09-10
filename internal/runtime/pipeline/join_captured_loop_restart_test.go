@@ -50,23 +50,13 @@ func TestJoinCapturedLoopOutcomeAfterRestartBothStores(t *testing.T) {
 						members = []any{}
 					}
 					h := newExactWorkflowJoinHarness(t, storeCase, flowID, "dispatching", members)
-					start := runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Start: "revision", From: "dispatching"}, AdvancesTo: "awaiting"}
-					repeat := runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "awaiting"}, AdvancesTo: "awaiting"}
-					observer := runtimecontracts.SystemNodeContract{ExecutionType: "system_node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"loop.start": start, "loop.repeat": repeat}}
-					h.bundle.Nodes["observer"] = observer
-					h.bundle.FlowTree.ByID["orders"].Nodes["observer"] = observer
+					h.bundle = workflowJoinLifecycleBundleWithOptions(t, false, "captured")
 					declarationFlowID := pipelineDeclarationFlowPath(flowID)
-					h.bundle.Semantics.Loops = []runtimecontracts.WorkflowLoopPlan{{FlowID: declarationFlowID, ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, EntryStage: "awaiting", RegionStages: []string{"awaiting"}}}
-					handler := h.bundle.Nodes["join-node"].EventHandlers["item.completed"]
-					handler.Loop = &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "awaiting"}
-					outcome := runtimecontracts.HandlerRuleEntry{AdvancesTo: "awaiting", DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-						{TargetField: "expected", Value: runtimecontracts.CELExpression("[loop.revision_id]")},
-					}}}
-					handler.Join.OnComplete, handler.Join.Timeout.Outcome = outcome, outcome
-					h.bundle.Nodes["join-node"].EventHandlers["item.completed"] = handler
-					h.bundle.FlowTree.ByID["orders"].Nodes["join-node"].EventHandlers["item.completed"] = handler
-					h.source.plans[0].Spec = *handler.Join
+					h.source.plans = []runtimecontracts.WorkflowJoinPlan{exactCompiledJoinPlanForTest(h.bundle, flowID)}
 					h.source.Source = workflowJoinLifecycleRootAndFlowSource(h.bundle)
+					observer := pipelineNode(t, flowID, "observer")
+					handlers := h.source.Source.ExecutableNodeEventHandlers(observer)
+					start, repeat := handlers["loop.start"], handlers["loop.repeat"]
 					h.restart()
 					execute := func(eventType string, handler runtimecontracts.SystemNodeEventHandler, payload map[string]any) {
 						t.Helper()

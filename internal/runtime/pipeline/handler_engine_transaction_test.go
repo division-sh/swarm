@@ -999,7 +999,7 @@ func TestExecuteNodeContractHandlerPersistsCanonicalDefaultPresenceCheckDataAccu
 	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("entity.kill_reason == ''")},
+				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("entity.kill_reason == null")},
 			},
 		},
 	}, workflowTriggerContext{

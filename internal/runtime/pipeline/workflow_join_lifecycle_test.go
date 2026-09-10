@@ -1155,9 +1155,19 @@ join-node:
 		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  ready: {terminal: true}", "  ready: {}", 1)
 		files["orders/schema.yaml"] += "loops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: attention}\n"
 		from := "awaiting"
-		if loop == "reentrant" {
-			from = "ready"
+		if loop == "reentrant" || loop == "captured" {
+			if loop == "reentrant" {
+				from = "ready"
+			}
 			files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    item.completed:\n      join:", "    item.completed:\n      loop: {admit: revision, from: awaiting}\n      join:", 1)
+		}
+		if loop == "captured" {
+			for _, replacement := range []struct{ old, new string }{
+				{"on_complete: {advances_to: ready}", "on_complete: {advances_to: awaiting, data_accumulation: {writes: [{target_field: expected, expression: '[loop.revision_id]'}]}}"},
+				{"timeout: {after: 1h, advances_to: attention}", "timeout: {after: 1h, advances_to: awaiting, data_accumulation: {writes: [{target_field: expected, expression: '[loop.revision_id]'}]}}"},
+			} {
+				files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], replacement.old, replacement.new, 1)
+			}
 		}
 		files["orders/events.yaml"] += "loop.start: {}\nloop.repeat:\n  revision_id: text\n"
 		files["orders/events.yaml"] = strings.Replace(files["orders/events.yaml"], "item.completed:\n", "item.completed:\n  revision_id: text\n", 1)
