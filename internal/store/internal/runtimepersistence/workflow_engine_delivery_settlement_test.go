@@ -125,7 +125,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
 
-			node := mustPersistenceRootNode("engine-fan-out")
+			node := mustPersistenceNode(flowID, "engine-fan-out")
 			targetRoute := events.RouteIdentity{FlowID: flowID, FlowInstance: instancePath, EntityID: entityID}
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(node),

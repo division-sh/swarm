@@ -72,11 +72,14 @@ func (o *Owner) BundleWriter() any { return nil }
 
 func selectedStoreBoundaryViolations(path, body string) []string {
 	allowedSelectedImports := map[string]bool{
-		"internal/serveapp/main.go":                    true,
-		"internal/serveapp/store_capabilities.go":      true,
-		"internal/serveapp/serve_runtime_execution.go": true,
-		"internal/serveapp/store_runtime.go":           true,
-		"internal/cliapp/store_authority.go":           true,
+		// The approved reset supervisor retains the exact selected family and
+		// owns successor construction and final retirement, not backend handles.
+		"internal/serveapp/process_lifecycle_supervisor.go": true,
+		"internal/serveapp/main.go":                         true,
+		"internal/serveapp/store_capabilities.go":           true,
+		"internal/serveapp/serve_runtime_execution.go":      true,
+		"internal/serveapp/store_runtime.go":                true,
+		"internal/cliapp/store_authority.go":                true,
 	}
 	insideSelected := strings.HasPrefix(path, "internal/store/selected/")
 	insideStore := strings.HasPrefix(path, "internal/store/")

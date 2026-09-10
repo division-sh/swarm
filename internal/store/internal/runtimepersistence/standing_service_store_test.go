@@ -154,8 +154,9 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := coordinator.Acquire(deliveryID); err == nil {
-				t.Fatal("startup scan retained a terminal delivery continuation")
+			acquisition, err := coordinator.Acquire(deliveryID)
+			if err != nil || acquisition.Validate(deliveryID) != nil || acquisition.Disposition() != worklifetime.DeliveryTerminallyFenced {
+				t.Fatalf("startup scan did not terminally fence the exact delivery: acquisition=%+v err=%v", acquisition, err)
 			}
 		})
 	}

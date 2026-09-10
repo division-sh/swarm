@@ -255,7 +255,7 @@ func TestResetRetainedCleanupScopeAndRollbackBothStores(t *testing.T) {
 	}
 }
 
-func admitRetainedResetCleanupProof(t *testing.T, capability startupownership.ProcessCapability, quiescer destructivereset.QuiescenceStore, runID string, includeSources bool) destructivereset.CleanupRequest {
+func admitRetainedResetCleanupProof(t *testing.T, capability startupownership.ProcessCapability, quiescer destructivereset.QuiescenceStore, runID string, includeSources bool, additionalRunIDs ...string) destructivereset.CleanupRequest {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC().Add(time.Minute)
@@ -268,9 +268,12 @@ func admitRetainedResetCleanupProof(t *testing.T, capability startupownership.Pr
 	}
 	planned := operation
 	planned.Phase, planned.Revision = destructivereset.PhasePlanned, operation.Revision+1
-	planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: now, Plan: cleanupPlanForRunIDs(runID)}
+	runIDs := append([]string{runID}, additionalRunIDs...)
+	planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: now, Plan: cleanupPlanForRunIDs(runIDs...)}
 	planned.Plan.IncludeSourceArtifacts, planned.Plan.Plan.IncludeSourceArtifacts = includeSources, includeSources
-	planned.Plan.Plan.ActiveRuns = []destructivereset.RunRef{{RunID: runID, Status: "running"}}
+	for _, id := range runIDs {
+		planned.Plan.Plan.ActiveRuns = append(planned.Plan.Plan.ActiveRuns, destructivereset.RunRef{RunID: id, Status: "running"})
+	}
 	if err := capability.AdvanceResetOperation(ctx, operation, planned); err != nil {
 		t.Fatal(err)
 	}

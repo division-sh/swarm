@@ -468,14 +468,12 @@ func selectedActivityProducerSourceWithLoops(t *testing.T, ordinaryRootLoop, act
 		"entities.yaml": "default:\n  name: text\n",
 		"events.yaml":   "ordinary.ready: {}\nreview.inspect: {}\nsupport.drafted: {}\n",
 		"nodes.yaml": `reader:
-  id: reader
   execution_type: system_node
   subscribes_to: [review.inspect]
   event_handlers:
     review.inspect:
       activity: {id: inspect, tool: provider.read}
 support:
-  id: support
   execution_type: system_node
   subscribes_to: [support.drafted]
   event_handlers:
@@ -486,14 +484,12 @@ support:
 		"flow-a/entities.yaml": "default:\n  name: text\n",
 		"flow-a/events.yaml":   "review.accepted: {}\nreview.inspect: {}\n",
 		"flow-a/nodes.yaml": `writer:
-  id: writer
   execution_type: system_node
   subscribes_to: [review.accepted]
   event_handlers:
     review.accepted:
       activity: {id: commit, tool: provider.write}
 reader:
-  id: reader
   execution_type: system_node
   subscribes_to: [review.inspect]
   event_handlers:
@@ -524,7 +520,6 @@ telegram.send_message:
 		files["schema.yaml"] += "  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
 		files["events.yaml"] = "ordinary.ready:\n  opaque_revision: text\nordinary.start: {}\nordinary.retry:\n  opaque_revision: text\nordinary.close:\n  opaque_revision: text\n"
 		files["nodes.yaml"] = `reader:
-  id: reader
   execution_type: system_node
   subscribes_to: [ordinary.start, ordinary.ready, ordinary.retry, ordinary.close]
   event_handlers:
@@ -546,7 +541,6 @@ telegram.send_message:
 		files["flow-a/schema.yaml"] += "  review: {}\n  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
 		files["flow-a/events.yaml"] = "review.accepted:\n  revision_id: text\nreview.inspect:\n  revision_id: text\nreview.start: {}\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n"
 		files["flow-a/nodes.yaml"] = `writer:
-  id: writer
   execution_type: system_node
   subscribes_to: [review.start, review.accepted, review.retry, review.close]
   event_handlers:
@@ -564,7 +558,6 @@ telegram.send_message:
       loop: {close: revision, from: review}
       advances_to: closed
 reader:
-  id: reader
   execution_type: system_node
   subscribes_to: [review.inspect]
   event_handlers:

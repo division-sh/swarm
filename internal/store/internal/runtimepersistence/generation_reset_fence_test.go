@@ -3,10 +3,10 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/google/uuid"
 )
@@ -23,7 +23,7 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 				now := time.Now().UTC()
 				requirePausedRunForTest(t, ctx, selected, runA, now)
 				requirePausedRunForTest(t, ctx, selected, runB, now)
-				request := destructiveResetCleanupRequest(runA, runB, now)
+				request := admitRetainedResetCleanupProof(t, process, selected.(destructivereset.QuiescenceStore), runA, false, runB)
 				var sequence int64
 				if err := db.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&sequence); err != nil {
 					t.Fatal(err)
@@ -41,11 +41,7 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 				waiting, stop := context.WithTimeout(ctx, time.Second)
 				_, err = process.ApplyDestructiveResetCleanup(waiting, request, nil)
 				stop()
-				if sqlite {
-					if err == nil || !strings.Contains(err.Error(), "destructive reset is unsupported by the SQLite selected-store composition") {
-						t.Fatalf("SQLite reset capability changed: %v", err)
-					}
-				} else if !errors.Is(err, context.DeadlineExceeded) {
+				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("reset crossed held generation mutation fence: %v", err)
 				}
 				if completion == "commit" {
@@ -68,12 +64,6 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 					t.Fatalf("cancelled/refused cleanup lost process possession: %v", err)
 				}
 				result, err := process.ApplyDestructiveResetCleanup(ctx, request, nil)
-				if sqlite {
-					if err == nil || !strings.Contains(err.Error(), "destructive reset is unsupported by the SQLite selected-store composition") {
-						t.Fatalf("SQLite reset became executable after fence release: %v", err)
-					}
-					return
-				}
 				if err != nil || result.DryRun || len(result.RunIDs) != 2 {
 					t.Fatalf("reset after mutation completion: result=%+v err=%v", result, err)
 				}

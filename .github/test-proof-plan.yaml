@@ -287,7 +287,7 @@ units:
   catalog-runtime:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
-    run: '^(Test($|[^CS].*|Stage.*|SelectedForkFlowOwnedReadinessBothStoresInitial)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CS].*|Stage.*|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedForkFlowOwnedReadinessBothStoresInitial)|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
