@@ -104,6 +104,14 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 						LoadRunForkSourceRunID(context.Context, string) (string, error)
 						LoadPreparedPublishEvent(context.Context, string) (bus.PreparedPublishEvent, bool, error)
 					})
+					retainedSource, found, err := owner.LoadPreparedPublishEvent(ctx, event.ID())
+					if err != nil || !found {
+						t.Fatalf("source admission before fork: found=%v err=%v", found, err)
+					}
+					originalPayloadAdmission, bound := retainedSource.Event.Event().PayloadAdmission()
+					if !bound {
+						t.Fatal("source event lacks persisted payload binding before fork")
+					}
 					beforePlan := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					plan, err := owner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: event.ID()})
 					if isExternal {
@@ -185,7 +193,7 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					}
 					sourcePayloadAdmission, sourceBound := originalEvent.Event.Event().PayloadAdmission()
 					childPayloadAdmission, childBound := readback.PayloadAdmission()
-					if !sourceBound || !childBound || !childPayloadAdmission.Binding().Equal(sourcePayloadAdmission.Binding()) {
+					if !sourceBound || !childBound || !sourcePayloadAdmission.Binding().Equal(originalPayloadAdmission.Binding()) || !childPayloadAdmission.Binding().Equal(originalPayloadAdmission.Binding()) {
 						t.Fatal("historical replay changed the original payload schema binding")
 					}
 					var got map[string]json.RawMessage
