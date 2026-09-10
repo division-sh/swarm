@@ -28,6 +28,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -350,7 +351,7 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	dir := t.TempDir()
 	sqlitePath := filepath.Join(dir, "runtime.db")
 	config := map[string]any{
-		"runtime": map[string]any{"execution_posture": "live", "recovery_on_startup": false},
+		"runtime": map[string]any{"recovery_on_startup": false},
 		"store":   map[string]any{"backend": backend, "sqlite": map[string]any{"path": sqlitePath}},
 		"llm":     map[string]any{"backend": "anthropic", "session": map[string]any{"lock_ttl": "10s", "rotate_after_turns": 40, "rotate_on_parse_failures": 3}},
 	}
@@ -425,7 +426,7 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	}
 	deps := selected.RuntimeDeps()
 	deps.Config = cfg
-	deps.Options = swarmruntime.RuntimeOptions{WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials}
+	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials}
 	rt, err := swarmruntime.NewRuntime(ctx, deps)
 	if err != nil {
 		t.Fatal(err)
