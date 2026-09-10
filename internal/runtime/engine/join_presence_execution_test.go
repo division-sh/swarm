@@ -43,7 +43,7 @@ func TestExecutorJoinOutcomePresenceCompleteAndTimeout(t *testing.T) {
 					RootTypes: types, RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"expected": {Type: "list<text>"}, "captured": {Type: "boolean"}}}},
 					Semantics: rc.WorkflowSemanticView{Joins: []rc.WorkflowJoinPlan{{Mode: rc.WorkflowJoinModeArrival, Node: node, HandlerEvent: "item.completed", Spec: spec, ResultType: rc.CatalogTypeReference{Type: "Result", Catalog: types}}}},
 				}
-				executor, err := NewExecutor(RuntimeDependencies{Source: semanticview.Wrap(bundle), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{}}, nil)
+				executor, err := NewExecutor(RuntimeDependencies{Source: sourceWithFixtureStages(semanticview.Wrap(bundle), ".", "awaiting", "awaiting", "ready"), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{}}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

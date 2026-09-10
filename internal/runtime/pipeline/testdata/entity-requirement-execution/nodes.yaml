@@ -1,5 +1,4 @@
 node-a:
-  id: node-a
   execution_type: system_node
   event_handlers:
     work.ready:
