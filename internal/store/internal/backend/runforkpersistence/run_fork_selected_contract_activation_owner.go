@@ -218,7 +218,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
 		},
 		deliveries:  postgresDeliveryAdapter,
-		ensureState: ensureRunForkSelectedContractExecutionForkState,
+		ensureState: s.ensureRunForkSelectedContractExecutionForkState,
 		transition: func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, handoff *runLifecycleCandidateHandoffReservation, req runtimerunlifecycle.ActiveTransitionRequest) error {
 			_, err := s.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, tx, story, handoff, req)
 			return err
@@ -257,7 +257,7 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 			return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
 		},
 		deliveries:  sqliteDeliveryAdapter,
-		ensureState: ensureSQLiteRunForkSelectedContractExecutionForkState,
+		ensureState: s.ensureSQLiteRunForkSelectedContractExecutionForkState,
 		transition: func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, handoff *runLifecycleCandidateHandoffReservation, req runtimerunlifecycle.ActiveTransitionRequest) error {
 			_, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, tx, story, handoff, req)
 			return err

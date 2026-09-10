@@ -57,11 +57,13 @@ func TestLifecycleDiagnosticAcknowledgmentAndConsumerOwnership(t *testing.T) {
 		}
 	}
 	want := map[string]int{
-		"internal/runtime/manager/runtime.go:HydrateForStartup":                       1,
-		"internal/runtime/manager/runtime.go:launchExecutionLoop":                     2,
-		"internal/runtime/manager/agent_manager.go:registerExecutableAgentLifecycle":  1,
-		"internal/runtime/manager/agent_manager.go:teardownIdentityWithTopology":      1,
-		"internal/runtime/manager/terminal_retirement.go:completeTerminalRetirements": 1,
+		"internal/runtime/manager/runtime.go:HydrateForStartup":                      1,
+		"internal/runtime/manager/runtime.go:launchExecutionLoop":                    2,
+		"internal/runtime/manager/agent_manager.go:registerExecutableAgentLifecycle": 1,
+		"internal/runtime/manager/agent_manager.go:teardownIdentityWithTopology":     1,
+		// TestLifecycleDiagnosticFailureDoesNotChangeCompletedRetirement proves
+		// projection follows retirement settlement without poisoning its result.
+		"internal/runtime/manager/terminal_retirement.go:launchTerminalFlowCompletion": 1,
 	}
 	if !reflect.DeepEqual(consumers, want) {
 		t.Fatalf("diagnostic consumer census changed; update execution proof, not only this list:\ngot=%v\nwant=%v", consumers, want)

@@ -651,7 +651,10 @@ func (s *EventSQLiteOwner) CommitPublication(ctx context.Context, command runtim
 	}, command)
 }
 
-func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+func commitRuntimeLogEventTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	if tx == nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log transaction is required")
+	}
 	if err := events.ValidateNamedEvent(admitted, events.EventAdmissionDiagnosticDirect, events.EventTypePlatformRuntimeLog); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log operation: %w", err)
 	}
@@ -659,10 +662,14 @@ func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run fu
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
+	return store.appendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
+}
+
+func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	outcome := runtimebus.EventAppendOutcomeUnknown
-	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 		var err error
-		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), effects, admitted, settlement)
+		outcome, err = commitRuntimeLogEventTx(txctx, store, tx, runtimeAuthorActivityMutation(story), effects, admitted)
 		if err != nil {
 			return err
 		}

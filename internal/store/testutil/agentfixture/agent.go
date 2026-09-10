@@ -194,7 +194,8 @@ func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store,
 			return nil, topologyErr
 		}
 		if _, commitErr := grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-			OperationID: uuid.NewString(), OperationKind: kind, RequestHash: uuid.NewString(),
+			DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+			OperationID:      uuid.NewString(), OperationKind: kind, RequestHash: uuid.NewString(),
 			Identity: identity, AgentID: identity.AgentID(), Trigger: kind,
 			ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
 			TargetEpoch: targetEpoch, TargetGeneration: targetGeneration, TargetPhase: state.Phase,
@@ -441,7 +442,8 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 	}
 	now := time.Now().UTC()
 	transition := runtimemanager.AgentLifecycleTransition{
-		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(), Identity: identity, AgentID: identity.AgentID(),
+		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+		OperationID:      uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(), Identity: identity, AgentID: identity.AgentID(),
 		Trigger: "storetest_fixture", TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
 		ConfigRevision: configRevision, RunMode: runtimemanager.AgentRunModeStopped, Agent: &rec, Topology: topology, Now: now,
 	}
@@ -466,7 +468,8 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 	}
 	if !found && rec.Status != "terminated" {
 		_, err = grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-			OperationID: uuid.NewString(), OperationKind: "start", RequestHash: uuid.NewString(), Identity: identity, AgentID: identity.AgentID(),
+			DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+			OperationID:      uuid.NewString(), OperationKind: "start", RequestHash: uuid.NewString(), Identity: identity, AgentID: identity.AgentID(),
 			Trigger: "storetest_fixture", ExpectedEpoch: result.RuntimeEpoch, ExpectedGeneration: result.Generation, ExpectedPhase: result.Phase,
 			TargetEpoch: result.RuntimeEpoch, TargetGeneration: result.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
 			ConfigRevision: configRevision, RunMode: runtimemanager.AgentRunModeStandard, Topology: topology, Now: now.Add(time.Nanosecond),
@@ -521,6 +524,9 @@ func ensureFixtureRun(ctx context.Context, selected Store, runID string, started
 // membership and static admission.
 func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	t.Helper()
+	if req.DiagnosticOrigin.Owner == "" {
+		req.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+	}
 	if selected == nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle fixture selected store is required")
 	}
@@ -646,6 +652,9 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 // authority must already agree with that complete set.
 func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	t.Helper()
+	if req.DiagnosticOrigin.Owner == "" {
+		req.DiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
+	}
 	if selected == nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle fixture selected store is required")
 	}

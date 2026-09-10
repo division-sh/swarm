@@ -273,6 +273,7 @@ func selectedContractAgentModelOptions(options SelectedContractAgentRuntimeOptio
 		return runtimemanager.AgentManagerOptions{}, llmselection.Profile{}, fmt.Errorf("selected-contract manager llm backend %q conflicts with runtime default %q", configured, backendProfile.ID)
 	}
 	managerOptions.LLMBackend = backendProfile.ID
+	managerOptions.ModelAliases = options.Config.LLM.Models
 	return managerOptions, backendProfile, nil
 }
 
@@ -511,6 +512,10 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	}
 	if len(req.AgentRuntime.Records) == 0 {
 		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
+			LifecycleDiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{
+				Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+				SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID, ForkEventID: req.Admission.ForkEventID,
+			},
 			ExecutionPosture:   req.AgentRuntime.Options.ExecutionPosture,
 			BaseContext:        context.WithoutCancel(ctx),
 			SourceArtifactFact: req.LoadedSource.SourceArtifactFact,
@@ -538,6 +543,10 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		return nil, managedexecution.Admission{}, err
 	}
 	builder.options.BaseContext = context.WithoutCancel(ctx)
+	builder.options.LifecycleDiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{
+		Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+		SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID, ForkEventID: req.Admission.ForkEventID,
+	}
 	builder.options.DeliveryStore = ports.busDurable.DeliveryLifecycle
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, builder.factory, builder.options, ports.manager)
 	if builder.bindManager != nil {

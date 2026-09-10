@@ -52,7 +52,7 @@ func TestSelectedContractSourceProjectionRejectsMissingProducerRoutingAuthority(
 	}
 }
 
-func TestSelectedContractContainerAcceptsMixedEffectiveAgentSelections(t *testing.T) {
+func TestSelectedContractContainerValidatesStoredSelectionsWithoutRepair(t *testing.T) {
 	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	if err != nil {
 		t.Fatalf("resolve profile: %v", err)
@@ -60,10 +60,13 @@ func TestSelectedContractContainerAcceptsMixedEffectiveAgentSelections(t *testin
 	records := []runtimemanager.PersistedAgent{
 		{Config: runtimeactors.AgentConfig{
 			ID: "live-agent", LLMBackend: llmselection.BackendClaudeCLI,
+			ResolvedLLMBackend:  llmselection.BackendClaudeCLI,
+			ResolvedLLMProvider: profile.Provider, ResolvedLLMTransport: profile.Transport,
 			ExecutionMode: runtimeeffects.ExecutionModeLive,
 		}},
 		{Config: runtimeactors.AgentConfig{
-			ID: "mock-agent", LLMBackend: llmselection.BackendMock,
+			ID: "mock-agent", ResolvedLLMBackend: llmselection.BackendMock,
+			ResolvedLLMProvider: llmselection.ProviderMock, ResolvedLLMTransport: llmselection.TransportMock,
 			ExecutionMode: runtimeeffects.ExecutionModeMock,
 			Mock: mockperformance.Performance{
 				Kind: mockperformance.KindPython, Module: "mocks/agent.py",
@@ -77,17 +80,19 @@ func TestSelectedContractContainerAcceptsMixedEffectiveAgentSelections(t *testin
 
 	records[1].Config.ExecutionMode = runtimeeffects.ExecutionModeLive
 	records[1].Config.ResolvedLLMBackend = llmselection.BackendClaudeCLI
-	if err := validateSelectedContractAgentExecutionSelections(profile, records); err != nil {
-		t.Fatalf("stale derived descriptor must be recomputed by the manager: %v", err)
+	if err := validateSelectedContractAgentExecutionSelections(profile, records); err == nil {
+		t.Fatal("conflicting persisted descriptor must be refused, never recomputed")
 	}
+	records[1].Config.ExecutionMode = runtimeeffects.ExecutionModeMock
+	records[1].Config.ResolvedLLMBackend = llmselection.BackendMock
 
 	records[0].Config.LLMBackend = llmselection.BackendAnthropic
-	if err := validateSelectedContractAgentExecutionSelections(profile, records); err == nil || !strings.Contains(err.Error(), "conflicts with configured runtime backend") {
+	if err := validateSelectedContractAgentExecutionSelections(profile, records); err == nil || !strings.Contains(err.Error(), "conflicts") {
 		t.Fatalf("authored backend conflict error = %v", err)
 	}
 }
 
-func TestSelectedContractContainerDefersRawDescriptorMaterializationToManagerOwner(t *testing.T) {
+func TestSelectedContractContainerRejectsIncompleteStoredDescriptor(t *testing.T) {
 	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	if err != nil {
 		t.Fatalf("resolve profile: %v", err)
@@ -98,7 +103,7 @@ func TestSelectedContractContainerDefersRawDescriptorMaterializationToManagerOwn
 			Kind: mockperformance.KindPython, Module: "mocks/agent.py",
 		},
 	}}}
-	if err := validateSelectedContractAgentExecutionSelections(profile, records); err != nil {
-		t.Fatalf("raw selected-contract descriptor: %v", err)
+	if err := validateSelectedContractAgentExecutionSelections(profile, records); err == nil || !strings.Contains(err.Error(), "resolved llm backend is required") {
+		t.Fatalf("incomplete selected-contract descriptor must be refused: %v", err)
 	}
 }

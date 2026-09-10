@@ -124,7 +124,7 @@ func selectedContractTestProcessCapability(
 	ctx context.Context,
 	selected runtimestartupownership.Store,
 	loaded LoadedSelectedContractSource,
-	backend ...string,
+	configs ...*config.Config,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
 	if selected == nil {
@@ -132,16 +132,12 @@ func selectedContractTestProcessCapability(
 	}
 	bundleHash := loaded.SourceArtifactFact.BundleHash()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
-	configuredBackend := ""
-	if len(backend) > 0 {
-		configuredBackend = backend[0]
+	modelOptions := runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live, SemanticSource: loaded.Source, ReceiverExecution: eventreceiver.NormalExecution()}
+	if len(configs) > 0 {
+		modelOptions.LLMBackend = configs[0].LLM.Backend
+		modelOptions.ModelAliases = configs[0].LLM.Models
 	}
-	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:  executionposture.Live,
-		SemanticSource:    loaded.Source,
-		LLMBackend:        configuredBackend,
-		ReceiverExecution: eventreceiver.NormalExecution(),
-	})
+	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, modelOptions)
 	desired, err := manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
 	if err != nil {
 		t.Fatalf("compile selected-contract declaration topology: %v", err)
@@ -324,7 +320,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		t.Fatal("selected-contract mock runtime returned no agent factory")
 	}
 	actor := runtimeactors.AgentConfig{
-		ID: "mock-agent", LLMBackend: llmselection.BackendMock,
+		ID: "mock-agent", ResolvedLLMBackend: llmselection.BackendMock,
 		ResolvedLLMProvider: llmselection.ProviderMock, ResolvedLLMTransport: llmselection.TransportMock,
 		ExecutionMode: runtimeeffects.ExecutionModeMock,
 		Mock: mockperformance.Performance{
@@ -461,6 +457,34 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: authority.SelectedFork.ForkRunID, Source: sourceFact,
 		Artifact: bundle.SourceArtifact,
 	})
+	sourceRunID, forkEventID := uuid.NewString(), uuid.NewString()
+	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, Source: sourceFact, Artifact: bundle.SourceArtifact,
+	})
+	storetest.CommitSemanticEvent(t, ctx, selected, eventtest.PersistedProjection(forkEventID, events.EventType("item.received"), "test", "", []byte(`{}`), 0, sourceRunID, "", events.EventEnvelope{}, time.Now().UTC()))
+	if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at) VALUES ($1,$2,$3,$4,'selected_contracts',$5)`, uuid.NewString(), authority.SelectedFork.ForkRunID, sourceRunID, forkEventID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	forkAdmission := runfork.RunForkSelectedContractExecutionAdmission{
+		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
+		NonMutating: true, ForkRunID: authority.SelectedFork.ForkRunID, SourceRunID: sourceRunID, ForkEventID: forkEventID,
+		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
+		AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1", DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
+	}
+	issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
+		Admission: forkAdmission, ContainerPlanFingerprint: "container", ActorCensusFingerprint: "actors", EffectiveConfigFingerprint: "config", ExecutionMode: runtimeeffects.ExecutionModeLive, Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err = selected.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "self-release-scope-test", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = selectedForkExecutionTestContext(t, initiatingCtx, authority)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
+	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
 	admission, ok := managedexecution.FromContext(ctx)
 	if !ok {
 		t.Fatal("selected-contract test admission is missing")
@@ -495,7 +519,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	})
 	config.Identity = agentidentity.Identity{}
 	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(
-		runtimemanager.AgentManagerOptions{},
+		runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live},
 		runtimemanager.AgentMaterializationBlueprint{Config: config, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
 	)
 	if err != nil {
@@ -532,6 +556,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	}
 
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
+		Admission:    forkAdmission,
 		Owner:        selectedContractExecutionOwnerForTest(t, selected),
 		LoadedSource: LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact},
 		AgentRuntime: selectedContractAgentRuntimePlan{
