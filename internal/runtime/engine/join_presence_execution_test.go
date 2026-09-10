@@ -39,6 +39,11 @@ func TestExecutorJoinOutcomePresenceCompleteAndTimeout(t *testing.T) {
 					OnComplete: outcome, OnCompleteFound: true, Timeout: rc.JoinTimeoutSpec{After: "1h", Outcome: outcome}, TimeoutFound: true}
 				types := rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Result": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}
 				node := identitytest.RootNode(t, "collector")
+				admitted, err := completeSemanticFixtureHandlerRuleIdentity(node, "item.completed", rc.SystemNodeEventHandler{Join: &spec})
+				if err != nil {
+					t.Fatal(err)
+				}
+				spec = *admitted.Join
 				bundle := &rc.WorkflowContractBundle{
 					RootTypes: types, RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"expected": {Type: "list<text>"}, "captured": {Type: "boolean"}}}},
 					Semantics: rc.WorkflowSemanticView{Joins: []rc.WorkflowJoinPlan{{Mode: rc.WorkflowJoinModeArrival, Node: node, HandlerEvent: "item.completed", Spec: spec, ResultType: rc.CatalogTypeReference{Type: "Result", Catalog: types}}}},
