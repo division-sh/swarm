@@ -28,6 +28,72 @@ func captureSelectedResetSupervisor(t *testing.T) <-chan *processLifecycleSuperv
 	return captured
 }
 
+func TestSelectedResetConstructionRequiresExactAuthorityBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			captured := captureSelectedResetSupervisor(t)
+			rt := startServedControlProofRuntime(t, backend)
+			supervisor := <-captured
+			predecessor := supervisor.selected
+			original := supervisor.resetBuildExecution
+			foreignProcess := worklifetime.NewProcess()
+			defer func() {
+				foreignProcess.Retire()
+				if _, err := foreignProcess.Join(context.Background()); err != nil {
+					t.Error(err)
+				}
+			}()
+			checked := 0
+			supervisor.operationMu.Lock()
+			supervisor.resetBuildExecution = func(candidate serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error) {
+				// The real reset is at containers_settled with its predecessor
+				// joined, so each refusal isolates the crossed authority axis.
+				for _, variant := range []string{"canceled", "missing_operation", "unknown_operation", "missing_process", "foreign_process", "missing_capability"} {
+					ctx, cancel := context.WithCancel(context.Background())
+					opID, process, capability := supervisor.resetOperationID, supervisor.selectedProcess, supervisor.processCapability
+					switch variant {
+					case "canceled":
+						cancel()
+					case "missing_operation":
+						opID = ""
+					case "unknown_operation":
+						opID = uuid.NewString()
+					case "missing_process":
+						process = nil
+					case "foreign_process":
+						process = foreignProcess
+					case "missing_capability":
+						capability = nil
+					}
+					_, err := predecessor.ConstructResetSuccessor(ctx, opID, process, capability)
+					cancel()
+					if err == nil {
+						return nil, errors.New("selected successor accepted " + variant)
+					}
+					checked++
+				}
+				return original(candidate)
+			}
+			supervisor.operationMu.Unlock()
+			response := requestServedJSONRPC(t, rt.Endpoint, "runtime.nuke", map[string]any{
+				"include_source_artifacts": false, "idempotency_key": uuid.NewString(),
+			})
+			if response.Error != nil {
+				t.Fatalf("exact reset construction: %+v", response.Error)
+			}
+			supervisor.operationMu.Lock()
+			defer supervisor.operationMu.Unlock()
+			supervisor.resetBuildExecution = original
+			if checked != 6 || supervisor.selected == predecessor || !supervisor.resetConverged {
+				t.Fatal("exact construction matrix did not complete with a fresh successor")
+			}
+			if _, err := predecessor.ConstructResetSuccessor(context.Background(), supervisor.resetOperationID, supervisor.selectedProcess, supervisor.processCapability); err == nil {
+				t.Fatal("completed operation minted another selected successor")
+			}
+		})
+	}
+}
+
 func TestSelectedResetFinalReceiptLossPreservesSuccessorBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {

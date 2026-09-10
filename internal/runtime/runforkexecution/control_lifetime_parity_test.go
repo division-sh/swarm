@@ -23,7 +23,7 @@ import (
 
 func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, phase := range []string{"executing", "retained", "reconstructed"} {
+		for _, phase := range []string{"executing", "executing_retirement", "retained", "reconstructed"} {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				var selected any
 				var db *sql.DB
@@ -57,7 +57,7 @@ func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
 				var forkRun string
-				if phase != "executing" {
+				if phase != "executing" && phase != "executing_retirement" {
 					result, err := ExecuteSelectedContractRunFork(ctx, request)
 					if err != nil {
 						t.Fatal(err)
@@ -158,12 +158,32 @@ func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 						t.Fatalf("stop skipped accepted execution join: %v", err)
 					default:
 					}
+					var retired chan error
+					if phase == "executing_retirement" {
+						if err := owner.FenceSelectedContexts(); err != nil {
+							close(release)
+							t.Fatal(err)
+						}
+						retired = make(chan error, 1)
+						go func() { retired <- owner.RetireSelectedContexts(context.Background()) }()
+						select {
+						case err := <-retired:
+							close(release)
+							t.Fatalf("retirement skipped accepted execution/control disposition: %v", err)
+						default:
+						}
+					}
 					close(release)
 					if err := <-finished; err == nil {
 						t.Fatal("stopped execution reported success")
 					}
 					if err := <-stopped; err != nil {
 						t.Fatal(err)
+					}
+					if retired != nil {
+						if err := <-retired; err != nil {
+							t.Fatalf("retirement could not join settled execution/control: %v", err)
+						}
 					}
 				}
 				var status, control, execution string
@@ -174,7 +194,11 @@ func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1`, forkRun).Scan(&retainedEvents); err != nil || retainedEvents == 0 {
 					t.Fatalf("stop discarded committed fork history: count=%d err=%v", retainedEvents, err)
 				}
-				if _, selected, err := owner.StopSelectedFork(ctx, runcontrol.TransitionRequest{RunID: forkRun}); !selected || !errors.Is(err, runcontrol.ErrAlreadyTerminal) {
+				if phase == "executing_retirement" {
+					if _, selected, err := owner.StopSelectedFork(ctx, runcontrol.TransitionRequest{RunID: forkRun}); selected || !errors.Is(err, worklifetime.ErrRetired) {
+						t.Fatalf("retired owner admitted another stop: selected=%v err=%v", selected, err)
+					}
+				} else if _, selected, err := owner.StopSelectedFork(ctx, runcontrol.TransitionRequest{RunID: forkRun}); !selected || !errors.Is(err, runcontrol.ErrAlreadyTerminal) {
 					t.Fatalf("terminal repeat = %v %v", selected, err)
 				}
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {

@@ -189,13 +189,12 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			if forkRequest.SourceRunID != result.Materialization.ForkRunID || forkRequest.SourceEventID != result.ForkEvents[0].ForkEventID || !forkRequest.Generation.Valid() || forkRequest.Generation.RevisionID == sourceGeneration.RevisionID {
 				t.Fatalf("fork request identity = %#v, source generation = %#v", forkRequest, sourceGeneration)
 			}
-			forkGeneration := loadSelectedContractActivityGeneration(t, db, result.Materialization.ForkRunID, entityID)
 			forkFact := activityidentity.Fact{
-				RunID: result.Materialization.ForkRunID, SourceEventID: result.ForkEvents[0].ForkEventID,
-				EntityID: entityID,
-				Owner:    activityidentity.MustNodeOwner(activityNode), ExecutionFlowID: "flow_a",
+				RunID: result.Materialization.ForkRunID, SourceEventID: forkRequest.SourceEventID,
+				ParentEventID: forkRequest.ParentEventID, EntityID: entityID,
+				Owner: activityidentity.MustNodeOwner(activityNode), ExecutionFlowID: "flow_a",
 				HandlerEventKey: "review.requested", ActivityID: "connector",
-				Tool: "provider.connector", Attempt: 1, RevisionID: forkGeneration.RevisionID,
+				Tool: "provider.connector", Attempt: 1, RevisionID: forkRequest.Generation.RevisionID,
 			}
 			forkRequestEventID := activityidentity.RequestEventID(forkFact)
 			forkResultEventID := activityidentity.ResultEventID(forkFact, tt.resultEventType)
@@ -215,12 +214,12 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				if forkAttemptCount != 1 {
 					t.Fatalf("fork activity attempts = %d, want 1", forkAttemptCount)
 				}
-				assertSelectedContractForkActivityAttempt(t, db, forkRequestEventID, result.Materialization.ForkRunID, forkResultEventID, forkGeneration, tt)
+				assertSelectedContractForkActivityAttempt(t, db, forkRequestEventID, result.Materialization.ForkRunID, forkResultEventID, forkRequest.Generation, tt)
 			}
 
 			published := loadSelectedContractActivityResult(t, db, result.Materialization.ForkRunID, forkResultEventID, tt.resultEventType)
-			if published["revision_id"] != forkGeneration.RevisionID {
-				t.Fatalf("published revision_id = %#v, want %s", published["revision_id"], forkGeneration.RevisionID)
+			if published["revision_id"] != forkRequest.Generation.RevisionID {
+				t.Fatalf("published revision_id = %#v, want %s", published["revision_id"], forkRequest.Generation.RevisionID)
 			}
 			if tt.failureClass != "" {
 				failure, _ := published["failure"].(map[string]any)

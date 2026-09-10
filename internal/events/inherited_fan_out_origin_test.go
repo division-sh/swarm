@@ -43,7 +43,7 @@ func TestInheritedFanOutOriginIsNotCausalParentOrReplay(t *testing.T) {
 	if err := ValidateGenericPublishEvent(event); err == nil {
 		t.Fatal("generic publication self-authorized inherited origin")
 	}
-	admitted, err := RestoreAdmittedEvent(RestoredEventInput{Class: EventAdmissionInheritedFanOut, Facts: facts, RunID: origin.RunID(), InheritedFanOut: &origin})
+	admitted, err := RestoreAdmittedEvent(RestoredEventInput{Class: EventAdmissionInheritedFanOut, Facts: facts, RunID: origin.RunID(), InheritedFanOut: &origin, Payload: testPayloadAdmission(t, facts.Payload)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestInheritedFanOutOriginRejectsContradictoryIdentity(t *testing.T) {
 			case "non_node":
 				facts.Producer = ProducerClaim{Type: EventProducerAgent, ID: "observer"}
 			case "causal_parent", "wrong_readback_run", "missing_readback_origin":
-				input := RestoredEventInput{Class: EventAdmissionInheritedFanOut, Facts: facts, RunID: origin.RunID(), InheritedFanOut: &origin}
+				input := RestoredEventInput{Class: EventAdmissionInheritedFanOut, Facts: facts, RunID: origin.RunID(), InheritedFanOut: &origin, Payload: testPayloadAdmission(t, facts.Payload)}
 				if variant == "causal_parent" {
 					input.ParentEventID = origin.TriggerEventID()
 				}

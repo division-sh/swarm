@@ -34,7 +34,7 @@ func testWorkflowRecipientSource(t *testing.T) semanticview.Source {
 	root := runtimecontracts.FlowContractView{
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"test-node": {
-			ID: "test-node", ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
+			ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.received": {}},
 		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"item.received": {}},

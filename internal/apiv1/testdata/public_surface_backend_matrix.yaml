@@ -181,6 +181,7 @@ store_parity:
     - {id: agent-manager-roles, kind: go_test, name: TestAgentManagerPersistenceRolesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: external-effect-recovery, kind: go_test, name: TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres, path: internal/store/internal/runtimepersistence/external_effect_recovery_posture_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: external_effects, risk_dimensions: [writer_ownership]}]}
     - {id: served-selected-contract-fork, kind: go_test, name: TestServedParityHarnessRunForkLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: selected_contract_fork, risk_dimensions: [served_lifecycle]}]}
+    - {id: served-selected-reset-construction, kind: go_test, name: TestSelectedForkPublicChangedTargetAfterResetBothStores, path: internal/serveapp/selected_fork_public_execution_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: selected_contract_fork, risk_dimensions: [selected_construction]}]}
     - {id: workflow-settlement-parity, kind: go_test, name: TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores, path: internal/store/internal/runtimepersistence/workflow_engine_delivery_settlement_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
     - {id: served-test-setup, kind: go_test, name: TestServedParityHarnessTestSetupEntitiesLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [served_lifecycle]}]}
     - {id: workflow-opaque-owner, kind: go_test, name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
@@ -363,11 +364,12 @@ store_parity:
       selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork]
-      risk_dimensions: [served_lifecycle]
+      risk_dimensions: [selected_construction, served_lifecycle]
       evidence:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle], proof_ids: [served-selected-contract-fork]}
+        - {role: risk_proof, risk_dimensions: [selected_construction], proof_ids: [served-selected-reset-construction]}
       optional_products: [runFork]
-      nested_roles: {product_run_fork: [planner, availability, activation, executionOwner]}
+      nested_roles: {product_run_fork: [planner, availability, activation, executionOwner, construction]}
       platform_tables: [run_fork_selected_contract_bindings, run_fork_selected_contract_branch_divergences, run_fork_selected_contract_executions, run_fork_selected_contract_route_recoveries, run_fork_selected_contract_runtime_executions]
       public_methods: [run.fork]
     - id: workflow_runtime
