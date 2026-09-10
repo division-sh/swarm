@@ -877,8 +877,10 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testi
 					t.Fatalf("first generation handle = %#v ok=%v, loop=%#v", firstRef, ok, loop.Generation())
 				}
 				if verify != nil {
-					handler := h.bundle.Nodes["join-node"].EventHandlers["item.completed"]
-					handler.Loop = &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "awaiting"}
+					handler := h.source.ExecutableNodeEventHandlers(mustPipelineNode(h.flowID, "join-node"))["item.completed"]
+					if handler.Join == nil || handler.Loop == nil {
+						t.Fatal("retained-member fixture requires the admitted join and loop handler")
+					}
 					arrival := eventtest.RunCreatingRootIngress(
 						uuid.NewString(), events.EventType("item.completed"), "operator", "",
 						mustJSON(map[string]any{"member_id": "a", "result": map[string]any{"value": "retained"}, "revision_id": loop.RevisionID}), 0,
