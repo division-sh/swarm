@@ -1,0 +1,39 @@
+package channelactivation
+
+import (
+    "context"
+    "testing"
+    "time"
+)
+
+// Offline reproducer of the agent -> activation replacement -> MCP discovery
+// wait cycle. The production callers acquire these leases in separate contexts.
+func TestAgentGChannelPresentationNestedAcquireProbe(t *testing.T) {
+    publication := testEmptyPublication(t)
+    owner, err := NewOwner(publication)
+    if err != nil { t.Fatal(err) }
+    held, err := owner.AcquirePresentationContext(context.Background())
+    if err != nil { t.Fatal(err) }
+    replaced := make(chan error, 1)
+    go func() { replaced <- owner.Replace(publication) }()
+    defer func() {
+        held.Release()
+        if err := <-replaced; err != nil { t.Error(err) }
+    }()
+    deadline := time.Now().Add(time.Second)
+    for {
+        owner.mu.Lock()
+        fenced := !owner.accepting
+        owner.mu.Unlock()
+        if fenced { break }
+        if time.Now().After(deadline) { t.Fatal("replacement did not fence") }
+        time.Sleep(time.Millisecond)
+    }
+    ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+    defer cancel()
+    nested, err := owner.AcquirePresentationContext(ctx)
+    if err != nil {
+        t.Fatalf("MCP discovery cannot acquire while its provider holds the predecessor and replacement waits for that provider: %v", err)
+    }
+    nested.Release()
+}

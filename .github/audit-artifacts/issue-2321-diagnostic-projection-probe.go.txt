@@ -1,0 +1,67 @@
+// Reproduction artifact, not a production change or a passing closure test.
+// Place in internal/runtime/manager/issue2321_projection_probe_test.go and run:
+// go test ./internal/runtime/manager -run '^TestIssue2321ConcurrentDiagnosticProjectionProbe$' -count=3 -v
+// The barrier models concurrent list snapshots and the existing store CAS.
+// On f9bd165b4 all three repetitions emit twice and return one projection conflict.
+package manager
+
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+)
+
+type diagnosticProjectionProbeStore struct {
+	listed atomic.Int32
+	marked atomic.Bool
+	both   chan struct{}
+}
+
+func (s *diagnosticProjectionProbeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, _ int) ([]AgentLifecycleDiagnostic, error) {
+	if s.listed.Add(1) == 2 {
+		close(s.both)
+	}
+	select {
+	case <-s.both:
+		return []AgentLifecycleDiagnostic{{OutboxID: "same-pending-row", AgentID: "agent", EventName: "agent_stopped"}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *diagnosticProjectionProbeStore) MarkAgentLifecycleDiagnosticProjected(context.Context, string, time.Time) error {
+	if !s.marked.CompareAndSwap(false, true) {
+		return errors.New("lifecycle diagnostic projection conflict")
+	}
+	return nil
+}
+
+type diagnosticProjectionProbeBus struct {
+	resetTestBus
+	logs atomic.Int32
+}
+
+func (b *diagnosticProjectionProbeBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+	b.logs.Add(1)
+	return nil
+}
+
+func TestIssue2321ConcurrentDiagnosticProjectionProbe(t *testing.T) {
+	store := &diagnosticProjectionProbeStore{both: make(chan struct{})}
+	bus := &diagnosticProjectionProbeBus{}
+	manager := &AgentManager{bus: bus, lifecycle: &agentLifecycleCoordinator{}, roles: PersistenceRoles{LifecycleDiagnostics: store}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { results <- manager.projectLifecycleDiagnostics(ctx) }()
+	}
+	first, second := <-results, <-results
+	if first != nil || second != nil || bus.logs.Load() != 1 {
+		t.Fatalf("concurrent projection: errors=(%v, %v), emitted=%d, want successful single projection", first, second, bus.logs.Load())
+	}
+}

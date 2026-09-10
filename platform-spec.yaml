@@ -1099,6 +1099,12 @@ contract_formats:
             event_id and created_at facts are explicit admission output, not
             database defaults; optional run_id remains empty only when the exact
             subtype is global/no-run by design.
+          lifecycle_projection: >-
+            Lifecycle runtime logs use the existing outbox occurrence UUID and timestamp,
+            immutable enqueue-time execution mode, concrete identity and validated origin.
+            Event append, no_subscriber_by_design settlement and projected_at acknowledgement
+            form one selected-store transaction. A lifecycle observation is never a causal root
+            or authority for delivery, execution, effects or a descendant event.
           closed_catalog:
           - platform.runtime_log
           - platform.inbound_recorded
@@ -5765,6 +5771,19 @@ engine:
           - SQLite driver busy_timeout must stay short; elapsed retry budget, cancellation, and backoff are owned by the selected mutation boundary rather than by long driver-level waits.
           - A standalone pure selected-store read executes in one caller-context, transactionally consistent read-only transaction. It does not consume SQLite process-local mutation admission or busy recovery and it does not initialize or lock mutation-only author activity, candidate handoff, or run-fork revision ownership. Transaction-scoped reads that guard an already-owned mutation remain inside that mutation transaction.
           - SQLite process-local mutation admission and the complete first begin/operation/commit attempt are governed only by the caller context. The internal five-second busy-recovery clock starts after the first actual SQLite busy/locked result; subsequent backoff and re-admission consume that clock, exhaustion retains the last actual busy/locked cause, and caller cancellation or deadline wins in every phase.
+          - SQLite read and write transaction attempts pin one exact connection until termination or supported bad-connection disposal finishes. Callback errors, cancellation and panic unwind the live sql.Tx before connection release; panic propagates unchanged. Failed COMMIT or unproven rollback discards that same connection, never another pooled connection or the whole pool. sql.ErrTxDone alone is not proof of physical rollback. Primary and genuine cleanup errors are retained; already-discarded connection state does not manufacture a cleanup failure.
+          - A SQLite COMMIT error is not proof of rollback. Only an actual SQLite busy/locked noncommit result, with completed cleanup or disposal and no cleanup error, may enter the existing busy retry policy. Uncertain commit and cleanup failure never authorize callback replay. Subsequent unrelated reads and writes must not inherit an abandoned transaction.
+          - SQLite read and write boundaries preserve caller cancellation or deadline identity alongside callback and genuine cleanup errors, including when database/sql automatic rollback wins before Commit and reports sql.ErrTxDone. Cancellation never authorizes a read retry or revives a completed transaction.
+          - PostgreSQL ordinary read/write transactions own rollback or exact connection disposal on every exit, including callback panic. Cleanup precedes pool release and preserves the original panic. Owning cancellation after a successful callback cannot become a fabricated Commit or already-disposed connection failure. Independent callback, commit, rollback and cleanup errors remain observable; cancellation is classified only with evidence from the exact transaction or driver operation, never SQLSTATE or error text alone. No callback replay or whole-pool reset is permitted.
+          - PostgreSQL retained-session transactions own their transaction operation, activeTx and operation serialization through every success, error, cancellation and panic exit. Safe rollback preserves healthy session and advisory possession for the next operation; unsafe cleanup fences and disposes that exact session. Cleanup must join an operation's cancellation worker before releasing operation ownership. Independent primary and cleanup failures are retained, including concurrent cancellation. Retained possession is not released at the end of every transaction.
+          - PostgreSQL cancellation attribution is produced by the pinned native driver operation before returning through database/sql or a caller callback. One exact connection-local operation generation arbitrates native completion against its owning cancellation action; query ownership extends through row drain/close and prepared execution gets a new generation. An error observed before cancellation keeps its original identity. A successfully issued owning cancellation that wins local arbitration may produce an owned-stop result for that operation; independently observed server, transport, cancellation-worker and cleanup failures remain joined. SQLSTATE, text, pool validity and arbitrary callback errors never establish cancellation provenance.
+          - Native cancellation arbitration establishes a local winner, not wire-level proof that a particular CancelRequest caused the server response. PostgreSQL does not acknowledge the identity of a cancellation request; indistinguishable competing cancellation is not claimed to be physically distinguishable. Observed competing evidence and unproven transaction settlement remain failures. Cancellation before COMMIT admission prevents the commit; after admission the actual commit outcome and any uncertainty remain authoritative and never authorize callback replay.
+          - An implicit native PostgreSQL scope belongs only to its operation or active transaction, never the retained physical connection. Failed or canceled BEGIN leaves no implicit authority, and transaction settlement ends that authority without requiring pool reset or disposal. Later independent queries, prepared work, successor transactions and advisory cleanup cannot inherit a predecessor's cancellation. Explicit selected-store bindings remain distinct and retain their native error, worker and physical-disposal evidence until their actual owner releases them after cleanup.
+          - Retained PostgreSQL operations carry their real caller cancellation authority through a detached database/sql transport context into the same native operation owner. Only the native owner issues cancellation; a second callback-wide pg_cancel_backend worker is forbidden. The native worker is joined and the protocol drained before rollback, disposal or the next operation. Cancellation between statements refuses the next statement without canceling an idle or successor operation. Healthy rollback retains the exact session and advisory possession; failed drain or cleanup requires exact-session fencing and disposal. Producer-recorded independent errors survive even where database/sql otherwise prioritizes cancellation or hides automatic cleanup results.
+          - Standalone retained-session possession checks keep their exact native operation record and operation serialization through the preserve-or-dispose decision and physical close. Native invalidity fences reuse but never proves cancellation provenance or advisory possession. Caller cancellation cannot preserve an invalid connection or an observed missing lock. A healthy drained canceled check may preserve the session; independent query and disposal failures remain observable. Terminal lease callbacks run after the operation boundary unlocks, and healthy unbinding occurs only after the complete check settles.
+          - After a successful SQLite transaction callback, the transaction owner checks cancellation before Commit. If automatic rollback wins the remaining Commit race, that exact Commit's sql.ErrTxDone with the owning context canceled is a cancellation result, not an independent execution failure. Callback errors and actual driver commit or cleanup errors remain intact, including when joined with cancellation; no consumer may blanket-suppress sql.ErrTxDone.
+          - All standalone SQLite read snapshots, including agent lifecycle facts, agent summaries/diagnosis, pending-delivery facts/details and standing-service statuses, consume the private read runner. Raw SQLite BeginTx escape ports are forbidden. PostgreSQL repeatable-read policy remains engine-specific and unchanged.
+          - SQLite schema bootstrap remains the distinct pinned BEGIN IMMEDIATE owner. Every unsuccessful exit rolls back or disposes that exact connection, retains rollback/disposal errors, and cannot admit an uncertain schema. Successful bootstrap enables WAL on its owned connection before release. This rule adds no schema migration or compatibility behavior.
           - Typed post-commit evidence is consumed only after the selected mutation boundary releases its process-local write serialization lock; executable callback slices are not transaction authority.
           - ? SQLite generic API idempotency callback execution must stay outside the idempotency row write transaction; failed callbacks must not persist completion. `event.publish` does not wrap an arbitrary callback in that transaction
             : its typed selected-store operation performs the same short keyed lookup/serialization, then commits the already prepared publication facts and deterministic completion in the publication owner's private transaction.
@@ -5919,6 +5938,30 @@ engine:
         owner: internal/runtime/deliverylifecycle.Store
         sqlite_owner: internal/runtime/deliverylifecycle SQLite private adapter behind SQLiteRuntimeStore
         postgres_owner: internal/runtime/deliverylifecycle PostgreSQL private adapter behind PostgresStore
+        process_local_coordinator_lifetime: |
+          The existing deliverycontinuation.Coordinator owns startup, retirement and its exact terminal result.
+          Startup publishes its cancellation authority with the started transition before acquiring a standing lease.
+          A lease acquired after retirement is canceled and released; initial enumeration and synchronization cannot
+          acknowledge readiness after observing retirement or cancellation. One completion path settles the lease
+          before publishing completion, for both startup abort and a running worker's exit. Retirement fences all new
+          handoffs and carriers, while already accepted exact carriers retain their existing drain/return semantics.
+          A canceled retirement caller bounds only its wait, not the fence or the worker's cancellation. Repeated
+          retirement joins the same completion and returns its preserved terminal failure. Only the coordinator's
+          typed retirement refusal and its actual owning cancellation are ordinary termination. Independent store,
+          dispatch, invariant and lease-cleanup errors remain fatal even when joined with cancellation. Startup
+          returns synchronous failures; a running worker records and reports its terminal failure exactly once.
+          No callback, string matching, retry or second lifecycle owner may reinterpret that result.
+          Runtime shutdown fences and joins autonomous continuation dispatch before manager teardown invalidates
+          the committed-readiness dependency used by dispatch. Already accepted route carriers keep their existing
+          drain authority. The shared shutdown grace remains a reporting/escalation budget: expiration does not
+          permit manager destruction while dispatch still owns that dependency or detach unjoined work.
+          PreparedStartup releases execution but does not own composed abort. Its caller owns cleanup on every
+          failed release, including cancellation. Standalone Runtime.Start synchronously cleans up its runtime.
+          Serve composition first withdraws and fences the complete registered context set through the existing
+          RuntimeContextManager, retires its standing children, then joins their runtime parents. It also closes
+          every prepared but unregistered runtime, including reset reconstruction failures. A lower prepared-release
+          path must not join an outer-owned child or invoke outer cleanup while holding a startup lock. Cleanup
+          preserves the original startup failure and independent retirement failures; no detached cleanup is allowed.
         scope: |
           One exact obligation exists per admitted event and complete opaque DeliveryRoute identity. The owner alone constructs obligations, selects eligible work, mints persisted lease-fenced claims, binds execution, schedules retries, records exact outcomes, terminalizes parent-owned work, and decodes snapshots and run summaries. Agent and node consumers cannot reconstruct lifecycle behavior from status strings, retry counters, receipts, timestamps, or raw SQL. Every obligation carries one closed execution authority. Normal authority consists of the exact bundle source, runtime instance, and runtime generation with no selected-execution fields. Selected-contract authority consists of the exact selected execution, fork run, generation, and bundle source and is structurally coupled to the selected execution row. Bundle identity or subscriber identity alone is never execution authority. Every named event/delivery commit returns exact durable handoff proofs. The retained publication owns those exact continuations until it transfers them to one route carrier or the one normal-runtime-generation delivery coordinator. A route carrier must either consume its exact continuation into a fenced attempt or return it to the coordinator before completing. Read-only handoff proof is not transfer authority, and no nonterminal transition may have zero or two process-local continuation owners. Successful canonical platform/pipeline settlement atomically stamps the exact delivery rows' continuation_handoff_at fact using database time in the same transaction as the receipt. Coordinator enumeration consumes only that delivery-owned fact and never interprets receipt SQL. Pipeline settlement returns one closed outcome that reports whether the receipt and delivery handoff committed independently of any later claim, session, or candidate cleanup error. Consumers signal whenever that outcome says the handoff committed and never infer rollback or commit from the auxiliary error alone. A freshly committed row without that handoff remains publication-owned and cannot be discovered or executed by the coordinator; startup recovers the event-level obligation before enumerating delivery continuations. Recovery-enabled startup first admits the exact managed-execution and delivery authorities without executing replay or starting the coordinator. After manager execution loops and completed dynamic agent/flow routes become live, it drives the event-level pipeline scope to explicit exhaustion, then starts the normal coordinator and performs its bounded authority-scoped selected-store scan to explicit exhaustion. Startup synchronizes one further event-driven scan through that same coordinator before runtime readiness; the synchronization returns the exact scan or dispatch failure and cannot manufacture eligibility or wait for a future durable due time. Recovery-disabled startup inventories the exact bundle-source delivery scope and rejects pending, failed, busy, or reclaimable agent or node work before execution-authority activation. It never silently adopts that work. The coordinator receives only an opaque relative wake duration computed from the same selected-store time observation that classified a retry or lease; persisted eligibility and lease timestamps never cross into process scheduling. Canonical post-commit pipeline handoff, committed delivery transfer, carrier return, topology/authentication change, and parent terminalization signal the coordinator only after their owning transition commits. Parent terminalization always queues that signal as a synchronous transaction-owned post-commit finalizer inside the same selected-store mutation, even when no execution authority is registered at queue time; an outer post-commit cleanup error cannot erase it, while rollback cannot emit it. The finalizer runs before the mutation call returns and never escapes as independent process-local work. Each concurrently live normal execution authority owns one opaque runtime-generation signal registration installed only after that generation's coordinator and process-local occurrence are admitted. Duplicate registration for the same exact authority fails closed; distinct bundle/runtime authorities may coexist on one selected store. Release is authority-exact. A committed callback signals the typed authorities registered at callback execution, closing the scan-versus-commit race across generation replacement; released predecessors receive nothing, and every current coordinator rechecks only its own selected-store scope. Reconciliation before any registration commits durable terminal state without a process-local callback; each admitted coordinator's authoritative startup scan discovers its own state. A wake is not eligibility authority: every execution decision is rechecked by the selected store. The cursor is opaque and monotonic; an empty or under-filled page is not exhaustion. Claim and scan results are closed over acquired, deferred, busy, reclaimable, terminal, wrong-authority, absent, invariant-invalid, and explicit exhaustion. Exact continuation dispatch is separately closed over transferred, terminally settled, deferred under one named live agent-route/internal-subscription/carrier-return wake authority, and fatal. A materializing node route executes through its exact compiled receiver and cannot defer behind topology that only its own execution creates. Child publications emitted while an exact node continuation executes are committed by that node mutation's selected-store owner and dispatched only by consuming its exact staged post-commit evidence before the continuation reports transfer or terminal settlement. A successful workflow-node mutation commits its state/lifecycle facts, proposed effects, child publications, and the exact inbound node-delivery success in one selected-store transaction; it also requests run-completion evaluation in that transaction. No runtime caller may settle that successful claim in a later transaction. Any publication or settlement conflict rolls back every mutation fact. The claim heartbeat excludes renewal while the transaction commits, records the exact committed claim without canceling handler context, and stops and joins only after declared post-commit dispatch returns. Missing or mismatched settlement evidence fails closed; mutation-free handled outcomes retain their named delivery-only settlement. Missing publication evidence fails closed; continuation dispatch never re-appends or reconstructs the child publication. A workflow engine revision compare-and-set loss is a typed retryable lifecycle conflict: its complete node mutation rolls back and the exact inbound delivery returns to the durable lifecycle owner for a fresh state read. It is never normalized into a terminal handler failure or repaired by process-local route serialization. When an accepted agent delivery emits the event that terminalizes its own flow instance, lifecycle ownership fences that exact route before returning from terminalization but retains the current durable generation until the accepted route carrier settles. The agent loop then commits the terminal lifecycle transition and removes the route from its finalizer. Terminal authority cannot overtake tool-follow-up effects that belong to the already accepted delivery, and no later carrier can enter behind the fence. Once the exact child's nonempty durable delivery handoff is accepted by the generation coordinator, an unavailable immediate carrier is transferred work rather than a fatal parent failure; no-handoff or pre-transfer failure remains fatal. Generic errors, free-form blockage classification, and fixed dispatch or scan retry intervals are not continuation authority. Corrupt or missing durable facts and fatal dispatch results fail closed. Activating a successor normal authority atomically shortens any exact predecessor open-attempt lease in the same bundle source using selected-store time; the ordinary fenced claim path then reports it reclaimable, and the stale predecessor capability remains unable to settle. Manager, workflow pipeline, public API, CLI, and dashboard code do not poll, enumerate, or manually claim a delivery backlog. Event-targeted event and agent replay remain named producers and transfer their newly committed exact obligations through the same owner. Claims use database time, a random token, monotonic version, and persisted expiry. Every completion requires the current capability; reclaim occurs only after expiry and stale writers cannot mutate the obligation or any coupled outcome/activity/diagnostic fact. An executing agent or node handler renews its exact claim through the owner before, during, and after execution. Renewal atomically extends the obligation and its one open attempt using database time; renewal failure cancels handler execution and forbids settlement through that stale capability. Backlog work is claimed one item at a time immediately before execution so queued local work cannot consume its lease before starting. Agent max_retries=1 means two total attempts; node max_retries=3 means four total attempts. Existing selected stores are unsupported and no migration, fallback, or compatibility interpretation exists. Selected-contract execution installs no normal or process-global continuation coordinator. Retryable selected agent and node failures terminalize under the exact selected execution owner, and activation requires every fork-local agent and node obligation to be terminal. Pending, in-progress, or retry-scheduled selected work blocks activation and is cleaned up by the selected execution failure path. Feature-preserving long-lived selected deferred work requires its own future typed owner and cannot be inferred as a normal-runtime handoff. Parent terminalization is one closed named store operation: it records a typed lifecycle-conflict failure, advances the delivery fence, closes any prior open attempt, commits the exact terminalization attempt/outcome at the new fence, and inserts the matching dead_letters row before the transaction may commit. Every terminal dead-letter delivery therefore has exact `{delivery_id, claim_version}` evidence; terminalization cannot leave lifecycle state visible without that evidence.
       - name: platform_pipeline_receipt_rows
@@ -6005,17 +6048,17 @@ engine:
     - "Production multi-writer SQLite concurrency semantics are not promoted by #1087."
     - "Additional raw-SQL runtime feature parity for SQLite requires a separately gated backend-neutral owner before use."
   process_execution_posture:
-    promoted_by: '#2214'
-    implementation_status: mandatory_binary_process_ceiling
+    promoted_by: '#2214, #2321'
+    implementation_status: command_owned_process_ceiling
     owner: internal/runtime/executionposture.Posture
-    config:
-      key: runtime.execution_posture
+    command_composition:
       values: [live, mock_only]
-      required: true
       rule: >
-        Every runtime process declares exactly one execution posture. Omission and unknown values fail config verification.
-        Environment variables, CLI flags, LLM backend/profile, agent census, responder presence, provider/event names,
-        persisted rows, and credentials never default, override, or infer posture. There is no compatibility alias.
+        Serve and serve --dev select live; test selects mock_only through command composition.
+        Runtime construction requires that typed purpose. runtime.execution_posture is retired in every config layer,
+        including masked declarations, and fails with originating file/key and command-oriented remediation.
+        Environment variables, backend profiles, agent census, source doubles, responder presence, persisted descriptors
+        and credentials never select command purpose. There is no compatibility selector.
     relationship_to_execution_mode: >
       Posture is the immutable current-process ceiling; it is not persisted causal execution_mode and does not rewrite it.
       live admits both live and exact mock chains under the ordinary monotonic actor rules. mock_only admits only mock work.
@@ -6066,7 +6109,7 @@ engine:
       a live intent is rejected even when restored durable state or a lower-level adapter would otherwise admit it.
     source_readiness: >
       internal/runtime/bootverify.ResolveSourceBootEffectReachability is the sole source-level provider-connector credential
-      readiness projection consumed by verify, doctor, serve validation, and final runtime
+      readiness projection consumed by doctor, serve validation, and final runtime
       boot. live retains conservative declarative activity reachability. mock_only requires every effective agent to resolve
       exact mock and every provider-connector activity site to have an exact compiled mock response; only those unreachable
       outbound transport credentials are waived. Signing, listener, MCP, native, exec, workspace, and other independent
@@ -6079,8 +6122,8 @@ engine:
       and drains exact loaded contexts before their source projections are released; observations never expose a stale or
       lexical-hash fallback identity. A process epoch does not replace or reload a loaded source.
     no_legacy_rule: >
-      Old configs without runtime.execution_posture and old selected stores containing live work selected under mock_only are
-      unsupported. No default, migration, fallback reader, store-wide posture marker, live-to-mock rewrite, warning-only
+      Configs containing runtime.execution_posture and old selected stores containing live work selected under mock_only are
+      unsupported. No migration, fallback reader, store-wide posture marker, live-to-mock rewrite, warning-only
       admission, dummy credential, or dual semantic owner exists.
     proof: >
       Source-boundary ratchets forbid posture-owned live literals and profile-derived process mode. Supported proof covers
@@ -6144,6 +6187,10 @@ engine:
           - Provider responses must normalize assistant messages and tool calls into the platform response model.
           - Raw provider responses must be preserved for turn/audit persistence.
           - Provider-specific stream parsers are implementation details behind the adapter contract, not generic platform truth.
+          - Claude CLI failure diagnostics select a bounded explanation from typed result errors in JSON or JSONL before
+            truncation, redact injected provider and MCP credentials before bounding, and never substitute arbitrary
+            structured output, successful message text, prompts, or usage fields for an error explanation. Malformed,
+            unknown and plain-text errors remain bounded. Error prose does not authorize retries.
         native_tools:
           rules:
           - The adapter must declare whether it is strict provider-native for native_tools and which native capabilities are callable.
@@ -6158,6 +6205,11 @@ engine:
             turn when provider-native support or the required fallback owner proof is missing. Retired dynamic mutation
             surfaces never reach this admission point.
           - Persisted turn visible-tool facts must reflect callable truth for the adapter's turn.
+          - CLI native validation consumes only exact provider-native inventory from authoritative provider initialization.
+            Observed valid-empty inventory is distinct from missing or invalid inventory; missing, null, non-array, or
+            malformed entries fail closed even when no native capability is planned. Canonical display names and MCP
+            observations never substitute for native inventory. Managed turns, startup probes, and fork-chat share this
+            checked observation contract while retaining their distinct capability policies.
         persistence:
           rules:
           - Agent turns and stateless execution audits must be persisted consistently across adapters.
@@ -6341,7 +6393,7 @@ engine:
           owner: internal/runtime/llm/selection.ResolveAgentExecutionSelection
           configured_default: llm.backend
           authored_backend_intent: AgentConfig.LLMBackend
-          exact_override: generation-owned AgentConfig.Mock.Configured
+          execution_purpose: command-owned internal/runtime/executionposture.Posture
           derived_descriptor:
             backend: AgentConfig.ResolvedLLMBackend
             provider: AgentConfig.ResolvedLLMProvider
@@ -6349,15 +6401,13 @@ engine:
             mode: AgentConfig.ExecutionMode
             model: AgentConfig.ResolvedModel
           rule: >
-            llm.backend is the configured default. Authored AgentConfig.LLMBackend is immutable selection intent, not a
-            writable effective field: an authored live backend must equal the configured default, authored mock requires an
-            exact Python performance, and any unsupported or conflicting combination fails closed. With no conflicting live
-            pin, a generation-owned exact Python mock selects the mock profile and typed mock execution mode before model
-            resolution, conversation construction, tool/provider admission, completion authorization, or persistence.
-            Selection writes only the derived descriptor fields. It never overwrites authored backend, model, mock,
-            capability, or authority fields. The mock profile requires and retains the exact captured artifact. Missing or
-            conflicting backend, provider, transport, mode, or artifact state is invalid; no downstream reader may infer or
-            override selection.
+            llm.backend is the configured live default. An authored live AgentConfig.LLMBackend must equal that default.
+            Public llm.backend mock, --backend mock and authored llm_backend mock are retired selectors. A valid live pin
+            plus a supplied double is valid source under both commands. Command purpose selects execution exactly once
+            before model resolution, construction, admission, authorization or persistence. Live produces a live descriptor
+            with no executable mock artifact; mock_only requires and captures the exact compiled Python performance.
+            Source declarations retain their authored double, model and capabilities unchanged. Missing or conflicting
+            backend, provider, transport, mode or artifact state fails descriptor validation; readers never reselect.
           model_metadata_rule: >
             Authored model aliases always resolve against the configured live profile and its llm.models metadata, even when
             an exact mock selects mock execution. The mock execution profile is not a second model-metadata namespace and
@@ -6368,11 +6418,10 @@ engine:
               Every agent conversation is constructed with the concrete runtime selected by its resolved descriptor. The
               configured live adapter and mock adapter are typed lazy slots, not a context-switched runtime multiplexer.
               The mock slot has an independent canonical constructor and does not require an injected live adapter's factory
-              or live-session dependencies. Fully mocked sources never construct or consult the unreachable live adapter.
-              Mixed sources bind exact mocked agents to MockRuntime and all other agents to the configured live adapter.
-              The process execution posture is a separate ceiling: mock_only requires every effective agent to resolve exact
-              mock before runtime construction, while live permits the existing per-agent selection matrix. Agent source
-              artifacts, backend profiles, and responder presence never select process posture.
+              or live-session dependencies. Mock-selected descriptors never construct or consult the unreachable live
+              adapter. Source doubles do not select an adapter. Mock command admission requires exact performances for
+              every effective declaration; serve selects live even for a source containing doubles.
+              Stored descriptors are validated and consumed unchanged, without resolving model aliases again.
             turn_mode_admission:
               owner: internal/runtime/agents.LLMAgent.OnEvent
               invariant_ids:
@@ -6409,12 +6458,12 @@ engine:
               - selected-contract ephemeral materialization
               - conversation fork-chat source snapshot
             lifecycle_rule: >
-              Static spawn, persisted recovery/restart, selected-contract reconstruction, and fork-chat reconstruction re-run
-              canonical selection from authored runtime selection plus the current configured default.
-              Persisted derived fields are observations, not cross-boot authority, and stale derived fields are replaced
-              before admission or construction. The persistence projection accepts only an already-resolved backend and never
-              invents a configured default from authored intent or an empty descriptor. Native-tool admission runs only after
-              this resolution and construction uses that same resolved actor/runtime pair.
+              Fresh materialization and explicit authored model/backend/performance patches consume canonical selection
+              at the write entrance. Recovery/restart, stored selected-contract agents and fork-chat snapshots validate
+              and consume the persisted descriptor, including its concrete model, without reselection or conversion.
+              Reconfiguration cannot change causal execution mode. Persistence accepts only an already-resolved descriptor;
+              no reader invents a configured default or silently repairs stale state. Native-tool admission and runtime
+              binding consume that exact descriptor.
             agent_lifecycle_authority_rule: >
               Managed agents are declarative residents of their flow instance. Flow termination and contract-readiness
               reconciliation own agent teardown. Agents cannot independently terminate other declared agents. Operator
@@ -6429,16 +6478,16 @@ engine:
               mutation and never rewrite it.
             native_capability_rule: >
               Exact mock selection waives provider-native capability admission because no provider-native process can run;
-              authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
-              bash, and exec-tool reasons remain authoritative in workspace selection and are never erased by the waiver.
-          fully_mocked_provider_startup_waiver:
-            promoted_by: '#2172, #2214'
-            owner: effective source agent registry entry Mock.Configured fact consumed through ResolveAgentExecutionSelection
+              authored native_tools declarations remain legal and unchanged. Live descriptors retain every native,
+              bash, exec-tool and workspace prerequisite regardless of source doubles. Mock execution uses isolated
+              workspace backing and cannot authorize native or external execution.
+          command_selected_provider_startup:
+            promoted_by: '#2172, #2214, #2321'
+            owner: command purpose and the canonical executable agent descriptor
             rule: >
-              A configured exact Python mock selects in-process mock execution for that agent even when runtime config names
-              a live provider profile. When every declared agent is mock-configured, no provider turn is reachable, so the
-              complete provider startup chain is waived. Mixed bundles remain fail-closed for every unmocked agent, and
-              teaching errors must name the sorted unmocked agent ids.
+              Live purpose preserves the complete provider startup chain even when every source agent has a double.
+              Mock purpose requires complete source admission and exact stored mock descriptors and does not acquire
+              live-provider prerequisites. No fully-mocked predicate or source-presence waiver remains authoritative.
             consumers:
               - validateSelectedBackendCredentialForDeclaredAgents
               - validateSelectedBackendCredentialForActiveAgents
@@ -6456,7 +6505,7 @@ engine:
                 - every project-scoped and flow-scoped node declaration lowered through runtime/contracts.ActivitySitesForNode
               rule: >
                 Static and managed outbound tool credentials are required exactly when that tool's transport remains
-                reachable under the mandatory process posture. live retains the conservative #2172 rule: any live-selected
+                reachable under command purpose. live retains the conservative rule: any live-selected
                 agent retains every outbound tool credential, and declarative activity sites remain live-reachable from
                 non-agent ingress regardless of agent census. mock_only requires every effective agent to resolve exact mock
                 and every provider_connector activity site to have an exact compiled response; it then waives only the
@@ -6469,7 +6518,7 @@ engine:
                 requirement remains required. Process posture is explicit authority; persisted event mode, profile, agent
                 count, responder presence, and missing credentials never infer it.
               consumers:
-                - internal/runtime/workflow_validation.go for swarm verify and serve validation
+                - internal/runtime/workflow_validation.go for execution validation
                 - internal/cliapp/local_preflight.go for doctor contract-secret admission
                 - internal/runtime/runtime.go for final runtime boot credential admission
               diagnostics: >
@@ -6479,10 +6528,10 @@ engine:
                 never exposed.
             workspace_classifier_rule: >
               The workspace backend classifier consumes every canonical project-scoped and flow-scoped declaration plus
-              only flat declarations not represented by a scope. It resolves each declaration's Mock.Configured fact. An
-              exact mocked agent contributes no claude_cli process-execution reason, but retains ordinary workspace
-              lifecycle/write requirements and any independently declared exec-class capability. Any unmocked claude_cli
-              agent remains exec-capable and host execution is refused with the scope-qualified unmocked agent named. Boot and
+              only flat declarations not represented by a scope. It consumes canonical command-selected execution.
+              Mock purpose contributes no live Claude/native/exec requirement and retains isolated workspace backing.
+              Live Claude agents remain exec-capable even with doubles, and host execution is refused with the
+              scope-qualified agent named. Boot and
               runtime workspace-class validation consume the same census, not flattened aliases. A package/flow projection of one
               authored declaration is counted once. Native admission binds each scoped declaration through its scope-owned
               URI and canonical owning-flow route/path only when that URI is unique across declarations; missing or collapsed
@@ -6497,7 +6546,7 @@ engine:
               StartupVisibleToolSurfaceProber. Absence is a hard startup error; it cannot be skipped and an empty target set
               is not success. Exact mock and non-Claude selections do not carry this provider-specific obligation.
         authoring:
-          runtime_config: A live provider profile may remain selected globally; each exact agent mock selects in-process mock execution for that agent.
+          runtime_config: Configuration selects a live provider profile; command composition selects live serve or exact mock test execution.
           agent_performance:
             shape: '{mock: {kind: python, module: <declaring-flow-relative mocks/ .py file>, post_tool_tail_latency_ms: <optional non-negative integer>}}'
             kind: python
@@ -6998,6 +7047,7 @@ engine:
         native-tool surface must equal callable truth on the same turn. A provider CLI whose builtin availability can be
         selected MUST receive the exact positively selected provider-native bindings on its first process launch; permission
         admission, provider defaults, and a static catalog complement are not capability-availability authority.
+        Exact valid-empty provider inventory proves zero native tools; missing or malformed inventory does not.
       contract_field:
         field: native_tools
         type: object
@@ -7016,6 +7066,8 @@ engine:
           path to satisfy a native_tools declaration. Platform fallback native tools must consume the same actor authorization
           plus workspace execution-target capability owner. The visible native-tool surface for a turn must equal callable truth
           on that same turn.
+          Canonical display names may combine these channels for presentation but cannot supply provider-native evidence
+          when the exact native channel is empty. Each CLI process must supply its own valid inventory observation.
       capabilities:
         bash:
           description: Shell command execution. On supporting provider-native runtimes, bash runs provider-natively. On the
@@ -7924,6 +7976,28 @@ engine:
       note: Chain depth overflow is NOT a handler failure. It is an emission interception. The dead_letter is for the downstream
         event, not the handler that produced it.
   boot_verification:
+    structural_validation:
+      owner: internal/runtime.ValidateWorkflowContractSurface and internal/runtime/bootverify
+      source_owner: internal/runtime.AdmitEffectiveSourceProjection over internal/packadmission.FromBundle metadata
+      rule: >
+        Bare verify, describe, describe --graph and describe routes validate one admitted effective source,
+        including provider/channel declarations. Structural validation is an explicit validation purpose,
+        not a live or mock execution selection. It acquires no credential owner, probes no MCP/Claude/Docker,
+        constructs no actor and claims no selected store. It keeps declared schema, field, scope, model
+        grammar, tool permission, workspace class, source capability and supplied mock validation.
+        Missing test performances and live machine readiness are separate admission concerns.
+      check_boundary: >
+        Existing bootcheck and post-boot declaration owners remain authoritative. Credential state and
+        concrete MCP availability/discovery are execution observations, absent from structural reports.
+        Mixed tool/model checks retain declaration validation without inventing successful discovery or
+        selecting an execution backend. Runtime boot and doctor retain concrete live readiness checks.
+      output: >
+        Verify and describe report validation_scope: structural and live_readiness: not_evaluated.
+        Structural workspace_backend and verify capability_subjects are retired without aliases.
+        Verify retains pack_inventory and source capability validation. Operational capability subjects
+        remain on their existing live diagnostic surfaces. production_valid continues to mean absence
+        of validation-only harness dependence, never machine or credential readiness. Describe routes
+        preserves routing-topology/v1 and stable quiet IDs over the admitted source/report.
     description: The platform runs contract verification at boot, after loading all contracts and before starting any nodes
       or agents. If any check fails, boot aborts. These checks are the authoritative integration test.
     checks:
@@ -9374,7 +9448,7 @@ tool_model:
         grant_model, client_auth, body, and static non-secret token headers, and supports GitHub App `--installation-id` and
         optional `--api-base-url` metadata.
     boot_validation: >
-      Boot/verify consumes managed_credential requirements and reports managed_credential_state for missing, pending,
+      Execution boot/doctor consumes managed_credential requirements and reports managed_credential_state for missing, pending,
       refresh_failed, scope_insufficient, grant-type/grant-model/token-profile mismatches, installation-input requirements,
       or otherwise unusable records. When boot warnings are fatal, these findings block startup. Connector readback/doctor
       MUST compare declared tool grant_type, scopes, grant_model, token_request profile, and installation_id_input against
@@ -9710,8 +9784,14 @@ tool_model:
         operation while replacement is fenced; this is not new admission, and the child clears the inherited authority
         before any later publication. Persisted replay or recovery without that live
         parent authority still requires current exact-generation acquisition and rejects stale generations or another
-        owner's lease. A model turn pins the publication that supplied its tools. Managed MCP tools/list acquires that same
-        exact activation-publication lease for catalog projection and capability filtering; an unleased actor catalog cannot
+        owner's lease. A model turn pins the publication that supplied its tools. Nested catalog acquisition and MCP
+        tools/list, tools/call, and direct tool requests inherit an owner-issued process-local binding from that turn
+        through the existing turn registry. Descendants validate the exact owner, publication, actor, source, and turn;
+        invalid, released, revoked, or foreign bindings fail closed without acquiring a successor. Admitted descendants
+        retain the predecessor while replacement fences unrelated admission. Parent completion or cancellation and token
+        unregister, expiry, or reset revoke new descendants and join already admitted descendants before predecessor
+        retirement. Authority is never serialized or reconstructed from generations, names, or durable rows. Catalog
+        projection and capability filtering consume this same exact activation-publication lease; an unleased actor catalog cannot
         publish activation tools, and replacement cannot substitute a successor while the request holds the lease. Durable private activities persist both
         activation-publication and plan generation and never substitute a same-name current target. Tool discovery,
         validation, authorization, agent-origin dispatch, private activity dispatch/recovery, registration selection,
@@ -9722,6 +9802,19 @@ tool_model:
         activation facts rather than rereading mutable current identity, so an activation remains reconstructable while a
         rebind advances identity and until the successor process publication is exact-current. Missing or contradictory
         activation-owned destination, coordinate, credential, or revision facts fail closed.
+        Serve prepares the exact runtime-context occurrence and required standing/topology facts before reconstructing
+        connected state and publishing the complete executable activation catalog. Destructive-effect reconciliation and
+        publication must succeed before recovered or new business work, delivery continuations, autonomous producers,
+        or ingress readiness are released. Full Runtime.Start is not preparation. Declared-only plans cannot replace this
+        executable barrier; partial preparation or publication failure unwinds prepared resources and preserves errors.
+        Runtime.PrepareStart performs existing lifecycle preparation, managed preflight, and source-scoped topology
+        canonicalization without Manager.Run or replay. Standing preparation uses the existing activation transaction
+        and exact standing publication writer to establish target facts, including publication sequence, and reconstructs
+        process-only topology. It defers initial-entry finalization, timers, and creation-event publication. After the
+        executable catalog is installed, PreparedStartup.Start is the sole single-use release owner: it admits the
+        generation grant and Manager.Run, completes prepared standing topology through the existing finalizer, and
+        then releases recovery and producer phases. Reset uses this same owner after complete-set consumer convergence;
+        no second prepared-start interpreter or early grant admission is permitted.
       registration_handoff_rule: >
         A pre-binding webhook intent carries only exact registration plan, target, validated credential observation, and generation facts.
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external
@@ -14135,7 +14228,17 @@ platform_tables:
             INDEX idx_agent_lifecycle_transition_facts_agent (agent_id, flow_instance, created_at)
         );
     agent_lifecycle_diagnostic_outbox:
-      description: Durable non-authoritative projection queue for lifecycle diagnostics. Its complete run-scoped agent coordinate is a snapshot, not a live foreign-key selector.
+      description: >-
+        Durable non-authoritative projection queue for lifecycle diagnostics. Its complete
+        run-scoped agent coordinate, actor/event modes and typed enqueue-time provenance are
+        immutable historical snapshots, not live foreign-key selectors or caller-context tags.
+        The outbox UUID identifies the diagnostic occurrence, not the event. Event identity
+        is derived as specified by agent_lifecycle_authority.diagnostic_projection.projection;
+        created_at supplies the event timestamp. Diagnostic mode and replay follow
+        agent_lifecycle_authority.recovery.diagnostic_settlement.
+        Diagnostic event persistence and acknowledgement commit atomically through the existing
+        event owner. Selected-fork discard deletes these projection rows with the discarded events;
+        ordinary execution close retains them. Old selected stores are unsupported.
       ddl: |
         CREATE TABLE agent_lifecycle_diagnostic_outbox (
             outbox_id          UUID PRIMARY KEY,
@@ -14150,6 +14253,8 @@ platform_tables:
             flow_instance      TEXT NOT NULL,
             event_name         TEXT NOT NULL,
             payload            JSONB NOT NULL,
+            execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
+            provenance         JSONB NOT NULL,
             projected_at       TIMESTAMPTZ,
             projection         JSONB,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -16220,6 +16325,14 @@ platform_tables:
       - component and action live in details, not as top-level runtime_log fields
       - failure-bearing entries carry details.failure as a platform.failure/v1 envelope; details.error is forbidden and message is not a semantic classifier
       - readers and debug UIs should filter and render structured runtime diagnostics from details
+      - >-
+        Durable lifecycle projection consumes the same explicit-facts runtime-log encoder and
+        named event transaction port as ordinary runtime logging. It never calls an optional
+        logger before a separate acknowledgement. Its stable ID/time, run, parent and
+        structured detail follow agent_lifecycle_authority.diagnostic_projection and
+        recovery.diagnostic_settlement. Immutable producer provenance is not diagnostic mode
+        authority: the first logger's root posture supplies mode and the committed receipt
+        freezes it for replay, as defined by agent_lifecycle_authority.recovery.diagnostic_settlement.
       - >
         Tool-execution entries that consume external tool-provider dispatch admission include machine-readable
         details fields `rate_limit_scope`, `rate_limit_bucket_hash`, `rate_limit_limit`, `rate_limit_period_ms`,
@@ -16893,6 +17006,9 @@ run_model:
       the existing event ParentEventID/events.source_event_id lineage written by the store/runtime logger. Activation and
       selected-tree validation must continue to consume only persisted fork-run lineage, not in-memory descriptors,
       action/reason strings, produced_by_type alone, readiness JSON, operator OAuth state, or diagnostic payload prose.
+      Exact acknowledged lifecycle observations are validated through agent_lifecycle_authority.diagnostic_projection
+      and may be excluded only from the final stray-event count. They never become selected-tree roots or authorize
+      descendants. Matching runtime_lineage payload tags confer no exemption or execution authority.
       Unrelated fork-run platform rows, source platform facts, source outcomes/deliveries, restart recovery, current-state
       materialization, session/turn/audit reconstruction, non-agent replay, retry/idempotency/follow-up policy beyond
       normal selected-fork output, and operator consumers remain fail-closed, invalid, or split under their own owners.'
@@ -16905,6 +17021,8 @@ run_model:
       pipeline and system-node dead letters, dead-letter-escalation, and runtime-log records. Such events are fork-local lineage/output evidence only when they
       are causally parented to selected-fork execution through the fork event parent/source_event_id chain and persisted
       under the fork run_id. For platform.runtime_log diagnostics, the canonical persisted lineage is events.source_event_id;
+      noncausal lifecycle observations follow agent_lifecycle_authority.diagnostic_projection and are harmless evidence,
+      not an exception to causal execution authority;
       the runtime logger may derive it only from an explicit diagnostic parent_event_id or a verified same-run persisted
       subject EventID. Activity diagnostics emitted while executing a selected-fork platform.activity_requested event MUST
       use the actual persisted fork-local request event as that subject; a recomputed activity request identity that is not
@@ -17202,7 +17320,9 @@ run_model:
         Activation and selected-tree validation must continue to consume persisted lineage only, and unrelated/source
         platform rows, action/reason strings, produced_by_type alone, descriptors, readiness/operator state, restart
         recovery, current-state materialization, sessions/turns/audits, non-agent replay, retry/idempotency, and follow-up
-        policy remain outside this owner.'
+        policy remain outside this owner. Exact acknowledged lifecycle observations follow
+        agent_lifecycle_authority.diagnostic_projection: exempt only the event itself from the final stray count,
+        never its descendants, and never populate the recursive tree from diagnostic tags.'
       3g2_selected_contract_fork_local_runtime_platform_event_lineage_policy: 'For selected-contract mutating fork
         execution, runtime.run_fork.selected_contract_execution.fork_local_runtime_platform_event_lineage_policy owns
         fresh fork-run runtime/platform control or diagnostic events emitted by the selected-fork runtime container while
@@ -17210,7 +17330,8 @@ run_model:
         causally parented to selected-fork execution through the selected fork event parent/source_event_id chain.
         For platform.runtime_log diagnostics, the runtime logger must persist canonical lineage through events.source_event_id
         derived from an explicit diagnostic parent_event_id or from a verified same-run persisted subject EventID; diagnostic
-        action/reason strings and local caller detail shape are not semantic owners. Unrelated fork-run platform events
+        action/reason strings and local caller detail shape are not semantic owners. Noncausal lifecycle observations
+        follow agent_lifecycle_authority.diagnostic_projection and cannot authorize any descendant. Unrelated fork-run platform events
         without selected-fork causal context, source platform facts, source outcomes, source deliveries, live EventBus
         descriptors, operator surfaces, and produced_by_type alone remain invalid selected-fork lineage. This owner does
         not change the source diagnostic platform outcome policy for platform.runtime_log/platform.inbound_recorded,
@@ -18974,15 +19095,15 @@ configuration_source_authority:
         runtime:
           trust: project_safe_unless_key_is_marked_elevated
           keys:
-            execution_posture: project_safe_required_exact_live_or_mock_only
+            execution_posture: retired_rejected_in_every_layer
             max_concurrent_agents: split_unsupported
             event_poll_interval: split_unsupported
-            recovery_on_startup: project_safe
+            recovery_on_startup: project_safe_default_true_explicit_false_preserved
             decision_card_first_reminder: project_safe_duration_default_4h
             decision_card_urgency: project_safe_duration_default_24h
             decision_card_reminder_interval: project_safe_duration_default_24h
             decision_card_input_draft_ttl: project_safe_duration_default_15m
-          owner: process_execution_posture for execution_posture; runtime_storage.runtime_store_backend_selection for existing runtime/store keys
+          owner: process_execution_posture for retired selector refusal; runtime_storage.runtime_store_backend_selection for runtime/store keys
         store:
           trust: elevated
           keys:
@@ -19336,8 +19457,9 @@ workspace_model:
     canonical_owner: platform-spec.yaml#workspace_model.workspace_backend_selection
     scope: >
       Defines the capability-derived effective workspace backend requirement for `swarm serve` boot,
-      selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`, `swarm
-      verify`, `swarm describe`, and the `conversation.fork_chat` sandbox runtime. The loaded contract and effective runtime
+      selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`,
+      and the `conversation.fork_chat` sandbox runtime. Bare verify and describe are structural readers and
+      do not select a workspace backend or observe machine readiness. The loaded contract and effective runtime
       backend decide whether a workspace is needed, whether host is sufficient, or whether container isolation is required.
       Operator backend input is a preference or explicit unsafe opt-out; it is not the semantic source of the requirement.
     cli_flag: --workspace-backend <docker|host>
@@ -19345,10 +19467,14 @@ workspace_model:
     unsafe_config_key: workspace.allow_exec_on_host
     retired_env_var: SWARM_WORKSPACE_BACKEND
     source_order:
-    - loaded contract execution capability
+    - command-selected executable descriptor and typed effect reachability over the admitted source
     - --workspace-backend preference / unsafe host opt-out
     - workspace.backend preference plus workspace.allow_exec_on_host for persistent unsafe host opt-out
     default_backend: capability-derived
+    command_selection: >-
+      Source doubles do not waive live Claude, native bash, exec tools or managed-workspace prerequisites. MockOnly
+      execution uses isolated host backings for mock agents and the existing mock-effect fence instead of executing
+      their live native/exec capabilities. Structural readers select no concrete workspace or machine readiness.
     capability_classes:
       none:
         rule: No declared agents require no workspace lifecycle by default and MUST boot with zero Docker/workspace external dependencies.
@@ -19598,6 +19724,13 @@ workspace_model:
       rule: Every writable Docker volume and Host workspace directory is named by one SHA-256 projection of the canonical length-framed tuple. Bundle identity is never truncated; per-agent identity consumes the exact concrete-agent fingerprint; per-flow-instance identity consumes the exact canonical flow-instance path. Display slugs, normalized paths, container names, and process projection IDs are never durable storage authority. Host and Docker consume the same backing key for the same tuple, and distinct values such as a/b, a-b, and a_b remain distinct.
       kinds: scaffold, system, system-entities, system-nginx, system-systemd, agent, flow
       lifecycle: Process replacement reuses the same backing key for the same tuple. Different bundles, kinds, agents, or flow instances cannot share writable state. No compatibility lookup, old-name migration, or alias exists.
+    claude_provider_state:
+      owner: Workspace lifecycle owns the private backing and disposable execution container; the Claude adapter binds every launch and validates provider conversation artifacts before confirmed-head promotion. Existing selected-store session, completion, delivery and lifecycle owners retain all execution authority.
+      namespace: Full admitted bundle hash, exact concrete actor fingerprint (including run and flow identity), closed state kind and exact lifetime coordinate are length-framed and hashed. Reusable memory uses the platform session incarnation; a stateless delivery uses its exact typed delivery identity so a reclaimed continuation can survive process-local session rebinding. Neither coordinate is a Claude resume ID.
+      execution: A disposable private execution container inherits the three standard workspace mounts unchanged and binds provider-private state through checked CLAUDE_CONFIG_DIR. Reusable sessions and delivery invocations use separate named volumes; runless startup probes, fork-chat and non-delivery stateless invocations use isolated tmpfs. No operator home, shared per-flow provider home, authored selector or ambient fallback is admitted.
+      retention: Invocation completion and source-projection release remove their disposable containers through the existing identity-checked projection cleanup owner, targeting the inspected immutable Docker ID rather than a reusable container name, not persistent provider volumes. Reusable backing survives same-host process replacement. Session termination/rotation, run reset/deletion and terminal delivery settlement revoke selection through their existing owners; their exact backing may remain as inert artifacts, never selected by a new session or delivery. Probe/fork/non-delivery invocation tmpfs disappears with its container. Test cleanup removes only its exact owned containers and volume keys. This adds no global GC, old-home migration, transcript reconstruction or cross-host/DB-only restore promise.
+      continuation: A stateless delivery's retained files are only temporary execution state for that exact delivery, not reusable agent memory. Recovery must first admit the canonical settled-response continuation and current claim. New delivery identities cannot consume this backing. Confirmed heads still come exclusively from session/settled-continuation authority; files cannot authorize provider execution or select a latest head.
+      failure: Missing, corrupt, foreign or unusable backing for an existing confirmed head refuses before provider dispatch. A candidate provider head must have usable exact backing before atomic selected-store promotion. Unconfirmed children are never adopted; no fresh-session fallback, sent-delivery replay or relaxed lease fencing is allowed.
   managed_container_identity:
     status: internal_only
     owner: internal/runtime/containeridentity plus internal/runtime/workspace creation paths
@@ -20403,20 +20536,28 @@ test_specification:
       - catalog.runtime.agent_emission_delivery
       - catalog.runtime.agent_terminal_teardown
     compiled_process_golden_profile:
-      promoted_by: '#2168'
+      promoted_by: '#2168, #2321'
       source: internal/releasee2e/testdata/golden_agent_workload
       executor: github.com/division-sh/swarm/internal/releasee2e
       ci_owner: hitl-releasee2e-rest
       process_boundary: >
-        The executor builds the current swarm binary and uses only public readiness and
+        The executor builds the current swarm binary for public structural commands and a separate go test -c
+        serveapp binary with TestOwnedMockLifecycleProcessEntry for retained mock execution (H). The child uses
+        buildRuntimeComposition and existing lifecycle owners; its input is absent from the production binary.
+        The parent owns retained stores/workspace roots across children. The proof uses public readiness and
         /v1/rpc behavior against the authored source. Every workload runs from an authored
         YAML-only child project with no project-local `go.mod`, beneath one hostile ancestor
-        `go.mod` that acts only as an upward-search canary. Verify, initial serve, and every
+        `go.mod` that acts only as an upward-search canary. Verify, initial internal child, and every
         restart use that exact child working directory and relative `swarm.yaml`, `contracts`,
         and `api-token` operands. It runs with mock_only execution, no provider credential
         and a fixture-private empty executable search path, so Claude, Docker, and Podman
         cannot be discovered. SQL is permitted only to provision and remove an isolated
         host-PostgreSQL database.
+      surface_credit: >-
+        H is retained mock workload, restart, forced death and burst evidence, never public serve/test or live-provider
+        credit. T is real public test with fresh resources and no ingress. Separate L evidence exercises actual live
+        serve/dev, possession/refusal, real provider readiness/turn and retained restart with supported prerequisites.
+        Missing L prerequisites are an acceptance blocker, not a skipped-success row or permission to relabel H.
       pr_profile: >
         pr-common and pr-escalated execute the complete N=2 SQLite composition shape.
         Forced restart and contention rows are skipped explicitly by the canonical proof
@@ -20436,7 +20577,7 @@ test_specification:
       - project-local Go-module authority or absolute config, source-root, or token operands
       - reduced payload assertions, deadline-as-success, or a non-race burst substitute
     compiled_process_full_lifecycle_profile:
-      promoted_by: '#2008'
+      promoted_by: '#2008, #2321'
       source: internal/releasee2e/testdata/full_lifecycle/standing_telegram
       executor: github.com/division-sh/swarm/internal/releasee2e
       ci_owner: hitl-releasee2e-rest
@@ -20446,22 +20587,37 @@ test_specification:
         progression, mock connector settlement, graceful restart, forced death, default-config intrinsic standing recovery, and post-restart
         public convergence without interpreting any production semantic inside the harness.
       invocation_boundary: >
-        Every journey builds the current swarm binary once per test group and runs real verify and Cobra serve from an
+        Every journey builds the current swarm binary for structural verify, secrets and test-admission commands, plus an
+        internal go test -c serveapp lifecycle binary (H) using the shared buildRuntimeComposition, from an
         authored YAML-only child beneath a hostile ancestor go.mod. Config, source-root, and token operands are relative
         to that child. Selected stores begin empty; secrets are set through the public command; RPC and webhook traffic
-        use public listeners. Provider credentials and discoverable Claude, Docker, or Podman executables are absent.
+        use real listeners and authentication/receipt/normalization/settlement owners. The parent retains the selected
+        store/workspace roots across children; J5 delegates fresh epochs to the existing dev-scratch owner. Provider
+        session credentials and discoverable Claude, Docker, or Podman executables are absent. Local signed-ingress
+        fixture credentials are present. This is not public mock serve or private test restart proof.
+      surface_credit: >-
+        T runs fresh public authored/derived tests without ingress. H owns J1-J5 retained mock lifecycle and signed ingress.
+        L separately exercises actual public live serve/dev, real provider prerequisites and graceful/crash restart on both
+        supported retained stores; dev epochs remain SQLite. TestCommandLiveServeAndRestartParity owns this provisioned
+        public-process journey, with real provider credentials and an explicitly authorized Telegram test destination.
+        Missing prerequisites or an unexecuted opt-in test are not passing L evidence. Preserve the exact workload and
+        assertions across this separation. Credential-absent ingress
+        startup, subsequent activation and Telegram example collapse are split to #2319, not proven by provisioned L or H
+        execution and not prerequisites to #2321 review/merge/closure. The broader credential-absent onboarding claim
+        remains open; existing fail-closed credential checks remain valid until that separate work ships.
+        No hidden mock serve flag or second semantic owner exists.
       journeys:
-        J1_sqlite_graceful: Plain serve with omitted recovery gracefully restarts one SQLite store and retains the exact standing service, run, generation, standing ingress entity, bundle, and downstream route before one fresh same-conversation ingress converges.
+        J1_sqlite_graceful: Internal retained mock child with omitted recovery gracefully restarts one SQLite store and retains the exact standing service, run, generation, standing ingress entity, bundle, and downstream route before one fresh same-conversation ingress converges.
         J2_postgres_graceful: J1 against an isolated host-PostgreSQL database.
         J3_sqlite_crash_intrinsic_recover: >
-          Plain SQLite serve is publicly paused at one exact pending normal-authority delivery and killed. One restart with
+          The internal SQLite child is publicly paused at one exact pending normal-authority delivery and killed. One restart with
           the same store/source and unchanged omitted recovery configuration reaches readiness because the active exact-current
           standing generation is active_intrinsic. It retains exact identities, normalizes the same N to running with
           standing_reconcile, automatically converges the interrupted chain once, and converges one fresh transport identity
           using the same conversation and downstream entity/route once. Generic run.pause does not persist standing suspension.
         J4_postgres_crash_intrinsic_recover: J3 against an isolated host-PostgreSQL database.
         J5_sqlite_dev_fresh_epoch: >
-          Project-local serve --dev reaches the same public paused/pending checkpoint and is killed. Its next invocation
+          The internal child using the existing project-local dev-scratch owner reaches the same public paused/pending checkpoint and is killed. Its next invocation
           uses a fresh SQLite scratch epoch. The same authored filesystem flow may rederive identical service, generation-one
           run, and standing ingress entity IDs; freshness requires a strictly later public run started_at and absence of every predecessor
           exact event, delivery, and card fact before one new ingress converges exactly once. PostgreSQL, authored-path,
@@ -20475,9 +20631,9 @@ test_specification:
         delivery. A deadline is failure, not success.
       manifestations:
         M1: The explicit fixture source is one finite admitted filesystem flow tree; child flows are discovered directly from directories, and package.yaml or flows/ topology is absent.
-        M2: Verify and serve use the same production-shaped YAML-only relative invocation root.
-        M3: Exact authored connector mock response admission succeeds and a missing response fails verify.
-        M4: Cold plain serve reaches committed readiness on both selected stores with recovery omitted.
+        M2: Public verify and internal retained mock construction use the same production-shaped YAML-only relative invocation root; public live serve is separate L evidence.
+        M3: Exact authored connector mock response admission succeeds; missing response is structurally valid but fails public test admission before acquisition. Malformed supplied responses still fail structural verification.
+        M4: Cold internal retained mock construction reaches committed readiness on both selected stores with recovery omitted.
         M5: Signed ingress proves the exact ordered receipt from its raw standing-entity event and no-subscriber settlement through its normalized downstream-entity event and exact delivery target, with no dead letter.
         M6: The filesystem-flow-owned mock agent executes without external provider or container discovery and exposes mock provenance.
         M7: One workflow timer advances once with exact platform.stage_timer event cardinality.
@@ -20500,7 +20656,8 @@ test_specification:
         M24: The mandatory top-level CI partition executes this complete proof, including smoke in PR profiles and all five journeys in full/nightly profiles; the package census proves exhaustive disjoint coverage across required units.
       supported_surfaces:
       - compiled swarm verify --json
-      - compiled swarm serve and project-local swarm serve --dev
+      - compiled swarm test admission (T) and internal retained mock lifecycle child (H)
+      - separately proven compiled live swarm serve and project-local swarm serve --dev (L)
       - /readyz and health.check
       - signed provider webhook ingress
       - run.list, run.get, run.pause, and run.diagnose
@@ -20742,6 +20899,28 @@ test_specification:
       live LLM provider sessions.
     selected_public_surface:
       command_family: swarm test
+      execution_purpose: mock_only selected by command composition, never source doubles or deployment configuration
+      session_ownership: >-
+        Each invocation admits effective source, scenario declarations, payloads and exact mock completeness before
+        acquiring one fresh private runtime. TestSessionRunner is injected into cliapp.Execute by cmd/swarm and implemented
+        by serveapp.RunTestSession through the same buildRuntimeComposition used by live serve. Existing store, workspace,
+        source-set, API, process supervisor and runtime lifetime owners remain authoritative; no second scheduler or lifecycle
+        framework is introduced. Committed readiness and exact runtime.identity source matching precede scenario execution.
+      private_resources: >-
+        The session owns fresh temporary SQLite state, isolated host workspace and data-projection roots, ephemeral numeric
+        loopback API/gateway listeners and generated in-memory authentication. Deployment store/listener/auth/workspace
+        selections and ambient credentials or API targets cannot enter its construction request. All configuration layers
+        are still parsed and validated, including masked retired keys. Live backend/model policy remains source-validation
+        input, not live execution authority. No project store, dev epoch or persistent project-context registration is used.
+      external_boundary: >-
+        Explicit --api-server, --context and --api-token-file refuse before connection lookup or acquisition. Public test
+        mounts no provider ingress, channel registration or external exposure. Real signed ingress and retained restart
+        evidence belong to a separately labelled internal lifecycle harness, not this public command.
+      shutdown: >-
+        On cooperative success, failure or cancellation, withdraw readiness, cancel/drain/join owned work, shut down
+        listeners, close contexts/workspaces/store, then remove private resources. Surface execution and cleanup errors.
+        Forced death may leave inaccessible temporary artifacts; later invocations never reuse them. No scavenger,
+        retained test daemon, compatibility reader or recovery abstraction is added.
       command_catalog_status: >
         `swarm test` is the selected and implemented first-slice user-facing
         runner family. The concrete cli_specification.command_catalog row
@@ -20854,13 +21033,14 @@ test_specification:
           provenance is unavailable. PostgreSQL and SQLite selected-contract forks inherit exact profile bytes only when
           effective identities match before materialization.
       archetype_admission: >-
-        Every admitted `swarm new` archetype contains an authored derived smoke scenario, verifies, boots under mock_only, and
-        runs through the public scenario runner with zero credentials and zero Docker in under 60 seconds. `swarm new` writes
+        Every admitted `swarm new` archetype contains an authored derived smoke scenario, verifies structurally, and runs
+        through bare public `swarm test` with zero credentials and zero Docker in under 60 seconds. No separate server,
+        deployment configuration, precreated .swarm directory or mock-to-live graduation file is shipped. `swarm new` writes
         only the selected embedded canonical archetype and refuses overwrite; future producers persist the same canonical plan
         grammar rather than introducing a scaffold-only format.
     non_goals:
     - No runtime/backend/provider implementation is promoted by this section.
-    - This runner does not select or implement the active `mock` backend, and no active `local` LLM backend profile is promoted.
+    - The command selects MockOnly through the canonical execution selector; it does not implement a provider or promote an active `local` LLM backend profile.
     - The runner does not satisfy, weaken, or bypass internal/runtime/llm.ProviderContract.
     - The runner does not prove live agent sessions, tool-call translation, agent-memory behavior, turn/audit persistence,
       retry lineage, native-tool capability truth, or spend/budget accounting.
@@ -22762,7 +22942,10 @@ cli_specification:
               classification: shared_output
               fact_owner: local contract verification
               json_shape: >
-                object with ok, source_root, workspace_backend, errors, warnings, and lint_evidence. `errors`, `warnings`,
+                object with ok, source_root, validation_scope: structural, live_readiness: not_evaluated,
+                production_valid, harness counts/provenance, pack_inventory, errors, warnings, and lint_evidence.
+                workspace_backend and operational capability_subjects are retired from structural verify.
+                production_valid describes harness independence, not deployment readiness. `errors`, `warnings`,
                 and `lint_evidence` are arrays of structured boot verification findings with canonical `check_id`,
                 `severity`, `location`, and `message` fields plus optional additive `remediation` and `evidence` fields.
                 `message` remains the problem text. `--json` renders
@@ -23084,14 +23267,17 @@ cli_specification:
             describe:
               command: swarm describe
               classification: shared_output
-              fact_owner: local authoring view
-              json_shape: describe authoring view result object
+              fact_owner: local authoring view over the same admitted effective source and structural validation report as verify
+              json_shape: >
+                describe authoring view result object with validation_scope: structural and live_readiness: not_evaluated.
+                workspace_backend is retired. Preserve source identity/authority, graph, routing topology, diagnostics,
+                root, flows and approvals. Diagnostic views retain invalid-source findings instead of asserting live readiness.
               quiet_values:
               - flow ids and summary values declared by the command implementation
             describe_routes:
               command: swarm describe routes
               classification: shared_output
-              fact_owner: routing-topology/v1 projection over the authored endpoint census and lowered connect plans
+              fact_owner: routing-topology/v1 projection over the admitted effective source endpoint census, lowered connect plans and shared structural report
               json_shape: routing-topology/v1 object
               quiet_values:
               - stable route edge ids followed by stable typed route issue ids
@@ -24014,7 +24200,7 @@ cli_specification:
       tier: should_have
       implementation_status: implemented_first_slice
       owner: platform-spec.yaml#test_specification.deterministic_scenario_runner
-      behavior: Public deterministic scenario-runner CLI consumer. The command discovers v1 YAML scenarios only under tests/... and <flow-path>/tests/...; automatic discovery treats YAML files with version, steps, derive, or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps optionally consume setup/pre-state aliases seeded through /v1/rpc test.setup_entities before calling /v1/rpc event.publish; mailbox.decide/defer steps locate exactly one pending decision card through mailbox.list and then call the typed mailbox mutation RPC. The command waits for test quiescence by repeatedly reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt work, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic completion rule. Expectations consume run.trace, event.list dead-letter readback, paginated entity.list, and entity.get for detail assertions. The command does not activate mock/local providers, implement ProviderContract, test live agent sessions/tool calls/audit/ spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables directly.
+      behavior: Public deterministic scenario-runner CLI consumer owning a fresh private MockOnly runtime through the shared serve composition. The command discovers v1 YAML scenarios only under tests/... and <flow-path>/tests/...; automatic discovery treats YAML files with version, steps, derive, or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps optionally consume setup/pre-state aliases seeded through /v1/rpc test.setup_entities before calling /v1/rpc event.publish; mailbox.decide/defer steps locate exactly one pending decision card through mailbox.list and then call the typed mailbox mutation RPC. The command waits for test quiescence by repeatedly reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt work, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic completion rule. Expectations consume run.trace, event.list dead-letter readback, paginated entity.list, and entity.get for detail assertions. The command selects exact mock execution through the canonical selector; it does not implement ProviderContract or a local provider, test live agent sessions/tool calls/audit/ spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables directly.
       derived_mode: >-
         `--derive <flow>` explicitly compiles and executes the canonical S6 derived plan without writing a scenario file.
         `--input` selects one exact public pin; ambiguity fails with candidate evidence; `--all-inputs` runs one plan per exact
@@ -24034,7 +24220,7 @@ cli_specification:
           acquiring generated-input eligibility.
         effective_source_owner: >-
           The command resolves unified configuration once, loads configured provider-trigger packs from that same snapshot, and
-          composes the bundle source through internal/runtime.SourceWithProviderTriggerEvents before endpoint census and schema
+          admits the bundle through packadmission.FromBundle and internal/runtime.AdmitEffectiveSourceProjection before endpoint census and schema
           resolution. Generated, inline, and file-backed payloads resolve their canonical event key and validate through one
           semanticview.ResolveEventSchema path over this same effective source; only generated payloads additionally require an
           exact input-pin census match.
@@ -35557,6 +35743,34 @@ durable_pipeline_processing_obligation_authority:
       exhausted result reports the remembered local blockage. Only the global runtime-ingress pause may stop a batch
       immediately. Cancellation, query or processing error, cursor close, and cursor abandonment release every outstanding
       cursor claim and invalidate the cursor; later recovery reclaims the durable obligation from a fresh cursor.
+    startup_blockage_evidence: >
+      Startup admission rejects every blocked result, including an exhausted scan with remembered blockage. Existing
+      recovery and selected-store claim diagnostics distinguish ingress pause before scanning or during dispatch,
+      claim contention, run dispatch refusal, and typed bounded retry release. The selected-store scan owner reports
+      its private phase and exact candidate event/run identity; claim diagnostics report the requested and held purposes,
+      exact local claim and attached scan when known. An in-flight acquisition or an unavailable PostgreSQL advisory
+      lock is reported as such, never attributed to an invented competing process. Work-bearing refusal reports retain
+      event type and the original dispatch or typed retry reason. These observations cannot grant execution, alter
+      eligibility, retry startup, or turn Blocked into readiness. Passing startup runs do not explain a historical refusal
+      whose branch and competing claim were not captured.
+    startup_timer_handoff: >
+      Runtime preparation withholds callback execution in the existing Scheduler before topology finalization can arm
+      initial-entry or adopted standing timer projections. Those projections remain in the scheduler's ordinary exact
+      task records with their original occurrence, due time, and work lease; no second pending-timer registry is created.
+      Startup releases that scheduler only after recovery admission, required pipeline recovery to unblocked explicit
+      exhaustion, and delivery continuation startup/synchronization succeed. Timer restoration may register projections while callbacks remain
+      withheld. Overdue timers then fire through their original canonical occurrence owner, not through recovery replay.
+      Cancellation or startup failure stops and joins withheld tasks through ordinary scheduler retirement without
+      releasing callbacks. Preparing a scheduler already carrying work or releasing a stopped scheduler fails closed.
+    startup_creation_handoff: >
+      Authorized current-pending topology finalization uses its existing prepared-startup phase authority to hand
+      creation occurrences to startup pipeline recovery. The same creation owner atomically commits the exact event,
+      initial delivery facts and creation-readiness completion, then releases its exact publication claim without
+      receiver dispatch. This handoff cannot stamp a pipeline receipt or delivery continuation_handoff_at. After
+      topology completes, the existing recovery scan acquires and settles that exact persisted event before delivery
+      enumeration. There is no second queue, asynchronous publication competitor, whole-runtime join or synchronous
+      readiness-to-receiver reentry. Completed plans do not re-emit creation, ordinary runtime creation keeps its
+      existing asynchronous publication owner, and pending startup readiness still requires recovery authorization.
     scan_result: >
       Every sweep reports settled, examined, exhausted, and blocked facts explicitly. Examined never exceeds the requested
       batch limit. Exhausted means every fixed phase reached its captured insertion-sequence high-water boundary, not that a batch returned no work or reached
@@ -35988,6 +36202,9 @@ agent_lifecycle_authority:
         Direct flow termination retains committed route-retirement evidence across auxiliary panic as well as error.
         Its exact process-route retirement is consumed once on normal return or unwind; a failed retirement remains
         part of the owning completion error, not a successful projection or permission to skip agent-set fencing.
+        After actual retirement succeeds, clear its retained executable responsibility before projecting auxiliary
+        diagnostics. A diagnostic failure remains attributed in the completion/shutdown error but cannot retain or
+        repeat already completed retirement.
       whole_set: >
         The lifecycle coordinator captures and fences every exact affected predecessor before the first member join.
         Member persistence failure or panic cannot leave an unfenced or unowned suffix. The same bounded terminal
@@ -36042,7 +36259,7 @@ agent_lifecycle_authority:
     turn_evidence_split: SettleCompletion is the only provider-turn evidence writer. The selected store locks lifecycle truth, selects one closed current or drained permit, and returns that typed disposition to the common provider caller. A current permit may atomically apply the supplied exact current mutable projection. A drained permit projects the submitted completion candidate into a distinct restricted value containing immutable turn/effect/spend evidence only; it ignores any current-only provider-head candidate and cannot update agent_sessions run_id, timestamps, conversation, provider state, watchdog, output, or successor state. The stale_projection_refused rule is enforced by that locked permit projection, not by an earlier generation check. Every provider adapter consumes a drained disposition as a successful no-output stop before session, conversation, provider-head, turn-count, rotation, output, or successor projection. Evidence failure rolls back the complete current or drained named operation. Direct AppendAgentTurn, catch-error/strip/retry settlement, and any alternate turn insert owner are forbidden.
   public_restart:
     idempotency: A supplied API idempotency key derives a stable lifecycle operation_id. API completion failure is repaired by replaying the stored lifecycle outcome without repeating restart.
-    diagnostic: Success requires durable transition outcome and durable outbox enqueue; immediate projection is non-authoritative.
+    diagnostic: Success requires durable transition outcome and durable outbox enqueue with immutable validated provenance; immediate projection is auxiliary. Its failure retains pending work and is reported through the nonrecursive process diagnostic sink, without changing a committed lifecycle result or repeating restart.
   reconfigure:
     candidate_derivation: The canonical per-agent decision point encloses the authoritative current-config read, partial-patch merge, validation and agent build, subordinate-plan derivation, durable lifecycle/config/session commit, and process-local agent/config projection. A candidate or subordinate plan derived before that serialization point is invalid; concurrent partial patches execute in one serial order against the predecessor committed by the prior decision.
     operation_identity: After per-agent serialization, derive one stable operation id from the agent id, authoritative expected lifecycle occurrence (runtime epoch, generation, and phase), candidate config revision, normalized subordinate plan, and exact dynamic readiness authority when present. Retry while that expected occurrence and authority remain current reuses the id; the same candidate and plan after any intervening committed generation or readiness-plan revision is a distinct operation. A candidate whose revision already equals the authoritative current cell is a no-op and creates no lifecycle operation.
@@ -36076,6 +36293,38 @@ agent_lifecycle_authority:
       fallback and no synthesized run. An acknowledged outbox replays its retained receipt without requiring the
       event to remain present, so later cleanup cannot cause log resurrection. Only newly committed projection
       publishes a process-local recorder notification; recorder notification is not durable acknowledgment authority.
+  diagnostic_projection:
+    owner: eventpersistence.PersistLifecycleDiagnostic is the sole atomic event and receipt owner, reached through RuntimeLogger
+    enqueue: >-
+      Lifecycle transition persistence snapshots required typed provenance alongside operation and transition facts:
+      exact agent identity, process/source binding, actor mode, normal or selected-fork ownership, and accepted-event
+      or observation origin. Accepted-event origin requires the persisted same-run parent and records its mode as
+      provenance; this mode does not override the diagnostic logger posture defined by recovery.diagnostic_settlement.
+      Producer diagnostic lineage is immutable enqueue-time evidence, never projection caller context. An explicit
+      accepted-event origin must agree with the producer parent and supplies it when no producer parent was present.
+      Selected origin is validated through the existing selected-fork execution/binding owner with exact source/fork
+      IDs, generation and fingerprints. Requested origin participates in operation replay identity. Missing or
+      conflicting provenance rolls back the transition. Fresh schemas have no defaults or legacy backfills.
+    projection: >-
+      The manager lists at most 100 pending occurrences and delegates each to RuntimeLogger and the existing
+      eventpersistence settlement transaction, retaining an independently committed prefix. No agentpersistence
+      projector or separate acknowledgment writer exists. First live-run settlement validates the immutable
+      operation, transition, identity, timestamp and historical selected-fork relation before canonical append.
+      The deterministic event ID is UUIDv5 (SHA1, OID namespace) of the UTF-8 string
+      "swarm:lifecycle-diagnostic:" concatenated with outbox_id. It is not the outbox occurrence UUID.
+      Event append and complete projection receipt commit together. Recovery.diagnostic_history governs admitted
+      reset: absent live owners do not invalidate retained historical receipts or authorize event resurrection.
+    fork_validation: >-
+      Both selected-fork activation validators consume the event owner's read-only acknowledged observation
+      relation. Within the run transaction verify immutable provenance, the complete receipt, canonical event bytes,
+      timestamp, run, execution mode, producer, scope, no-delivery settlement and absent deliveries. Only exact
+      selected-fork observations with no persisted parent may be excluded from the final stray-event count; they
+      never become recursive roots or authorize descendants, deliveries, effects or source freeze. Receipt JSON
+      formatting is not event-byte authority: use the canonical encoder for exact event comparison on both stores.
+    lifecycle_failure: >-
+      Completed retirement is independent of auxiliary projection failure. Preserve original lifecycle, provider
+      and cleanup failures and report projection failure through the nonrecursive process diagnostic sink.
+      Startup and joined shutdown retain diagnostic-error attribution without reversing committed lifecycle work.
   destructive_cleanup_quiescence:
     runtime_nuke: Apply-mode runtime.nuke withdraws the complete affected context set and fences every runtime and standing occurrence before waiting for any predecessor to drain. It awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
     reset_reconstruction: The existing process lifecycle supervisor owns reset reconstruction and final shutdown; RuntimeContextManager owns complete-set withdrawal, staged installation, and publication. When include_source_artifacts is false, retain the identical admitted source set and allocate fresh runtime occurrences, generation grants, source projections, and workspace lifecycles. Rebind all execution handlers, fork consumers, MCP, standing and channel publication, monitoring, and final-close records before reopening admission. Original directories are not reread, and already retired runtime or workspace lifecycles cannot be reopened. Reconstruction failure leaves the entire set unavailable rather than publishing a partial set.
@@ -36092,6 +36341,14 @@ agent_lifecycle_authority:
     reset_cleanup_attempt_clock: RequestedAt remains immutable admission evidence. Every uncommitted cleanup attempt evaluates directive expiry and other current-time authority gates using the current attempt time, including same-key continuation and startup recovery. No retry may waive an unexpired authority gate or rewrite a committed cleanup receipt.
     reset_empty_topology: Successfully recovered source-clearing reset leaves a valid zero-context source set, not an incomplete constructor. New keyed or unkeyed resets with either source-retention mode must complete over that empty set without synthesizing runtimes or restoring source. Exact outcome replay and conflicting-key rejection remain authoritative, and a successful empty reset releases its active operation slot.
     other_ordering: Manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Selected-store compatibility migration and backfill paths do not exist.
+    diagnostic_lifetime: >-
+      Ordinary selected execution close retains diagnostic occurrences for delayed projection. Admitted destructive
+      selected-fork discard removes pending and projected diagnostic outbox rows in the same run-locked transaction
+      that deletes the fork events, after quiescence. Retain the existing operation/transition, execution/binding,
+      turn and completion evidence according to their aggregate policy. Rollback retains the whole prior relation.
+      Reset and nuke retain historical diagnostic snapshots and receipts under recovery.diagnostic_history;
+      unlike explicit selected-fork discard they do not require historical runs or events to remain present.
+      Deletion is not successful projection and cannot authorize a zero-row acknowledgement or event resurrection.
   forbidden:
     - direct lifecycle map writes outside the coordinator
     - raw agents-table mutation that bypasses selected-store topology admission
@@ -36137,6 +36394,11 @@ managed_agent_capability_surface:
     statuses: [confirmed, unavailable, mismatch]
     rule: Each planned binding names its required typed evidence kind. Effective visibility and callability require the upstream toolcapabilities decision to be visible/callable and every required delivery binding to have exact confirmed evidence. Missing evidence is not success. Unavailable evidence denies that tool. Any unplanned, duplicate, missing, schema-changed, cross-authority, or otherwise mismatched delivery records a typed mismatch and denies the complete surface.
     monotonicity: Evidence may be added or narrowed from confirmed to unavailable/mismatch. Unavailable or mismatch evidence and mismatch facts cannot be removed, rewritten, or widened for the life of the surface.
+    cli_inventory_presence: The parser/Response preserves valid, not-observed and invalid authoritative inventory separately.
+      Only provider system/init metadata supplies inventory or MCP connection evidence; assistant, tool-result and result
+      data fields cannot fabricate or repair it. Valid string and named-object entries are supported. Any malformed entry
+      invalidates the complete observation, and later metadata cannot erase that invalidity. A valid empty or controls-only
+      list supplies affirmative zero-native evidence. Tool calls, planned names and canonical display lists do not.
   startup_preflight:
     owner: one provider-contract-aware managed preflight implementation that produces startup_probe surfaces and persists both successful and failed operation/evidence facts
     actor_owner: Normal cold-start and prepared-handoff probes consume the exact declaration-owned runless agent plan before execution admission. Selected-contract-fork probes consume the exact concrete fork-run actor identity because the fork run is already admitted. A startup surface cannot carry both forms, fabricate a run, infer a run from context, or reuse a provider-turn identity.
@@ -36156,12 +36418,17 @@ managed_agent_capability_surface:
     selected_contract_fork: Consume the exact current selected-fork completion authority and derive the selected managed-execution admission; settle provider/MCP preflight before gateway use, agent-loop start, or fork-event publication.
     claude_cli_selection: Every cold, recovery, prepared-replacement, and selected-contract Claude startup process receives positive --tools selection derived from the exact callable provider_builtin bindings plus the closed transport-control set. --allowedTools separately admits those builtins, exact MCP bindings, and controls. Missing or incompatible positive-selector support fails closed without static-catalog fallback, discovery/relaunch, or negative-complement retry.
     failure: Missing provider evidence, MCP tools/list or required startup tools/call failure, delivery mismatch, persistence failure, or authority loss fails closed with retained typed evidence and zero managed execution under that admission.
+      Missing or invalid CLI inventory also fails when the planned native set is empty; valid-empty inventory is not missing.
   provider_turn:
     rule: Every managed provider turn receives a fresh provider_turn authority under one admitted execution variant. Its typed concrete actor identity must exactly equal the actor configuration, normal lifecycle token when present, session memory identity, usage target, and persisted turn identity. The same surface identity is carried through API/CLI request construction or deterministic in-process execution, provider response normalization, MCP registration/list/call, response tool-call validation, direct executor and relay admission, managed effects, recovery/settlement, turn persistence, and supported readback. Same-slug siblings are distinct principals and any cross-identity combination fails before provider or tool execution.
     receiver_scope: A provider turn reached through EventBus consumes only the receiver-owned normal or selected-contract execution variant. Publisher execution state is not provider-turn evidence and cannot authorize tools, MCP calls, completions, or effects.
     api: Exact live-request definitions are the delivery evidence. Planned names alone are not observation.
     cli: Provider-builtin availability uses positive --tools selection from the exact callable provider_builtin bindings on every first, resumed, and tool-result process launch. The closed provider transport-control set, currently ExitPlanMode, is selected separately and is excluded from actor capability evidence. --allowedTools is permission admission for the selected builtins, exact MCP bindings, permitted local tools, and transport controls; it is never builtin-availability authority, and MCP/local names never enter --tools. Provider-visible initialization facts preserve every reported non-control builtin as exact evidence; unknown/default builtins are typed mismatches rather than filtered observations. Prompt text is a rendering only and cannot authorize a tool. A provider-owned MCP tools/call occurrence atomically confirms its exact planned mcp_provider_visible binding and consumes that occurrence before tool authorization. Missing, ambiguous, or mismatched managed-versus-forkchat authority, incompatible selector support, unplanned tools, missing occurrence coordinates, and replayed occurrences fail closed with no static catalog, negative complement, compatibility fallback, or discovery/relaunch.
     in_process: Deterministic platform mock execution carries the exact local-runtime bindings and interpreter evidence in the same provider-turn surface. It is not reclassified as API or CLI transport and cannot authorize external effects.
+    cli_inventory: Every fresh, resumed and tool-result CLI process requires a valid authoritative inventory. Native
+      comparisons consume the exact native channel only; MCP names remain exact MCP evidence, even when their canonical
+      display names collide with native names. A failure discovered after provider execution settles outcome_uncertain
+      through the existing completion owner, preserving external effects and forbidding automatic redispatch.
   enforcement:
     mcp: tools/list exposes only planned surface tools whose exact delivered name, description, and schema match the canonical candidate definition identity for the same typed concrete actor, provider-turn, and managed-execution authority; any difference records a typed mismatch and denies the complete surface. tools/call settles exact provider-turn MCP visibility from the provider-owned call occurrence before authorization and rejects missing, mismatched, unavailable, unplanned, differently authorized, cross-identity, missing-coordinate, or replayed calls before executor dispatch.
     executor_relay: Tool executor, local runtime, and relay paths consume the exact provider-turn surface and managed-execution admission. They cannot recompute a broader set from actor declarations, names, prompts, or provider defaults.
@@ -36210,7 +36477,10 @@ managed_external_effect_authority:
     postlaunch_read_only_failure: Terminal connector failure with no automatic retry.
     postlaunch_write_or_unknown_failure: Every error after cmd.Start succeeds, including provider exit, response validation,
       mutable projection, and atomic provider-head settlement failure, settles the attempt platform.outcome_uncertain with
-      adapter-specific evidence while preserving the original failure as the returned classification; automatic redispatch is forbidden.
+      adapter-specific evidence and returns a nonretryable platform.outcome_uncertain classification. The original typed
+      failure remains attached as cause evidence, including on terminal delivery readback. A joined settlement or heartbeat
+      failure must not expose a retryable inner cause as the outer decision. Exact prelaunch rejection retains its existing
+      canonical retry policy; automatic postlaunch redispatch is forbidden.
     current_completion: Successor-facing session, conversation, watchdog, provider-head, turn-count, and rotation projection is lifecycle-token validated at the same selected-store mutation boundary as immutable completion evidence. Current projection and evidence commit together.
     current_delivery_response_continuation:
       owner: settled runtime_external_effect_attempt evidence plus selected-store authorization and the normal provider adapter loop
