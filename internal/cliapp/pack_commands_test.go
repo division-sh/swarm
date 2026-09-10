@@ -102,7 +102,7 @@ func TestCLIWorkflowModuleConsumersUseConfiguredDevelopmentBase(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	development, dirs := packfixture.DevelopmentBase(t, nil)
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
-	configLines := []string{"runtime:", "  execution_posture: live", "llm:", "  backend: anthropic", "platform:", "  packs:", "    platform_dirs:"}
+	configLines := []string{"llm:", "  backend: anthropic", "platform:", "  packs:", "    platform_dirs:"}
 	for _, dir := range dirs {
 		configLines = append(configLines, "      - "+dir)
 	}

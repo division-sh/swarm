@@ -1,5 +1,0 @@
-runtime:
-  execution_posture: mock_only
-  recovery_on_startup: true
-llm:
-  backend: claude_cli

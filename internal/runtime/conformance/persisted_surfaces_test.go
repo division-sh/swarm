@@ -94,6 +94,23 @@ func (s staticWorkspaceResolver) ResolveWorkspace(context.Context, runtimeactors
 	return s.target, nil
 }
 
+// This protocol fixture does not claim Docker artifact-lifetime coverage.
+type conformanceClaudeState struct{}
+
+func (conformanceClaudeState) Directory() string                       { return runtimeworkspace.ClaudeStateDirectory }
+func (conformanceClaudeState) CheckHead(context.Context, string) error { return nil }
+func (conformanceClaudeState) Release(context.Context) error           { return nil }
+
+func (s staticWorkspaceResolver) ResolveClaudeWorkspace(ctx context.Context, actor runtimeactors.AgentConfig, _ runtimeworkspace.ClaudeStateRequest, _ string) (*runtimeworkspace.Target, error) {
+	target, err := s.ResolveWorkspace(ctx, actor)
+	if err != nil || target == nil {
+		return target, err
+	}
+	copy := *target
+	copy.ClaudeState = conformanceClaudeState{}
+	return &copy, nil
+}
+
 func conformanceProviderCredentialResolver(t testing.TB, key, value string) runtimellm.ProviderCredentialResolver {
 	t.Helper()
 	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
@@ -569,8 +586,8 @@ printf '{"result":"ok"}'
 	}
 	session = conversation.Session
 	failure, ok := runtimefailures.As(err)
-	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
-		t.Fatalf("ContinueSession failure = %v, want generic connector failure", err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassOutcomeUncertain || failure.Failure.Detail.Code != "claude_cli_attempt_outcome_unconfirmed" || failure.Failure.Retryable {
+		t.Fatalf("ContinueSession failure = %v, want nonretryable uncertain launched outcome", err)
 	}
 	if session.ID != originalSessionID {
 		t.Fatalf("session ID rotated from stderr prose: got %q, want %q", session.ID, originalSessionID)
@@ -1007,7 +1024,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: false, ExecutionPosture: executionposture.Live,
+			RecoveryOnStartup: false,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
@@ -1026,6 +1043,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		TimerObligationReader:       pg,
 		PipelineObligations:         pg.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
 			WorkflowModule:     loadConformanceRuntimeWorkflowModule(t),
 			LLMRuntime:         conformanceNoopLLMRuntime{},
@@ -1103,7 +1121,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: true, ExecutionPosture: executionposture.Live,
+			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
@@ -1121,6 +1139,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		DeliveryStore:               pg,
 		PipelineObligations:         eventStore.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         conformanceNoopLLMRuntime{},
@@ -1348,7 +1367,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: true, ExecutionPosture: executionposture.Live,
+			RecoveryOnStartup: true,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
@@ -1366,6 +1385,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		DeliveryStore:               pg,
 		PipelineObligations:         pg.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         conformanceNoopLLMRuntime{},

@@ -12,12 +12,25 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testcatalog"
 	"github.com/google/uuid"
 )
+
+// Unit-level RPC doubles are injected through the command-owned session port,
+// never selected through a public connection flag or ambient target.
+func scenarioProtocolTestOptions(server *httptest.Server) rootCommandOptions {
+	opts := defaultRootCommandOptions()
+	opts.httpClient = server.Client()
+	opts.runTest = func(ctx context.Context, _ TestSessionRequest, run func(context.Context, TestSessionEndpoint) error) error {
+		return run(ctx, TestSessionEndpoint{APIServer: server.URL, Token: "test-token"})
+	}
+	return opts
+}
 
 func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
@@ -110,7 +123,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -238,7 +251,7 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -352,7 +365,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -431,7 +444,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 		"test", sourceRoot,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -734,14 +747,31 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 	}))
 	defer server.Close()
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test", sourceRoot,
-		"--timeout", "2s",
-		"--poll-interval", "10ms",
-	}, &stdout, &stderr, testRootCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	// These catalog companions are explicitly protocol-only, including intentionally
+	// non-executable source fixtures. Exercise the runner, not command admission.
+	var stdout bytes.Buffer
+	bundle := loadWorkflowValidationBundleAt(t, sourceRoot)
+	files, err := discoverScenarioTestFiles(bundle, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err = prepareScenarioTestFiles(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &cliAPIClient{endpoint: server.URL + "/v1/rpc", token: "test-token", httpClient: server.Client()}
+	if _, err := scenarioTestSourceArtifactFact(context.Background(), client, bundleHash); err != nil {
+		t.Fatal(err)
+	}
+	runner := scenarioRunner{client: client, bundle: bundle, source: semanticview.Wrap(bundle), bundleHash: bundleHash, sourceRoot: sourceRoot, timeout: 2 * time.Second, pollInterval: 10 * time.Millisecond, out: &stdout}
+	for _, file := range files {
+		prepared, err := runner.prepareScenario(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runner.runPreparedScenario(context.Background(), prepared); err != nil {
+			t.Fatal(err)
+		}
 	}
 	wantMethods := make([]string, 0, len(doc.Steps)*2+5)
 	wantMethods = append(wantMethods, "runtime.identity")
@@ -759,13 +789,8 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, sourceRoot string, do
 		wantMethods = append(wantMethods, entityGetMethod)
 	}
 	assertScenarioTestMethods(t, calls, wantMethods)
-	for _, want := range []string{"scenario ok:", "swarm test ok: scenarios=1"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-		}
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+	if !strings.Contains(stdout.String(), "scenario ok:") {
+		t.Fatalf("protocol runner output = %s", stdout.String())
 	}
 }
 
@@ -805,7 +830,7 @@ steps:
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"test", sourceRoot, filepath.Join("tests", "invalid-type.yaml"),
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}
@@ -854,7 +879,7 @@ steps:
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"test", sourceRoot, filepath.Join("operating", "tests", "bad-setup.yaml"),
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}
@@ -973,7 +998,7 @@ steps:
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"test", sourceRoot, filepath.Join("tests", "symlink-escape.yaml"),
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}
@@ -1045,7 +1070,7 @@ steps:
 		"test", sourceRoot, filepath.Join("tests", "mailbox.yaml"),
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -1139,7 +1164,7 @@ steps:
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 				"test", sourceRoot, filepath.Join("tests", "human-task.yaml"),
 				"--timeout", "2s", "--poll-interval", "10ms",
-			}, &stdout, &stderr, testRootCommandOptions(server))
+			}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 			if code != 0 {
 				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
@@ -1201,7 +1226,7 @@ steps:
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 				"test", sourceRoot, filepath.Join("tests", "invalid-card-match.yaml"),
-			}, &stdout, &stderr, testRootCommandOptions(server))
+			}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 			if code != scenarioTestExitValidation || lookup || !strings.Contains(stderr.String(), tc.want) {
 				t.Fatalf("code=%d lookup=%v stderr=%q, want validation containing %q", code, lookup, stderr.String(), tc.want)
 			}
@@ -1248,7 +1273,7 @@ steps:
 		"test", sourceRoot, filepath.Join("tests", "mailbox-reject-missing-reason.yaml"),
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
-	}, &stdout, &stderr, testRootCommandOptions(server))
+	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}

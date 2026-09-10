@@ -141,7 +141,7 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 				{runtime: runtimes[0], sourceArtifactFact: facts[0]},
 				{runtime: runtimes[1], sourceArtifactFact: facts[1]},
 			}
-			err = startServeRuntimeContexts(context.Background(), contexts, nil)
+			_, err = prepareServeRuntimeContexts(context.Background(), contexts, nil)
 			if err == nil {
 				t.Fatal("two-context startup accepted foreign incomplete topology")
 			}

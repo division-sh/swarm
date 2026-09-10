@@ -317,7 +317,7 @@ func (am *AgentManager) retireRemovedStaticTopology(
 	if targetEpoch <= 0 {
 		targetEpoch = 1
 	}
-	result, err := store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+	result, err := am.lifecycle.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
 		Identity: identity, AgentID: identity.AgentID(), Trigger: operationKind,
 		ExpectedEpoch: current.LifecycleEpoch, ExpectedGeneration: current.LifecycleGeneration,
@@ -811,7 +811,7 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 			item.identity, item.targetTopology, "source_set_rebind", item.revision, planHash,
 			targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
 		)
-		result, commitErr := store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+		result, commitErr := p.manager.lifecycle.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: "source_set_rebind", RequestHash: requestHash,
 			Identity: item.identity, AgentID: item.identity.AgentID(), Trigger: "source_set_rebind",
 			ExpectedEpoch: item.epoch, ExpectedGeneration: item.generation, ExpectedPhase: item.phase,
@@ -901,6 +901,13 @@ func (am *AgentManager) hydratePersistedAgentExecutions(ctx context.Context) err
 		return err
 	}
 	sort.SliceStable(agents, func(i, j int) bool { return agents[i].StartedAt.Before(agents[j].StartedAt) })
+	for _, rec := range agents {
+		if rec.Topology.Equal(admission) {
+			if err := am.validatePersistedAgentExecution(rec.Config); err != nil {
+				return fmt.Errorf("hydrate reconciled agent %s: %w", rec.Config.ID, err)
+			}
+		}
+	}
 	for _, rec := range agents {
 		if !rec.Topology.Equal(admission) {
 			continue
@@ -1105,7 +1112,7 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 		string(targetPhase), configRevision,
 	}, "\x00"))).String()
 	requestHash := lifecycleRequestHashForIdentity(identity, admission, operationKind, configRevision, string(targetPhase))
-	_, err = store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+	_, err = am.lifecycle.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
 		Identity: identity, AgentID: identity.AgentID(), Trigger: "source_reconcile",
 		ExpectedEpoch: expectedEpoch, ExpectedGeneration: expectedGeneration, ExpectedPhase: expectedPhase,

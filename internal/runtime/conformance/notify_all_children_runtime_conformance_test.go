@@ -29,6 +29,7 @@ import (
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -129,6 +130,7 @@ type notifyAllChildrenRuntime struct {
 	selected           notifyAllChildrenStore
 	sourceArtifactFact runtimecorrelation.SourceArtifactFact
 	genericSchedules   *runtimegenericschedule.Lifecycle
+	posture            executionposture.Posture
 }
 
 type notifyAllChildrenRuntimeOptions struct {
@@ -999,10 +1001,12 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 					)
 					t.Cleanup(func() {
 						if t.Failed() {
-							t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
+							diagnostics, err := json.Marshal(runtime.diagnostics.snapshot())
+							t.Logf("notify-all-children runtime diagnostics: %s (encoding error: %v)", diagnostics, err)
 						}
 					})
-					if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "notify-all-children-fixed-slug", runtime.sourceArtifactFact)); err != nil {
+					runCtx := runtimeeffects.WithExecutionMode(managedConformanceExecutionContextForBundle(t, ctx, "notify-all-children-fixed-slug", runtime.sourceArtifactFact), runtime.posture.RootMode())
+					if err := runtime.manager.Run(runCtx); err != nil {
 						t.Fatalf("run manager: %v", err)
 					}
 
@@ -1402,6 +1406,10 @@ func newNotifyAllChildrenRuntime(
 	if len(options) > 0 {
 		opts = options[0]
 	}
+	posture := executionposture.Live
+	if opts.realMockAgents {
+		posture = executionposture.MockOnly
+	}
 	sourceArtifactFact := opts.sourceArtifactFact
 	if sourceArtifactFact.Validate() != nil {
 		sourceArtifactFact = conformanceSourceArtifactFact(t, source)
@@ -1431,6 +1439,7 @@ func newNotifyAllChildrenRuntime(
 		runtimeControlEvents = append(runtimeControlEvents, "platform.join_complete")
 	}
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
+		ExecutionPosture:   posture,
 		ContractBundle:     source,
 		SourceArtifactFact: sourceArtifactFact,
 		WorkOwner:          workOwner,
@@ -1478,7 +1487,7 @@ func newNotifyAllChildrenRuntime(
 			eventBus,
 			eventBus.EngineDispatcher(),
 			notifyAllChildrenGenericScheduleLogger{t: t},
-			executionposture.Live,
+			posture,
 		)
 		if err != nil {
 			t.Fatalf("construct notify-all-children generic schedule lifecycle: %v", err)
@@ -1521,22 +1530,18 @@ func newNotifyAllChildrenRuntime(
 			t.Fatalf("notify-all-children store %T does not implement conversation persistence", backend)
 		}
 		cfg := &config.Config{}
-		cfg.LLM.Backend = llmselection.BackendMock
+		cfg.LLM.Backend = llmselection.BackendAnthropic
 		cfg.LLM.Session.LockTTL = time.Minute
 		sessionStore = runtimesessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
-		modelRuntime := runtimellm.NewMockRuntime(
-			cfg,
-			sessionStore,
-			"notify-all-children-conformance",
-			conversations,
-			eventBus,
-			liveTestCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}),
-		)
-		profile, err := llmselection.ResolveActiveBackend(llmselection.BackendMock)
+		profile, err := llmselection.ResolveLiveBackend(cfg.LLM.Backend)
 		if err != nil {
-			t.Fatalf("resolve mock profile: %v", err)
+			t.Fatalf("resolve configured live profile: %v", err)
 		}
-		modelRuntimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, modelRuntime)
+		modelRuntimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
+			Cfg: cfg, Sessions: sessionStore, Conversations: conversations, Events: eventBus,
+			LockOwner:            "notify-all-children-conformance",
+			CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}).WithExecutionPosture(posture),
+		}, nil)
 		if err != nil {
 			t.Fatalf("build mock agent runtime set: %v", err)
 		}
@@ -1557,7 +1562,7 @@ func newNotifyAllChildrenRuntime(
 		if opts.agentGate != nil {
 			agentFactory = opts.agentGate.wrapFactory(agentFactory)
 		}
-		llmBackend = llmselection.BackendMock
+		llmBackend = cfg.LLM.Backend
 	}
 	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	switch sqliteStore := backend.(type) {
@@ -1583,7 +1588,7 @@ func newNotifyAllChildrenRuntime(
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{
-		ExecutionPosture:   executionposture.Live,
+		ExecutionPosture:   posture,
 		Module:             module,
 		SourceArtifactFact: sourceArtifactFact,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -1623,8 +1628,8 @@ func newNotifyAllChildrenRuntime(
 		roles = gateLifecycleDiagnosticOverlap(t, db, roles)
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:   executionposture.Live,
-		BaseContext:        testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact),
+		ExecutionPosture:   posture,
+		BaseContext:        runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()),
 		SourceArtifactFact: sourceArtifactFact,
 		WorkflowInstances:  coordinator,
 		WorkOwner:          workOwner,
@@ -1676,6 +1681,7 @@ func newNotifyAllChildrenRuntime(
 		})
 	}
 	maintenanceCtx, stopMaintenance := context.WithCancel(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact))
+	maintenanceCtx = runtimeeffects.WithExecutionMode(maintenanceCtx, posture.RootMode())
 	maintenanceDone := make(chan struct{})
 	go func() {
 		defer close(maintenanceDone)
@@ -1686,7 +1692,8 @@ func newNotifyAllChildrenRuntime(
 		<-maintenanceDone
 	})
 	return notifyAllChildrenRuntime{
-		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
+		posture: posture,
+		bus:     eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
 		workOwner: workOwner, selected: backend, sourceArtifactFact: sourceArtifactFact, genericSchedules: genericSchedules,
 	}
 }
@@ -1987,15 +1994,20 @@ func publishNotifyAllChildrenEventClass(t *testing.T, ctx context.Context, runti
 	id := uuid.NewString()
 	eventType := events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, localEvent))
 	createdAt := time.Now().UTC()
-	evt := eventtest.ExistingRunRootIngress(
-		id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, events.EventEnvelope{}, createdAt,
+	mode := executionmode.Live
+	if runtime.posture == executionposture.MockOnly {
+		mode = executionmode.Mock
+	}
+	evt := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(
+		id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), createdAt, mode,
 	)
 	if runCreating {
-		evt = eventtest.RunCreatingRootIngress(
-			id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, "", events.EventEnvelope{}, createdAt,
+		evt = eventtest.RunCreatingRootIngressWithMode(
+			id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, "", events.EventEnvelope{}, createdAt, mode,
 		)
 	}
 	publishCtx := testAuthorActivityContextForBundle(ctx, runtime.sourceArtifactFact)
+	publishCtx = runtimeeffects.WithExecutionMode(publishCtx, mode)
 	if err := runtime.bus.PublishAcknowledged(publishCtx, evt); err != nil {
 		t.Fatalf("PublishAcknowledged(%s): %v", localEvent, err)
 	}

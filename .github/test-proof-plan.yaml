@@ -392,7 +392,7 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     # 34287939711: move the independent 53.10s reset and 46.06s rotation
     # journeys to existing lighter units; no backend/case split or extra job.
-    run: '^Test(Canonical.*|Channel(Connect.*|Effect.*|Listener.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Configure.*|Connected.*|Create.*)$'
+    run: '^Test(Canonical.*|Channel(Connect.*|Effect.*|Listener.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

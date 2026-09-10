@@ -190,6 +190,7 @@ const (
 )
 
 type AgentLifecycleTransition struct {
+	DiagnosticOrigin   LifecycleDiagnosticOrigin
 	OperationID        string
 	OperationKind      string
 	RequestHash        string
@@ -224,24 +225,25 @@ type AgentLifecycleState struct {
 }
 
 type AgentLifecycleTransitionResult struct {
-	OperationID         string                            `json:"operation_id"`
-	TransitionID        string                            `json:"transition_id"`
-	Identity            runtimeagentidentity.Identity     `json:"identity"`
-	AgentID             string                            `json:"agent_id"`
-	PreviousEpoch       int64                             `json:"previous_epoch"`
-	RuntimeEpoch        int64                             `json:"runtime_epoch"`
-	PreviousGeneration  uint64                            `json:"previous_generation"`
-	Generation          uint64                            `json:"generation"`
-	PreviousPhase       AgentLifecyclePhase               `json:"previous_phase"`
-	Phase               AgentLifecyclePhase               `json:"phase"`
-	ConfigRevision      string                            `json:"config_revision"`
-	RunMode             AgentRunMode                      `json:"run_mode"`
-	Topology            runtimeagenttopology.Admission    `json:"topology"`
-	ProcessBinding      ProcessExecutionBinding           `json:"process_binding"`
-	Subordinate         sessions.LifecycleMutationOutcome `json:"subordinate"`
-	ProviderDrainCount  int                               `json:"provider_drain_count"`
-	ProviderDrainTarget AgentLifecyclePhase               `json:"provider_drain_target,omitempty"`
-	Replayed            bool                              `json:"-"`
+	DiagnosticProvenance LifecycleDiagnosticProvenance     `json:"diagnostic_provenance"`
+	OperationID          string                            `json:"operation_id"`
+	TransitionID         string                            `json:"transition_id"`
+	Identity             runtimeagentidentity.Identity     `json:"identity"`
+	AgentID              string                            `json:"agent_id"`
+	PreviousEpoch        int64                             `json:"previous_epoch"`
+	RuntimeEpoch         int64                             `json:"runtime_epoch"`
+	PreviousGeneration   uint64                            `json:"previous_generation"`
+	Generation           uint64                            `json:"generation"`
+	PreviousPhase        AgentLifecyclePhase               `json:"previous_phase"`
+	Phase                AgentLifecyclePhase               `json:"phase"`
+	ConfigRevision       string                            `json:"config_revision"`
+	RunMode              AgentRunMode                      `json:"run_mode"`
+	Topology             runtimeagenttopology.Admission    `json:"topology"`
+	ProcessBinding       ProcessExecutionBinding           `json:"process_binding"`
+	Subordinate          sessions.LifecycleMutationOutcome `json:"subordinate"`
+	ProviderDrainCount   int                               `json:"provider_drain_count"`
+	ProviderDrainTarget  AgentLifecyclePhase               `json:"provider_drain_target,omitempty"`
+	Replayed             bool                              `json:"-"`
 }
 
 type AgentLifecyclePersistence interface {
@@ -320,6 +322,7 @@ type PersistenceRoles struct {
 type StrategicContext = json.RawMessage
 
 type AgentManagerOptions struct {
+	LifecycleDiagnosticOrigin      LifecycleDiagnosticOrigin
 	ExecutionPosture               executionposture.Posture
 	BaseContext                    context.Context
 	SourceArtifactFact             runtimecorrelation.SourceArtifactFact

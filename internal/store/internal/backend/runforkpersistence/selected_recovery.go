@@ -35,12 +35,16 @@ func (s *RunForkPostgresOwner) ListSelectedForkRecoveryEntries(ctx context.Conte
 }
 
 func (s *RunForkSQLiteOwner) ListSelectedForkRecoveryEntries(ctx context.Context) ([]runfork.SelectedForkRecoveryEntry, error) {
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var entries []runfork.SelectedForkRecoveryEntry
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		entries, err = listSelectedForkRecoveryEntries(txctx, tx)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	return listSelectedForkRecoveryEntries(ctx, tx)
+	return entries, nil
 }
 
 func listSelectedForkRecoveryEntries(ctx context.Context, tx *sql.Tx) ([]runfork.SelectedForkRecoveryEntry, error) {

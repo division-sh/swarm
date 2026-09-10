@@ -294,6 +294,7 @@ func (l *agentExecutionLease) Release() {
 }
 
 type agentLifecycleCoordinator struct {
+	diagnosticOrigin    LifecycleDiagnosticOrigin
 	mu                  sync.Mutex
 	storeMu             sync.RWMutex
 	workMu              sync.Mutex
@@ -474,6 +475,7 @@ func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, sessionLifecy
 		store: store, phase: runtimeLifecycleStopped, runMode: AgentRunModeStopped,
 		cells: map[runtimeagentidentity.Identity]*agentLifecycleCell{}, sessions: sessionLifecycle,
 		routes: routes, stateReader: stateReader, effectsStore: effectsStore,
+		diagnosticOrigin: LifecycleDiagnosticOrigin{Owner: LifecycleDiagnosticNormal, Causality: LifecycleDiagnosticObservation},
 	}
 	return coordinator
 }
@@ -911,7 +913,7 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 				Topology: topology, Now: now,
 			}
 		}
-		result, err := store.CommitAgentLifecycleTransition(ctx, transition)
+		result, err := c.commitLifecycleTransition(ctx, store, transition)
 		if err != nil {
 			return err
 		}
@@ -1723,7 +1725,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	}
 	if store != nil {
 		var err error
-		result, err = store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+		result, err = c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash, Identity: identity,
 			AgentID: agentID, Trigger: trigger, ExpectedEpoch: previousEpoch, ExpectedGeneration: previousGeneration,
 			ExpectedPhase: previousPhase, TargetEpoch: nextEpoch, TargetGeneration: nextGeneration,
@@ -1923,7 +1925,7 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		if err != nil {
 			return err
 		}
-		_, err = store.CommitAgentLifecycleTransition(c.context(), AgentLifecycleTransition{
+		_, err = c.commitLifecycleTransition(c.context(), store, AgentLifecycleTransition{
 			OperationID: uuid.NewString(), OperationKind: "self_release",
 			RequestHash: lifecycleRequestHashForIdentity(token.Identity, cell.topology, "self_release", cell.configRevision, planHash),
 			Identity:    token.Identity,
@@ -2005,7 +2007,7 @@ func (c *agentLifecycleCoordinator) commitDeferredAgentTerminationLocked(
 			cell.processBinding.ProcessAuthorityID, cell.processBinding.ProcessBootID,
 			targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
 		)
-		return store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+		return c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
 			Identity: cell.identity, AgentID: cell.identity.AgentID(), Trigger: pending.trigger,
 			ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation, ExpectedPhase: cell.phase,
@@ -2063,7 +2065,7 @@ func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Contex
 	requestHash := lifecycleRequestHashForIdentity(cell.identity, cell.topology, "start_failed", cell.configRevision, planHash)
 	store := c.persistence()
 	if store != nil {
-		_, err = store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+		_, err = c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: "start_failed", RequestHash: requestHash, Identity: cell.identity,
 			AgentID: identity.AgentID(), Trigger: "start_failed", ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation,
 			ExpectedPhase: cell.phase, TargetEpoch: cell.epoch, TargetGeneration: cell.generation,
@@ -2248,7 +2250,7 @@ func (c *agentLifecycleCoordinator) commitIdentityTerminationLocked(
 				cell.processBinding.ProcessAuthorityID, cell.processBinding.ProcessBootID,
 				targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
 			)
-			result, err := store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+			result, err := c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 				OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash, Identity: identity,
 				AgentID: agentID, Trigger: trigger, ExpectedEpoch: epoch, ExpectedGeneration: generation, ExpectedPhase: phase,
 				TargetEpoch: nextEpoch, TargetGeneration: nextGeneration, TargetPhase: target,

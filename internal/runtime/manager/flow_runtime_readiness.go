@@ -1281,6 +1281,12 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		return fmt.Errorf("dynamic flow creation occurrence requires transactional event publisher")
 	}
 	creationCtx := events.WithDeliveryContext(ctx, plan.CreationEvent.DeliveryContext)
+	dispatchMode := runtimepipeline.DynamicFlowRuntimeCreationDispatchAsync
+	if admission.processPrepared {
+		// Only authorized startup-pending finalization uses this phase. Let
+		// recovery dispatch after this readiness attempt has finished.
+		dispatchMode = runtimepipeline.DynamicFlowRuntimeCreationDispatchStartupRecovery
+	}
 	if err := publisher.CommitDynamicFlowRuntimeCreationOccurrence(
 		creationCtx,
 		runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest{
@@ -1289,6 +1295,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 			Plan:         plan,
 			Event:        evt,
 			OccurredAt:   time.Now().UTC(),
+			DispatchMode: dispatchMode,
 		},
 	); err != nil {
 		fresh, found, loadErr := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))

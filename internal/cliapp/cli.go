@@ -36,7 +36,7 @@ func InjectedBuildMetadata() versionmetadata.Injected {
 	return versionmetadata.Injected{Version: binaryVersion, Commit: binaryCommit, Date: binaryDate}
 }
 
-func Execute(ctx context.Context, args []string, out, errOut io.Writer, runServe ServeRunner) int {
+func Execute(ctx context.Context, args []string, out, errOut io.Writer, runServe ServeRunner, runTest TestSessionRunner) int {
 	root, err := captureInvocationRoot()
 	if err != nil {
 		if errOut != nil {
@@ -46,6 +46,7 @@ func Execute(ctx context.Context, args []string, out, errOut io.Writer, runServe
 	}
 	opts := defaultRootCommandOptions()
 	opts.runServe = runServe
+	opts.runTest = runTest
 	return executeRootCommandAtInvocation(ctx, root, args, out, errOut, opts)
 }
 

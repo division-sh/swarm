@@ -32,6 +32,11 @@ type StandingFlowInstanceOwner interface {
 	EnsureFlowInstance(context.Context, FlowInstanceActivationRequest) (bool, error)
 }
 
+type StandingFlowInstancePreparationOwner interface {
+	StandingFlowInstanceOwner
+	PrepareStandingFlowInstance(context.Context, FlowInstanceActivationRequest) (bool, func() error, error)
+}
+
 type StandingTargetMutation struct {
 	Candidate  StandingServiceCandidate
 	Activation FlowInstanceActivationRequest
@@ -65,54 +70,83 @@ func (pc *PipelineCoordinator) CommitDynamicFlowRuntimeReadinessReconciliation(
 }
 
 func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner) ([]StandingTargetMutationResult, error) {
+	results, _, err := pc.commitStandingTargets(ctx, req, owner, nil)
+	return results, err
+}
+
+func (pc *PipelineCoordinator) PrepareStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstancePreparationOwner) ([]StandingTargetMutationResult, func() error, error) {
+	return pc.commitStandingTargets(ctx, req, owner, owner)
+}
+
+func (pc *PipelineCoordinator) commitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner, preparation StandingFlowInstancePreparationOwner) ([]StandingTargetMutationResult, func() error, error) {
 	if pc == nil || pc.workflowStore == nil {
-		return nil, fmt.Errorf("standing target mutation requires workflow persistence")
+		return nil, nil, fmt.Errorf("standing target mutation requires workflow persistence")
 	}
 	if owner == nil {
-		return nil, fmt.Errorf("standing target mutation requires flow instance owner")
+		return nil, nil, fmt.Errorf("standing target mutation requires flow instance owner")
 	}
 	observedAt := req.ObservedAt.UTC()
 	if observedAt.IsZero() {
-		return nil, fmt.Errorf("standing target mutation requires observed_at")
+		return nil, nil, fmt.Errorf("standing target mutation requires observed_at")
 	}
+	var completions []func() error
 	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
 	for _, target := range req.Targets {
 		reconciliation, found, err := pc.workflowStore.LoadReconciledStandingService(ctx, target.Candidate)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !found {
 			reconciliation, err = pc.workflowStore.ReconcileStandingService(ctx, target.Candidate)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
 		if reconciliation.RestartDisposition.Executable() {
 			if err := pc.workflowStore.AdmitStandingServiceRun(ctx, reconciliation.RunID, pc.executionPosture); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			operationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
 			operationCtx = runtimecorrelation.WithSourceArtifactFact(operationCtx, target.Candidate.Source)
 			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, runtimeeffects.ExecutionMode(pc.executionPosture.RootMode()))
-			if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
-				return nil, err
+			if preparation == nil {
+				if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
+					return nil, nil, err
+				}
 			}
 			activation := target.Activation
 			activation.StandingGenerationReplacement = reconciliation.Generation > 1
-			created, err := owner.EnsureFlowInstance(operationCtx, activation)
+			var created bool
+			var err error
+			if preparation != nil {
+				var complete func() error
+				created, complete, err = preparation.PrepareStandingFlowInstance(operationCtx, activation)
+				if err == nil {
+					completions = append(completions, complete)
+				}
+			} else {
+				created, err = owner.EnsureFlowInstance(operationCtx, activation)
+			}
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			result.Created = created
 			result.PublicationSequence, err = pc.workflowStore.PublishStandingService(operationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		results = append(results, result)
 	}
-	return results, nil
+	return results, func() error {
+		for _, complete := range completions {
+			if err := complete(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
 }
 
 func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context, req FlowInstanceTerminationRequest) (FlowInstanceTermination, error) {

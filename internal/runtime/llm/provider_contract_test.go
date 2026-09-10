@@ -101,7 +101,6 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 		{backend: "claude_cli", runtimeMode: "cli_test", provider: "claude"},
 		{backend: "openai_compatible", runtimeMode: "openai_compatible", provider: "openai_compatible"},
 		{backend: "openai_responses", runtimeMode: "openai_responses", provider: "openai"},
-		{backend: "mock", runtimeMode: "mock", provider: "mock"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.backend, func(t *testing.T) {
@@ -133,6 +132,14 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 				t.Fatalf("provider = %q, want %q", contract.Provider, tt.provider)
 			}
 		})
+	}
+}
+
+func TestMockRuntimeUsesCanonicalProviderContractWithoutPublicBackendSelector(t *testing.T) {
+	runtime := NewMockRuntime(nil, sessions.NewInMemoryRegistry(0), "", nil, nil, nil)
+	contract, err := RequireProviderContract("mock", runtime)
+	if err != nil || contract.Provider != "mock" {
+		t.Fatalf("mock provider contract = %#v, error=%v", contract, err)
 	}
 }
 

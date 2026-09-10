@@ -36,6 +36,7 @@ const (
 var goldenSmokeCandidateIDs = []string{"alpha", "beta"}
 
 type goldenWorkloadOptions struct {
+	lifecycleBinary   string
 	candidateIDs      []string
 	processGOMAXPROCS int
 	runDeadline       time.Duration
@@ -48,7 +49,8 @@ func TestGoldenAgentWorkloadSQLiteSmoke(t *testing.T) {
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
 	runGoldenAgentWorkload(t, binaryPath, releaseRoot, goldenSQLiteStore(releaseRoot), false, goldenWorkloadOptions{
-		candidateIDs: goldenSmokeCandidateIDs,
+		lifecycleBinary: buildOwnedMockLifecycleBinary(t, releaseRoot),
+		candidateIDs:    goldenSmokeCandidateIDs,
 	})
 }
 
@@ -60,7 +62,8 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 		t.Fatalf("create release project: %v", err)
 	}
 	contracts := filepath.Join(root, "contracts")
-	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
+	// L: exercise public live process ownership without claiming agent execution.
+	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "routing", "root-ingress"), contracts)
 	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-sqlite-possession-e2e\n\ngo 1.23.0\n")
 	store := goldenSQLiteStore(root)
 	configPath := filepath.Join(root, "config", "swarm.yaml")
@@ -114,7 +117,7 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			goldenServedBundleHash(t, process.rpc)
+			goldenServedBundleHash(t, process.rpc, "live")
 			if info, err := os.Stat(test.possessionPath); err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
 				t.Fatalf("serve possession coordinate %s: info=%v err=%v", test.possessionPath, info, err)
 			}
@@ -134,10 +137,12 @@ func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
 	t.Run("sqlite", func(t *testing.T) {
 		root := filepath.Join(releaseRoot, "sqlite-restart")
 		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), true, goldenWorkloadOptions{
-			candidateIDs: goldenSmokeCandidateIDs,
+			lifecycleBinary: lifecycleBinary,
+			candidateIDs:    goldenSmokeCandidateIDs,
 		})
 	})
 	t.Run("postgres", func(t *testing.T) {
@@ -147,7 +152,8 @@ func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 		}
 		root := filepath.Join(releaseRoot, "postgres-restart")
 		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), true, goldenWorkloadOptions{
-			candidateIDs: goldenSmokeCandidateIDs,
+			lifecycleBinary: lifecycleBinary,
+			candidateIDs:    goldenSmokeCandidateIDs,
 		})
 	})
 }
@@ -176,6 +182,7 @@ func runGoldenAgentWorkloadBurstIteration(t *testing.T, iteration int) {
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildRaceReleaseBinary(t, releaseRoot)
 	options := goldenWorkloadOptions{
+		lifecycleBinary:   buildOwnedMockLifecycleBinary(t, releaseRoot, "-race"),
 		candidateIDs:      goldenBurstCandidateIDs(),
 		processGOMAXPROCS: goldenBurstGOMAXPROCS,
 		runDeadline:       goldenBurstDeadline,
@@ -219,6 +226,7 @@ func goldenContinuousProofProfile(t *testing.T) (string, bool) {
 func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T) {
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
+	lifecycleBinary := buildOwnedMockLifecycleBinary(t, releaseRoot)
 	root := filepath.Join(releaseRoot, "sqlite-dev-restart")
 	store := goldenStoreSelection{name: "sqlite", configYAML: "store:\n  backend: sqlite\n"}
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -237,16 +245,17 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	apiPort := freeReleaseTCPPort(t)
 	start := func(dev bool) *releaseServeProcess {
 		return startReleaseServe(t, releaseProcessSpec{
-			BinaryPath: binaryPath,
-			WorkingDir: root,
-			ConfigPath: configPath,
-			Source:     contracts,
-			Store:      store.name,
-			Dev:        dev,
-			APIPort:    apiPort,
-			TokenFile:  tokenFile,
-			Token:      goldenAPIToken,
-			Env:        env,
+			BinaryPath:                  binaryPath,
+			InternalMockLifecycleBinary: lifecycleBinary,
+			WorkingDir:                  root,
+			ConfigPath:                  configPath,
+			Source:                      contracts,
+			Store:                       store.name,
+			Dev:                         dev,
+			APIPort:                     apiPort,
+			TokenFile:                   tokenFile,
+			Token:                       goldenAPIToken,
+			Env:                         env,
 		})
 	}
 
@@ -257,7 +266,7 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 		t.Fatal(err)
 	}
 	readyCancel()
-	bundleHash := goldenServedBundleHash(t, process.rpc)
+	bundleHash := goldenServedBundleHash(t, process.rpc, "mock_only")
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, goldenSmokeCandidateIDs)
 	waitForGoldenCrashCheckpoint(t, process.rpc, runID, goldenSmokeCandidateIDs, goldenRunDeadline)
 	if err := process.killAndWait(5 * time.Second); err != nil {
@@ -270,7 +279,7 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	if err != nil {
 		t.Fatalf("restart fresh dev scratch epoch: %v", err)
 	}
-	if restartedHash := goldenServedBundleHash(t, restarted.rpc); restartedHash != bundleHash {
+	if restartedHash := goldenServedBundleHash(t, restarted.rpc, "mock_only"); restartedHash != bundleHash {
 		t.Fatalf("restarted bundle hash = %q, want unchanged persisted source %q", restartedHash, bundleHash)
 	}
 	missingCtx, missingCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -299,7 +308,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			if err := os.MkdirAll(test.root, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), filepath.Join(test.root, "contracts"))
+			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "routing", "root-ingress"), filepath.Join(test.root, "contracts"))
 			writeReleaseFile(t, filepath.Join(test.root, ".swarm", "swarm.yaml"), goldenRuntimeConfig(goldenStoreSelection{name: "sqlite", configYAML: "store:\n  backend: sqlite\n"}))
 			writeReleaseFile(t, filepath.Join(test.root, "api-token"), goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, test.root, "", 0)
@@ -333,7 +342,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 				t.Fatal(err)
 			}
 			cancel()
-			goldenServedBundleHash(t, process.rpc)
+			goldenServedBundleHash(t, process.rpc, "live")
 			scratchPath := filepath.Join(contracts, ".swarm", "stores", "dev-scratch.db")
 			if info, err := os.Stat(scratchPath); err != nil || !info.Mode().IsRegular() {
 				t.Fatalf("canonical dev scratch store %s: info=%v err=%v", scratchPath, info, err)
@@ -355,7 +364,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 		}
 		contracts := filepath.Join(projectRoot, "contracts")
-		copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
+		copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "routing", "root-ingress"), contracts)
 		invocationEnv := goldenProcessEnv(t, invocationRoot, "", 0)
 		assertGoldenProcessHasNoExternalExecutables(t, invocationEnv)
 
@@ -392,7 +401,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			t.Fatal(err)
 		}
 		borrowedCancel()
-		goldenServedBundleHash(t, borrowed.rpc)
+		goldenServedBundleHash(t, borrowed.rpc, "live")
 		if err := borrowed.stopAndWait(5 * time.Second); err != nil {
 			t.Fatalf("borrowed non-dev teardown: %v\n%s", err, borrowed.output.String())
 		}
@@ -417,7 +426,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			t.Fatal(err)
 		}
 		localCancel()
-		goldenServedBundleHash(t, local.rpc)
+		goldenServedBundleHash(t, local.rpc, "live")
 		if err := local.stopAndWait(5 * time.Second); err != nil {
 			t.Fatalf("remediated local dev teardown: %v\n%s", err, local.output.String())
 		}
@@ -525,6 +534,10 @@ func goldenDatabaseName(t *testing.T) string {
 
 func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenStoreSelection, restart bool, options goldenWorkloadOptions) {
 	t.Helper()
+	if options.lifecycleBinary == "" {
+		t.Fatal("retained mock workload requires its internal compiled lifecycle binary")
+	}
+	t.Log("proof_surface=H; exact mock workload/restart proof, not public serve/test")
 	const (
 		configOperand    = "swarm.yaml"
 		contractsOperand = "contracts"
@@ -571,15 +584,16 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	apiPort := freeReleaseTCPPort(t)
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
-			BinaryPath: binaryPath,
-			WorkingDir: projectRoot,
-			ConfigPath: configOperand,
-			Source:     contractsOperand,
-			Store:      store.name,
-			APIPort:    apiPort,
-			TokenFile:  tokenOperand,
-			Token:      goldenAPIToken,
-			Env:        env,
+			BinaryPath:                  binaryPath,
+			InternalMockLifecycleBinary: options.lifecycleBinary,
+			WorkingDir:                  projectRoot,
+			ConfigPath:                  configOperand,
+			Source:                      contractsOperand,
+			Store:                       store.name,
+			APIPort:                     apiPort,
+			TokenFile:                   tokenOperand,
+			Token:                       goldenAPIToken,
+			Env:                         env,
 		})
 		ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 		defer cancel()
@@ -589,7 +603,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		return process
 	}
 	process := start()
-	bundleHash := goldenServedBundleHash(t, process.rpc)
+	bundleHash := goldenServedBundleHash(t, process.rpc, "mock_only")
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, options.candidateIDs)
 	var preRestartRuntimeLog *goldenRuntimeLog
 	if restart {
@@ -649,7 +663,6 @@ func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
 
 func goldenRuntimeConfig(store goldenStoreSelection) string {
 	return "runtime:\n" +
-		"  execution_posture: mock_only\n" +
 		"  recovery_on_startup: true\n" +
 		"llm:\n" +
 		"  backend: claude_cli\n" +
@@ -725,7 +738,7 @@ func assertGoldenProcessHasNoExternalExecutables(t *testing.T, env []string) {
 	}
 }
 
-func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient) string {
+func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient, wantPosture string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -744,9 +757,9 @@ func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient) string {
 	if err := rpc.call(ctx, "health.check", map[string]any{}, &health); err != nil {
 		t.Fatal(err)
 	}
-	if !health.Alive || !health.Ready || !health.DBOK || !health.RuntimeOK || health.ExecutionPosture != "mock_only" ||
+	if !health.Alive || !health.Ready || !health.DBOK || !health.RuntimeOK || health.ExecutionPosture != wantPosture ||
 		health.Bundle.WorkflowName != "." || health.Bundle.WorkflowVersion != health.Bundle.BundleHash || strings.TrimSpace(health.Bundle.BundleHash) == "" {
-		t.Fatalf("health.check = %#v, want ready root flow at the exact admitted bundle hash in mock_only posture", health)
+		t.Fatalf("health.check = %#v, want ready root flow at the exact admitted bundle hash in %s posture", health, wantPosture)
 	}
 	return health.Bundle.BundleHash
 }
@@ -882,29 +895,39 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store 
 	if err != nil {
 		diagnosticCtx, diagnosticCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer diagnosticCancel()
+		collectGoldenFailureEvidence(diagnosticCtx, rpc, store.diagnosticDB, runID, func(part string, evidence any, partErr error) {
+			// Flush each part immediately; later failures cannot erase earlier facts.
+			encoded, encodeErr := json.Marshal(evidence)
+			t.Logf("golden completion failure evidence part=%s error=%v encode_error=%v: %s", part, partErr, encodeErr, encoded)
+		})
+		t.Fatalf("wait for golden run completion: %v; last run=%#v\nserve output:\n%s", err, last, process.output.String())
+	}
+}
+
+func collectGoldenFailureEvidence(ctx context.Context, rpc *releaseRPCClient, db *sql.DB, runID string, emit func(string, any, error)) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	collect := func(part string, read func(context.Context) (any, error)) {
+		partCtx, partCancel := context.WithTimeout(ctx, time.Second)
+		defer partCancel()
+		value, err := read(partCtx)
+		emit(part, value, err)
+	}
+	collect("diagnosis", func(ctx context.Context) (any, error) {
 		var diagnosis goldenDiagnosis
-		diagnosisErr := rpc.call(diagnosticCtx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
-		events, eventsErr := listGoldenEvents(diagnosticCtx, rpc, runID)
-		eventCounts := make(map[string]int)
-		deliveryCounts := make(map[string]int)
-		for _, event := range events {
-			eventCounts[event.EventName]++
-			for _, delivery := range event.Deliveries {
-				deliveryCounts[delivery.Status]++
-			}
-		}
-		entities := listGoldenEntities(t, diagnosticCtx, rpc, runID)
+		err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
+		return diagnosis, err
+	})
+	collect("events", func(ctx context.Context) (any, error) { return listGoldenEvents(ctx, rpc, runID) })
+	collect("entities", func(ctx context.Context) (any, error) { return readGoldenEntities(ctx, rpc, runID) })
+	collect("runtime_logs", func(ctx context.Context) (any, error) {
 		var logs struct {
 			Logs []map[string]any `json:"logs"`
 		}
-		logsErr := rpc.call(diagnosticCtx, "runtime.logs", map[string]any{"run_id": runID, "limit": 100, "order": "desc"}, &logs)
-		logCounts := make(map[string]int)
-		for _, log := range logs.Logs {
-			logCounts[fmt.Sprintf("%v/%v", log["component"], log["action"])]++
-		}
-		completion, completionErr := readGoldenCompletionCandidate(diagnosticCtx, store.diagnosticDB, runID)
-		t.Fatalf("wait for golden run completion: %v; last run=%#v; completion=%#v completion_err=%v; diagnosis=%#v diagnosis_err=%v; event_counts=%#v delivery_counts=%#v events_err=%v; entities=%#v; runtime_log_counts=%#v logs_err=%v\nserve output:\n%s", err, last, completion, completionErr, diagnosis, diagnosisErr, eventCounts, deliveryCounts, eventsErr, entities, logCounts, logsErr, process.output.String())
-	}
+		err := rpc.call(ctx, "runtime.logs", map[string]any{"run_id": runID, "limit": 100, "order": "desc"}, &logs)
+		return logs.Logs, err
+	})
+	collect("completion", func(ctx context.Context) (any, error) { return readGoldenCompletionCandidate(ctx, db, runID) })
 }
 
 type goldenCompletionCandidate struct {
@@ -998,11 +1021,11 @@ func listGoldenEvents(ctx context.Context, rpc *releaseRPCClient, runID string) 
 			NextCursor string        `json:"next_cursor"`
 		}
 		if err := rpc.call(ctx, "event.list", params, &page); err != nil {
-			return nil, err
+			return all, err
 		}
 		for _, event := range page.Events {
 			if strings.TrimSpace(event.EventID) == "" || event.RunID != runID || seenEvents[event.EventID] {
-				return nil, fmt.Errorf("event.list returned malformed or duplicate row %#v", event)
+				return all, fmt.Errorf("event.list returned malformed or duplicate row %#v", event)
 			}
 			seenEvents[event.EventID] = true
 			all = append(all, event)
@@ -1011,7 +1034,7 @@ func listGoldenEvents(ctx context.Context, rpc *releaseRPCClient, runID string) 
 			return all, nil
 		}
 		if seenCursors[page.NextCursor] {
-			return nil, fmt.Errorf("event.list repeated cursor %q", page.NextCursor)
+			return all, fmt.Errorf("event.list repeated cursor %q", page.NextCursor)
 		}
 		seenCursors[page.NextCursor] = true
 		cursor = page.NextCursor
@@ -1213,6 +1236,14 @@ func assertGoldenDeliveryTarget(t *testing.T, event goldenEvent, delivery golden
 
 func listGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string) []goldenEntitySummary {
 	t.Helper()
+	entities, err := readGoldenEntities(ctx, rpc, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entities
+}
+
+func readGoldenEntities(ctx context.Context, rpc *releaseRPCClient, runID string) ([]goldenEntitySummary, error) {
 	var all []goldenEntitySummary
 	cursor := ""
 	seenCursors := map[string]bool{}
@@ -1227,20 +1258,20 @@ func listGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClient
 			NextCursor string                `json:"next_cursor"`
 		}
 		if err := rpc.call(ctx, "entity.list", params, &page); err != nil {
-			t.Fatal(err)
+			return all, err
 		}
 		for _, entity := range page.Entities {
 			if entity.EntityID == "" || entity.RunID != runID || seenEntities[entity.EntityID] {
-				t.Fatalf("entity.list returned malformed or duplicate row %#v", entity)
+				return all, fmt.Errorf("entity.list returned malformed or duplicate row %#v", entity)
 			}
 			seenEntities[entity.EntityID] = true
 			all = append(all, entity)
 		}
 		if page.NextCursor == "" {
-			return all
+			return all, nil
 		}
 		if seenCursors[page.NextCursor] {
-			t.Fatalf("entity.list repeated cursor %q", page.NextCursor)
+			return all, fmt.Errorf("entity.list repeated cursor %q", page.NextCursor)
 		}
 		seenCursors[page.NextCursor] = true
 		cursor = page.NextCursor

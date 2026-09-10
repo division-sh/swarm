@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -44,7 +45,7 @@ func (r WorkspaceCapabilityReason) String() string {
 	case WorkspaceReasonLifecycle:
 		return "declared agents use runtime-mediated workspace lifecycle"
 	case WorkspaceReasonClaudeCLI:
-		return fmt.Sprintf("unmocked agent %s uses claude_cli backend", workspaceBackendAgentLabel(r.AgentID))
+		return fmt.Sprintf("live agent %s uses claude_cli backend", workspaceBackendAgentLabel(r.AgentID))
 	case WorkspaceReasonNativeBash:
 		return fmt.Sprintf("agent %s has native_tools.bash", workspaceBackendAgentLabel(r.AgentID))
 	case WorkspaceReasonExecTool:
@@ -121,15 +122,7 @@ func resolveWorkspaceBackendDecision(flagBackend string, flagSet bool, cfg *conf
 	if err != nil {
 		return preference, err
 	}
-	return DecideWorkspaceBackend(preference, cfg, source)
-}
-
-func resolveWorkspaceBackendDiagnostic(repo, configPath string, source semanticview.Source) (WorkspaceBackendSelection, error) {
-	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
-	if err != nil {
-		return WorkspaceBackendSelection{}, err
-	}
-	return resolveWorkspaceBackendDecision("", false, cfgResult.Config, source)
+	return DecideWorkspaceBackend(executionposture.Live, preference, cfg, source)
 }
 
 func resolveWorkspaceBackendFromInput(in workspaceBackendInput) (WorkspaceBackendSelection, error) {
@@ -179,8 +172,8 @@ func normalizeWorkspaceBackend(raw string, source string) (string, error) {
 	}
 }
 
-func DecideWorkspaceBackend(preference WorkspaceBackendSelection, cfg *config.Config, source semanticview.Source) (WorkspaceBackendSelection, error) {
-	class, reasons, err := classifyWorkspaceBackendRequirement(cfg, source)
+func DecideWorkspaceBackend(posture executionposture.Posture, preference WorkspaceBackendSelection, cfg *config.Config, source semanticview.Source) (WorkspaceBackendSelection, error) {
+	class, reasons, err := classifyWorkspaceBackendRequirement(posture, cfg, source)
 	if err != nil {
 		return preference, err
 	}
@@ -239,7 +232,10 @@ func DecideWorkspaceBackend(preference WorkspaceBackendSelection, cfg *config.Co
 	return decision, nil
 }
 
-func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview.Source) (workspaceCapabilityClass, []WorkspaceCapabilityReason, error) {
+func classifyWorkspaceBackendRequirement(posture executionposture.Posture, cfg *config.Config, source semanticview.Source) (workspaceCapabilityClass, []WorkspaceCapabilityReason, error) {
+	if !posture.Valid() {
+		return "", nil, fmt.Errorf("command execution purpose is required for workspace selection")
+	}
 	if cfg == nil {
 		return "", nil, fmt.Errorf("runtime config is required")
 	}
@@ -272,6 +268,7 @@ func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview
 			label += " (" + declaration.Label(true) + ")"
 		}
 		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			Posture:           posture,
 			ConfiguredDefault: profile,
 			MockConfigured:    entry.Mock.Configured(),
 		})
@@ -281,6 +278,9 @@ func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview
 		if selection.Profile.ID == llmselection.BackendClaudeCLI {
 			class = workspaceCapabilityExec
 			reasons = append(reasons, WorkspaceCapabilityReason{Kind: WorkspaceReasonClaudeCLI, AgentID: label})
+		}
+		if posture == executionposture.MockOnly {
+			continue
 		}
 		if nativeToolEnabled(entry.NativeTools, "bash") {
 			class = workspaceCapabilityExec

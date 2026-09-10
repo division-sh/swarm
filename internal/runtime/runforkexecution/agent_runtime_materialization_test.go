@@ -312,7 +312,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		t.Fatal("selected-contract mock runtime returned no agent factory")
 	}
 	actor := runtimeactors.AgentConfig{
-		ID: "mock-agent", LLMBackend: llmselection.BackendMock,
+		ID: "mock-agent", ResolvedLLMBackend: llmselection.BackendMock,
 		ResolvedLLMProvider: llmselection.ProviderMock, ResolvedLLMTransport: llmselection.TransportMock,
 		ExecutionMode: runtimeeffects.ExecutionModeMock,
 		Mock: mockperformance.Performance{
@@ -464,7 +464,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	})
 	agentConfig.Identity = agentidentity.Identity{}
 	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(
-		runtimemanager.AgentManagerOptions{},
+		runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live},
 		runtimemanager.AgentMaterializationBlueprint{Config: agentConfig, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
 	)
 	if err != nil {

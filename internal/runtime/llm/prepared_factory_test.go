@@ -14,8 +14,12 @@ import (
 func TestPreparedProviderFactoryHasNoBusinessAuthority(t *testing.T) {
 	for _, backend := range []string{selection.BackendAnthropic, selection.BackendClaudeCLI, selection.BackendOpenAICompatible, selection.BackendOpenAIResponses, selection.BackendMock} {
 		t.Run(backend, func(t *testing.T) {
-			cfg := &config.Config{LLM: config.LLMConfig{Backend: backend}}
-			profile, err := selection.ResolveActiveBackend(backend)
+			configuredBackend := backend
+			if backend == selection.BackendMock {
+				configuredBackend = selection.BackendClaudeCLI
+			}
+			cfg := &config.Config{LLM: config.LLMConfig{Backend: configuredBackend}}
+			profile, err := selection.ResolveLiveBackend(configuredBackend)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -23,7 +27,14 @@ func TestPreparedProviderFactoryHasNoBusinessAuthority(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			client, err := set.defaultSlot.get()
+			var client Runtime
+			if backend == selection.BackendMock {
+				var resolved AgentRuntimeResolution
+				resolved, err = set.ResolveAgentRuntime(resolvedMockAgent("prepared-mock"))
+				client = resolved.Runtime
+			} else {
+				client, err = set.defaultSlot.get()
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,6 +65,25 @@ func TestPreparedProviderFactoryHasNoBusinessAuthority(t *testing.T) {
 				t.Fatalf("normal construction guard was weakened: %v", err)
 			}
 		})
+	}
+}
+
+func TestPreparedProviderFactoryRejectsMockConfiguredDefault(t *testing.T) {
+	profile, err := selection.ResolveActiveBackend(selection.BackendMock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := RuntimeFactory{Cfg: &config.Config{LLM: config.LLMConfig{Backend: selection.BackendClaudeCLI}}}
+	for _, prepared := range []bool{false, true} {
+		var set *AgentRuntimeSet
+		if prepared {
+			set, err = NewPreparedAgentRuntimeSet(profile, factory)
+		} else {
+			set, err = NewAgentRuntimeSet(profile, factory, nil)
+		}
+		if set != nil || err == nil || !strings.Contains(err.Error(), "backend mock is retired as a public selector") {
+			t.Fatalf("prepared=%t admitted configured mock default: %v", prepared, err)
+		}
 	}
 }
 

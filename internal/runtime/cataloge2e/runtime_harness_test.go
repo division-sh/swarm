@@ -29,6 +29,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -314,12 +315,8 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	}
 
 	if provider != nil {
-		posture, err := cfg.ProcessExecutionPosture()
-		if err != nil {
-			t.Fatal(err)
-		}
 		deps.Options.LLMRuntime = &terminalManagedProvider{scriptedLLMRuntime: llmRuntime, probe: provider,
-			controller: runtimeeffects.NewCompletionController(deps.EffectsStore, deps.CompletionStore, deps.CompletionHeartbeatStore, nil).WithExecutionPosture(posture)}
+			controller: runtimeeffects.NewCompletionController(deps.EffectsStore, deps.CompletionStore, deps.CompletionHeartbeatStore, nil).WithExecutionPosture(deps.Options.ExecutionPosture)}
 	}
 	rt, err := runtime.NewValidationHarnessRuntime(ctx, deps)
 	if err != nil {
@@ -486,6 +483,7 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 		RuntimeIngressStore:      pg,
 		ConversationStore:        nil,
 		Options: runtime.RuntimeOptions{
+			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         llmRuntime,
@@ -545,6 +543,7 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 		RuntimeIngressStore:      sqlite,
 		ConversationStore:        nil,
 		Options: runtime.RuntimeOptions{
+			ExecutionPosture:   executionposture.Live,
 			SelfCheck:          false,
 			WorkflowModule:     module,
 			LLMRuntime:         llmRuntime,

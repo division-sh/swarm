@@ -24,6 +24,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -254,11 +255,7 @@ func validateSelectedContractAgentExecutionSelections(profile llmselection.Profi
 		return nil
 	}
 	for _, record := range records {
-		_, selectionErr := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
-			ConfiguredDefault: profile,
-			AuthoredBackend:   record.Config.LLMBackend,
-			MockConfigured:    record.Config.Mock.Configured(),
-		})
+		_, selectionErr := runtimellm.ValidateAgentExecutionDescriptor(profile, record.Config)
 		if selectionErr != nil {
 			return fmt.Errorf("selected-contract agent %s execution selection: %w", record.Config.ID, selectionErr)
 		}

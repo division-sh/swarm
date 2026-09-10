@@ -81,10 +81,9 @@ type AgentRuntimeResolution struct {
 
 // AgentRuntimeSet binds one configured live default and the exact mock
 // adapter to already-resolved agent descriptors. Slots are built lazily so a
-// fully mocked source never constructs the unreachable live adapter.
+// command-selected mock execution never constructs the unreachable live adapter.
 type AgentRuntimeSet struct {
 	configuredDefault llmselection.Profile
-	modelAliases      llmselection.ModelAliases
 	defaultSlot       *runtimeSlot
 	mockSlot          *runtimeSlot
 }
@@ -104,7 +103,7 @@ func NewPreparedAgentRuntimeSet(configuredDefault llmselection.Profile, factory 
 }
 
 func newAgentRuntimeSet(configuredDefault llmselection.Profile, factory RuntimeFactory, injectedDefault Runtime, prepareLive, prepareMock func(RuntimeFactory) (RuntimeFactory, error)) (*AgentRuntimeSet, error) {
-	profile, err := llmselection.ResolveActiveBackend(configuredDefault.ID)
+	profile, err := llmselection.ResolveLiveBackend(configuredDefault.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -116,19 +115,10 @@ func newAgentRuntimeSet(configuredDefault llmselection.Profile, factory RuntimeF
 	mockBuilder := &runtimeFactoryBuilder{factory: factory, prepare: prepareMock}
 	defaultSlot := &runtimeSlot{profile: profile, injected: injectedDefault, builder: liveBuilder}
 	mockSlot := &runtimeSlot{profile: mockProfile, builder: mockBuilder}
-	if profile.ID == llmselection.BackendMock {
-		mockSlot = defaultSlot
-	}
 	return &AgentRuntimeSet{
 		configuredDefault: profile,
-		modelAliases: func() llmselection.ModelAliases {
-			if factory.Cfg == nil {
-				return nil
-			}
-			return factory.Cfg.LLM.Models
-		}(),
-		defaultSlot: defaultSlot,
-		mockSlot:    mockSlot,
+		defaultSlot:       defaultSlot,
+		mockSlot:          mockSlot,
 	}, nil
 }
 
@@ -157,23 +147,9 @@ func (r *AgentRuntimeSet) ResolveAgentRuntime(actor models.AgentConfig) (AgentRu
 	if r == nil {
 		return AgentRuntimeResolution{}, fmt.Errorf("agent llm runtime resolver is required")
 	}
-	resolved, err := ResolveAgentExecution(r.configuredDefault, r.modelAliases, actor)
+	selection, err := ValidateAgentExecutionDescriptor(r.configuredDefault, actor)
 	if err != nil {
 		return AgentRuntimeResolution{}, fmt.Errorf("agent %s execution selection: %w", agentRuntimeLabel(actor), err)
-	}
-	actor = resolved.Actor
-	selection := resolved.Selection
-	if strings.TrimSpace(actor.ResolvedLLMBackend) != selection.Profile.ID {
-		return AgentRuntimeResolution{}, fmt.Errorf("agent %s resolved llm backend %q conflicts with effective selection %q", agentRuntimeLabel(actor), strings.TrimSpace(actor.ResolvedLLMBackend), selection.Profile.ID)
-	}
-	if actor.ExecutionMode != selection.Mode {
-		return AgentRuntimeResolution{}, fmt.Errorf("agent %s execution mode %q conflicts with effective selection %q", agentRuntimeLabel(actor), actor.ExecutionMode, selection.Mode)
-	}
-	if strings.TrimSpace(actor.ResolvedLLMProvider) != selection.Profile.Provider {
-		return AgentRuntimeResolution{}, fmt.Errorf("agent %s provider %q conflicts with effective selection %q", agentRuntimeLabel(actor), strings.TrimSpace(actor.ResolvedLLMProvider), selection.Profile.Provider)
-	}
-	if strings.TrimSpace(actor.ResolvedLLMTransport) != selection.Profile.Transport {
-		return AgentRuntimeResolution{}, fmt.Errorf("agent %s transport %q conflicts with effective selection %q", agentRuntimeLabel(actor), strings.TrimSpace(actor.ResolvedLLMTransport), selection.Profile.Transport)
 	}
 	modelRuntime, err := r.runtimeForSelection(selection)
 	if err != nil {

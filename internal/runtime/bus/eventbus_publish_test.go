@@ -74,7 +74,7 @@ func TestMockOnlyPostureRejectsLiveEventBeforePersistence(t *testing.T) {
 		uuid.NewString(), "work.requested", "operator", "", []byte(`{}`), 0,
 		eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 		t.Fatalf("Publish error = %v, want mock-only live rejection", err)
 	}
 	if store.commits != 0 {

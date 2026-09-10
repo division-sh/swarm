@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -234,6 +235,10 @@ func registerServeTestDurableAgent(
 		t.Fatalf("serve test bundle source: %v", err)
 	}
 	bundleHash := source.BundleHash()
+	// Seed the selected-store representation before sealing its topology revision.
+	if len(cfg.Config) == 0 {
+		cfg.Config = json.RawMessage(`{}`)
+	}
 	ctx := runtimecorrelation.WithRunID(runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		bundleHash,
@@ -256,7 +261,9 @@ func registerServeTestDurableAgent(
 		if candidateIdentity.Normalize() != identity.Normalize() {
 			continue
 		}
-		candidate.Config = cfg
+		// The prompt is intentionally process-local; all persisted execution
+		// fields remain exactly those read back from the fixture writer.
+		candidate.Config.Prompt = cfg.Prompt
 		if err := manager.MaterializeAdmittedAgentForExecution(ctx, candidate); err != nil {
 			t.Fatalf("materialize committed serve test durable agent: %v", err)
 		}

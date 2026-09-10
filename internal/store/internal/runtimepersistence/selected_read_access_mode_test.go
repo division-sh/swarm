@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -46,6 +48,34 @@ func TestSQLiteStandaloneSelectedReadsBypassMutationAdmission(t *testing.T) {
 		t.Fatalf("construct delivery authority: %v", err)
 	}
 	reads := selectedSQLiteReadProofs(store, capability.CurrentSourceSet, authority, runID)
+	identity := mustTestAgentIdentityForRun(runID, "read-snapshot-agent", "global")
+	seedTestAgentRow(t, ctx, db, false, identity, "active")
+	reads = append(reads,
+		selectedReadProof{name: "agent lifecycle snapshot", run: func(ctx context.Context) error {
+			_, err := store.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{identity})
+			return err
+		}},
+		selectedReadProof{name: "agent summary snapshot", run: func(ctx context.Context) error {
+			_, err := store.operatorAgentSQLite.ListOperatorAgents(ctx, operatorread.OperatorAgentListOptions{})
+			return err
+		}},
+		selectedReadProof{name: "agent diagnosis snapshot", run: func(ctx context.Context) error {
+			_, err := store.operatorAgentSQLite.LoadOperatorAgentDiagnosis(ctx, identity, operatorread.OperatorAgentDiagnosisOptions{})
+			return err
+		}},
+		selectedReadProof{name: "pending facts snapshot", run: func(ctx context.Context) error {
+			_, err := store.ListPendingAgentDeliveryFacts(ctx, []agentidentity.Identity{identity}, time.Time{})
+			return err
+		}},
+		selectedReadProof{name: "pending details snapshot", run: func(ctx context.Context) error {
+			_, err := store.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{AgentIdentity: identity})
+			return err
+		}},
+		selectedReadProof{name: "standing status snapshot", run: func(ctx context.Context) error {
+			_, err := store.pipelineSQLiteOwner.ListStandingServiceStatuses(ctx)
+			return err
+		}},
+	)
 	before := captureSelectedReadSideEffects(t, db, false, runID)
 
 	holderStarted := make(chan struct{})
@@ -272,12 +302,19 @@ func TestStandaloneSelectedReadAccessModeGuard(t *testing.T) {
 		}
 		tests = append(tests, selectedReadGuard{path: "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation_adapter.go", receiver: "RunLifecycle" + backend + "Owner", method: "RequirePublicationRunActive", required: "runRead"})
 	}
+	for _, method := range []string{"ListAgentDeliveryLifecycleFacts", "readOperatorAgentSummarySnapshot", "LoadOperatorAgentDiagnosis"} {
+		tests = append(tests, selectedReadGuard{path: "internal/store/internal/operatorsurface/sqlite_operator_agent_conversation_read_surface.go", receiver: "AgentSQLite", method: method, required: "RunReadTransaction"})
+	}
+	for _, method := range []string{"ListPendingAgentDeliveryFacts", "ListPendingAgentDeliveryDetails"} {
+		tests = append(tests, selectedReadGuard{path: "internal/store/internal/operatorsurface/pending_delivery_read_surface.go", receiver: "AgentSQLite", method: method, required: "RunReadTransaction"})
+	}
+	tests = append(tests, selectedReadGuard{path: "internal/store/internal/backend/pipelinepersistence/standing_service.go", receiver: "standingServiceAdapter", method: "ListStandingServiceStatuses", required: "RunReadTransaction"})
 	for _, test := range tests {
 		calls := selectedReadMethodCalls(t, filepath.Join(root, test.path), test.receiver, test.method)
 		if !calls[test.required] {
 			t.Errorf("%s.%s does not consume %s: calls=%v", test.receiver, test.method, test.required, calls)
 		}
-		for _, forbidden := range []string{"RunTransaction", "runPrivateAuthorActivityMutation", "runSQLiteLifecycleOperation", "runPostgresLifecycleOperation", "WithCandidateHandoffResult"} {
+		for _, forbidden := range []string{"BeginTx", "Commit", "Rollback", "RunTransaction", "runPrivateAuthorActivityMutation", "runSQLiteLifecycleOperation", "runPostgresLifecycleOperation", "WithCandidateHandoffResult"} {
 			if calls[forbidden] {
 				t.Errorf("%s.%s still consumes mutation-only owner %s", test.receiver, test.method, forbidden)
 			}

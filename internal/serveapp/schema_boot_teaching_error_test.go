@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -35,6 +36,7 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 		t.Fatalf("DefaultRuntimeConfig: %v", err)
 	}
 	request := serveRuntimeBundleContextRequest{
+		ExecutionPosture: executionposture.Live,
 		Ctx:              context.Background(),
 		Loaded:           loaded,
 		Config:           cfg,

@@ -422,7 +422,6 @@ func writeReleaseChannelFixture(t *testing.T, root string) string {
 
 func releaseChannelRuntimeConfig(storePath string) string {
 	return "runtime:\n" +
-		"  execution_posture: live\n" +
 		"  recovery_on_startup: true\n" +
 		"workspace:\n" +
 		"  backend: host\n" +

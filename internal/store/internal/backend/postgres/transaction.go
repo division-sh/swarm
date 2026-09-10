@@ -6,6 +6,9 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log/slog"
+
+	"github.com/lib/pq"
 )
 
 func (b *Backend) RunTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) (err error) {
@@ -27,42 +30,77 @@ func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, opera
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	scope := pq.NewOperationScope(ctx)
+	ctx = scope.Context(ctx)
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
+	if err := bindNativeOperation(conn, scope); err != nil {
+		return errors.Join(err, conn.Close())
+	}
 	discard := false
+	var tx *sql.Tx
 	defer func() {
+		var cleanupErr error
+		if tx != nil {
+			rollbackErr := tx.Rollback()
+			if rollbackErr != nil {
+				discard = true
+				if rollbackErr != sql.ErrTxDone {
+					cleanupErr = rollbackErr
+				}
+			}
+		}
 		if discard {
 			rawErr := conn.Raw(func(any) error { return driver.ErrBadConn })
-			if errors.Is(rawErr, driver.ErrBadConn) {
+			if rawErr == driver.ErrBadConn || rawErr == sql.ErrConnDone {
 				rawErr = nil
 			}
-			err = errors.Join(err, rawErr)
+			cleanupErr = errors.Join(cleanupErr, rawErr)
 		}
-		err = errors.Join(err, conn.Close())
+		// Unsafe rollback must dispose first: only that exact physical close can
+		// end an uncompleted driver transaction. Safe automatic rollback is also
+		// joined here before the owned connection returns to the pool.
+		_ = scope.Wait()
+		// Keep the record bound through physical pool-return disposal. Native
+		// ResetSession clears it before the next borrower is admitted.
+		closeErr := conn.Close()
+		if closeErr == sql.ErrConnDone {
+			closeErr = nil
+		}
+		cleanupErr = errors.Join(cleanupErr, closeErr)
+		if nativeErr := scope.Err(); nativeErr != nil {
+			err = errors.Join(err, nativeErr)
+		}
+		if cleanupErr != nil {
+			slog.Error("postgres transaction cleanup failed", "error", cleanupErr)
+			err = errors.Join(err, cleanupErr)
+		}
 	}()
-	tx, err := conn.BeginTx(ctx, opts)
+	tx, err = conn.BeginTx(ctx, opts)
 	if err != nil {
 		return err
 	}
 	if operationErr := operation(ctx, tx); operationErr != nil {
-		rollbackErr := tx.Rollback()
-		if errors.Is(rollbackErr, sql.ErrTxDone) {
-			rollbackErr = nil
-		}
-		if rollbackErr != nil {
-			discard = true
-		}
-		return errors.Join(operationErr, rollbackErr)
+		return errors.Join(ctx.Err(), operationErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
 		discard = true
-		rollbackErr := tx.Rollback()
-		if errors.Is(rollbackErr, sql.ErrTxDone) {
-			rollbackErr = nil
+		if commitErr == sql.ErrTxDone && ctx.Err() != nil {
+			return ctx.Err()
 		}
-		return errors.Join(commitErr, rollbackErr)
+		return errors.Join(ctx.Err(), commitErr)
 	}
+	tx = nil
 	return nil
+}
+
+func bindNativeOperation(conn *sql.Conn, scope *pq.OperationScope) error {
+	return conn.Raw(func(raw any) error {
+		return pq.BindOperationScope(raw.(driver.Conn), scope)
+	})
 }

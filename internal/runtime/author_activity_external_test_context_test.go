@@ -302,8 +302,8 @@ func newExternalRuntimeTestPipelineCoordinator(
 
 func completeExternalRuntimeTestWorkflowDeps(t testing.TB, selected any, deps runtimepkg.RuntimeDeps) runtimepkg.RuntimeDeps {
 	t.Helper()
-	if deps.Config != nil && !deps.Config.Runtime.ExecutionPosture.Valid() {
-		deps.Config.Runtime.ExecutionPosture = executionposture.Live
+	if !deps.Options.ExecutionPosture.Valid() {
+		deps.Options.ExecutionPosture = executionposture.Live
 	}
 	owner, ok := selected.(externalRuntimeTestWorkflowOwner)
 	if !ok {

@@ -554,6 +554,20 @@ func walkUnifiedMapping(node *yaml.Node, prefix []string, layer unifiedConfigLay
 			*diagnostics = append(*diagnostics, unknownUnifiedConfigDiagnostic(path, layer))
 			continue
 		}
+		if rule.Retired != "" {
+			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
+				Kind: unifiedConfigDiagnosticOldShape, Layer: layer.Name, Path: layer.Path, Key: path,
+				Message: fmt.Sprintf("config key %q in %s is retired", path, layer.Path), Remediation: rule.Retired,
+			})
+			continue
+		}
+		if path == "llm.backend" && valueNode.Kind == yaml.ScalarNode && llmselection.NormalizeBackendID(valueNode.Value) == llmselection.BackendMock {
+			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
+				Kind: unifiedConfigDiagnosticOldShape, Layer: layer.Name, Path: layer.Path, Key: path,
+				Message: fmt.Sprintf("config key %q in %s: backend mock is retired as a public selector", path, layer.Path), Remediation: "use swarm test to execute authored doubles",
+			})
+			continue
+		}
 		if rule.OldShape != "" {
 			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
 				Kind:        unifiedConfigDiagnosticOldShape,
@@ -607,6 +621,7 @@ func walkUnifiedMapping(node *yaml.Node, prefix []string, layer unifiedConfigLay
 }
 
 type unifiedConfigKeyRule struct {
+	Retired              string
 	Container            bool
 	Elevated             bool
 	SecretReference      bool
@@ -617,7 +632,7 @@ type unifiedConfigKeyRule struct {
 }
 
 func (r unifiedConfigKeyRule) supportedExampleLeaf() bool {
-	return !r.Container && r.Split == "" && r.OldShape == "" && !r.InlineSecret
+	return !r.Container && r.Retired == "" && r.Split == "" && r.OldShape == "" && !r.InlineSecret
 }
 
 func unifiedConfigRule(pathParts []string) (unifiedConfigKeyRule, bool) {
@@ -711,7 +726,7 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"serve.mcp_listen_addr":                   {},
 		"serve.api_token_file":                    {Elevated: true, SecretReference: true},
 		"runtime":                                 section,
-		"runtime.execution_posture":               {},
+		"runtime.execution_posture":               {Retired: config.RetiredExecutionPostureMessage},
 		"runtime.recovery_on_startup":             {},
 		"runtime.max_concurrent_agents":           {Split: "tracked split: runtime.max_concurrent_agents is not wired to runtime enforcement; no supported replacement"},
 		"runtime.event_poll_interval":             {Split: "tracked split: runtime.event_poll_interval is not wired to runtime polling; no supported replacement"},

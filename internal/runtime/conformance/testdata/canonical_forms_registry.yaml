@@ -41,15 +41,15 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 97
+  custom_unmarshal_total: 98
   custom_unmarshal_reachable: 96
-  custom_unmarshal_excluded: 1
+  custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
     contracts: 82
     flowmodel_policy: 11
     agentintent: 1
     channel_pack: 1
-    deployment_config_excluded: 1
+    deployment_config_excluded: 2
   yaml_node_functions_in_contracts: 215
   yaml_tagged_fields_in_contracts_flowmodel_agentintent: 926
   yaml_tagged_fields_in_reachable_pack_layers: 167
@@ -734,10 +734,10 @@ decoder_coverage:
 
 decoder_exclusions:
   internal/config/config.go:
-    deployment.swarm_yaml: [WorkspaceConfig]
+    deployment.swarm_yaml: [WorkspaceConfig, RuntimeConfig]
 
 registry_result:
-  completeness: "all 97 remaining production custom unmarshallers classified as 96 source-reachable row owners and 1 deployment swarm.yaml exclusion; package/project and authored element-id decoders are retired"
+  completeness: "all 98 remaining production custom unmarshallers classified as 96 source-reachable row owners and 2 deployment swarm.yaml exclusions; package/project and authored element-id decoders are retired"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"

@@ -21,9 +21,11 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
@@ -38,36 +40,17 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
-func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
+func TestSwarmTestPrivateSQLiteNoLiveLLMProof(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
-	stubServeRuntimeWorkspaceLifecycle(t)
-	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+	t.Setenv("PATH", t.TempDir())
 	sourceRoot := writeScenarioRunnerFixture(t)
-	configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-		ConfigPath:              configPath,
-		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
-		APIListenAddr:           "127.0.0.1:0",
-		MCPListenAddr:           "127.0.0.1:0",
-		SelfCheck:               true,
-		Verbose:                 true,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-	})
-
 	var stdout, stderr bytes.Buffer
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
-		"test", sourceRoot,
-		"--config", configPath,
-		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
-		"--timeout", "10s",
-		"--poll-interval", "25ms",
+		"test", sourceRoot, "--timeout", "10s", "--poll-interval", "25ms",
 	}, &stdout, &stderr, nil)
-	if code != 0 {
-		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
-		t.Fatalf("stdout missing success:\n%s", stdout.String())
+	if code != 0 || !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
+		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 }
 
@@ -79,7 +62,7 @@ func TestServedParityHarnessDerivedScenarioLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioDerivedScenarioLifecycle), runServedDerivedScenarioBackendProof)
 }
 
-func TestSwarmTestConsumesLiveSourceArtifactAcrossSupportedBackendsAndModes(t *testing.T) {
+func TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsAndModes(t *testing.T) {
 	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
 		for _, dev := range []bool{false, true} {
 			if dev && backend != storebackend.BackendSQLite {
@@ -140,7 +123,7 @@ expect:
 					t.Fatalf("unsupported backend %q", backend)
 				}
 				opts.ConfigPath = configPath
-				process := startServeRuntimeTestProcessAtRepo(t, repo, opts)
+				process := startOwnedMockLifecycleTestProcess(t, repo, t.TempDir(), opts)
 				process.waitForReadyLine()
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 				for _, args := range [][]string{
@@ -148,8 +131,8 @@ expect:
 					{"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
 				} {
 					var stdout, stderr bytes.Buffer
-					commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
-					if code := executeCLIFrom(context.Background(), repoRootForTest(), commandArgs, &stdout, &stderr, nil); code != 0 {
+					commandArgs := append(append([]string(nil), args...), "--config", configPath)
+					if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), commandArgs, endpoint, &stdout, &stderr); code != 0 {
 						t.Fatalf("%s command %v code=%d stdout=%s stderr=%s", name, args, code, stdout.String(), stderr.String())
 					}
 					if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
@@ -250,12 +233,14 @@ expect:
 		{"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
 	} {
 		var stdout, stderr bytes.Buffer
-		commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
-		if code := executeCLIFrom(context.Background(), repoRootForTest(), commandArgs, &stdout, &stderr, nil); code != 3 {
-			t.Fatalf("changed-source command %v code=%d stdout=%s stderr=%s, want bundle mismatch", args, code, stdout.String(), stderr.String())
+		commandArgs := append(append([]string(nil), args...), "--config", configPath)
+		if code := executeCLIFrom(context.Background(), repoRootForTest(), commandArgs, &stdout, &stderr, nil); code != 0 {
+			t.Fatalf("private changed-source command %v code=%d stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stderr.String(), "target runtime does not serve bundle_hash") {
-			t.Fatalf("changed-source command %v stderr=%s, want retained-generation mismatch", args, stderr.String())
+		var unchanged apiv1.RuntimeIdentityResult
+		requireServedJSONRPCResult(t, rpcEndpoint, "runtime.identity", map[string]any{}, &unchanged)
+		if !reflect.DeepEqual(unchanged.SourceArtifacts, predecessorIdentity.SourceArtifacts) {
+			t.Fatal("private test changed the retained live source authority")
 		}
 	}
 
@@ -486,7 +471,7 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, opts)
+	endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 	if db == nil {
 		t.Fatalf("%s selected database is required", backend)
 	}
@@ -594,20 +579,19 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code = %d stderr=%s stdout=%s", backend, code, verifyErr.String(), verifyOut.String())
 	}
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, opts)
+	endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 	requireSchemaOnlyProviderTriggerHasNoWebhookRoute(t, strings.TrimSuffix(endpoint, "/v1/rpc"))
 
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
 	scenario := filepath.ToSlash(filepath.Join("telegram-chat", "tests", "public-mock-approval.yaml"))
-	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
+	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
 		"test", sourceRoot,
 		"--config", configPath,
-		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "45s",
 		"--poll-interval", "25ms",
 		scenario,
-	}, &stdout, &stderr, nil)
+	}, endpoint, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("%s code = %d stderr=%s stdout=%s", backend, code, stderr.String(), stdout.String())
 	}
@@ -690,7 +674,8 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 		t.Fatalf("unsupported backend %q", backend)
 	}
 	opts.ConfigPath = configPath
-	process := startServeRuntimeTestProcess(t, opts)
+	retainedRoot := t.TempDir()
+	process := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	process.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 	rt := servedTestProcessRuntime(t, process)
@@ -750,12 +735,11 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
-	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
+	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
 		"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested",
 		"--config", configPath,
-		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "20s", "--poll-interval", "25ms",
-	}, &stdout, &stderr, nil)
+	}, endpoint, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("%s derived scenario code=%d stdout=%s stderr=%s", backend, code, stdout.String(), stderr.String())
 	}
@@ -787,7 +771,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 		t.Cleanup(func() { buildStoresForServe = priorBuildStores })
 		db = storetest.DatabaseForTest(reopened)
 	}
-	restarted := startServeRuntimeTestProcess(t, opts)
+	restarted := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	restarted.waitForReadyLine()
 	restartedEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
 	restartedRuntime := servedTestProcessRuntime(t, restarted)
@@ -814,56 +798,78 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
-	stubServeRuntimeWorkspaceLifecycle(t)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
-	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	credentialPath := t.TempDir()
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	scaffoldRoot := scaffoldConformanceArchetype(t, archetype)
-	sourceRoot := scaffoldRoot
-	configPath := filepath.Join(sourceRoot, "swarm.yaml")
-	scenarioPath := filepath.Join("tests", "smoke.yaml")
-
+	t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", credentialPath)
+	sourceRoot := scaffoldConformanceArchetype(t, archetype)
 	var verifyOut, verifyErr bytes.Buffer
-	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot, "--config", configPath}, &verifyOut, &verifyErr, nil); code != 0 {
-		t.Fatalf("%s generated verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
+	if code := executeCLIFrom(context.Background(), sourceRoot, []string{"verify", sourceRoot}, &verifyOut, &verifyErr, nil); code != 0 {
+		t.Fatalf("%s verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
 	}
 	oldBuildStores := buildStoresForServe
 	var db *sql.DB
+	var privateStorePath string
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 		stores, err := oldBuildStores(ctx, selection, cfg)
 		if err == nil {
 			db = selectedStoreDatabaseForTest(t, stores)
+			privateStorePath = selection.SQLitePath
 		}
 		return stores, err
 	}
 	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
-	endpoint, rt := startServedEventPublishFollowUpRuntimeAtRepo(t, sourceRoot, cliapp.ServeOptions{
-		ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, Verbose: true,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-	})
-	if db == nil || rt == nil {
-		t.Fatalf("%s generated runtime is incomplete", archetype)
+	runner := func(ctx context.Context, req cliapp.TestSessionRequest, execute func(context.Context, cliapp.TestSessionEndpoint) error) error {
+		return RunTestSession(ctx, req, func(ctx context.Context, endpoint cliapp.TestSessionEndpoint) error {
+			if err := execute(ctx, endpoint); err != nil {
+				return err
+			}
+			metadata, err := packadmission.FromBundle(req.Bundle)
+			if err != nil {
+				return err
+			}
+			hash, err := runtimecontracts.BundleHash(req.Bundle)
+			if err != nil {
+				return err
+			}
+			fact, err := runtimecorrelation.NewSourceArtifactFact(hash)
+			if err != nil {
+				return err
+			}
+			projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
+				Source: semanticview.Wrap(req.Bundle), SourceArtifactFact: fact,
+				ProviderTriggerCatalog: metadata.ProviderTriggers, ChannelPlans: metadata.ChannelPlans,
+			})
+			if err != nil {
+				return err
+			}
+			requireExactScenarioExecutionProfile(t, db, servedparity.BackendDefaultSQLite, projection.Identity())
+			return nil
+		})
 	}
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
-	code := executeCLIFrom(context.Background(), sourceRoot, []string{
-		"test", sourceRoot, "--config", configPath,
-		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
-		"--timeout", "30s", "--poll-interval", "25ms", scenarioPath,
-	}, &stdout, &stderr, nil)
+	code := executeCLIFromWithRunners(context.Background(), sourceRoot, []string{
+		"test", sourceRoot, "tests/smoke.yaml", "--timeout", "30s", "--poll-interval", "25ms",
+	}, &stdout, &stderr, nil, runner)
 	if code != 0 {
-		t.Fatalf("%s generated scenario code=%d stdout=%s stderr=%s", archetype, code, stdout.String(), stderr.String())
+		t.Fatalf("%s scenario code=%d stdout=%s stderr=%s", archetype, code, stdout.String(), stderr.String())
 	}
 	if elapsed := time.Since(started); elapsed >= 60*time.Second {
-		t.Fatalf("%s generated journey took %s, want under 60s", archetype, elapsed)
+		t.Fatalf("journey took %s", elapsed)
 	}
-	requireExactScenarioExecutionProfile(t, db, servedparity.BackendDefaultSQLite, rt.EffectiveSourceIdentity)
-	if _, err := os.Stat(credentialPath); !os.IsNotExist(err) {
-		t.Fatalf("%s generated journey created credential store %s: %v", archetype, credentialPath, err)
+	if privateStorePath == "" || db == nil {
+		t.Fatal("private store was not exercised")
+	}
+	if err := db.Ping(); err == nil {
+		t.Fatal("test returned before store close")
+	}
+	for _, path := range []string{filepath.Dir(privateStorePath), filepath.Join(sourceRoot, ".swarm"), filepath.Join(sourceRoot, "swarm.yaml"), filepath.Join(sourceRoot, "swarm.live.yaml")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("unexpected retained resource %s: %v", path, err)
+		}
 	}
 }
 
@@ -1047,7 +1053,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 		t.Fatalf("unsupported backend %q", backend)
 	}
 	opts.ConfigPath = configPath
-	endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
+	endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 	if db == nil {
 		t.Fatalf("%s served database is required", backend)
 	}
@@ -1077,14 +1083,13 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 
 	var stdout, stderr bytes.Buffer
 	scenario := filepath.ToSlash(filepath.Join("telegram-chat", "tests", "generated-input.yaml"))
-	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
+	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
 		"test", sourceRoot,
 		"--config", configPath,
-		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "20s",
 		"--poll-interval", "25ms",
 		scenario,
-	}, &stdout, &stderr, nil)
+	}, endpoint, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("%s code = %d stderr=%s stdout=%s", backend, code, stderr.String(), stdout.String())
 	}
@@ -1289,7 +1294,7 @@ func servedBackendLabel(backend servedparity.Backend) string {
 	return "sqlite"
 }
 
-func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *testing.T) {
+func TestInternalLifecycleScenariosPreserveCanonicalRoutingPathsSQLite(t *testing.T) {
 	rootNode := func(localID string) string {
 		return identitytest.RootNode(t, localID).Key()
 	}
@@ -1347,16 +1352,15 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 					return nil
 				}
 			}
-			endpoint, _ := startServedEventPublishFollowUpRuntime(t, options)
+			endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, options)
 
 			var stdout, stderr bytes.Buffer
-			code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
+			code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
 				"test", sourceRoot,
 				"--config", configPath,
-				"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 				"--timeout", "20s",
 				"--poll-interval", "25ms",
-			}, &stdout, &stderr, nil)
+			}, endpoint, &stdout, &stderr)
 			observedReplyContext := ""
 			select {
 			case observedReplyContext = <-replyContextObserved:

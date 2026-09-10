@@ -19,6 +19,7 @@ import (
 	"time"
 
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 
 	"github.com/google/uuid"
 
@@ -1002,7 +1003,7 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 			ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg),
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "mock_only") {
+	if err == nil || !strings.Contains(err.Error(), "command-selected mock execution rejects live execution") {
 		t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want exact live source-mode rejection", result, err)
 	}
 	if result.Materialization.ForkRunID != "" {
@@ -2317,6 +2318,19 @@ func (s selectedForkWorkspaceLifecycle) ResolveWorkspaceForCapabilityAdmission(c
 	return s.target, nil
 }
 
+// Selected execution protocol proofs fake storage; real Docker tests prove its lifetime.
+type selectedForkClaudeState struct{}
+
+func (selectedForkClaudeState) Directory() string                       { return workspace.ClaudeStateDirectory }
+func (selectedForkClaudeState) CheckHead(context.Context, string) error { return nil }
+func (selectedForkClaudeState) Release(context.Context) error           { return nil }
+
+func (s selectedForkWorkspaceLifecycle) ResolveClaudeWorkspace(context.Context, runtimeactors.AgentConfig, workspace.ClaudeStateRequest, string) (*workspace.Target, error) {
+	target := *s.target
+	target.ClaudeState = selectedForkClaudeState{}
+	return &target, nil
+}
+
 func (selectedForkWorkspaceLifecycle) ValidateSource(context.Context, semanticview.Source) error {
 	return nil
 }
@@ -2727,6 +2741,7 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 		return nil, errors.New("selected-fork startup capability surface missing")
 	}
 	response := &runtimellm.Response{
+		CLIInventory:    runtimellm.CLIInventoryValid,
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: surface.PlannedBindingNames(managedcapabilities.BindingMCPProvider),
 	}
@@ -2976,6 +2991,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	if err := credentials.Set(ctx, llmselection.OpenAICompatibleCredentialEnv, "test-key"); err != nil {
 		t.Fatalf("store provider credential: %v", err)
 	}
+	cfg := selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "gpt-selected-fork", provider.URL)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2989,7 +3005,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
-			Config:              selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "gpt-selected-fork", provider.URL),
+			Config:              cfg,
 			ProviderCredentials: credentials, ProcessCapability: processCapability,
 			QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
 		},
@@ -3055,7 +3071,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
 	})
-	storetest.RequirePausedRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), forkRunID, now)
+	storetest.RequireRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), storetest.RunFixture{
+		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: storetest.ScenarioSetupOrigin(),
+		Artifact: sourceartifactfixture.Artifact(), StartedAt: now,
+	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
 		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `

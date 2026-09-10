@@ -1,0 +1,65 @@
+// Historical diagnostic reproducer for baseline 05528a92e / 0a140df7f only.
+// Use that baseline with go test -overlay; this predates the checked reader API.
+// Current passing regressions are TestCLIInventoryChannelIntegrity and
+// TestCLIInventoryPresence in internal/runtime/llm/cli_inventory_test.go.
+package llm
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+)
+
+func TestCommandLiveMCPOnlyCapabilityProbe(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		native          bool
+		advertiseNative bool
+		wantValid       bool
+	}{
+		{"mcp_only", false, false, true},
+		{"mcp_and_native", true, true, true},
+		{"unexpected_native", false, true, false},
+		{"missing_native", true, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			actor := runtimeactors.AgentConfig{ID: "census-agent", NativeTools: runtimeactors.NativeToolConfig{Bash: test.native}}
+			actor.Identity = testAgentIdentity(actor.ID, "")
+			var definitions []ToolDefinition
+			var capabilities []toolcapabilities.Capability
+			tools := []string{"ExitPlanMode"}
+			for _, name := range []string{"read_chat", "emit_telegram_reply_requested"} {
+				definitions = append(definitions, ToolDefinition{Name: name, Schema: map[string]any{"type": "object"}})
+				capabilities = append(capabilities, toolcapabilities.Capability{Name: name, Kind: toolcapabilities.KindStandard, Visible: true, Callable: true})
+				tools = append(tools, "mcp__runtime-tools__"+name)
+			}
+			if test.advertiseNative {
+				tools = append(tools, "Bash")
+			}
+			surface, err := managedCapabilityPlanForTest(runtimeactors.WithActor(context.Background(), actor), &ClaudeCLIRuntime{}, "", definitions, toolcapabilities.NewSet(capabilities), nativeCapabilityTestAuthority())
+			if err != nil {
+				t.Fatal(err)
+			}
+			init, err := json.Marshal(map[string]any{"type": "system", "subtype": "init", "tools": tools, "mcp_servers": []map[string]string{{"name": "runtime-tools", "status": "connected"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			acc := newCLIStreamAccumulator()
+			acc.AddLine(init)
+			response := acc.Response()
+			observed, err := ObserveCLIResponseCapabilitySurface(surface, response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = ValidateCLIProviderCapabilitySurface(observed, response)
+			t.Logf("provider=%v canonical=%v planned=%v interpreted=%v mismatches=%v error=%v", response.ProviderVisibleTools, response.VisibleTools, surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin), exactCLIProviderVisibleTools(response), observed.HasMismatch(), err)
+			if (err == nil) != test.wantValid {
+				t.Fatalf("valid=%t, want %t", err == nil, test.wantValid)
+			}
+		})
+	}
+}

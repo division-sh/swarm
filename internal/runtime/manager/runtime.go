@@ -26,6 +26,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -958,10 +960,15 @@ func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error 
 	return nil
 }
 
-func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) error {
+func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) (err error) {
 	if am == nil {
 		return nil
 	}
+	defer func() {
+		if err != nil {
+			diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "lifecycle diagnostic projection failed", map[string]any{"error": err.Error()})
+		}
+	}()
 	store := am.roles.LifecycleDiagnostics
 	if store == nil {
 		return nil
@@ -1466,7 +1473,21 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 				updatedIdentity.Description(),
 			)
 		}
-		if err := am.resolveAgentModel(&updated); err != nil {
+		if patch != nil && (patch.Model != "" || patch.LLMBackend != "" || patch.Mock.Configured()) {
+			profile, err := llmselection.ResolveLiveBackend(am.llmBackend)
+			if err != nil {
+				return replaceExecutionResult{}, err
+			}
+			resolved, err := runtimellm.ResolveAgentExecution(am.executionPosture, profile, llmselection.EffectiveModelAliases(am.modelAliases), updated)
+			if err != nil {
+				return replaceExecutionResult{}, err
+			}
+			updated = resolved.Actor
+		}
+		if updated.ExecutionMode != current.Config.ExecutionMode {
+			return replaceExecutionResult{}, fmt.Errorf("agent reconfiguration cannot change execution mode")
+		}
+		if err := am.validatePersistedAgentExecution(updated); err != nil {
 			return replaceExecutionResult{}, err
 		}
 		if err := am.executionPosture.Admit(updated.ExecutionMode, "agent lifecycle replacement"); err != nil {

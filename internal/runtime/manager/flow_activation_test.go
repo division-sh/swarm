@@ -3190,7 +3190,7 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	restarted.executionPosture = executionposture.MockOnly
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if err := restarted.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+	if err := restarted.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 		t.Fatalf("readiness reconciliation error = %v, want live-plan rejection", err)
 	}
 	if len(agents.upserts) != baselineAgents || len(restartBus.addedPaths) != 0 || len(restartBus.published) != 0 || len(instances.armedEntries) != 0 {
@@ -4310,7 +4310,7 @@ func TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission(t *
 	if err := blueprints[0].Identity.Validate(); err != nil {
 		t.Fatalf("declaration plan: %v", err)
 	}
-	blueprint, err := ResolveAgentMaterializationBlueprint(AgentManagerOptions{}, blueprints[0])
+	blueprint, err := ResolveAgentMaterializationBlueprint(AgentManagerOptions{ExecutionPosture: executionposture.Live}, blueprints[0])
 	if err != nil {
 		t.Fatalf("ResolveAgentMaterializationBlueprint: %v", err)
 	}

@@ -67,6 +67,28 @@ func (e *firstTurnWorkflowToolExec) ToolCapabilitiesForActor(_ runtimeactors.Age
 }
 
 func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
+	testClaudeCLIManagedRequestInventory(t, 0, "")
+}
+
+func TestClaudeCLIManagedInventoryFailureSettlesWithoutRetry(t *testing.T) {
+	for _, phase := range []struct {
+		name       string
+		invocation int
+	}{
+		{"fresh", 1}, {"resumed_tool_result", 2},
+	} {
+		for _, inventory := range []string{"missing", "null", "malformed", "unexpected_native"} {
+			t.Run(phase.name+"/"+inventory, func(t *testing.T) {
+				testClaudeCLIManagedRequestInventory(t, phase.invocation, inventory)
+			})
+		}
+	}
+}
+
+func testClaudeCLIManagedRequestInventory(t *testing.T, rejectAt int, inventory string) {
+	t.Helper()
+	t.Setenv("FAKE_DOCKER_REJECT_INVENTORY_AT", strconv.Itoa(rejectAt))
+	t.Setenv("FAKE_DOCKER_REJECT_INVENTORY", inventory)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
@@ -97,7 +119,7 @@ func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	setEffectHarnessAgent(t, effects, "market-research-agent", "market/inst-1")
 	runtime := NewClaudeCLIRuntimeWithOptions(
 		cfg,
-		sessions.NewInMemoryRegistry(0),
+		claudeSettledTestRegistry{Registry: sessions.NewInMemoryRegistry(0), effects: effects},
 		"worker-1",
 
 		workspaceResolverStub{target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}},
@@ -182,6 +204,48 @@ func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 
 	resp, err := conv.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("market-research-agent")})
+	if rejectAt > 0 {
+		if err == nil || resp != nil {
+			t.Fatalf("invalid inventory response=%v error=%v", resp, err)
+		}
+		settlements := effects.CompletionSettlementsForAdapter("claude_cli")
+		if len(settlements) != rejectAt {
+			t.Fatalf("settlements=%d, want %d", len(settlements), rejectAt)
+		}
+		uncertain := 0
+		for _, settlement := range settlements {
+			if settlement.Settlement.State == runtimeeffects.StateOutcomeUncertain {
+				uncertain++
+			}
+		}
+		if uncertain != 1 {
+			t.Fatalf("uncertain settlements=%d, error=%v", uncertain, err)
+		}
+		calls, readErr := os.ReadFile(filepath.Join(captureDir, "invocations"))
+		if readErr != nil || strings.TrimSpace(string(calls)) != strconv.Itoa(rejectAt) {
+			t.Fatalf("invocations=%s, err=%v", calls, readErr)
+		}
+		if len(exec.calls) != rejectAt-1 {
+			t.Fatalf("local effects=%v; failed inventory must not replay tools", exec.calls)
+		}
+		if rejectAt == 2 {
+			var args []string
+			raw, readErr := os.ReadFile(filepath.Join(captureDir, "2.args"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if err := json.Unmarshal(raw, &args); err != nil {
+				t.Fatal(err)
+			}
+			if argValue(args, "--resume") == "" || !slices.Contains(args, "--fork-session") {
+				t.Fatalf("second invocation did not resume: %v", args)
+			}
+			if _, err := capturedToolResultInput(captureDir); err != nil {
+				t.Fatalf("second invocation lacked real tool result: %v", err)
+			}
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("RunManaged: %v", err)
 	}
@@ -356,6 +420,20 @@ func runFirstTurnFakeDockerHelper() int {
 	if providerSessionID == "" {
 		fmt.Fprintln(os.Stderr, "--session-id is required")
 		return 2
+	}
+	if strconv.Itoa(count) == os.Getenv("FAKE_DOCKER_REJECT_INVENTORY_AT") {
+		field := ""
+		switch os.Getenv("FAKE_DOCKER_REJECT_INVENTORY") {
+		case "null":
+			field = `,"tools":null`
+		case "malformed":
+			field = `,"tools":["Read",42]`
+		case "unexpected_native":
+			field = `,"tools":["Read","Write","Edit","FutureBuiltin"]`
+		}
+		fmt.Fprintf(os.Stdout, "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":%q%s}\n", providerSessionID, field)
+		fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"done\",\"session_id\":%q}\n", providerSessionID)
+		return 0
 	}
 	if isReadFileToolResultPayload(input) {
 		fmt.Fprintf(os.Stdout, "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":%q,\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"mcp__runtime-tools__emit_category_assessed\",\"Read\",\"Write\",\"Edit\"]}\n", providerSessionID)

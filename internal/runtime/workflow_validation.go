@@ -22,6 +22,7 @@ import (
 )
 
 type WorkflowContractValidationOptions struct {
+	Purpose                        runtimebootverify.ValidationPurpose
 	ExecutionPosture               executionposture.Posture
 	Credentials                    runtimecredentials.Store
 	ProviderCredentials            runtimecredentials.Store
@@ -62,11 +63,16 @@ func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Sto
 	if err != nil {
 		panic(fmt.Sprintf("resolve built-in default LLM profile: %v", err))
 	}
+	opts := workflowContractValidationPolicyOptions()
+	opts.ExecutionPosture = posture
+	opts.Credentials = credentials
+	opts.LLMProfile = profile
+	opts.CheckMCPReachable = true
+	return opts
+}
+
+func workflowContractValidationPolicyOptions() WorkflowContractValidationOptions {
 	return WorkflowContractValidationOptions{
-		ExecutionPosture:               posture,
-		Credentials:                    credentials,
-		LLMProfile:                     profile,
-		CheckMCPReachable:              true,
 		StrictEmitSchemas:              runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true),
 		FatalToolImplementationWarning: bootWarningsFatal(),
 		FatalBootWarnings:              bootWarningsFatal(),
@@ -74,14 +80,30 @@ func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Sto
 	}
 }
 
+func StructuralWorkflowContractValidationOptions() WorkflowContractValidationOptions {
+	opts := workflowContractValidationPolicyOptions()
+	opts.Purpose = runtimebootverify.StructuralValidation
+	return opts
+}
+
 // ValidateWorkflowContractSurface is the canonical verify/boot contract-validation entrypoint
 // for prompt guards, bootverify errors, tool implementation validation, and explicit emit-schema coverage.
-func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.Source, opts WorkflowContractValidationOptions) (WorkflowContractValidationResult, error) {
-	result := WorkflowContractValidationResult{ProductionValid: true}
+func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.Source, opts WorkflowContractValidationOptions) (result WorkflowContractValidationResult, err error) {
+	result = WorkflowContractValidationResult{ProductionValid: true}
+	reportBlocks := false
+	defer func() {
+		if err != nil && opts.Purpose == runtimebootverify.StructuralValidation && !reportBlocks {
+			result.BootReport.Add(runtimebootverify.NewHardInvalidityFinding("workflow_contract_validation", "global", err.Error(), "Fix the source declaration before validation or execution."))
+			result.BootReport.Sort()
+		}
+	}()
 	if source == nil {
 		return result, fmt.Errorf("semantic source is required")
 	}
-	if !opts.ExecutionPosture.Valid() {
+	if !opts.Purpose.Valid() {
+		return result, fmt.Errorf("invalid validation purpose")
+	}
+	if opts.Purpose != runtimebootverify.StructuralValidation && !opts.ExecutionPosture.Valid() {
 		return result, fmt.Errorf("runtime execution posture is required")
 	}
 	if invalidSinks := workflowInvalidOutputSinkDeclarations(source); len(invalidSinks) > 0 {
@@ -103,15 +125,25 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if len(harnessOutputs) > 0 && !opts.AllowHarnessOutputs {
 		return result, fmt.Errorf("production validation rejects test-only output sink: harness at %s; replace it with a real consumer before booting", strings.Join(harnessOutputs, ", "))
 	}
-	bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, opts.LLMProfile, opts.ExecutionPosture)
-	if err != nil {
-		return result, err
+	if opts.Purpose == runtimebootverify.StructuralValidation {
+		// Validate supplied source schemas without selecting actors or requiring
+		// mock completeness. No deployment credential or activation is observed.
+		if _, err := providerconnectors.CompileMockResponsePlan(source); err != nil {
+			return result, err
+		}
+	} else {
+		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, opts.LLMProfile, opts.ExecutionPosture)
+		if err != nil {
+			return result, err
+		}
+		source = bootEffects.Source
+		result.mockConnectorResponses = bootEffects.MockConnectorResponses
+		result.bootEffectReachability = bootEffects.Reachability
 	}
-	source = bootEffects.Source
-	result.mockConnectorResponses = bootEffects.MockConnectorResponses
-	result.bootEffectReachability = bootEffects.Reachability
 
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
+		ExecutionPosture:        opts.ExecutionPosture,
+		Purpose:                 opts.Purpose,
 		Credentials:             opts.Credentials,
 		ManagedCredentials:      opts.ManagedCredentials,
 		EffectReachability:      result.bootEffectReachability,
@@ -121,11 +153,13 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		ModelAliases:            opts.ModelAliases,
 	})
 	if result.BootReport.HasErrors() {
+		reportBlocks = true
 		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))
 	}
 	if opts.FatalBootWarnings {
 		warnings := filterWorkflowValidationFindings(result.BootReport.Warnings(), opts.ExcludedFatalBootWarningChecks...)
 		if len(warnings) > 0 {
+			reportBlocks = true
 			return result, fmt.Errorf("boot verification blocked by policy-escalated findings:\n%s", formatWorkflowValidationFindings(warnings, true))
 		}
 	}
@@ -172,6 +206,9 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		result.BootReport.Add(finding)
 	}
 	result.BootReport.Sort()
+	if opts.Purpose == runtimebootverify.StructuralValidation {
+		return result, nil
+	}
 	var providerCredentialOwner *runtimecredentials.SnapshotOwner
 	if opts.ProviderCredentials != nil {
 		providerCredentialOwner, err = runtimecredentials.NewSnapshotOwner(opts.ProviderCredentials)

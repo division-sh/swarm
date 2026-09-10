@@ -1923,7 +1923,6 @@ func writeServedConversationForkConfig(t *testing.T, backend, sqlitePath, provid
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"store:",
 		"  backend: " + backend,
@@ -2442,7 +2441,7 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend
 		if realWorkspace {
 			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 		}
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
@@ -2467,7 +2466,7 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend
 		if realWorkspace {
 			configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		}
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
@@ -7490,7 +7489,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "serve-abandon", "agent-a")
 	requireServeTestAgentFixtureForSource(t, sqliteStore, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
-		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
+		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Authored(true),
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
@@ -8662,7 +8661,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
 	requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
-		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
+		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Authored(true),
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
@@ -8889,6 +8888,24 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 }
 
 func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
+	return startRuntimeTestProcessWithRunner(t, repo, opts, runFrom)
+}
+
+func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
+	t.Helper()
+	t.Log("proof_surface=H in-process retained mock lifecycle; not public serve/test")
+	return startRuntimeTestProcessWithRunner(t, repo, opts, func(ctx context.Context, root string, opts cliapp.ServeOptions) int {
+		code, err := runOwnedMockLifecycle(ctx, root, retainedRoot, opts, apiv1.AuthTokenResolution{
+			Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Source: "internal-lifecycle-parent", Explicit: true,
+		})
+		if err != nil {
+			fmt.Fprintf(opts.Output, "internal lifecycle setup: %v\n", err)
+		}
+		return code
+	})
+}
+
+func startRuntimeTestProcessWithRunner(t *testing.T, repo string, opts cliapp.ServeOptions, run func(context.Context, string, cliapp.ServeOptions) int) *serveRuntimeTestProcess {
 	t.Helper()
 	if opts.PublicWebhookListener != nil {
 		file, err := opts.PublicWebhookListener.File()
@@ -8918,7 +8935,7 @@ func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.S
 	}
 	t.Cleanup(process.cleanup)
 	go func() {
-		done <- runFrom(ctx, repo, opts)
+		done <- run(ctx, repo, opts)
 	}()
 	return process
 }
@@ -9048,7 +9065,6 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 	t.Helper()
 	configText := strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 	}, "\n") + "\n"
@@ -9257,7 +9273,6 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 	}

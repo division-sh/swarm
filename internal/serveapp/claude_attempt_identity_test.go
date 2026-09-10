@@ -64,16 +64,17 @@ func claudeAttemptProofContext(source runtimecorrelation.SourceArtifactFact) con
 }
 
 type claudeAttemptProofSurface struct {
-	name         string
-	memory       bool
-	outputFormat string
+	name           string
+	memory         bool
+	outputFormat   string
+	backingFailure error
 }
 
 func defaultClaudeAttemptProofSurface() claudeAttemptProofSurface {
 	return claudeAttemptProofSurface{
-		name:         "memory_json",
+		name:         "memory_stream_json",
 		memory:       true,
-		outputFormat: "json",
+		outputFormat: "stream-json",
 	}
 }
 
@@ -110,7 +111,21 @@ type claudeAttemptProofStore interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
-type claudeAttemptProofWorkspace struct{}
+type claudeAttemptProofWorkspace struct{ failure error }
+
+type claudeAttemptProofState struct{ failure error }
+
+func (claudeAttemptProofState) Directory() string                         { return workspace.ClaudeStateDirectory }
+func (s claudeAttemptProofState) CheckHead(context.Context, string) error { return s.failure }
+func (claudeAttemptProofState) Release(context.Context) error             { return nil }
+
+func (w claudeAttemptProofWorkspace) ResolveClaudeWorkspace(ctx context.Context, actor runtimeactors.AgentConfig, _ workspace.ClaudeStateRequest, _ string) (*workspace.Target, error) {
+	target, err := w.ResolveWorkspace(ctx, actor)
+	if err == nil {
+		target.ClaudeState = claudeAttemptProofState{failure: w.failure}
+	}
+	return target, err
+}
 
 func (claudeAttemptProofWorkspace) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
 	return &workspace.Target{Backend: workspace.BackendDocker, Container: "claude-attempt-proof", Workdir: workspace.LogicalWorkspaceMount}, nil
@@ -276,56 +291,112 @@ func makeClaudeAttemptProofDeliveryDueNow(t *testing.T, backend claudeAttemptPro
 
 func TestClaudePostlaunchFailurePreservesClassificationAndRestartRefusesProviderRedispatch(t *testing.T) {
 	for _, backendName := range []string{"sqlite", "postgres"} {
+		for _, format := range []string{"json", "stream-json"} {
+			t.Run(backendName+"/"+format, func(t *testing.T) {
+				surface := defaultClaudeAttemptProofSurface()
+				surface.outputFormat = format
+				backend := newClaudeAttemptProofBackend(t, backendName)
+				t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "proof-oauth-token")
+				t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
+				captureDir := t.TempDir()
+				t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_CAPTURE", captureDir)
+				t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE", "postlaunch_failure")
+				dockerBin := filepath.Join(t.TempDir(), "docker")
+				writeClaudeAttemptProofDocker(t, dockerBin)
+				calls := &atomic.Int32{}
+				manager, eventBus, coordinator := newClaudeAttemptProofManager(t, backend, dockerBin, calls, surface)
+				runClaudeAttemptProofManager(t, backend, manager)
+
+				eventID := publishClaudeAttemptProofEvent(t, backend, eventBus)
+				receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
+				if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassOutcomeUncertain || receipt.Failure.Retryable {
+					t.Fatalf("first receipt = %#v, want immediate nonretryable uncertainty", receipt)
+				}
+				cause, ok := receipt.Failure.Detail.Attributes["cause_failure"].(map[string]any)
+				if !ok || cause["class"] != string(runtimefailures.ClassConnectorFailure) || receipt.Failure.Detail.Attributes["stdout"] != "injected provider process failure" {
+					t.Fatalf("original cause/explanation missing from terminal receipt: %#v", receipt.Failure)
+				}
+				attempts := loadClaudeAttemptProofAttempts(t, backend)
+				if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateOutcomeUncertain) {
+					t.Fatalf("postlaunch attempts = %#v, want one outcome-uncertain attempt", attempts)
+				}
+				if err := coordinator.Retire(backend.context()); err != nil {
+					t.Fatalf("retire first delivery coordinator: %v", err)
+				}
+				if err := manager.Shutdown(); err != nil {
+					t.Fatalf("shutdown first manager: %v", err)
+				}
+
+				restarted, restartedBus, _ := newClaudeAttemptProofManagerForGeneration(t, backend, dockerBin, calls, 2, surface)
+				t.Cleanup(func() { _ = restarted.Shutdown() })
+				cfg := claudeAttemptProofAgentConfig()
+				if _, err := restarted.ResolveAgentConfig(cfg.Identity.RunID, cfg.ID, cfg.CanonicalFlowPath()); err != nil {
+					t.Fatalf("restarted manager did not hydrate the Claude proof agent: %v", err)
+				}
+				runClaudeAttemptProofManager(t, backend, restarted)
+				restartedBus.SignalDeliveryContinuations()
+				dead := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
+				if dead.RetryCount != 0 || calls.Load() != 1 || readClaudeAttemptProofCount(t, captureDir) != 1 {
+					t.Fatalf("restart receipt=%#v agent_calls=%d process_calls=%d, want no retry and one provider invocation", dead, calls.Load(), readClaudeAttemptProofCount(t, captureDir))
+				}
+				before, _ := json.Marshal(receipt.Failure)
+				after, _ := json.Marshal(dead.Failure)
+				if string(before) != string(after) {
+					t.Fatalf("restart replaced original terminal failure: before=%s after=%s", before, after)
+				}
+				if got := loadClaudeAttemptProofAttempts(t, backend); len(got) != 1 || got[0].id != attempts[0].id || got[0].state != string(runtimeeffects.StateOutcomeUncertain) {
+					t.Fatalf("attempts after restart = %#v, want unchanged uncertain attempt", got)
+				}
+			})
+		}
+	}
+}
+
+func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
+	testClaudeProviderHeadCommitFailure(t, runtimefailures.ClassOutcomeUncertain)
+}
+
+func TestClaudeMissingCandidateBackingNeverPromotesHead(t *testing.T) {
+	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
 			backend := newClaudeAttemptProofBackend(t, backendName)
-			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "proof-oauth-token")
 			t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
 			captureDir := t.TempDir()
 			t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_CAPTURE", captureDir)
-			t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE", "postlaunch_failure")
+			t.Setenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE", "success")
 			dockerBin := filepath.Join(t.TempDir(), "docker")
 			writeClaudeAttemptProofDocker(t, dockerBin)
 			calls := &atomic.Int32{}
-			manager, eventBus, coordinator := newClaudeAttemptProofManager(t, backend, dockerBin, calls)
+			surface := defaultClaudeAttemptProofSurface()
+			surface.backingFailure = fmt.Errorf("candidate transcript unavailable")
+			manager, bus, _ := newClaudeAttemptProofManager(t, backend, dockerBin, calls, surface)
+			t.Cleanup(func() {
+				if err := manager.Shutdown(); err != nil {
+					t.Error(err)
+				}
+			})
 			runClaudeAttemptProofManager(t, backend, manager)
-
-			eventID := publishClaudeAttemptProofEvent(t, backend, eventBus)
-			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusError, calls)
-			if receipt.RetryCount != 1 || receipt.Failure == nil || receipt.Failure.Detail.Code != "claude_cli_process_failed" {
-				t.Fatalf("first receipt = %#v, want original retryable connector classification", receipt)
+			eventID := publishClaudeAttemptProofEvent(t, backend, bus)
+			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
+			if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassOutcomeUncertain || receipt.Failure.Retryable {
+				t.Fatalf("candidate backing failure=%+v", receipt)
+			}
+			if head := loadClaudeAttemptProofProviderHead(t, backend); head != "" {
+				t.Fatalf("promoted unusable provider head %q", head)
 			}
 			attempts := loadClaudeAttemptProofAttempts(t, backend)
-			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateOutcomeUncertain) {
-				t.Fatalf("postlaunch attempts = %#v, want one outcome-uncertain attempt", attempts)
-			}
-			if err := coordinator.Retire(backend.context()); err != nil {
-				t.Fatalf("retire first delivery coordinator: %v", err)
-			}
-			if err := manager.Shutdown(); err != nil {
-				t.Fatalf("shutdown first manager: %v", err)
-			}
-
-			makeClaudeAttemptProofDeliveryDueNow(t, backend, eventID)
-			restarted, restartedBus, _ := newClaudeAttemptProofManagerForGeneration(t, backend, dockerBin, calls, 2)
-			t.Cleanup(func() { _ = restarted.Shutdown() })
-			cfg := claudeAttemptProofAgentConfig()
-			if _, err := restarted.ResolveAgentConfig(cfg.Identity.RunID, cfg.ID, cfg.CanonicalFlowPath()); err != nil {
-				t.Fatalf("restarted manager did not hydrate the Claude proof agent: %v", err)
-			}
-			runClaudeAttemptProofManager(t, backend, restarted)
-			restartedBus.SignalDeliveryContinuations()
-			dead := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
-			if dead.RetryCount != 1 || calls.Load() != 2 || readClaudeAttemptProofCount(t, captureDir) != 1 {
-				t.Fatalf("restart replay receipt=%#v agent_calls=%d process_calls=%d, want one refused retry and one provider invocation", dead, calls.Load(), readClaudeAttemptProofCount(t, captureDir))
-			}
-			if got := loadClaudeAttemptProofAttempts(t, backend); len(got) != 1 || got[0].id != attempts[0].id || got[0].state != string(runtimeeffects.StateOutcomeUncertain) {
-				t.Fatalf("attempts after restart = %#v, want unchanged uncertain attempt", got)
+			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateOutcomeUncertain) || readClaudeAttemptProofCount(t, captureDir) != 1 {
+				t.Fatalf("candidate backing failure redispatched: %+v", attempts)
 			}
 		})
 	}
 }
 
-func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
+func TestClaudeRetryableSettlementFailureRemainsTerminal(t *testing.T) {
+	testClaudeProviderHeadCommitFailure(t, runtimefailures.ClassDependencyUnavailable)
+}
+
+func testClaudeProviderHeadCommitFailure(t *testing.T, injectedClass runtimefailures.Class) {
 	for _, backendName := range []string{"sqlite", "postgres"} {
 		t.Run(backendName, func(t *testing.T) {
 			backend := newClaudeAttemptProofBackend(t, backendName)
@@ -333,7 +404,7 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 			backend.store = claudeAttemptProofProviderHeadFaultStore{
 				claudeAttemptProofStore: baseStore,
 				err: runtimefailures.New(
-					runtimefailures.ClassOutcomeUncertain,
+					injectedClass,
 					"provider_head_commit_injected",
 					"claude-attempt-proof",
 					"settle_provider_head",
@@ -351,8 +422,18 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 			runClaudeAttemptProofManager(t, backend, manager)
 			eventID := publishClaudeAttemptProofEvent(t, backend, eventBus)
 			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
-			if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Detail.Code != "provider_head_commit_injected" {
-				t.Fatalf("provider-head fault status=%s reason=%s retries=%d failure=%+v calls=%d, want original terminal failure", receipt.Status, receipt.ReasonCode, receipt.RetryCount, receipt.Failure, calls.Load())
+			if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassOutcomeUncertain || receipt.Failure.Retryable {
+				t.Fatalf("provider-head fault status=%s reason=%s retries=%d failure=%+v calls=%d, want nonretryable uncertain failure", receipt.Status, receipt.ReasonCode, receipt.RetryCount, receipt.Failure, calls.Load())
+			}
+			if injectedClass == runtimefailures.ClassOutcomeUncertain {
+				if receipt.Failure.Detail.Code != "provider_head_commit_injected" {
+					t.Fatalf("lost original uncertain failure: %#v", receipt.Failure)
+				}
+			} else {
+				cause, ok := receipt.Failure.Detail.Attributes["cause_failure"].(map[string]any)
+				if !ok || cause["class"] != string(injectedClass) {
+					t.Fatalf("lost retryable persistence cause: %#v", receipt.Failure)
+				}
 			}
 			attempts := loadClaudeAttemptProofAttempts(t, backend)
 			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateResponseObserved) {
@@ -418,6 +499,19 @@ func TestClaudeAttemptIdentitySelectedStoreMemoryAndProcessParity(t *testing.T) 
 					t.Cleanup(func() { _ = manager.Shutdown() })
 
 					eventID := publishClaudeAttemptProofEvent(t, backend, eventBus, surface)
+					if outputFormat == "json" {
+						// A result-only response contains no authoritative init inventory.
+						// It cannot be credited as a successful capability-observed turn.
+						receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
+						attempts := loadClaudeAttemptProofAttempts(t, backend)
+						if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassOutcomeUncertain || calls.Load() != 1 || readClaudeAttemptProofCount(t, captureDir) != 1 {
+							t.Fatalf("unobserved inventory must settle without retry: %#v calls=%d", receipt, calls.Load())
+						}
+						if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateOutcomeUncertain) || (memory && loadClaudeAttemptProofProviderHead(t, backend) != "") {
+							t.Fatalf("unobserved inventory advanced provider authority: %#v", attempts)
+						}
+						return
+					}
 					receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusProcessed, calls)
 					if receipt.RetryCount != 0 || calls.Load() != 1 {
 						t.Fatalf("%s receipt=%#v failure=%+v agent_calls=%d, want one successful invocation", surface.name, receipt, receipt.Failure, calls.Load())
@@ -544,7 +638,7 @@ func newClaudeAttemptProofManagerForGeneration(
 	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-attempt-proof-token")
 	eventBus, workOwner, coordinator := newClaudeAttemptProofEventBus(t, backend, generation)
-	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{}}
 	cfg.Workspace.DockerBin = dockerBin
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.OutputFormat = surface.outputFormat
@@ -552,7 +646,7 @@ func newClaudeAttemptProofManagerForGeneration(
 		cfg,
 		backend.sessions,
 		"claude-proof-worker",
-		claudeAttemptProofWorkspace{},
+		claudeAttemptProofWorkspace{failure: surface.backingFailure},
 		backend.store,
 		eventBus,
 		runtimellm.ClaudeCLIRuntimeOptions{
@@ -943,8 +1037,14 @@ func runClaudeAttemptProofProcessHelper() int {
 		return 2
 	}
 	if os.Getenv("SWARM_CLAUDE_ATTEMPT_PROOF_MODE") == "postlaunch_failure" {
-		fmt.Fprintln(os.Stderr, "injected provider process failure")
+		if outputFormat == "stream-json" {
+			fmt.Fprintln(os.Stdout, `{"type":"system","subtype":"init","tools":[]}`)
+		}
+		fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"is_error\":true,\"usage\":{\"noise\":%q},\"errors\":[\"injected provider process failure\"]}\n", strings.Repeat("x", 500))
 		return 1
+	}
+	if outputFormat == "stream-json" {
+		fmt.Fprintln(os.Stdout, `{"type":"system","subtype":"init","tools":[]}`)
 	}
 	fmt.Fprintf(os.Stdout, "{\"type\":\"result\",\"result\":\"ok\",\"session_id\":%q,\"model\":\"claude-proof\",\"total_cost_usd\":0.001,\"usage\":{\"input_tokens\":12,\"output_tokens\":3,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}\n", providerSessionID)
 	return 0

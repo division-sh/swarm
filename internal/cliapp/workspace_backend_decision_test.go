@@ -3,6 +3,7 @@ package cliapp
 import (
 	"context"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -129,7 +130,7 @@ func TestWorkspaceBackendDecisionCapabilityMatrix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			decision, err := DecideWorkspaceBackend(tt.preference, tt.cfg, workspaceBackendTestSource(tt.agents))
+			decision, err := DecideWorkspaceBackend(executionposture.Live, tt.preference, tt.cfg, workspaceBackendTestSource(tt.agents))
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("DecideWorkspaceBackend error = %v, want containing %q", err, tt.wantErr)
@@ -161,21 +162,21 @@ func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
 		{
 			name:            "claude only offers API backend as complete alternative",
 			agent:           runtimecontracts.AgentRegistryEntry{ID: "worker"},
-			wantProblem:     []string{"unmocked agent worker uses claude_cli backend"},
+			wantProblem:     []string{"live agent worker uses claude_cli backend"},
 			wantRemediation: []string{"Use Docker", "llm.backend: anthropic", "Docker-free local run"},
 			wantClaudeOnly:  true,
 		},
 		{
 			name:              "mixed native bash names every blocker and requires host authorization",
 			agent:             runtimecontracts.AgentRegistryEntry{ID: "worker", NativeTools: map[string]any{"bash": true}},
-			wantProblem:       []string{"unmocked agent worker uses claude_cli backend", "agent worker has native_tools.bash"},
+			wantProblem:       []string{"live agent worker uses claude_cli backend", "agent worker has native_tools.bash"},
 			wantRemediation:   []string{"Use Docker", "llm.backend: anthropic", "workspace.allow_exec_on_host: true"},
 			forbidRemediation: "or switch to an API backend",
 		},
 		{
 			name:              "mixed exec tool names every blocker and requires host authorization",
 			agent:             runtimecontracts.AgentRegistryEntry{ID: "worker", Tools: []string{"shell"}},
-			wantProblem:       []string{"unmocked agent worker uses claude_cli backend", "agent worker has exec-class tool shell"},
+			wantProblem:       []string{"live agent worker uses claude_cli backend", "agent worker has exec-class tool shell"},
 			wantRemediation:   []string{"Use Docker", "llm.backend: anthropic", "workspace.allow_exec_on_host: true"},
 			forbidRemediation: "or switch to an API backend",
 		},
@@ -184,7 +185,7 @@ func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			preference := WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend", PreferenceExplicit: true, AllowExecOnHost: true}
-			decision, err := DecideWorkspaceBackend(preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{"worker": tt.agent}))
+			decision, err := DecideWorkspaceBackend(executionposture.Live, preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{"worker": tt.agent}))
 			if err == nil {
 				t.Fatal("DecideWorkspaceBackend unexpectedly accepted claude_cli host execution")
 			}
@@ -212,72 +213,63 @@ func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
 	}
 }
 
-func TestWorkspaceBackendClaudeCLIUsesEffectivePerAgentMockSelection(t *testing.T) {
-	mocked := testWorkspaceBackendMockPerformance()
-	t.Run("fully mocked bundle keeps ordinary host workspace lifecycle", func(t *testing.T) {
-		decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{
-			"alpha": {ID: "alpha", Mock: mocked},
-			"beta":  {ID: "beta", Mock: mocked},
-		}))
-		if err != nil {
-			t.Fatalf("DecideWorkspaceBackend: %v", err)
-		}
-		if decision.Backend != workspace.BackendHost || decision.CapabilityClass != workspaceCapabilityWorkspaceWrite {
-			t.Fatalf("decision = %#v, want host workspace-write lifecycle", decision)
-		}
-		if workspaceBackendHasReason(decision.Reasons, WorkspaceReasonClaudeCLI) {
-			t.Fatalf("fully mocked agents contributed claude_cli execution reason: %#v", decision.Reasons)
-		}
-		if !workspaceBackendHasReason(decision.Reasons, WorkspaceReasonLifecycle) {
-			t.Fatalf("fully mocked agents lost ordinary workspace lifecycle reason: %#v", decision.Reasons)
-		}
-	})
-
-	t.Run("mixed bundle refuses host and names only unmocked Claude agent", func(t *testing.T) {
-		preference := WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "workspace.backend", PreferenceExplicit: true}
-		decision, err := DecideWorkspaceBackend(preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{
-			"mocked-worker": {ID: "mocked-worker", Mock: mocked},
-			"live-worker":   {ID: "live-worker"},
-		}))
-		if err == nil {
-			t.Fatal("DecideWorkspaceBackend unexpectedly admitted mixed claude_cli bundle on host")
-		}
-		if !strings.Contains(err.Error(), "unmocked agent live-worker uses claude_cli backend") {
-			t.Fatalf("error = %q, want named unmocked agent", err)
-		}
-		if strings.Contains(err.Error(), "unmocked agent mocked-worker") {
-			t.Fatalf("error misclassified mocked agent as live: %q", err)
-		}
-		var claudeAgents []string
-		for _, reason := range decision.Reasons {
-			if reason.Kind == WorkspaceReasonClaudeCLI {
-				claudeAgents = append(claudeAgents, reason.AgentID)
+func TestCommandWorkspaceSelectionIgnoresLiveSourceDoubles(t *testing.T) {
+	for _, purpose := range []executionposture.Posture{executionposture.Live, executionposture.MockOnly} {
+		for _, backend := range []string{llmselection.BackendClaudeCLI, llmselection.BackendAnthropic, llmselection.BackendOpenAICompatible, llmselection.BackendOpenAIResponses} {
+			for _, capability := range []string{"ordinary", "native", "exec-tool"} {
+				t.Run(string(purpose)+"/"+backend+"/"+capability, func(t *testing.T) {
+					actor := runtimecontracts.AgentRegistryEntry{ID: "worker", Mock: testWorkspaceBackendMockPerformance()}
+					if capability == "native" {
+						actor.NativeTools = map[string]any{"bash": true}
+					}
+					if capability == "exec-tool" {
+						actor.Tools = []string{"shell"}
+					}
+					got, err := DecideWorkspaceBackend(purpose, WorkspaceBackendSelection{}, testWorkspaceBackendConfig(backend), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{"worker": actor}))
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantExec := purpose == executionposture.Live && (backend == llmselection.BackendClaudeCLI || capability != "ordinary")
+					wantBackend := workspace.BackendHost
+					if wantExec {
+						wantBackend = workspace.BackendDocker
+					}
+					if got.Backend != wantBackend {
+						t.Fatalf("backend = %s, want %s: %#v", got.Backend, wantBackend, got.Reasons)
+					}
+					wantClaude := purpose == executionposture.Live && backend == llmselection.BackendClaudeCLI
+					if workspaceBackendHasReason(got.Reasons, WorkspaceReasonClaudeCLI) != wantClaude {
+						t.Fatalf("Claude reasons = %#v", got.Reasons)
+					}
+				})
 			}
 		}
-		if len(claudeAgents) != 1 || claudeAgents[0] != "live-worker" {
-			t.Fatalf("claude_cli reasons = %v, want only live-worker; all reasons=%#v", claudeAgents, decision.Reasons)
-		}
+	}
+	source := workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{
+		"with-double":    {ID: "with-double", Mock: testWorkspaceBackendMockPerformance()},
+		"without-double": {ID: "without-double"},
 	})
-
-	t.Run("mock does not waive independently declared native execution", func(t *testing.T) {
-		decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{
-			"worker": {ID: "worker", Mock: mocked, NativeTools: map[string]any{"bash": true}},
-		}))
-		if err != nil {
-			t.Fatalf("DecideWorkspaceBackend: %v", err)
+	if _, err := DecideWorkspaceBackend(executionposture.MockOnly, WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), source); err == nil {
+		t.Fatal("mock command accepted a missing double")
+	}
+	got, err := DecideWorkspaceBackend(executionposture.Live, WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, reason := range got.Reasons {
+		if reason.Kind == WorkspaceReasonClaudeCLI {
+			count++
 		}
-		if decision.Backend != workspace.BackendDocker || decision.CapabilityClass != workspaceCapabilityExec {
-			t.Fatalf("decision = %#v, want Docker for independent native bash execution", decision)
-		}
-		if workspaceBackendHasReason(decision.Reasons, WorkspaceReasonClaudeCLI) || !workspaceBackendHasReason(decision.Reasons, WorkspaceReasonNativeBash) {
-			t.Fatalf("reasons = %#v, want native bash without claude_cli", decision.Reasons)
-		}
-	})
+	}
+	if count != 2 {
+		t.Fatalf("live command Claude agents = %d, want both declarations", count)
+	}
 }
 
 func TestWorkspaceBackendCensusesScopedLiveAgentsHiddenByAmbiguousAliases(t *testing.T) {
 	source := scopedWorkspaceBackendAgentFixture(t)
-	decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), source)
+	decision, err := DecideWorkspaceBackend(executionposture.Live, WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), source)
 	if err != nil {
 		t.Fatalf("DecideWorkspaceBackend: %v", err)
 	}
@@ -371,7 +363,7 @@ func TestWorkspaceBackendReasonsPreserveEveryAgentCapabilityAcrossAggregateClass
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendOpenAIResponses), workspaceBackendTestSource(tt.agents))
+			decision, err := DecideWorkspaceBackend(executionposture.Live, WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendOpenAIResponses), workspaceBackendTestSource(tt.agents))
 			if err != nil {
 				t.Fatalf("DecideWorkspaceBackend: %v", err)
 			}

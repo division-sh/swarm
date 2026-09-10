@@ -34,16 +34,19 @@ func (s *RunForkSQLiteOwner) LoadRunForkSourceRunID(ctx context.Context, forkRun
 	if err := s.requireCurrentSchema(); err != nil {
 		return "", err
 	}
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var sourceRunID string
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		snapshot, err := s.RunLifecycleSQLiteOwner.LoadSnapshotTx(txctx, tx, forkRunID)
+		if err != nil {
+			return err
+		}
+		sourceRunID, err = originalRunFromForkSnapshot(snapshot)
+		return err
+	})
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
-	snapshot, err := s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, forkRunID)
-	if err != nil {
-		return "", err
-	}
-	return originalRunFromForkSnapshot(snapshot)
+	return sourceRunID, nil
 }
 
 func originalRunFromForkSnapshot(snapshot runlifecycle.Snapshot) (string, error) {

@@ -8,38 +8,49 @@ import (
 	"time"
 
 	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
 
-func TestProcessExecutionPostureIsMandatoryAndStrict(t *testing.T) {
-	tests := []struct {
-		name    string
-		posture string
-		wantErr bool
-	}{
-		{name: "live", posture: "live"},
-		{name: "mock only", posture: "mock_only"},
-		{name: "omitted", wantErr: true},
-		{name: "unknown", posture: "mock", wantErr: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Posture(tc.posture)}}
-			got, err := cfg.ProcessExecutionPosture()
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("ProcessExecutionPosture() error = %v, want error=%v", err, tc.wantErr)
+func TestLoadRejectsRetiredExecutionPosture(t *testing.T) {
+	for _, value := range []string{"live", "mock_only", "mock", "null", "''", "{}"} {
+		t.Run(value, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "swarm.yaml")
+			if err := os.WriteFile(path, []byte("runtime:\n  execution_posture: "+value+"\n"), 0o600); err != nil {
+				t.Fatal(err)
 			}
-			if !tc.wantErr && string(got) != tc.posture {
-				t.Fatalf("ProcessExecutionPosture() = %q, want %q", got, tc.posture)
+			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), RetiredExecutionPostureMessage) {
+				t.Fatalf("Load() = %v, want retired selector rejection", err)
 			}
 		})
+	}
+}
+
+func TestLoadRecoveryDefaultsWithoutExecutionSelector(t *testing.T) {
+	for _, tc := range []struct {
+		source   string
+		recovery bool
+	}{
+		{"", true},
+		{"runtime:\n  recovery_on_startup: false\n", false},
+		{"runtime:\n  recovery_on_startup: true\n", true},
+	} {
+		path := filepath.Join(t.TempDir(), "swarm.yaml")
+		source := tc.source + "llm:\n  backend: anthropic\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n"
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Runtime.RecoveryOnStartup != tc.recovery {
+			t.Fatalf("recovery = %v, want %v", cfg.Runtime.RecoveryOnStartup, tc.recovery)
+		}
 	}
 }
 
 func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"database:",
 		"  host: 127.0.0.1",
@@ -113,7 +124,6 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 func TestValidatePlatformPackDirs(t *testing.T) {
 	base := strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  backend: host",
@@ -228,7 +238,7 @@ func TestValidatePostgresDatabasePasswordSourceAcceptsExplicitSource(t *testing.
 
 func validDatabasePasswordConfig() *Config {
 	return &Config{
-		Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live},
+		Runtime: RuntimeConfig{},
 		LLM: LLMConfig{
 			Backend: "claude_cli",
 			Session: LLMSessionConfig{
@@ -248,7 +258,6 @@ func validDatabasePasswordConfig() *Config {
 func TestLoad_RejectsRetiredWorkspaceDataSourceEvenWhenBlank(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: \"   \"",
@@ -272,7 +281,6 @@ func TestLoad_RejectsRetiredWorkspaceDataSourceEvenWhenBlank(t *testing.T) {
 func TestLoad_PreservesWorkspaceBackendPresence(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  backend: \"   \"",
@@ -300,7 +308,7 @@ func TestLoad_PreservesWorkspaceBackendPresence(t *testing.T) {
 }
 
 func TestValidate_RejectsInvalidBackend(t *testing.T) {
-	c := &Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "bogus"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
@@ -313,7 +321,7 @@ func TestValidate_RejectsInvalidBackend(t *testing.T) {
 func TestValidate_RejectsLegacyBackendIDsForNewConfig(t *testing.T) {
 	for _, backend := range []string{"api", "cli_test"} {
 		t.Run(backend, func(t *testing.T) {
-			c := &Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live}}
+			c := &Config{Runtime: RuntimeConfig{}}
 			c.LLM.Backend = backend
 			c.LLM.Session.LockTTL = time.Second
 			c.LLM.Session.RotateAfterTurns = 1
@@ -326,7 +334,7 @@ func TestValidate_RejectsLegacyBackendIDsForNewConfig(t *testing.T) {
 }
 
 func TestValidate_RejectsReservedActiveBackend(t *testing.T) {
-	c := &Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "local"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
@@ -337,7 +345,7 @@ func TestValidate_RejectsReservedActiveBackend(t *testing.T) {
 }
 
 func TestValidate_OpenAICompatibleRequiresProfileOwnedConfig(t *testing.T) {
-	c := &Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "openai_compatible"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
@@ -356,7 +364,7 @@ func TestValidate_OpenAICompatibleRequiresProfileOwnedConfig(t *testing.T) {
 }
 
 func TestValidate_OpenAIResponsesUsesProfileOwnedDefaultAndOverride(t *testing.T) {
-	c := &Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "openai_responses"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
@@ -375,7 +383,7 @@ func TestValidate_OpenAIResponsesUsesProfileOwnedDefaultAndOverride(t *testing.T
 }
 
 func TestValidate_RejectsRetiredRuntimeMode(t *testing.T) {
-	c := &Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.RuntimeMode = "api"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
@@ -386,7 +394,7 @@ func TestValidate_RejectsRetiredRuntimeMode(t *testing.T) {
 }
 
 func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
-	c := &Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "claude_cli"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
@@ -402,7 +410,6 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"llm:",
 		"  backend: anthropic",
 		"  session:",
@@ -422,7 +429,7 @@ func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 }
 
 func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
-	c := &Config{Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live}}
+	c := &Config{Runtime: RuntimeConfig{}}
 	c.LLM.Backend = "anthropic"
 	c.LLM.Session.LockTTL = 1 * time.Second
 	c.LLM.Session.RotateAfterTurns = 1
@@ -442,7 +449,7 @@ func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
 func TestValidateLLMProviderLimits(t *testing.T) {
 	base := func() *Config {
 		return &Config{
-			Runtime: RuntimeConfig{ExecutionPosture: executionposture.Live},
+			Runtime: RuntimeConfig{},
 			LLM: LLMConfig{
 				Backend: "anthropic",
 				Session: LLMSessionConfig{
@@ -556,7 +563,6 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
-		"  execution_posture: live",
 		"llm:",
 		"  backend: anthropic",
 		"  session:",

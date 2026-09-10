@@ -975,7 +975,7 @@ func runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(admission
 	return admission
 }
 
-func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
+func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
 	if len(allowedEvents) == 0 {
 		return ensureRunForkActivationNoForkReplayState(ctx, tx, postgresDeliveryAdapter, forkRunID)
@@ -1049,6 +1049,13 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 	if err != nil {
 		return err
 	}
+	if s.lifecycleDiagnostics == nil {
+		return fmt.Errorf("lifecycle observation owner is required")
+	}
+	observations, err := s.lifecycleDiagnostics.LifecycleObservationIDsTx(ctx, tx, forkRunID)
+	if err != nil {
+		return err
+	}
 	var strayEvents int
 	var strayEventEvidence string
 	if err := tx.QueryRowContext(ctx, `
@@ -1074,18 +1081,6 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			WHERE e.run_id = $1::uuid
 			  AND e.produced_by_type = 'agent'
 			UNION
-			SELECT e.event_id
-			FROM events e
-			WHERE e.run_id = $1::uuid
-			  AND e.event_name = 'platform.runtime_log'
-			  AND e.source_event_id IS NULL
-			  AND e.payload->'details'->>'runtime_lineage_owner' = $7
-			  AND e.payload->'details'->>'runtime_lineage_run_id' = $1::text
-			  AND e.payload->'details'->>'runtime_lineage_row_category' = 'diagnostic'
-			  AND e.payload->'details'->>'runtime_lineage_selected_fork_owner' = $8
-			  AND e.payload->'details'->>'runtime_lineage_classification' = 'fork_local'
-			  AND e.payload->'details'->>'runtime_lineage_selected_fork_context' = 'true'
-			UNION
 			SELECT child.event_id
 			FROM events child
 			INNER JOIN selected_tree parent ON child.source_event_id = parent.event_id
@@ -1093,16 +1088,17 @@ func ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sq
 			  AND (
 				child.event_name NOT LIKE 'platform.%'
 				OR child.event_name = ANY($3::text[])
-				OR child.event_id = ANY($9::uuid[])
+				OR child.event_id = ANY($7::uuid[])
 			  )
 		)
 		SELECT COUNT(*), COALESCE(string_agg(e.event_name || ':' || e.event_id::text, ',' ORDER BY e.event_name, e.event_id), '')
 		FROM events e
 		WHERE e.run_id = $1::uuid
+		  AND NOT (e.event_id = ANY($8::uuid[]))
 		  AND NOT EXISTS (
 			SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id
 		  )
-	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentRunIDs), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances), runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, pq.Array(activityIDs)).Scan(&strayEvents, &strayEventEvidence); err != nil {
+	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentRunIDs), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances), pq.Array(activityIDs), pq.Array(observations)).Scan(&strayEvents, &strayEventEvidence); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {

@@ -37,15 +37,28 @@ type DynamicFlowRuntimeCreationEventPlan struct {
 	DeliveryContext events.DeliveryContext `json:"delivery_context,omitempty"`
 }
 
+type DynamicFlowRuntimeCreationDispatchMode uint8
+
+const (
+	DynamicFlowRuntimeCreationDispatchAsync DynamicFlowRuntimeCreationDispatchMode = iota
+	DynamicFlowRuntimeCreationDispatchStartupRecovery
+)
+
 type DynamicFlowRuntimeCreationOccurrenceRequest struct {
 	RunID        string
 	InstancePath string
 	Plan         DynamicFlowRuntimeReadinessPlan
 	Event        events.Event
 	OccurredAt   time.Time
+	DispatchMode DynamicFlowRuntimeCreationDispatchMode
 }
 
 func (r DynamicFlowRuntimeCreationOccurrenceRequest) Validate() error {
+	switch r.DispatchMode {
+	case DynamicFlowRuntimeCreationDispatchAsync, DynamicFlowRuntimeCreationDispatchStartupRecovery:
+	default:
+		return fmt.Errorf("unknown dynamic flow creation dispatch mode %d", r.DispatchMode)
+	}
 	r.RunID = strings.TrimSpace(r.RunID)
 	r.InstancePath = strings.Trim(strings.TrimSpace(r.InstancePath), "/")
 	if _, err := uuid.Parse(r.RunID); err != nil {

@@ -62,7 +62,7 @@ func TestManagedCapabilityPlanSeparatesAllProviderNativeFamiliesFromConcreteFall
 		}
 	}
 
-	response := &Response{ProviderVisibleTools: []string{"Bash", "Edit", "Read", "WebFetch", "WebSearch", "Write"}}
+	response := cliInventoryResponseForTest(`["Bash","Edit","Read","WebFetch","WebSearch","Write"]`)
 	observed, err := ObserveCLIResponseCapabilitySurface(surface, response)
 	if err != nil {
 		t.Fatalf("ObserveCLIResponseCapabilitySurface: %v", err)
@@ -169,8 +169,8 @@ func TestManagedCapabilityPlanRejectsMissingAndUnexpectedProviderBuiltins(t *tes
 		name     string
 		response *Response
 	}{
-		{name: "missing", response: &Response{ProviderVisibleTools: []string{"WebSearch"}}},
-		{name: "unexpected", response: &Response{ProviderVisibleTools: []string{"WebFetch", "WebSearch", "UnexpectedBuiltin"}}},
+		{name: "missing", response: cliInventoryResponseForTest(`["WebSearch"]`)},
+		{name: "unexpected", response: cliInventoryResponseForTest(`["WebFetch","WebSearch","UnexpectedBuiltin"]`)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			observed, observeErr := ObserveCLIResponseCapabilitySurface(surface, test.response)

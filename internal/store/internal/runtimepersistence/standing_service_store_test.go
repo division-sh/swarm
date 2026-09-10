@@ -659,7 +659,7 @@ func assertStandingMockOnlyLifecycleRejectsLiveWorkBeforeMutation(
 	assertRejected := func(operation string, mutate func() error) {
 		t.Helper()
 		err := mutate()
-		if err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+		if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 			t.Fatalf("%s error = %v, want mock-only live-work rejection", operation, err)
 		}
 		statuses, statusErr := liveCoordinator.ListStandingServiceStatuses(ctx)
@@ -733,7 +733,7 @@ func TestStandingServicePostureCensusRejectsEachLiveWorkFamilyBeforeMutation(t *
 					AdmitStandingServiceRun(context.Context, string, executionposture.Posture) error
 				})
 				err := admitter.AdmitStandingServiceRun(ctx, runID, executionposture.MockOnly)
-				if err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+				if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 					t.Fatalf("AdmitStandingServiceRun error = %v, want live %s rejection", err, family)
 				}
 				if got := countStandingCensusFamily(t, fixture, ctx, runID, family, executionmode.Live); got != 1 {

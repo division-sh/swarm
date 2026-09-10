@@ -94,8 +94,8 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered b
 	discardPrepared := func() {
 		for _, entry := range prepared.contexts {
 			for _, occurrence := range entry.standing {
-				occurrence.Retire()
-				_ = occurrence.Wait(context.Background())
+				// Discard owns the parent lease as well as the child's work.
+				_ = occurrence.RetireAndWait(context.Background())
 			}
 		}
 	}

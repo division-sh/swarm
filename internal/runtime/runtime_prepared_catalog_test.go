@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/llm"
@@ -14,6 +15,96 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	"github.com/google/uuid"
 )
+
+type preparedCatalogLeaseKey struct{}
+
+type preparedCatalogLeasedTools struct {
+	*startupProbeToolExecutor
+	t          *testing.T
+	active     bool
+	acquired   int
+	released   int
+	acquireErr error
+}
+
+func (s *preparedCatalogLeasedTools) AcquireToolDefinitionsForActorInContext(ctx context.Context, actor actors.AgentConfig) (context.Context, []llm.ToolDefinition, func(), error) {
+	if s.active {
+		s.t.Fatal("previous actor snapshot retained its lease")
+	}
+	if s.acquireErr != nil {
+		return ctx, nil, nil, s.acquireErr
+	}
+	s.active = true
+	s.acquired++
+	return context.WithValue(ctx, preparedCatalogLeaseKey{}, s), s.ToolDefinitionsForActorInContext(ctx, actor), func() {
+		if !s.active {
+			s.t.Fatal("snapshot lease released twice")
+		}
+		s.active = false
+		s.released++
+		s.defs[0].Schema.(map[string]any)["title"] = "released"
+	}, nil
+}
+
+func (s *preparedCatalogLeasedTools) ToolCapabilitiesForActorInContext(ctx context.Context, actor actors.AgentConfig, names []string, allow map[string]struct{}) toolcapabilities.Set {
+	if !s.active || ctx.Value(preparedCatalogLeaseKey{}) != s {
+		s.t.Fatal("capability snapshot read outside its exact lease")
+	}
+	return s.startupProbeToolExecutor.ToolCapabilitiesForActorInContext(ctx, actor, names, allow)
+}
+
+func TestPreparedProviderCatalogSettlesSnapshotLease(t *testing.T) {
+	_, probes := newPreparedProviderTestPlans(t)
+	cfg := &config.Config{LLM: config.LLMConfig{Backend: "claude_cli"}}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, startupProbeRuntime{ClaudeCLIRuntime: &llm.ClaudeCLIRuntime{}, probe: &preparedProtocolProbe{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []string{"success", "invalid_schema", "acquisition_failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			tools := &preparedCatalogLeasedTools{startupProbeToolExecutor: &startupProbeToolExecutor{defs: startupProbeDefs(), caps: startupProbeCaps()}, t: t}
+			tools.defs[0].Schema = map[string]any{"type": "object", "title": "original"}
+			if scenario == "invalid_schema" {
+				tools.defs[0].Schema.(map[string]any)["invalid"] = uint64(9007199254740993)
+			}
+			if scenario == "acquisition_failure" {
+				tools.acquireErr = errors.New("snapshot acquisition failed")
+			}
+			catalog, err := PrepareSelectedForkProviderCatalog(testAuthorActivityContext(context.Background()), runtimes, tools, []manager.AgentMaterializationBlueprint{probes[0].Agent, probes[1].Agent})
+			if tools.active || tools.acquired != tools.released {
+				t.Fatalf("unsettled snapshot lease: active=%v acquired=%d released=%d", tools.active, tools.acquired, tools.released)
+			}
+			if scenario != "success" {
+				if err == nil || catalog != nil {
+					t.Fatalf("failed snapshot produced catalog: %v", err)
+				}
+				if scenario == "invalid_schema" && tools.released != 1 {
+					t.Fatal("clone failure did not settle acquired lease")
+				}
+				if tools.acquireErr != nil && !errors.Is(err, tools.acquireErr) {
+					t.Fatalf("lost acquisition failure: %v", err)
+				}
+				return
+			}
+			if err != nil || tools.released != 2 {
+				t.Fatalf("snapshot census failed: releases=%d err=%v", tools.released, err)
+			}
+			originalSnapshots := 0
+			for _, target := range catalog.targets {
+				if target.tools[0].Schema.(map[string]any)["title"] == "original" {
+					originalSnapshots++
+				}
+			}
+			if originalSnapshots != 1 {
+				t.Fatal("lease release mutated the already frozen first snapshot")
+			}
+		})
+	}
+}
 
 func TestPreparedProviderCatalogExactIdentity(t *testing.T) {
 	_, probes := newPreparedProviderTestPlans(t)

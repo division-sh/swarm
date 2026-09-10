@@ -54,7 +54,7 @@ func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefaul
 // ResolveSourceBootEffectReachability derives which outbound tool transports
 // can still execute for one effective source. Any live-selected agent or
 // declarative workflow activity keeps its outbound tools reachable; an
-// all-mock source waives only exact responders with no live workflow entrance.
+// mock command admits exact responders without changing authored declarations.
 func ResolveSourceBootEffectReachability(source semanticview.Source, configuredDefault llmselection.Profile, plan *providerconnectors.MockResponsePlan, posture executionposture.Posture) (SourceBootEffectReachability, error) {
 	if source == nil {
 		return SourceBootEffectReachability{}, fmt.Errorf("semantic source is required")
@@ -76,6 +76,7 @@ func ResolveSourceBootEffectReachability(source semanticview.Source, configuredD
 	liveAgentLabels := map[string]struct{}{}
 	for _, agent := range agents {
 		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			Posture:           posture,
 			ConfiguredDefault: configuredDefault,
 			MockConfigured:    agent.Entry.Mock.Configured(),
 		})
@@ -87,14 +88,11 @@ func ResolveSourceBootEffectReachability(source semanticview.Source, configuredD
 		}
 	}
 	fact.liveAgentIDs = sortedSetKeysLocal(liveAgentLabels)
-	if posture == executionposture.MockOnly && len(fact.liveAgentIDs) > 0 {
-		return SourceBootEffectReachability{}, fmt.Errorf("runtime.execution_posture=mock_only requires every effective agent to select mock execution; live agents: %s", strings.Join(fact.liveAgentIDs, ", "))
-	}
 	if posture == executionposture.MockOnly {
 		for toolID, sites := range fact.liveWorkflowActivitySites {
 			entries := sourceToolEntriesByID(source)[toolID]
 			if len(sites) > 0 && !exactMockResponderAdmitsEveryEntry(plan, toolID, entries) {
-				return SourceBootEffectReachability{}, fmt.Errorf("runtime.execution_posture=mock_only requires an exact mock response for provider activity tool %q at %s", toolID, strings.Join(sites, ", "))
+				return SourceBootEffectReachability{}, fmt.Errorf("mock test execution requires an exact mock response for provider activity tool %q at %s", toolID, strings.Join(sites, ", "))
 			}
 		}
 		fact.unreachableOutboundTools = map[string]struct{}{}
@@ -104,16 +102,6 @@ func ResolveSourceBootEffectReachability(source semanticview.Source, configuredD
 			}
 		}
 		return fact, nil
-	}
-	if len(agents) == 0 || len(fact.liveAgentIDs) > 0 {
-		return fact, nil
-	}
-
-	fact.unreachableOutboundTools = map[string]struct{}{}
-	for toolID, entries := range sourceToolEntriesByID(source) {
-		if exactMockResponderAdmitsEveryEntry(plan, toolID, entries) && len(fact.liveWorkflowActivitySites[toolID]) == 0 {
-			fact.unreachableOutboundTools[toolID] = struct{}{}
-		}
 	}
 	return fact, nil
 }

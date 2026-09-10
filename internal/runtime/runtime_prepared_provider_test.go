@@ -89,7 +89,7 @@ func newPreparedProviderTestPlans(t *testing.T) (startupownership.ProcessCapabil
 	if err != nil || len(blueprints) != 1 {
 		t.Fatalf("blueprints: %d %v", len(blueprints), err)
 	}
-	blueprint, err := manager.ResolveAgentMaterializationBlueprint(manager.AgentManagerOptions{LLMBackend: "claude_cli"}, blueprints[0])
+	blueprint, err := manager.ResolveAgentMaterializationBlueprint(manager.AgentManagerOptions{ExecutionPosture: executionposture.Live, LLMBackend: "claude_cli"}, blueprints[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestPreparedProviderPreflightFailureDoesNotReturnReceipts(t *testing.T) {
 			if scenario == "provider_failure" && !strings.Contains(err.Error(), "provider-rejected-probe") {
 				t.Fatal(err)
 			}
-			if scenario == "mock_only" && (!strings.Contains(err.Error(), "mock_only rejects live execution") || len(probe.authorities) != 0 || len(store.surfaces) != 0) {
+			if scenario == "mock_only" && (!strings.Contains(err.Error(), "command-selected mock execution rejects live execution") || len(probe.authorities) != 0 || len(store.surfaces) != 0) {
 				t.Fatalf("mock-only preparation reached provider authority: err=%v authorities=%v surfaces=%v", err, probe.authorities, store.surfaces)
 			}
 			if scenario == "replaced_receipt" && !strings.Contains(err.Error(), "changed startup plan") {

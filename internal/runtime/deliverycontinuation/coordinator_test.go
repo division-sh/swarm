@@ -422,8 +422,8 @@ func TestCoordinatorSynchronizationReturnsExactFatalScanResult(t *testing.T) {
 		t.Fatalf("start coordinator: %v", err)
 	}
 	defer func() {
-		if err := coordinator.Retire(context.Background()); err != nil {
-			t.Errorf("retire coordinator: %v", err)
+		if err := coordinator.Retire(context.Background()); err == nil || !strings.Contains(err.Error(), "synchronized selected-store failure") {
+			t.Errorf("retirement must preserve synchronized failure: %v", err)
 		}
 	}()
 	for store.scanCalls() < 2 {
@@ -470,8 +470,8 @@ func TestCoordinatorStopsAfterUnownedStoreFailure(t *testing.T) {
 		t.Fatalf("start coordinator: %v", err)
 	}
 	defer func() {
-		if err := coordinator.Retire(context.Background()); err != nil {
-			t.Errorf("retire coordinator: %v", err)
+		if err := coordinator.Retire(context.Background()); err == nil || !strings.Contains(err.Error(), "selected-store failure without wake authority") {
+			t.Errorf("retirement must preserve store failure: %v", err)
 		}
 	}()
 	for store.scanCalls() < 2 {
@@ -557,8 +557,8 @@ func TestCoordinatorStopsAfterFatalDispatchWithoutPolling(t *testing.T) {
 		t.Fatalf("start coordinator: %v", err)
 	}
 	defer func() {
-		if err := coordinator.Retire(context.Background()); err != nil {
-			t.Errorf("retire coordinator: %v", err)
+		if err := coordinator.Retire(context.Background()); err == nil || !strings.Contains(err.Error(), "dispatch failure without wake authority") {
+			t.Errorf("retirement must preserve dispatch failure: %v", err)
 		}
 	}()
 

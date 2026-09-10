@@ -69,14 +69,14 @@ func (am *AgentManager) RebindLifecycleExecutionForStartup(ctx context.Context) 
 		if current.Equal(target) {
 			continue
 		}
-		if err := commitProcessTakeover(ctx, store, identity, state, target); err != nil {
+		if err := am.lifecycle.commitProcessTakeover(ctx, store, identity, state, target); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func commitProcessTakeover(
+func (c *agentLifecycleCoordinator) commitProcessTakeover(
 	ctx context.Context,
 	store AgentLifecyclePersistence,
 	identity runtimeagentidentity.Identity,
@@ -104,7 +104,7 @@ func commitProcessTakeover(
 		state.ProcessBinding.ProcessAuthorityID, state.ProcessBinding.ProcessBootID,
 		target.ProcessAuthorityID, target.ProcessBootID, target.GenerationGrantID,
 	)
-	result, err := store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+	result, err := c.commitLifecycleTransition(context.WithoutCancel(ctx), store, AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: "process_takeover", RequestHash: requestHash,
 		Identity: identity, AgentID: identity.AgentID(), Trigger: "process_takeover",
 		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,

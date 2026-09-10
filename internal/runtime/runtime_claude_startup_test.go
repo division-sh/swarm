@@ -76,6 +76,22 @@ type claudeStartupWorkspaceStub struct {
 	err    error
 }
 
+type claudeStartupStateStub struct{}
+
+func (claudeStartupStateStub) Directory() string                       { return workspace.ClaudeStateDirectory }
+func (claudeStartupStateStub) CheckHead(context.Context, string) error { return nil }
+func (claudeStartupStateStub) Release(context.Context) error           { return nil }
+
+func (s claudeStartupWorkspaceStub) ResolveClaudeWorkspace(ctx context.Context, actor runtimeactors.AgentConfig, _ workspace.ClaudeStateRequest, _ string) (*workspace.Target, error) {
+	target, err := s.ResolveWorkspaceForCapabilityAdmission(ctx, actor)
+	if err != nil || target == nil {
+		return target, err
+	}
+	copy := *target
+	copy.ClaudeState = claudeStartupStateStub{}
+	return &copy, nil
+}
+
 func (s claudeStartupWorkspaceStub) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -101,6 +117,14 @@ type claudeStartupCapabilityWorkspaceStub struct {
 	claudeStartupWorkspaceStub
 	regularCalls   *int
 	admissionCalls *int
+}
+
+func (s claudeStartupCapabilityWorkspaceStub) ResolveClaudeWorkspace(ctx context.Context, actor runtimeactors.AgentConfig, _ workspace.ClaudeStateRequest, _ string) (*workspace.Target, error) {
+	target, err := s.ResolveWorkspaceForCapabilityAdmission(ctx, actor)
+	if err == nil {
+		target.ClaudeState = claudeStartupStateStub{}
+	}
+	return target, err
 }
 
 func (s claudeStartupCapabilityWorkspaceStub) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
@@ -373,6 +397,7 @@ func (s *startupVisibleSurfaceProbeStub) ProbeStartupVisibleToolSurface(ctx cont
 	resp := s.resp
 	if resp == nil {
 		resp = &llm.Response{
+			CLIInventory:         llm.CLIInventoryValid,
 			ProviderVisibleTools: surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin),
 			MCPVisibleTools:      surface.PlannedBindingNames(managedcapabilities.BindingMCPProvider),
 		}
@@ -772,22 +797,8 @@ func TestValidateManagedProviderPreflightFailsClosedWhenLiveClaudeRuntimeLacksSt
 
 func TestClaudeStartupCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	source := ambiguousScopedClaudeStartupSource(t)
-	mocked, total, unmocked := declaredAgentMockCensus(source)
-	if mocked != 1 || total != 3 {
-		t.Fatalf("mock census = mocked:%d total:%d unmocked:%#v, want 1/3", mocked, total, unmocked)
-	}
-	joined := strings.Join(unmocked, "\n")
-	for _, want := range []string{
-		"flow packages/project-a agent shared-worker",
-		"flow packages/project-b agent shared-worker",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("unmocked declarations = %q, want %q", joined, want)
-		}
-	}
-
 	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
-	err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source)
+	err := validateSelectedBackendModelAliasesForDeclaredAgents(executionposture.Live, cfg, source)
 	if err == nil || !strings.Contains(err.Error(), "flow packages/project-a agent shared-worker") || !strings.Contains(err.Error(), "missing-live-alias") {
 		t.Fatalf("model alias validation error = %v, want hidden scoped declaration", err)
 	}
@@ -1076,7 +1087,9 @@ func TestValidateClaudeMCPToolsForManagedAgents_SeparatesProviderNativeSurfaceFr
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{
 		resp: &llm.Response{
-			VisibleTools: []string{"Bash", "Read", "Write", "Edit", "WebFetch", "WebSearch"},
+			VisibleTools:         []string{"Bash", "Read", "Write", "Edit", "WebFetch", "WebSearch"},
+			CLIInventory:         llm.CLIInventoryValid,
+			ProviderVisibleTools: []string{"Bash", "Read", "Write", "Edit", "WebFetch", "WebSearch"},
 		},
 	}
 
@@ -1122,7 +1135,9 @@ func TestValidateClaudeMCPToolsForManagedAgents_ComparesProviderNativeSurfaceOnl
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{
 		resp: &llm.Response{
-			VisibleTools: []string{"WebFetch", "WebSearch"},
+			VisibleTools:         []string{"WebFetch", "WebSearch"},
+			CLIInventory:         llm.CLIInventoryValid,
+			ProviderVisibleTools: []string{"WebFetch", "WebSearch"},
 		},
 	}
 
@@ -1165,7 +1180,9 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedProviderN
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{
 		resp: &llm.Response{
-			VisibleTools: []string{"WebSearch", "Bash"},
+			VisibleTools:         []string{"WebSearch", "Bash"},
+			CLIInventory:         llm.CLIInventoryValid,
+			ProviderVisibleTools: []string{"WebSearch", "Bash"},
 		},
 	}
 
@@ -1208,7 +1225,9 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenNativeBuiltinVisi
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
 	probe := &startupVisibleSurfaceProbeStub{
 		resp: &llm.Response{
-			VisibleTools: []string{"Read"},
+			VisibleTools:         []string{"Read"},
+			CLIInventory:         llm.CLIInventoryValid,
+			ProviderVisibleTools: []string{"Read"},
 		},
 	}
 

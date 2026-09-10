@@ -145,15 +145,18 @@ func PrepareSelectedForkProviderCatalog(ctx context.Context, runtimes *llm.Agent
 		if err != nil {
 			return nil, err
 		}
-		definitions, capabilities, err := startupToolPlan(actors.WithActor(ctx, resolved.Actor), resolved.Actor, resolved.Runtime, tools)
+		frozenTools, frozenCapabilities, err := func() ([]llm.ToolDefinition, toolcapabilities.Set, error) {
+			_, definitions, capabilities, release, err := startupToolPlan(actors.WithActor(ctx, resolved.Actor), resolved.Actor, resolved.Runtime, tools)
+			if err != nil {
+				return nil, toolcapabilities.Set{}, err
+			}
+			defer release()
+			return clonePreparedProviderTools(definitions, capabilities)
+		}()
 		if err != nil {
 			return nil, err
 		}
-		frozenTools, frozenCapabilities, err := clonePreparedProviderTools(definitions, capabilities)
-		if err != nil {
-			return nil, err
-		}
-		plannedTools := make([]definition, len(definitions))
+		plannedTools := make([]definition, len(frozenTools))
 		for i, tool := range frozenTools {
 			plannedTools[i] = definition{tool.Name, llm.DeliveredToolDescription(tool), tool.Schema, tool.GeneratedSchema}
 		}

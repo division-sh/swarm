@@ -425,10 +425,10 @@ func nativeCapabilityNames(actor models.AgentConfig) []string {
 }
 
 func observeCLIResponse(surface managedcapabilities.Surface, response *Response) (managedcapabilities.Surface, error) {
-	if response == nil {
-		return surface, nil
+	providerVisible, err := exactCLIProviderVisibleTools(response)
+	if err != nil {
+		return surface, err
 	}
-	providerVisible := exactCLIProviderVisibleTools(response)
 	mcpVisible := exactMCPVisibleTools(response)
 	plannedProvider := surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin)
 	plannedMCP := surface.PlannedBindingNames(managedcapabilities.BindingMCPProvider)
@@ -489,7 +489,10 @@ func ValidateCLIProviderCapabilitySurface(surface managedcapabilities.Surface, r
 		return fmt.Errorf("provider-visible capability surface contains typed delivery mismatch")
 	}
 	expected := surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin)
-	actual := exactCLIProviderVisibleTools(response)
+	actual, err := exactCLIProviderVisibleTools(response)
+	if err != nil {
+		return err
+	}
 	if !slices.Equal(expected, actual) {
 		return fmt.Errorf("provider-visible capability mismatch: expected [%s], got [%s]", strings.Join(expected, ", "), strings.Join(actual, ", "))
 	}
@@ -634,16 +637,15 @@ func withObservedMockRuntimeCapabilitySurface(ctx context.Context, deliveredTool
 	return managedcapabilities.WithContext(ctx, observed), observed, nil
 }
 
-func exactCLIProviderVisibleTools(response *Response) []string {
-	if response == nil {
-		return nil
+func exactCLIProviderVisibleTools(response *Response) ([]string, error) {
+	if response == nil || response.CLIInventory == CLIInventoryNotObserved {
+		return nil, fmt.Errorf("provider tool inventory was not observed")
 	}
-	raw := response.ProviderVisibleTools
-	if len(raw) == 0 {
-		raw = response.VisibleTools
+	if response.CLIInventory != CLIInventoryValid {
+		return nil, fmt.Errorf("provider tool inventory is invalid")
 	}
 	var out []string
-	for _, name := range raw {
+	for _, name := range response.ProviderVisibleTools {
 		name = strings.TrimSpace(name)
 		if name == "" || isCLIControlToolName(name) || strings.HasPrefix(name, toolidentity.RuntimeToolsMCPPrefix) {
 			continue
@@ -651,7 +653,7 @@ func exactCLIProviderVisibleTools(response *Response) []string {
 		out = append(out, name)
 	}
 	slices.Sort(out)
-	return slices.Compact(out)
+	return slices.Compact(out), nil
 }
 
 func exactMCPVisibleTools(response *Response) []string {

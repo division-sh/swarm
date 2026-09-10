@@ -692,8 +692,8 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 			admitRuntimeTestBundle(t, bundle)
 		}
 	}
-	if deps.Config != nil && !deps.Config.Runtime.ExecutionPosture.Valid() {
-		deps.Config.Runtime.ExecutionPosture = executionposture.Live
+	if !deps.Options.ExecutionPosture.Valid() {
+		deps.Options.ExecutionPosture = executionposture.Live
 	}
 	if strings.TrimSpace(deps.Options.RuntimeInstanceID) == "" {
 		deps.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
