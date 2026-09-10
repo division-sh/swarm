@@ -3605,7 +3605,7 @@ func TestExecutor_RejectsOverlappingCollectionOutputsBeforeReading(t *testing.T)
 				t.Fatalf("NewExecutor error: %v", err)
 			}
 			_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-				EntityID: "entity-1", ExecutionFlowID: identity.NormalizeFlowID("root"), Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
+				EntityID: "entity-1", ExecutionFlowID: identity.NormalizeFlowID("."), Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
 				Event:   eventtest.RunCreatingRootIngress("evt-query-collision", "work.received", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: tc.handler,
 				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -3684,7 +3684,7 @@ func TestExecutor_QuerySelectionRejectsMissingRequiredField(t *testing.T) {
 }
 
 func collectionExecutionSource() semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return sourceWithFixtureStages(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"WorkItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
 				"id": {Type: "text"}, "status": {Type: "text"}, "note": {Type: "text", IsOptional: true},
@@ -3696,7 +3696,7 @@ func collectionExecutionSource() semanticview.Source {
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"work.received": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[WorkItem]"}}),
 		},
-	})
+	}), ".", "pending", "pending")
 }
 
 func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
@@ -3704,7 +3704,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 	bundle, _ := semanticview.Bundle(source)
 	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"score": {Type: "integer"}, "query_rows": {Type: "[ScoredItem]"}}}}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(source, "flow-1", "pending", "pending"),
+		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -3771,7 +3771,7 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
 	repo := &orderedStateRepo{order: &[]string{}}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        entityCollectionExpressionSource(),
+		Source:        sourceWithFixtureStages(entityCollectionExpressionSource(), ".", "pending", "pending"),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -3805,7 +3805,7 @@ func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
 
 func TestExecutorChainedCollectionConditionUsesCompiledItemType(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithPolicy(nil),
+		Source:        sourceWithFixtureStages(sourceWithPolicy(nil), ".", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5562,7 +5562,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 		"name": {Type: "text"}, "scoring_rubric": {Type: "text"}, "dimensions_requested": {Type: "[text]"},
 	}}}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(source, "flow-1", "pending", "pending"),
+		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},

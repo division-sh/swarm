@@ -18,7 +18,7 @@ func TestExecutorFanOutCapturesReceiverWithoutPublicationAuthority(t *testing.T)
 	for _, flowOwned := range []bool{false, true} {
 		t.Run(map[bool]string{false: "node", true: "flow"}[flowOwned], func(t *testing.T) {
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source: fanOutPayloadSource(t, "task.completed"), StateRepo: stubStateRepo{},
+				Source: sourceWithFixtureStages(fanOutPayloadSource(t, "task.completed"), "flow-1", "pending", "pending"), StateRepo: stubStateRepo{},
 				MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{}, PayloadShaper: stubPayloadShaper{},
 			}, nil)
 			if err != nil {
