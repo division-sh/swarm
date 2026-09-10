@@ -166,9 +166,9 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 			shutdownErr = s.releaseResetProjections(ctx)
 		}
 	} else if manager != nil && bundleHash != "" {
-		shutdownErr = manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnavailable, opts).ShutdownErr
+		shutdownErr = errors.Join(shutdownErr, manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnavailable, opts).ShutdownErr)
 	} else if current != nil {
-		shutdownErr = s.stopRuntime(ctx, current, opts)
+		shutdownErr = errors.Join(shutdownErr, s.stopRuntime(ctx, current, opts))
 	}
 	s.mu.Lock()
 	s.currentRT = nil

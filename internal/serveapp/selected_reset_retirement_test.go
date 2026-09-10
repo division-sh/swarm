@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/google/uuid"
 )
 
 func captureSelectedResetSupervisor(t *testing.T) <-chan *processLifecycleSupervisor {
@@ -25,6 +26,92 @@ func captureSelectedResetSupervisor(t *testing.T) <-chan *processLifecycleSuperv
 	}
 	t.Cleanup(func() { buildSelectedAPICapabilities = prior })
 	return captured
+}
+
+func TestSelectedResetFinalReceiptLossPreservesSuccessorBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			captured := captureSelectedResetSupervisor(t)
+			rt := startServedControlProofRuntime(t, backend)
+			supervisor := <-captured
+			predecessor, successor := supervisor.selected, supervisor.selected
+			original := supervisor.resetBuildExecution
+			builds := 0
+			supervisor.operationMu.Lock()
+			supervisor.resetBuildExecution = func(candidate serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error) {
+				builds++
+				successor = supervisor.selected
+				return original(candidate)
+			}
+			supervisor.operationMu.Unlock()
+			// Preserve the existing real lost-receipt, later ordinary work,
+			// exact runtime/grant identity and repeated outcome proof.
+			proveServedResetFinalReceiptFailure(t, rt)
+			supervisor.operationMu.Lock()
+			if builds != 1 || successor == nil || successor == predecessor || supervisor.selected != successor || !supervisor.resetConverged {
+				t.Error("final-receipt retry withdrew or replaced the selected successor")
+			}
+			supervisor.resetBuildExecution = original
+			supervisor.operationMu.Unlock()
+			if _, selected, err := successor.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: uuid.NewString()}); err != nil || selected {
+				t.Fatalf("receipt replay left successor controls fenced or invented a binding: selected=%v err=%v", selected, err)
+			}
+		})
+	}
+}
+
+func TestSelectedResetRepeatedEmptyTopologyStaysFencedBothStores(t *testing.T) {
+	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
+		t.Run(string(backend), func(t *testing.T) {
+			captured := captureSelectedResetSupervisor(t)
+			rt := startServedControlProofRuntime(t, backend)
+			supervisor := <-captured
+			predecessor := supervisor.selected
+			for _, clear := range []bool{true, false, true} {
+				response := requestServedJSONRPC(t, rt.Endpoint, "runtime.nuke", map[string]any{
+					"include_source_artifacts": clear, "idempotency_key": uuid.NewString(),
+				})
+				if response.Error != nil {
+					t.Fatalf("empty reset clear=%v: %+v", clear, response.Error)
+				}
+				supervisor.operationMu.Lock()
+				if supervisor.selected != predecessor {
+					t.Error("empty reset created an executable selected successor")
+				}
+				supervisor.operationMu.Unlock()
+				if supervisor.CurrentRuntime() != nil || rt.Contexts.LookupBundleHashStatus(rt.BundleHash).Loaded() {
+					t.Fatal("empty reset revived loaded execution")
+				}
+				if use, lookup, err := rt.Contexts.AcquireBundleHash(context.Background(), rt.BundleHash); err != nil || use != nil || lookup.Loaded() {
+					if use != nil {
+						_ = use.Done()
+					}
+					t.Fatalf("empty reset runtime acquisition: lookup=%+v err=%v", lookup, err)
+				}
+				if _, _, err := predecessor.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: uuid.NewString()}); !errors.Is(err, worklifetime.ErrRetired) {
+					t.Fatalf("empty selected family admitted controls: %v", err)
+				}
+				refused := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{
+					"source_run_id": uuid.NewString(), "fork_event_id": uuid.NewString(), "idempotency_key": uuid.NewString(),
+				})
+				if refused.Error == nil || refused.Error.Data["code"] != apiv1.BundleUnavailableCode {
+					t.Fatalf("empty topology exposed fork execution: %+v", refused.Error)
+				}
+				for _, table := range []string{"source_artifacts", "runs", "events", "event_deliveries"} {
+					query := "SELECT COUNT(*) FROM " + table
+					if table == "events" {
+						// Reset deletes run history, not runless platform.runtime_log
+						// diagnostics emitted by the still-serving control process.
+						query += " WHERE run_id IS NOT NULL"
+					}
+					var count int
+					if err := rt.DB.QueryRow(query).Scan(&count); err != nil || count != 0 {
+						t.Fatalf("empty topology resurrected %s: count=%d err=%v", table, count, err)
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestSelectedResetFailedCandidateRemainsOwnedBothStores(t *testing.T) {
