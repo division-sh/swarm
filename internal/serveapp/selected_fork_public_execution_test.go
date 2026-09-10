@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -123,6 +124,23 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, reset
 			}
 			rows := readForkReceiverRows(t, rt, fork.ForkRunID)
 			requireSelectedForkMixedBusinessMutation(t, rt, fork.ForkRunID, childEvent, rows["consumer"].ID)
+			diagnostics := readServedLifecycleDiagnosticReceipts(t, rt.DB, fork.ForkRunID)
+			if len(diagnostics) == 0 {
+				t.Fatal("selected agent lifecycle produced no diagnostic receipts")
+			}
+			for id, receipt := range diagnostics {
+				if receipt == nil {
+					t.Fatalf("selected execution returned before diagnostic %s projection", id)
+				}
+				requireServedDiagnosticEventCount(t, rt.DB, id, fork.ForkRunID, 1)
+				payload, _ := receipt["payload"].(map[string]any)
+				details, _ := payload["details"].(map[string]any)
+				if receipt["run_id"] != fork.ForkRunID || receipt["parent_event_id"] != "" || receipt["lineage_disposition"] != "parentless" ||
+					details["runtime_lineage_run_id"] != fork.ForkRunID || details["runtime_lineage_selected_fork_context"] != true ||
+					details["runtime_lineage_owner"] != runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner {
+					t.Fatalf("selected lifecycle diagnostic %s lost its exact parentless producer authority: %+v", id, receipt)
+				}
+			}
 			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) {
 				t.Fatal("public selected execution changed source domain")
 			}
