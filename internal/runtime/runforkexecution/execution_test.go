@@ -19,7 +19,6 @@ import (
 	"time"
 
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 
 	"github.com/google/uuid"
 
@@ -3073,7 +3072,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	})
 	storetest.RequireRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), storetest.RunFixture{
 		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: storetest.ScenarioSetupOrigin(),
-		Artifact: sourceartifactfixture.Artifact(), StartedAt: now,
+		Artifact: runForkTestSourceArtifact, StartedAt: now,
 	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
 		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
@@ -3162,6 +3161,15 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	}
 	targetIdentity := selectedContractTestAgentIdentityForRun(t, forkRunID, "selected-agent", "selected-authority-race")
 	targetConfig := selectedExecutionFixtureAgentConfig(t, targetIdentity)
+	profile, err := llmselection.ResolveLiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, targetConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetConfig = resolved.Actor
 	targetPlan, err := targetIdentity.Plan()
 	if err != nil {
 		t.Fatal(err)
@@ -3254,6 +3262,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	record := runtimemanager.PersistedAgent{Config: targetConfig, Topology: topology, Status: "active", HiredBy: "test", StartedAt: now}
 	if _, err := grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(), Trigger: "competition-proof",
+		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{
+			Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+			SelectedFork: authority.SelectedFork, SourceRunID: admission.SourceRunID, ForkEventID: admission.ForkEventID,
+		},
 		Identity: targetIdentity, AgentID: targetIdentity.AgentID(), ConfigRevision: targetRevision,
 		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered, RunMode: runtimemanager.AgentRunModeStopped,
 		Topology: topology, Agent: &record, Now: now,
@@ -3525,13 +3537,14 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
 	loaded := LoadedSelectedContractSource{SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
 	preparedAgents := selectedContractAgentRuntimePlan{Declarations: declarations, Options: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability}}
-	authority, prepared := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, forkRunID, preparedAgents)
+	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, forkRunID, preparedAgents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	badIdentity := selectedContractTestAgentIdentityForRun(t, authority.SelectedFork.ForkRunID, "bad-agent", "")
 
 	_, _, err = startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner:        executionOwner,
 		Prepared:     prepared,
+		Admission:    executionAdmission,
 		LoadedSource: LoadedSelectedContractSource{SourceArtifactFact: sourceFact},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Declarations: declarations,

@@ -503,7 +503,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 			},
 		},
 	}
-	authority, prepared := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, forkRunID, agents)
+	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, forkRunID, agents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
@@ -527,7 +527,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	agents.Options.AgentManagerOptions = runtimemanager.AgentManagerOptions{WorkOwner: owner, ReceiverExecution: receiverExecution}
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner: executionOwner, LoadedSource: loaded,
-		Prepared: prepared, AgentRuntime: agents,
+		Prepared: prepared, AgentRuntime: agents, Admission: executionAdmission,
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntime: %v", err)

@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ func TestSelectedContractSourceProjectionPreservesProducerRoutingAcrossDifferent
 	producer := eventtest.ConcreteTemplateRoutingSource("producer", "producer/one", "entity-one")
 	eventsIn := []runfork.RunForkSelectedContractSourceEvent{{
 		SourceEventID: "source-event", EventName: "work.ready", RoutingSource: producer, ExecutionMode: executionmode.Live,
+		Payload: json.RawMessage(`{}`),
 	}}
 
 	projected, projection, err := projectSelectedContractSourceEvents("source-run", testWorkflowRecipientRoot(t), eventsIn)
@@ -67,6 +69,7 @@ func TestSelectedContractActivityProjectionRejectsMissingProducerRoutingAuthorit
 func TestSelectedContractSourceProjectionPreservesAdmittedAbsence(t *testing.T) {
 	input := []runfork.RunForkSelectedContractSourceEvent{{
 		SourceEventID: "source-event", EventName: "work.ready", RoutingSource: events.NoRoutingSource(), ExecutionMode: executionmode.Live,
+		Payload: json.RawMessage(`{}`),
 	}}
 	projected, projection, err := projectSelectedContractSourceEvents("source-run", testWorkflowRecipientRoot(t), input)
 	if err != nil || !reflect.DeepEqual(projected, input) {

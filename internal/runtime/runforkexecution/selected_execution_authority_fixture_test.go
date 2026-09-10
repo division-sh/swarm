@@ -20,7 +20,7 @@ import (
 
 // Component tests bind a real retained execution before constructing a runtime;
 // fabricated effect evidence alone can no longer pass generation admission.
-func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore, loaded LoadedSelectedContractSource, runID string, agents selectedContractAgentRuntimePlan) (effects.Authority, *PreparedSelectedFork) {
+func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore, loaded LoadedSelectedContractSource, runID string, agents selectedContractAgentRuntimePlan) (effects.Authority, *PreparedSelectedFork, runfork.RunForkSelectedContractExecutionAdmission) {
 	t.Helper()
 	source := loaded.SourceArtifactFact
 	sourceRun, eventID, bindingID := uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -51,15 +51,15 @@ func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db 
 	if err != nil {
 		t.Fatal(err)
 	}
+	admission := runfork.RunForkSelectedContractExecutionAdmission{
+		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
+		NonMutating: true, ForkRunID: runID, SourceRunID: sourceRun, ForkEventID: eventID,
+		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"}, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
+		AdmissionUse:               runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+		DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
+	}
 	issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
-		DeclarationPlan: agents.Declarations, Preparation: binding,
-		Admission: runfork.RunForkSelectedContractExecutionAdmission{
-			Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
-			NonMutating: true, ForkRunID: runID, SourceRunID: sourceRun, ForkEventID: eventID,
-			ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"}, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
-			AdmissionUse:               runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
-			DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
-		},
+		DeclarationPlan: agents.Declarations, Preparation: binding, Admission: admission,
 		ContainerPlanFingerprint: "sha256:" + strings.Repeat("1", 64), ActorCensusFingerprint: "sha256:" + strings.Repeat("2", 64),
 		EffectiveConfigFingerprint: "sha256:" + strings.Repeat("3", 64), ExecutionMode: effects.ExecutionModeLive,
 	})
@@ -70,5 +70,5 @@ func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return authority, prepared
+	return authority, prepared, admission
 }

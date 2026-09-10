@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -341,6 +342,7 @@ func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 	req := AdmissionRequest{Binding: Binding{Plan: plan, SourceArtifactFact: fact, EffectiveSourceIdentity: effective.Identity(), ContractSelection: selection,
 		FrontierAdmission: frontier, RecipientPlanning: planning, SourceModes: map[string]executionmode.Mode{"event-a": executionmode.Live, "event-b": executionmode.Live}}, Source: effective.Source()}
 	req.ModelOptions.LLMBackend = "anthropic"
+	req.ModelOptions.ExecutionPosture = executionposture.Live
 	req.ModelOptions.ModelAliases = map[string]map[string]string{"regular": {"anthropic": "model"}}
 	return req
 }
