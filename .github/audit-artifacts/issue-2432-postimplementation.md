@@ -1,5 +1,10 @@
 # Post-Implementation Proof Audit: #2432
 
+Current review-cycle-2 fixture and dual-store proof accounting is in
+`issue-2321-pr2441-review2-proof.md`. Every independent/reopened SQLite handle now
+has typed payload admission, with forced winner controls. Combined qualification
+is blocked; historical passes below do not establish final-head merge readiness.
+
 Rebased typed-payload admission and dual-store fork proof:
 `issue-2321-pr2441-rebase-accounting.md`. This preserves the existing diagnostic
 owner and exact receipt validation; combined qualification still awaits LSF-030.

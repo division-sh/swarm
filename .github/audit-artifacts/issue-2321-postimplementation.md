@@ -1,5 +1,10 @@
 # Post-Implementation Proof Audit: #2321
 
+Current review-cycle-2 status supersedes the historical gate/queue descriptions
+below: `issue-2321-pr2441-review2-proof.md`. Coordinator repairs and focused proofs
+are implemented; the real PostgreSQL cancellation/cleanup result is escalated,
+and J5 remains unclassified. No final-head full-suite or merge closure claimed.
+
 Rebased integration and current qualification receipts:
 `issue-2321-pr2441-rebase-accounting.md`. Historical heads below are not rebased
 full-suite proof. LSF-030 remains unresolved.

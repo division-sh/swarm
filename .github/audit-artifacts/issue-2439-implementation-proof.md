@@ -1,5 +1,11 @@
 # Post-Implementation Proof Audit: #2439
 
+Current review-cycle-2 T7 correction and negative controls are in
+`issue-2321-pr2441-review2-proof.md`. Only the owner's canceled Commit result is
+normalized; independent callback and real commit/cleanup failures remain intact.
+PostgreSQL cancellation/disposition is separately escalated, not absorbed into
+this approved SQLite class. No final-head whole-suite closure is claimed.
+
 Rebased integration receipts: `issue-2321-pr2441-rebase-accounting.md`.
 No SQLite transaction-exit change was required by the rebase. The new compile
 check is not full execution proof, and combined qualification remains blocked.
