@@ -142,6 +142,9 @@ func capturedLoopOwnershipViolations(t *testing.T, overlay map[string][]byte) []
 		"runtime/engine::Executor.currentContext -> ExecutionState.Loop":                                     1,
 		"runtime/engine::Executor.newExecutionFrame -> ExecutionState.Loop":                                  1,
 		"runtime/engine::evalWorkflowValueExpression -> ExecutionState.Loop":                                 1,
+		// The typed result adapter passes the already-selected context through;
+		// it neither loads a current activation nor reconstructs a generation.
+		"runtime/engine::evalWorkflowValueResult -> ExecutionState.Loop":                                     1,
 		"runtime/loopruntime::Activation.CapturedContext -> runtime/loopruntime::Activation.Context":         1,
 		"runtime/loopruntime::ForkChildReference.Context -> runtime/loopruntime::Activation.CapturedContext": 1,
 		"runtime/engine::Executor.stepLoop -> runtime/loopruntime::Activation.Context":                       1,

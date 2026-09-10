@@ -1193,6 +1193,20 @@ seam_families:
       ownership classification. Those references guard source admission and
       capability lifetime; they do not produce, infer, or replace route
       authority.
+  - id: delivery_continuation_election_controls
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - internal/runtime/bus/continuation_publication_election_test.go
+      - internal/runtime/bus/delivery_dispatch_election_test.go
+    search_dimensions: [direct_delivery_path, route_plan_source_reason]
+    notes: >
+      TestPublicationAndStartupElectOneExactCarrierBothStores dispatches an
+      exact admitted route through PublishDirectRoutes to race publication
+      against startup. TestDeliveryElectionLoserSkipsInterceptorsAndQueue
+      supplies route-plan recipient fixtures to prove carrier/attempt/terminal
+      election losers cannot intercept or enqueue. These tests consume route
+      identity to prove temporal work ownership, not receiver inference.
   - id: singleton_semantic_ownership_source_guard
     layer: conformance_guardrails
     classification: separate_semantic_concept

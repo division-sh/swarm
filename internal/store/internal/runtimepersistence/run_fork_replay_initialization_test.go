@@ -2,8 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -271,25 +269,7 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 
 func replayInitializedReceiverSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	root := t.TempDir()
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: replay-initialized-receivers
-pins:
-  inputs:
-    events: [{event: start, source: external}]
-  outputs:
-    events: [work.ready]
-connect:
-  - {event: work.ready, from: ., to: left}
-  - {event: work.ready, from: ., to: right}
-`)
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "events.yaml"), "start: {}\nwork.ready: {}\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "nodes.yaml"), "source:\n  id: source\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      emit: {event: work.ready}\n")
-	for _, flow := range []string{"left", "right"} {
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), fmt.Sprintf("name: %s\nmode: static\nstages:\n  active: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [work.ready]\n", flow))
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flow, "entities.yaml"), "receipt: {}\n")
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flow, "nodes.yaml"), "initialize:\n  id: initialize\n  execution_type: system_node\n  subscribes_to: [work.ready]\n  event_handlers:\n    work.ready:\n      create_entity: true\n")
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flow, "agents.yaml"), "worker:\n  id: worker\n  model: regular\n  intent: {inline: Observe initialized work.}\n  subscriptions: [work.ready]\n")
-	}
+	root := canonicalrouting.CopyReplayInitializedReceivers(t)
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {

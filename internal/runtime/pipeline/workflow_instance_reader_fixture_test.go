@@ -10,6 +10,7 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 type pipelineTestWorkflowInstanceReader struct {

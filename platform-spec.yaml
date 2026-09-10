@@ -585,6 +585,10 @@ contract_formats:
         field-name, revision-only or substring election is authoritative.
         Source-bound and already-child-bound references are distinct operations.
         Actual child ownership must agree with the correspondence before use.
+        Selected activity request payloads are child-bound before publication.
+        Pipeline decoding consumes those exact request, parent and generation
+        coordinates without repeating source-to-child translation; execution
+        admission still validates their current ownership and stage.
         Later lawful child repeat or close preserves historical ownership but
         does not grant current execution permission. Accumulator keys omit the
         revision-field coordinate: strict key decoding preserves this partial

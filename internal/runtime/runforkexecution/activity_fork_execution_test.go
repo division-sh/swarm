@@ -453,7 +453,6 @@ loops:
 		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
 		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start: {}\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/nodes.yaml": `test-node:
-  id: test-node
   execution_type: system_node
   subscribes_to: [review.start, review.requested, review.retry, review.close]
   event_handlers:

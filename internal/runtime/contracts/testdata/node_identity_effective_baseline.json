@@ -47,8 +47,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -174,8 +172,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -246,8 +242,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -329,8 +323,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -415,8 +407,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -512,8 +502,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -736,25 +724,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": {
-            "By": {
-              "portfolio_id": "payload.portfolio_id"
-            },
-            "Bindings": [
-              {
-                "Field": "portfolio_id",
-                "Ref": "payload.portfolio_id",
-                "RefPath": {
-                  "Root": 1,
-                  "Segments": [
-                    "portfolio_id"
-                  ],
-                  "Raw": "payload.portfolio_id"
-                }
-              }
-            ]
-          },
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -992,8 +961,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -1129,8 +1096,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -1395,8 +1360,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "portfolio.setup": {
@@ -1568,25 +1531,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": {
-                "Bindings": [
-                  {
-                    "Field": "portfolio_id",
-                    "Ref": "payload.portfolio_id",
-                    "RefPath": {
-                      "Raw": "payload.portfolio_id",
-                      "Root": 1,
-                      "Segments": [
-                        "portfolio_id"
-                      ]
-                    }
-                  }
-                ],
-                "By": {
-                  "portfolio_id": "payload.portfolio_id"
-                }
-              },
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -1670,8 +1614,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -1757,8 +1699,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -1855,25 +1795,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": {
-          "By": {
-            "portfolio_id": "payload.portfolio_id"
-          },
-          "Bindings": [
-            {
-              "Field": "portfolio_id",
-              "Ref": "payload.portfolio_id",
-              "RefPath": {
-                "Root": 1,
-                "Segments": [
-                  "portfolio_id"
-                ],
-                "Raw": "payload.portfolio_id"
-              }
-            }
-          ]
-        },
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "awaiting",
         "SetsGate": null,
@@ -2048,8 +1969,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -2294,8 +2213,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -2380,8 +2297,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -2477,8 +2392,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -2697,8 +2610,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -2834,8 +2745,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -3030,8 +2939,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -3108,8 +3015,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -3195,8 +3100,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -3293,8 +3196,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -3450,8 +3351,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -3578,8 +3477,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -3654,8 +3551,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -3749,8 +3644,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -3810,8 +3703,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -3909,8 +3800,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -4010,25 +3899,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": {
-            "By": {
-              "portfolio_id": "payload.portfolio_id"
-            },
-            "Bindings": [
-              {
-                "Field": "portfolio_id",
-                "Ref": "payload.portfolio_id",
-                "RefPath": {
-                  "Root": 1,
-                  "Segments": [
-                    "portfolio_id"
-                  ],
-                  "Raw": "payload.portfolio_id"
-                }
-              }
-            ]
-          },
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -4100,25 +3970,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": {
-            "By": {
-              "portfolio_id": "payload.portfolio_id"
-            },
-            "Bindings": [
-              {
-                "Field": "portfolio_id",
-                "Ref": "payload.portfolio_id",
-                "RefPath": {
-                  "Root": 1,
-                  "Segments": [
-                    "portfolio_id"
-                  ],
-                  "Raw": "payload.portfolio_id"
-                }
-              }
-            ]
-          },
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -4246,25 +4097,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": {
-            "By": {
-              "portfolio_id": "payload.portfolio_id"
-            },
-            "Bindings": [
-              {
-                "Field": "portfolio_id",
-                "Ref": "payload.portfolio_id",
-                "RefPath": {
-                  "Root": 1,
-                  "Segments": [
-                    "portfolio_id"
-                  ],
-                  "Raw": "payload.portfolio_id"
-                }
-              }
-            ]
-          },
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -4362,25 +4194,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": {
-            "By": {
-              "portfolio_id": "payload.portfolio_id"
-            },
-            "Bindings": [
-              {
-                "Field": "portfolio_id",
-                "Ref": "payload.portfolio_id",
-                "RefPath": {
-                  "Root": 1,
-                  "Segments": [
-                    "portfolio_id"
-                  ],
-                  "Raw": "payload.portfolio_id"
-                }
-              }
-            ]
-          },
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -4481,8 +4294,6 @@
             "Approval": null
           },
           "CreateEntity": true,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -4623,8 +4434,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "account.notify.requested": {
@@ -4722,8 +4531,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "account.registered": {
@@ -4821,8 +4628,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -4936,25 +4741,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": {
-                "Bindings": [
-                  {
-                    "Field": "portfolio_id",
-                    "Ref": "payload.portfolio_id",
-                    "RefPath": {
-                      "Raw": "payload.portfolio_id",
-                      "Root": 1,
-                      "Segments": [
-                        "portfolio_id"
-                      ]
-                    }
-                  }
-                ],
-                "By": {
-                  "portfolio_id": "payload.portfolio_id"
-                }
-              },
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "portfolio.accounts.register.requested": {
@@ -5082,25 +4868,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": {
-                "Bindings": [
-                  {
-                    "Field": "portfolio_id",
-                    "Ref": "payload.portfolio_id",
-                    "RefPath": {
-                      "Raw": "payload.portfolio_id",
-                      "Root": 1,
-                      "Segments": [
-                        "portfolio_id"
-                      ]
-                    }
-                  }
-                ],
-                "By": {
-                  "portfolio_id": "payload.portfolio_id"
-                }
-              },
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "portfolio.membership.seeded": {
@@ -5198,25 +4965,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": {
-                "Bindings": [
-                  {
-                    "Field": "portfolio_id",
-                    "Ref": "payload.portfolio_id",
-                    "RefPath": {
-                      "Raw": "payload.portfolio_id",
-                      "Root": 1,
-                      "Segments": [
-                        "portfolio_id"
-                      ]
-                    }
-                  }
-                ],
-                "By": {
-                  "portfolio_id": "payload.portfolio_id"
-                }
-              },
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "portfolio.notify.requested": {
@@ -5317,25 +5065,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": {
-                "Bindings": [
-                  {
-                    "Field": "portfolio_id",
-                    "Ref": "payload.portfolio_id",
-                    "RefPath": {
-                      "Raw": "payload.portfolio_id",
-                      "Root": 1,
-                      "Segments": [
-                        "portfolio_id"
-                      ]
-                    }
-                  }
-                ],
-                "By": {
-                  "portfolio_id": "payload.portfolio_id"
-                }
-              },
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "portfolio.opened": {
@@ -5433,8 +5162,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -5537,8 +5264,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -5639,8 +5364,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "completed",
         "SetsGate": null,
@@ -5703,8 +5426,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -5805,25 +5526,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": {
-          "By": {
-            "portfolio_id": "payload.portfolio_id"
-          },
-          "Bindings": [
-            {
-              "Field": "portfolio_id",
-              "Ref": "payload.portfolio_id",
-              "RefPath": {
-                "Root": 1,
-                "Segments": [
-                  "portfolio_id"
-                ],
-                "Raw": "payload.portfolio_id"
-              }
-            }
-          ]
-        },
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -5898,25 +5600,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": {
-          "By": {
-            "portfolio_id": "payload.portfolio_id"
-          },
-          "Bindings": [
-            {
-              "Field": "portfolio_id",
-              "Ref": "payload.portfolio_id",
-              "RefPath": {
-                "Root": 1,
-                "Segments": [
-                  "portfolio_id"
-                ],
-                "Raw": "payload.portfolio_id"
-              }
-            }
-          ]
-        },
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -6047,25 +5730,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": {
-          "By": {
-            "portfolio_id": "payload.portfolio_id"
-          },
-          "Bindings": [
-            {
-              "Field": "portfolio_id",
-              "Ref": "payload.portfolio_id",
-              "RefPath": {
-                "Root": 1,
-                "Segments": [
-                  "portfolio_id"
-                ],
-                "Raw": "payload.portfolio_id"
-              }
-            }
-          ]
-        },
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -6166,25 +5830,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": {
-          "By": {
-            "portfolio_id": "payload.portfolio_id"
-          },
-          "Bindings": [
-            {
-              "Field": "portfolio_id",
-              "Ref": "payload.portfolio_id",
-              "RefPath": {
-                "Root": 1,
-                "Segments": [
-                  "portfolio_id"
-                ],
-                "Raw": "payload.portfolio_id"
-              }
-            }
-          ]
-        },
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -6288,8 +5933,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -6400,8 +6043,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -6463,8 +6104,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -6579,8 +6218,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -6690,8 +6327,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -6769,8 +6404,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -6833,8 +6466,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -6909,8 +6540,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -6984,8 +6613,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -7100,8 +6727,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -7203,8 +6828,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -7278,8 +6901,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "processed",
         "SetsGate": null,
@@ -7354,8 +6975,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "done",
         "SetsGate": null,
@@ -7437,8 +7056,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -7555,8 +7172,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -7630,8 +7245,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -7814,8 +7427,6 @@
                   }
                 }
               ],
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "validation.triggered": {
@@ -7887,8 +7498,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -8015,8 +7624,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -8097,8 +7704,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -8173,8 +7778,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -8294,8 +7897,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -8418,8 +8019,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -8491,8 +8090,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -8566,8 +8163,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -8652,8 +8247,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -8713,8 +8306,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -8786,8 +8377,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -8902,8 +8491,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "requester.setup.requested": {
@@ -8975,8 +8562,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -9105,8 +8690,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -9208,8 +8791,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "requester.requested": {
@@ -9281,8 +8862,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "requester.setup": {
@@ -9342,8 +8921,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -9435,8 +9012,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -9511,8 +9086,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -9587,8 +9160,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -9674,8 +9245,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -9738,8 +9307,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -9814,8 +9381,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -9897,8 +9462,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -9958,8 +9521,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -10021,8 +9582,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -10094,8 +9653,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -10210,8 +9767,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "account.setup": {
@@ -10271,8 +9826,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -10384,8 +9937,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             },
             "account.work.requested": {
@@ -10457,8 +10008,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -10546,8 +10095,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -10610,8 +10157,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -10674,8 +10219,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -10750,8 +10293,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -10836,8 +10377,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -10899,8 +10438,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -11015,8 +10552,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -11126,8 +10661,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -11205,8 +10738,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -11269,8 +10800,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
@@ -11368,8 +10897,6 @@
             "Approval": null
           },
           "CreateEntity": false,
-          "SelectEntity": null,
-          "SelectOrCreateEntity": null,
           "Description": "",
           "EvidenceTarget": "",
           "Emit": {
@@ -11495,8 +11022,6 @@
               "Query": null,
               "Reduce": null,
               "Rules": null,
-              "SelectEntity": null,
-              "SelectOrCreateEntity": null,
               "SetsGate": null
             }
           },
@@ -11567,8 +11092,6 @@
           "Input": null,
           "Approval": null
         },
-        "SelectEntity": null,
-        "SelectOrCreateEntity": null,
         "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,

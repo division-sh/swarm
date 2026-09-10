@@ -342,6 +342,20 @@ func TestLoopActivityRequestResultAndForkCarryGeneration(t *testing.T) {
 	if err != nil || !roundTrip.Generation.Equal(source.Generation) || roundTrip.LoopStage != "review" {
 		t.Fatalf("activity request generation round trip = %#v err=%v", roundTrip, err)
 	}
+	fork.SourceEventID, fork.ParentEventID = uuid.NewString(), uuid.NewString()
+	forkEmit, err := activityRequestEmitIntent(fork)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lineage, err := events.NewSelectedForkLineage(fork.SourceRunID, source.SourceRunID, source.SourceEventID, "selected-activity-projection", "", executionmode.Live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected := eventtest.SelectedForkReplay(fork.SourceEventID, forkEmit.Event.Type(), forkEmit.Event.Producer(), "", forkEmit.Event.Payload(), forkEmit.Event.ChainDepth(), lineage, forkEmit.Event.Envelope(), time.Now().UTC())
+	decoded, err := activityIntentFromRequestEvent(projected)
+	if err != nil || !decoded.Generation.Equal(fork.Generation) || decoded.ParentEventID != fork.ParentEventID || decoded.SourceRunID != fork.SourceRunID || decoded.SourceEventID != fork.SourceEventID {
+		t.Fatalf("decoder remapped already-projected selected activity identity: %#v err=%v", decoded, err)
+	}
 	for name, payload := range map[string]map[string]any{
 		"success": activitySuccessPayload(source, map[string]any{"ok": true}),
 		"failure": activityFailurePayload(source, runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_failed", "test", "activity", nil)),

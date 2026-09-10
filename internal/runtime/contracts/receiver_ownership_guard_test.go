@@ -31,6 +31,9 @@ func receiverOwnerConstructorBudget() map[string]int {
 		// Approved #2433 fork projection preserves the three admitted target kinds;
 		// it does not elect a new receiver from producer context.
 		"store/internal/backend/runforkpersistence::projectRunForkFanOutExecutionOwnership": 3,
+		// Ordinary agent replay consumes the fixed-revision initializer proof
+		// and reconstructed receiver; it cannot request future initialization.
+		"store/internal/backend/runforkpersistence::projectRunForkReplayInitializedReceiver": 1,
 	}
 }
 

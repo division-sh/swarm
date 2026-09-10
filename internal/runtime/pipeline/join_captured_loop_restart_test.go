@@ -46,7 +46,7 @@ func TestJoinCapturedLoopOutcomeAfterRestartBothStores(t *testing.T) {
 					h := newExactWorkflowJoinHarness(t, storeCase, flowID, "dispatching", members)
 					start := runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Start: "revision", From: "dispatching"}, AdvancesTo: "awaiting"}
 					repeat := runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "awaiting"}, AdvancesTo: "awaiting"}
-					observer := runtimecontracts.SystemNodeContract{ID: "observer", ExecutionType: "system_node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"loop.start": start, "loop.repeat": repeat}}
+					observer := runtimecontracts.SystemNodeContract{ExecutionType: "system_node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"loop.start": start, "loop.repeat": repeat}}
 					h.bundle.Nodes["observer"] = observer
 					h.bundle.FlowTree.ByID["orders"].Nodes["observer"] = observer
 					declarationFlowID := pipelineDeclarationFlowPath(flowID)

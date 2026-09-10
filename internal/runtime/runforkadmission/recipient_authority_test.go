@@ -333,7 +333,7 @@ func recipientAuthoritySource(t *testing.T, receivers []recipientAuthorityReceiv
 			root.Schema.Connect = append(root.Schema.Connect, runtimecontracts.FlowConnect{SourceLine: len(root.Schema.Connect) + 1, Event: "scan.requested", From: "producer", To: declaration.path, Rename: pin})
 		}
 		if declaration.node != "" {
-			flow.Nodes = map[string]runtimecontracts.SystemNodeContract{declaration.node: {ID: declaration.node, SubscribesTo: declaration.pins, EventHandlers: handlers}}
+			flow.Nodes = map[string]runtimecontracts.SystemNodeContract{declaration.node: {SubscribesTo: declaration.pins, EventHandlers: handlers}}
 		}
 		if declaration.agent {
 			owner := "test://recipient-authority/" + declaration.path + "/worker"
