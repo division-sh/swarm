@@ -329,14 +329,16 @@ func (e *Executor) AcquireToolDefinitionsForActorInContext(ctx context.Context, 
 	client := e.mcpClient
 	e.mu.RUnlock()
 	if activations == nil {
+		if _, inherited := runtimechannelactivation.PresentationFromContext(ctx); inherited {
+			return ctx, nil, func() {}, fmt.Errorf("inherited channel presentation has no matching owner")
+		}
 		definitions := e.toolDefinitionsForActor(actor, source, client, nil)
 		return ctx, e.filterToolDefinitionsForActorInContext(ctx, actor, definitions), func() {}, nil
 	}
-	lease, err := activations.AcquirePresentationContext(ctx)
+	pinnedCtx, lease, err := activations.AcquirePresentationForContext(ctx, channelPresentationScope(ctx, actor))
 	if err != nil {
 		return ctx, nil, func() {}, fmt.Errorf("acquire channel activation publication: %w", err)
 	}
-	pinnedCtx := withChannelActivationGeneration(ctx, lease)
 	definitions := e.toolDefinitionsForActor(actor, source, client, lease.ToolEntries())
 	return pinnedCtx, e.filterToolDefinitionsForActorInContext(pinnedCtx, actor, definitions), lease.Release, nil
 }

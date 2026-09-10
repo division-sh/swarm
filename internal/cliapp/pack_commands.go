@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/spf13/cobra"
 )
 
@@ -145,7 +144,7 @@ func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			cfgResult, err := loadPackInventoryConfig(opts.repoRoot, rootConfigPath(opts.root))
+			cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: rootConfigPath(opts.root)})
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -197,7 +196,7 @@ func rootConfigPath(root rootCommandOptions) string {
 }
 
 func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.EffectivePackInventory, error) {
-	cfgResult, err := loadPackInventoryConfig(opts.repoRoot, rootConfigPath(opts.root))
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: rootConfigPath(opts.root)})
 	if err != nil {
 		return nil, err
 	}
@@ -226,31 +225,6 @@ func resolvePackInventoryPaths(opts packCommandOptions, cfgResult RuntimeConfigL
 	return resolveCLISourcePlatformSpecPathsFromConfig(opts.repoRoot, CLISourcePlatformSpecPathOptions{
 		SourceRoot: opts.sourceRoot, PlatformSpecPath: opts.platformSpecPath,
 	}, cfgResult.cli)
-}
-
-func loadPackInventoryConfig(repoRoot, explicitPath string) (RuntimeConfigLoadResult, error) {
-	result, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: explicitPath})
-	if err == nil {
-		return result, nil
-	}
-	if result.Config == nil {
-		return result, err
-	}
-	if _, authored := result.KeyOrigins["runtime.execution_posture"]; authored {
-		return result, err
-	}
-	blockers := unifiedConfigBlockers(result.Diagnostics)
-	_, postureErr := result.Config.ProcessExecutionPosture()
-	if len(blockers) != 1 || postureErr == nil || blockers[0].Kind != unifiedConfigDiagnosticValidationFailed || blockers[0].Message != postureErr.Error() {
-		return result, err
-	}
-	configCopy := *result.Config
-	configCopy.Runtime.ExecutionPosture = executionposture.Live
-	if validationErr := configCopy.Validate(); validationErr != nil {
-		return result, validationErr
-	}
-	result.Config = &configCopy
-	return result, nil
 }
 
 func packInventoryReadbackFromInventory(inventory *packartifact.EffectivePackInventory) packInventoryReadback {

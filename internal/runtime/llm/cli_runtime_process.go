@@ -4,18 +4,21 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -56,6 +59,9 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	}
 	defer func() {
 		retErr = finishCompletionDispatchHeartbeat(dispatch, heartbeat, retErr)
+		if retErr != nil && dispatch.invocation == completionProviderInvocationStarted && claudeAttemptFailure(retErr) == nil {
+			retErr = &claudeCompletionAttemptFailure{state: runtimeeffects.StateOutcomeUncertain, err: retErr, operation: "provider_execution"}
+		}
 		if retErr != nil {
 			resp = nil
 		}
@@ -94,13 +100,14 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	}
 	dispatch.markProviderInvocationStarted()
 	if err := cmd.Wait(); err != nil {
-		stderrText := strings.TrimSpace(stderr.String())
-		stdoutText := strings.TrimSpace(stdout.String())
+		secrets := claudeCommandSecrets(cmd)
+		stderrText := summarizeCLIErrorOutput(stderr.String(), secrets...)
+		stdoutText := summarizeCLIErrorOutput(stdout.String(), secrets...)
 		cause := claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run", err)
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			cause = runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
 		}
-		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait", map[string]any{"timeout": timeout.String(), "stderr": summarizeCLIErrorOutput(stderrText), "stdout": summarizeCLIErrorOutput(stdoutText)})
+		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait", map[string]any{"timeout": timeout.String(), "stderr": stderrText, "stdout": stdoutText})
 	}
 
 	raw := bytes.TrimSpace(stdout.Bytes())
@@ -159,8 +166,9 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 	stderrLines := <-stderrCh
 	waitErr := cmd.Wait()
 	if waitErr != nil {
-		stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
-		stdoutText := strings.TrimSpace(string(joinRawLines(stdoutLines)))
+		secrets := claudeCommandSecrets(cmd)
+		stderrText := summarizeCLIErrorOutput(string(joinRawLines(stderrLines)), secrets...)
+		stdoutText := summarizeCLIErrorOutput(string(joinRawLines(stdoutLines)), secrets...)
 		if monitor != nil {
 			monitor.WriteNotice("turn.end ok=false")
 		}
@@ -168,7 +176,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			cause = runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
 		}
-		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait_streaming", map[string]any{"timeout": timeout.String(), "stderr": summarizeCLIErrorOutput(stderrText), "stdout": summarizeCLIErrorOutput(stdoutText)})
+		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait_streaming", map[string]any{"timeout": timeout.String(), "stderr": stderrText, "stdout": stdoutText})
 	}
 
 	acc := newCLIStreamAccumulator()
@@ -189,15 +197,12 @@ func settleClaudeAttemptFailure(ctx context.Context, attempt *runtimeeffects.Han
 	if original == nil || attempt == nil {
 		return original
 	}
-	settlementCause := original
-	if state == runtimeeffects.StateOutcomeUncertain {
-		settlementCause = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", operation, evidence, original)
-	}
+	settlementCause := claudeFailureForState(state, original, operation, evidence)
 	failure := runtimefailures.FromError(settlementCause, "claude-cli-adapter", operation)
 	if settleErr := attempt.Settle(ctx, state, &failure.Failure, evidence); settleErr != nil {
-		return errors.Join(original, fmt.Errorf("settle claude attempt after %s: %w", operation, settleErr))
+		return claudeFailureForState(state, errors.Join(settlementCause, fmt.Errorf("settle claude attempt after %s: %w", operation, settleErr)), operation, evidence)
 	}
-	return original
+	return settlementCause
 }
 
 type claudeCompletionAttemptFailure struct {
@@ -207,8 +212,28 @@ type claudeCompletionAttemptFailure struct {
 	evidence  map[string]any
 }
 
-func (e *claudeCompletionAttemptFailure) Error() string { return e.err.Error() }
-func (e *claudeCompletionAttemptFailure) Unwrap() error { return e.err }
+func (e *claudeCompletionAttemptFailure) Error() string { return e.Unwrap().Error() }
+func (e *claudeCompletionAttemptFailure) Unwrap() error {
+	return claudeFailureForState(e.state, e.err, e.operation, e.evidence)
+}
+
+// The durable outcome and the public retry decision must describe the same attempt.
+func claudeFailureForState(state runtimeeffects.State, original error, operation string, evidence map[string]any) error {
+	if original == nil || state != runtimeeffects.StateOutcomeUncertain {
+		return original
+	}
+	if failure, ok := runtimefailures.As(original); ok && failure.Failure.Class == runtimefailures.ClassOutcomeUncertain {
+		return original
+	}
+	attributes := make(map[string]any, len(evidence)+1)
+	for key, value := range evidence {
+		attributes[key] = value
+	}
+	if failure, ok := runtimefailures.As(original); ok {
+		attributes["cause_failure"] = failure.Failure
+	}
+	return runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", operation, attributes, original)
+}
 
 func claudeCompletionFailureState(err error) runtimeeffects.State {
 	if attemptFailure := claudeAttemptFailure(err); attemptFailure != nil {
@@ -299,22 +324,76 @@ func effectiveCLITimeoutForConfig(ctx context.Context, cfg *config.Config) time.
 	return timeout
 }
 
-func summarizeCLIErrorOutput(raw string) string {
+func summarizeCLIErrorOutput(raw string, secrets ...string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
 	}
-	resp := parseCLIResponse([]byte(raw))
-	msg := strings.TrimSpace(resp.Message.Content)
-	if msg == "" {
-		msg = raw
+	msg := raw
+	if strings.HasPrefix(raw, "{") || strings.HasPrefix(raw, "[") {
+		msg = "provider returned structured output without a recognized error explanation"
+		decoder := json.NewDecoder(io.LimitReader(strings.NewReader(raw), 1024*1024))
+		for {
+			var result struct {
+				Type    string   `json:"type"`
+				IsError bool     `json:"is_error"`
+				Errors  []string `json:"errors"`
+			}
+			if err := decoder.Decode(&result); err != nil {
+				break
+			}
+			if result.Type != "result" || !result.IsError {
+				continue
+			}
+			for _, explanation := range result.Errors {
+				if strings.TrimSpace(explanation) != "" {
+					msg = explanation
+					break
+				}
+			}
+			break
+		}
 	}
+	msg = managedcredentials.RedactString(msg, secrets...)
 	msg = strings.Join(strings.Fields(msg), " ")
 	const maxLen = 240
 	if len(msg) > maxLen {
-		msg = msg[:maxLen] + "..."
+		msg = msg[:maxLen]
+		for !utf8.ValidString(msg) && len(msg) > 0 {
+			msg = msg[:len(msg)-1]
+		}
+		msg += "..."
 	}
-	return msg
+	return strings.ToValidUTF8(msg, "?")
+}
+
+func claudeCommandSecrets(cmd *exec.Cmd) []string {
+	var secrets []string
+	for index := 0; index+1 < len(cmd.Args); index++ {
+		switch cmd.Args[index] {
+		case "-e":
+			key, value, _ := strings.Cut(cmd.Args[index+1], "=")
+			if key == "CLAUDE_CODE_OAUTH_TOKEN" {
+				secrets = append(secrets, value)
+			}
+		case "--mcp-config":
+			var config struct {
+				Servers map[string]struct {
+					Headers map[string]string `json:"headers"`
+				} `json:"mcpServers"`
+			}
+			if json.Unmarshal([]byte(cmd.Args[index+1]), &config) == nil {
+				for _, server := range config.Servers {
+					for key, value := range server.Headers {
+						if strings.EqualFold(key, "Authorization") {
+							secrets = append(secrets, value, strings.TrimPrefix(value, "Bearer "))
+						}
+					}
+				}
+			}
+		}
+	}
+	return secrets
 }
 
 func isClaudeAuthOutput(raw string) bool {
@@ -334,8 +413,12 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 		return nil, err
 	}
 	if execTarget.Mode == workspace.ExecutionModeDockerContainer {
+		if target.ClaudeState == nil || target.ClaudeState.Directory() != workspace.ClaudeStateDirectory {
+			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_provider_state_binding_missing", "claude-cli-adapter", "build_command", nil)
+		}
 		dockerBin := configuredWorkspaceDockerBin(r.cfg)
 		dockerArgs := []string{"exec", "-i"}
+		dockerArgs = append(dockerArgs, "-e", "CLAUDE_CONFIG_DIR="+target.ClaudeState.Directory())
 		gatewayURL := r.toolGateway.WorkspaceMCPURL()
 		if gatewayURL != "" {
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_URL="+gatewayURL)
@@ -359,14 +442,6 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 }
 
 func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Target, error) {
-	return r.resolveWorkspaceTarget(ctx, false)
-}
-
-func (r *ClaudeCLIRuntime) resolveWorkspaceForCapabilityAdmission(ctx context.Context) (*workspace.Target, error) {
-	return r.resolveWorkspaceTarget(ctx, true)
-}
-
-func (r *ClaudeCLIRuntime) resolveWorkspaceTarget(ctx context.Context, capabilityAdmission bool) (*workspace.Target, error) {
 	if r.workspaces == nil {
 		return nil, fmt.Errorf("%w: workspace resolver is not configured", ErrClaudeWorkspaceRequired)
 	}
@@ -374,13 +449,7 @@ func (r *ClaudeCLIRuntime) resolveWorkspaceTarget(ctx context.Context, capabilit
 	if !ok {
 		return nil, fmt.Errorf("%w: actor context is missing", ErrClaudeWorkspaceRequired)
 	}
-	var target *workspace.Target
-	var err error
-	if capabilityAdmission {
-		target, err = workspace.ResolveForCapabilityAdmission(ctx, r.workspaces, actor)
-	} else {
-		target, err = r.workspaces.ResolveWorkspace(ctx, actor)
-	}
+	target, err := r.workspaces.ResolveWorkspace(ctx, actor)
 	if err != nil {
 		return nil, err
 	}

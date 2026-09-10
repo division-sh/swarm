@@ -41,7 +41,7 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 	if err != nil {
 		return nil, err
 	}
-	forkChatLLM, err := buildForkChatSandboxLLMRuntimes(req.Config, primary.workspaces, binding, req.ProviderCredentials, stores.Effects(), stores.Completion(), stores.CompletionHeartbeat(), rt.Budget)
+	forkChatLLM, err := buildForkChatSandboxLLMRuntimes(rt.ExecutionPosture, req.Config, primary.workspaces, binding, req.ProviderCredentials, stores.Effects(), stores.Completion(), stores.CompletionHeartbeat(), rt.Budget)
 	if err != nil {
 		return nil, err
 	}

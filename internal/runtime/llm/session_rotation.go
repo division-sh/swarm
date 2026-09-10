@@ -63,6 +63,7 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Reg
 		return nil, err
 	}
 	s.ID = lease.SessionID
+	s.ProviderSessionID = ""
 	s.TurnCount = 0
 	s.ParseFailures = 0
 	s.Messages = []Message{
@@ -104,6 +105,7 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 		return nil, err
 	}
 	s.ID = lease.SessionID
+	s.ProviderSessionID = ""
 	s.TurnCount = 0
 	s.ParseFailures = 0
 	s.Messages = []Message{

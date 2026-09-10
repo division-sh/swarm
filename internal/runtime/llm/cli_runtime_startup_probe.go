@@ -25,13 +25,8 @@ type cliStartupProbeResult struct {
 	err   error
 }
 
-func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor models.AgentConfig, systemPrompt string, tools []ToolDefinition) (*Response, error) {
+func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor models.AgentConfig, systemPrompt string, tools []ToolDefinition) (_ *Response, retErr error) {
 	ctx = models.WithActor(ctx, actor)
-	target, err := r.resolveWorkspaceForCapabilityAdmission(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	s := &Session{
 		ID:           ensurePlatformSessionID(""),
 		AgentID:      strings.TrimSpace(actor.ID),
@@ -57,6 +52,18 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_attempt_identity_missing", "claude-cli-adapter", "startup_probe", nil)
 	}
+	request, err := workspace.ClaudeProbeState(childSessionID)
+	if err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
+		return nil, err
+	}
+	target, err := r.resolveClaudeState(ctx, actor, request, "")
+	if err != nil {
+		failStartupProbePrelaunch(ctx, handle, err)
+		return nil, err
+	}
+	s.claudeState = target.ClaudeState
+	defer func() { retErr = errors.Join(retErr, r.releaseInvocationState(ctx, s)) }()
 
 	buildArgs := func(includeSystemPrompt bool) ([]string, string, error) {
 		args := []string{
@@ -173,10 +180,11 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 	}
 	if result.found {
 		if waitErr != nil && !errors.Is(runCtx.Err(), context.Canceled) {
-			stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
+			secrets := claudeCommandSecrets(cmd)
+			stderrText := summarizeCLIErrorOutput(string(joinRawLines(stderrLines)), secrets...)
 			stdoutText := ""
 			if result.resp != nil {
-				stdoutText = strings.TrimSpace(string(result.resp.Raw))
+				stdoutText = summarizeCLIErrorOutput(string(result.resp.Raw), secrets...)
 			}
 			failure := claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_startup_probe_failed", "startup_probe", waitErr)
 			_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)
@@ -185,7 +193,7 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 		return result.resp, nil
 	}
 
-	stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
+	stderrText := summarizeCLIErrorOutput(string(joinRawLines(stderrLines)), claudeCommandSecrets(cmd)...)
 	if isClaudeAuthOutput(stderrText) {
 		failure := claudeCLIProcessFailure(stderrText, "", "claude_cli_startup_probe_failed", "startup_probe", waitErr)
 		_ = handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "claude_cli_startup_outcome_uncertain", "claude-cli-adapter", "startup_probe", nil, failure)

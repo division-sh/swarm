@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"io"
 	"os"
 	"sort"
@@ -158,7 +159,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	if !ok {
 		return report.finalize()
 	}
-	workspaceBackend, err := DecideWorkspaceBackend(req.WorkspaceBackend, req.Config, source)
+	workspaceBackend, err := DecideWorkspaceBackend(executionposture.Live, req.WorkspaceBackend, req.Config, source)
 	if err != nil {
 		message, remediation := workspaceBackendDecisionDiagnostic(err)
 		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_decision_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, message, remediation)
@@ -175,12 +176,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	report.add(localPreflightWorkspacePrerequisite, code, severity, status, workspaceBackendDecisionDetail(workspaceBackend), remediation)
 	if req.CheckContractSecrets {
-		posture, postureErr := req.Config.ProcessExecutionPosture()
-		if postureErr != nil {
-			report.add(localPreflightContractSecretPrerequisite, "runtime_execution_posture_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, postureErr.Error(), "set runtime.execution_posture to exactly live or mock_only")
-			return report.finalize()
-		}
-		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, posture)
+		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, executionposture.Live)
 		if err != nil {
 			report.add(localPreflightContractSecretPrerequisite, "contract_secret_reachability_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the effective connector declarations or agent LLM selection")
 			return report.finalize()

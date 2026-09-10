@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"io"
 	"net"
 	"net/http"
@@ -140,6 +141,7 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
+	ExecutionPosture       executionposture.Posture
 	Ctx                    context.Context
 	Stores                 serveRuntimePersistence
 	Config                 *config.Config
@@ -160,6 +162,7 @@ type serveRuntimeBundleContextRequest struct {
 	ToolGatewayBinding     toolgateway.Binding
 	UseStartupRecovery     bool
 	RuntimeInstanceID      string
+	DataProjectionRoot     string
 	ProcessWorkOwner       *worklifetime.Process
 	NoticePresentation     runtimetools.InformationalNoticePresentationSink
 }
@@ -345,6 +348,10 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
+	return materializeRuntimeBundle(module, bundle, sourceRoot, resolvedPaths.PlatformSpecPath)
+}
+
+func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *runtimecontracts.WorkflowContractBundle, sourceRoot, platformSpecPath string) (serveRuntimeBundle, error) {
 	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("compute boot bundle identity: %w", err)
@@ -359,8 +366,8 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 		source:           semanticview.Wrap(bundle),
 		sourceProjection: sourceProjection,
 		sourceRoot:       sourceRoot,
-		platformSpecPath: resolvedPaths.PlatformSpecPath,
-		runningSpecPath:  resolvedPaths.PlatformSpecPath,
+		platformSpecPath: platformSpecPath,
+		runningSpecPath:  platformSpecPath,
 		bootIdentity:     bootIdentity,
 		cleanup:          sourceProjection.Release,
 	}, nil
@@ -448,6 +455,9 @@ func prepareLoadedServeSourceArtifact(ctx context.Context, persistence serveRunt
 }
 
 func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (result serveRuntimeBundleContext, retErr error) {
+	if !req.ExecutionPosture.Valid() {
+		return serveRuntimeBundleContext{}, fmt.Errorf("command execution purpose is required")
+	}
 	loaded := req.Loaded
 	stateStoreSummary := strings.TrimSpace(req.StateStoreSummary)
 	if stateStoreSummary == "" {
@@ -492,7 +502,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 				retErr = errors.Join(retErr, workspaces.ReleaseSourceProjection(context.WithoutCancel(req.Ctx)))
 			}
 		}()
-		if err := configureWorkspaceDataProjection(workspaces, loaded.source, req.Stores); err != nil {
+		if err := configureWorkspaceDataProjection(workspaces, loaded.source, req.Stores, req.DataProjectionRoot); err != nil {
 			return serveRuntimeBundleContext{}, err
 		}
 		if err := workspaces.ValidateSource(req.Ctx, loaded.source); err != nil {
@@ -510,11 +520,14 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 			}
 		}()
 	}
-	posture, err := req.Config.ProcessExecutionPosture()
-	if err != nil {
-		return serveRuntimeBundleContext{}, err
+	posture := req.ExecutionPosture
+	if !posture.Valid() {
+		return serveRuntimeBundleContext{}, fmt.Errorf("command execution purpose is required")
 	}
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials, posture)
+	validationOpts.AllowHarnessInputs = posture == executionposture.MockOnly
+	validationOpts.AllowHarnessOutputs = posture == executionposture.MockOnly
+	validationOpts.ModelAliases = req.Config.LLM.Models
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderCredentials = req.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
@@ -549,6 +562,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		scenarioDeclarations = append(scenarioDeclarations, located.Declaration)
 	}
 	runtimeDeps.Options = runtime.RuntimeOptions{
+		ExecutionPosture:                 posture,
 		SelfCheck:                        req.Options.SelfCheck,
 		WorkflowModule:                   loaded.module,
 		WorkspaceLifecycle:               workspaces,
@@ -618,14 +632,17 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	}, nil
 }
 
-func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source semanticview.Source, stores serveRuntimePersistence) error {
+func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source semanticview.Source, stores serveRuntimePersistence, root string) error {
 	if workspaces == nil || source == nil {
 		return nil
 	}
 	if source.DataProjectionRequired() && stores.data == nil {
 		return fmt.Errorf("selected store does not expose durable data access projection")
 	}
-	materializer, err := runtimedataaccess.NewMaterializer(runtimedataaccess.DefaultProjectionRoot(), source, stores.data)
+	if root == "" {
+		root = runtimedataaccess.DefaultProjectionRoot()
+	}
+	materializer, err := runtimedataaccess.NewMaterializer(root, source, stores.data)
 	if err != nil {
 		return err
 	}
@@ -639,7 +656,7 @@ func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source sem
 	return nil
 }
 
-func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (*runtimellm.AgentRuntimeSet, error) {
+func buildForkChatSandboxLLMRuntimes(posture executionposture.Posture, cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (*runtimellm.AgentRuntimeSet, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
@@ -647,9 +664,8 @@ func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Re
 	if err != nil {
 		return nil, err
 	}
-	posture, err := cfg.ProcessExecutionPosture()
-	if err != nil {
-		return nil, err
+	if !posture.Valid() {
+		return nil, fmt.Errorf("command execution purpose is required")
 	}
 	registry := sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
 	return runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
@@ -846,6 +862,102 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			return 3
 		}
 	}
+	managedCredentials, err := cliapp.BuildManagedCredentialStore()
+	if err != nil {
+		presenter.fail(5, "managed_credentials", err)
+		return 1
+	}
+	providerCredentials, err := cliapp.BuildProviderCredentialStore()
+	if err != nil {
+		presenter.fail(5, "provider_credentials", err)
+		return 1
+	}
+	credentials, err := cliapp.BuildCredentialStore()
+	if err != nil {
+		presenter.fail(5, "credentials", err)
+		return 1
+	}
+	composition := runtimeCompositionRequest{
+		Purpose: executionposture.Live, ProviderIngress: true,
+		Repo: repo, Options: opts, Config: cfgResult, ResolvedPaths: resolvedPaths,
+		LocalState: localState, SwarmDir: swarmDir, StoreSelection: storeSelection,
+		WorkspacePreference: workspaceBackendPreference, MountSources: mountSources,
+		PlatformPackBase: platformPackBase, PlatformPackBases: platformPackBases,
+		APIAuth: apiAuth, PublicIngressMode: publicIngressMode, PublicIngressEnabled: publicIngressEnabled,
+		Registration: projectContextRegistration, ScratchAuthority: scratchAuthority,
+		Credentials: credentials, ManagedCredentials: managedCredentials, ProviderCredentials: providerCredentials,
+		Presenter: presenter, NoticePresentation: noticePresentation, Cancel: cancelServe,
+		BootStartedAt: bootStartedAt, RuntimeInstanceID: runtimeInstanceID,
+	}
+	scratchAuthority = nil // The common constructor now owns abort-or-joined-close.
+	publicListener = nil   // Listener ownership follows the admitted composition request.
+	return buildRuntimeComposition(ctx, composition)
+}
+
+// runtimeCompositionRequest contains command-admitted construction facts. It is
+// internal to the composition root, not a public runtime mode/configuration API.
+type runtimeCompositionRequest struct {
+	Purpose              executionposture.Posture
+	ProviderIngress      bool
+	Repo                 string
+	Options              cliapp.ServeOptions
+	Config               cliapp.RuntimeConfigLoadResult
+	ResolvedPaths        cliapp.CLISourcePlatformSpecPaths
+	LocalState           cliapp.LocalRuntimeStateResolution
+	SwarmDir             cliapp.CLISwarmDirResolution
+	StoreSelection       storebackend.Selection
+	WorkspacePreference  cliapp.WorkspaceBackendSelection
+	MountSources         cliapp.WorkspaceMountSources
+	PlatformPackBase     *packartifact.PlatformPackInventory
+	PlatformPackBases    *packartifact.PlatformPackBaseGenerationOwner
+	APIAuth              apiv1.AuthTokenResolution
+	PublicIngressMode    string
+	PublicIngressEnabled bool
+	Registration         *cliapp.ServeProjectContextRegistration
+	ScratchAuthority     *devscratch.EpochAuthority
+	Credentials          runtimecredentials.Store
+	ManagedCredentials   runtimemanagedcredentials.Store
+	ProviderCredentials  runtimecredentials.Store
+	Presenter            *serveLifecyclePresenter
+	NoticePresentation   *serveNoticePresentationSink
+	Cancel               context.CancelFunc
+	BootStartedAt        time.Time
+	RuntimeInstanceID    string
+	OnReady              func(context.Context, string) error
+	AdmittedBundle       *runtimecontracts.WorkflowContractBundle
+	DataProjectionRoot   string
+}
+
+// buildRuntimeComposition owns the common acquisition/start/ready/close path for
+// live serving and private test execution. Existing owners retain all semantics.
+func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) int {
+	repo, opts, cfgResult := req.Repo, req.Options, req.Config
+	publicListener := opts.PublicWebhookListener
+	defer func() {
+		if publicListener != nil {
+			_ = publicListener.Close()
+		}
+	}()
+	cfg, resolvedPaths := cfgResult.Config, req.ResolvedPaths
+	localState, swarmDir, storeSelection := req.LocalState, req.SwarmDir, req.StoreSelection
+	mountSources, workspaceBackendPreference := req.MountSources, req.WorkspacePreference
+	platformPackBase, platformPackBases := req.PlatformPackBase, req.PlatformPackBases
+	apiAuth, projectContextRegistration := req.APIAuth, req.Registration
+	publicIngressMode, publicIngressEnabled := req.PublicIngressMode, req.PublicIngressEnabled
+	scratchAuthority := req.ScratchAuthority
+	defer func() {
+		if scratchAuthority != nil {
+			if err := scratchAuthority.AbortBeforeStoreOpen(); err != nil {
+				req.Presenter.cleanupFailure("scratch acquisition", err)
+			}
+		}
+	}()
+	presenter, noticePresentation, cancelServe := req.Presenter, req.NoticePresentation, req.Cancel
+	bootStartedAt, runtimeInstanceID := req.BootStartedAt, req.RuntimeInstanceID
+	if !req.Purpose.Valid() {
+		presenter.fail(3, "runtime_composition", fmt.Errorf("command execution purpose is required"))
+		return 2
+	}
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
@@ -1011,7 +1123,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	if resetRecovery != nil {
 		loadedBundles, err = loadServeRecoveredResetSources(ctx, repo, stores.SourceArtifactStore(), resetRecovery, platformPackBases,
 			func(artifact *sourceartifact.AdmittedSourceArtifact, source semanticview.Source) (*sourceartifact.RuntimeProjection, error) {
-				backend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+				backend, err := cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, source)
 				if err != nil {
 					return nil, err
 				}
@@ -1019,7 +1131,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			})
 	} else {
 		supervisor.resetStartup = false
-		loadedBundles, err = loadServeRuntimeBundles(ctx, repo, stores.SourceArtifactStore(), resolvedPaths, opts, platformPackBases)
+		loadedBundles, err = loadRuntimeCompositionBundles(ctx, req, stores.SourceArtifactStore())
 	}
 	if err != nil {
 		detail := err.Error()
@@ -1045,7 +1157,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.boot(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
 	}
 	if len(loadedBundles) > 0 {
-		_, err = cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+		_, err = cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, source)
 	}
 	if err != nil {
 		presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
@@ -1054,16 +1166,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		})
 		return 3
 	}
-	managedCredentialStore, err := cliapp.BuildManagedCredentialStore()
-	if err != nil {
-		presenter.fail(5, "managed_credentials", err)
-		return 1
-	}
-	providerCredentialStore, err := cliapp.BuildProviderCredentialStore()
-	if err != nil {
-		presenter.fail(5, "provider_credentials", err)
-		return 1
-	}
+	managedCredentialStore, providerCredentialStore := req.ManagedCredentials, req.ProviderCredentials
 	providerCredentialOwner, err := runtimecredentials.NewSnapshotOwner(providerCredentialStore)
 	if err != nil {
 		presenter.fail(5, "provider_credentials", err)
@@ -1077,7 +1180,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			return 1
 		}
 	}
-	if len(bundlePackLoads) > 0 && cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
+	if len(bundlePackLoads) > 0 && req.Purpose == executionposture.Live && cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
 		primaryPackLoad := bundlePackLoads[0]
 		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels, loadedBundle.source)
 		if preflight.HasBlockers() {
@@ -1112,11 +1215,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		loadedBundle = loadedBundles[0]
 	}
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
-	credentialStore, err := cliapp.BuildCredentialStore()
-	if err != nil {
-		presenter.fail(5, "credentials", err)
-		return 1
-	}
+	credentialStore := req.Credentials
 	apiListener, err = cliapp.ListenServeHTTPListener("api", opts.APIListenAddr)
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", err)
@@ -1142,7 +1241,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		if i == 0 {
 			contextToolGatewayBinding = toolGatewayBinding
 		}
-		workspaceBackend, err := cliapp.DecideWorkspaceBackend(workspaceBackendPreference, cfg, loaded.source)
+		workspaceBackend, err := cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, loaded.source)
 		if err != nil {
 			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
 				cliapp.WriteWorkspaceBackendDecisionFailure(out, "serve", err)
@@ -1157,6 +1256,8 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 		packLoad := bundlePackLoads[i]
 		request := serveRuntimeBundleContextRequest{
+			ExecutionPosture:       req.Purpose,
+			DataProjectionRoot:     req.DataProjectionRoot,
 			Ctx:                    ctx,
 			Stores:                 runtimePersistence,
 			Config:                 cfg,
@@ -1228,11 +1329,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	source = primaryContext.loaded.source
 	workspaces = primaryContext.workspaces
 	rt := primaryContext.runtime
-	posture, err := cfg.ProcessExecutionPosture()
-	if err != nil {
-		presenter.fail(5, "runtime_context", err)
-		return 1
-	}
+	posture := req.Purpose
 	channelInterfaces, err := serveOperatorChannelInterfaces(runtimeContexts)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
@@ -1433,7 +1530,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	var inboundHandler http.Handler
-	if rt != nil && rt.InboundGateway != nil {
+	if req.ProviderIngress && rt != nil && rt.InboundGateway != nil {
 		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
 	apiServer = newAPIServer(serveSupervisorReadiness{serveReadiness: ready, supervisor: supervisor}, apiV1Handler, inboundHandler, ctx)
@@ -1542,7 +1639,7 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		supervisor.stopRunStalled = stop
 		return nil
 	}
-	var recoveredStarts []*runtime.PreparedStartup
+	var releaseRuntimeContexts func() error
 	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
 		apiServerLease, err := processWorkOwner.Begin(ctx)
 		if err != nil {
@@ -1566,15 +1663,12 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 			if err := runtimeContextManager.StageRecoveredRuntimeContexts(preflightContexts...); err != nil {
 				return err
 			}
-			var err error
-			recoveredStarts, err = startResetServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)
-			if err != nil {
-				return err
-			}
+			releaseRuntimeContexts, err = prepareResetServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)
 		} else {
-			if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
-				return err
-			}
+			releaseRuntimeContexts, err = prepareServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)
+		}
+		if err != nil {
+			return err
 		}
 		supervisor.resetContextsManaged = true
 		return reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive)
@@ -1582,26 +1676,24 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
-	if rt != nil {
-		if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
-			presenter.fail(22, "channel_onboarding", err)
-			return 1
-		}
-	}
 	if err := channelActivationRefresher.publishChannelActivations(ctx); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
-	if len(recoveredStarts) > 0 {
+	if resetRecovery != nil && len(runtimeContexts) > 0 {
 		if err := runtimeContextManager.ReleaseResetExecution(preflightContexts...); err != nil {
 			presenter.fail(22, "pending_reset_recovery", err)
 			return 3
 		}
-		for _, start := range recoveredStarts {
-			if err := start.Start(); err != nil {
-				presenter.fail(22, "pending_reset_recovery", err)
-				return 3
-			}
+	}
+	if err := releaseRuntimeContexts(); err != nil {
+		presenter.fail(22, "channel_onboarding", err)
+		return 1
+	}
+	if rt != nil {
+		if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
+			presenter.fail(22, "channel_onboarding", err)
+			return 1
 		}
 	}
 	initialRegistrationPairs := []runtimepublicingress.RegistrationPair{}
@@ -1663,10 +1755,13 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		return 1
 	}
 	presenter.boot(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
-	standing, err := serveReadyStandingIngress(ctx, runtimeContextManager, providerCredentialOwner, apiListener.Addr())
-	if err != nil {
-		presenter.fail(22, "ready", err)
-		return 1
+	var standing []serveLifecycleIngressFact
+	if req.ProviderIngress {
+		standing, err = serveReadyStandingIngress(ctx, runtimeContextManager, providerCredentialOwner, apiListener.Addr())
+		if err != nil {
+			presenter.fail(22, "ready", err)
+			return 1
+		}
 	}
 	if !publicIngressEnabled && len(standing) > 0 {
 		presenter.recordPublicIngressDisabledHint()
@@ -1746,6 +1841,15 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}
 
+	if req.OnReady != nil {
+		err := req.OnReady(ctx, "http://"+apiListener.Addr().String())
+		ready.Store(false)
+		if err != nil {
+			presenter.runtimeFailure("test_execution", err)
+			return 1
+		}
+		return 0
+	}
 	<-ctx.Done()
 	ready.Store(false)
 	return serveCancellationExitCode(ownershipLoss)
@@ -2379,21 +2483,47 @@ func runServeSourceArtifactStartupRecovery(
 	return 0
 }
 
-func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
-	_, err := startServeRuntimeContextSet(ctx, contexts, manager, false)
-	return err
+func prepareServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) (_ func() error, prepareErr error) {
+	return prepareServeRuntimeContextSet(ctx, contexts, manager, false)
 }
 
-// Reset uses the same startup interpreter, but publishes no individual source.
-// The supervisor must stage every fresh context and rebind consumers first.
-func startResetServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) ([]*runtime.PreparedStartup, error) {
+func prepareResetServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) (func() error, error) {
 	if manager == nil {
 		return nil, errors.New("reset startup requires runtime context manager")
 	}
-	return startServeRuntimeContextSet(ctx, contexts, manager, true)
+	return prepareServeRuntimeContextSet(ctx, contexts, manager, true)
 }
 
-func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, reset bool) ([]*runtime.PreparedStartup, error) {
+func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager, reset bool) (_ func() error, prepareErr error) {
+	// Own every candidate from entry, including ones that never prepare or
+	// register. Only this boundary can fence siblings before any parent join.
+	prepared := make([]*runtime.Runtime, 0, len(contexts))
+	for _, contextDef := range contexts {
+		if contextDef.runtime != nil {
+			prepared = append(prepared, contextDef.runtime)
+		}
+	}
+	rollback := func() error {
+		var cleanupErr error
+		for _, rt := range prepared {
+			rt.CloseAdmission()
+		}
+		if manager != nil {
+			for _, result := range manager.DeactivateAll(runtime.RuntimeContextCauseUnavailable) {
+				cleanupErr = errors.Join(cleanupErr, result.ShutdownErr)
+			}
+		}
+		for i := len(prepared) - 1; i >= 0; i-- {
+			cleanupErr = errors.Join(cleanupErr, prepared[i].Shutdown())
+		}
+		return cleanupErr
+	}
+	preparedSet := false
+	defer func() {
+		if !preparedSet {
+			prepareErr = errors.Join(prepareErr, rollback())
+		}
+	}()
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
@@ -2402,56 +2532,20 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 			return nil, fmt.Errorf("preflight runtime dynamic topology: %w", err)
 		}
 	}
-	prepared := make([]*runtime.Runtime, 0, len(contexts))
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
 			continue
 		}
 		if err := contextDef.runtime.PrepareAuthorActivityCatalog(); err != nil {
-			for _, rt := range prepared {
-				_ = rt.Shutdown()
-			}
 			return nil, fmt.Errorf("prepare author activity catalog: %w", err)
 		}
-		prepared = append(prepared, contextDef.runtime)
 	}
 	for _, rt := range prepared {
 		if err := rt.PrepareStartupLifecycle(ctx); err != nil {
-			for _, preparedRuntime := range prepared {
-				_ = preparedRuntime.Shutdown()
-			}
 			return nil, fmt.Errorf("prepare runtime lifecycle: %w", err)
 		}
 	}
-	registered := make([]struct {
-		hash    string
-		runtime *runtime.Runtime
-	}, 0, len(contexts))
-	rollback := func() {
-		if reset {
-			// Staging installed the entire candidate set. Withdraw and join it
-			// as a set, including candidates whose Start has not completed.
-			manager.DeactivateAll(runtime.RuntimeContextCauseUnavailable)
-			return
-		}
-		closedByManager := make(map[*runtime.Runtime]struct{}, len(registered))
-		for i := len(registered) - 1; i >= 0; i-- {
-			entry := registered[i]
-			if manager != nil {
-				result := manager.DeactivateBundleHash(entry.hash, runtime.RuntimeContextCauseUnavailable)
-				if result.Found && result.ShutdownErr == nil {
-					closedByManager[entry.runtime] = struct{}{}
-				}
-			}
-		}
-		for i := len(prepared) - 1; i >= 0; i-- {
-			rt := prepared[i]
-			if _, closed := closedByManager[rt]; !closed {
-				_ = rt.Shutdown()
-			}
-		}
-	}
-	var starts []*runtime.PreparedStartup
+	releases := make([]func() error, 0, len(contexts))
 	resetContexts := make([]runtime.BundleContext, 0, len(contexts))
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {
@@ -2463,32 +2557,23 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 			contextDef.startupStandingActivations,
 		)
 		if err != nil {
-			rollback()
 			return nil, err
 		}
 		if startupStandingOwner != nil {
 			if contextDef.runtime.Bus == nil {
-				rollback()
 				return nil, errors.New("standing startup recovery requires event bus")
 			}
 			contextDef.runtime.Bus.SetStandingRunWorkOwner(startupStandingOwner)
 		}
-		if reset {
-			start, err := contextDef.runtime.PrepareStart(ctx)
-			if err != nil {
-				rollback()
-				return nil, err
-			}
-			starts = append(starts, start)
-		} else if err := contextDef.runtime.Start(ctx); err != nil {
-			rollback()
-			return nil, err
-		}
-		targets, activations, err := contextDef.runtime.EnsureStandingTargets(ctx)
+		release, err := contextDef.runtime.PrepareStart(ctx)
 		if err != nil {
-			rollback()
 			return nil, err
 		}
+		targets, activations, completeStanding, err := contextDef.runtime.PrepareStandingTargets(ctx)
+		if err != nil {
+			return nil, err
+		}
+		releases = append(releases, func() error { return release.Start(completeStanding) })
 		if manager != nil {
 			contextTargets := serveRuntimeContextStandingTargets(targets, contextDef.startupStandingTargets, activations)
 			for _, activation := range activations {
@@ -2496,7 +2581,6 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 					continue
 				}
 				if err := manager.SuppressStandingServiceTargets(activation.ServiceID); err != nil {
-					rollback()
 					return nil, err
 				}
 			}
@@ -2519,28 +2603,33 @@ func startServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeBun
 				continue
 			}
 			if err := manager.Register(definition); err != nil {
-				rollback()
 				return nil, err
 			}
-			registered = append(registered, struct {
-				hash    string
-				runtime *runtime.Runtime
-			}{
-				hash:    contextDef.sourceArtifactFact.BundleHash(),
-				runtime: contextDef.runtime,
-			})
 		} else if len(targets) > 0 {
-			rollback()
 			return nil, errors.New("standing targets require runtime context manager")
 		}
 	}
 	if reset {
 		if err := manager.PublishResetRuntimeContexts(resetContexts...); err != nil {
-			rollback()
 			return nil, err
 		}
 	}
-	return starts, nil
+	preparedSet = true
+	return func() (releaseErr error) {
+		released := false
+		defer func() {
+			if !released {
+				releaseErr = errors.Join(releaseErr, rollback())
+			}
+		}()
+		for _, release := range releases {
+			if err := release(); err != nil {
+				return err
+			}
+		}
+		released = true
+		return nil
+	}, nil
 }
 
 type serveStartupStandingRecoveryOwner struct {

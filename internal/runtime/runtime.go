@@ -79,6 +79,7 @@ type AuthorActivityCatalogRegistrar interface {
 }
 
 type RuntimeOptions struct {
+	ExecutionPosture                 executionposture.Posture
 	SelfCheck                        bool
 	WorkspaceLifecycle               workspace.Lifecycle
 	EnableToolGateway                bool
@@ -399,11 +400,15 @@ func (rt *Runtime) PrepareStartupLifecycle(ctx context.Context) error {
 	if rt == nil {
 		return errors.New("runtime is required")
 	}
+	rt.startupPrepareMu.Lock()
+	defer rt.startupPrepareMu.Unlock()
+	return rt.prepareStartupLifecycleLocked(ctx)
+}
+
+func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
 	if rt.Manager == nil {
 		return nil
 	}
-	rt.startupPrepareMu.Lock()
-	defer rt.startupPrepareMu.Unlock()
 	rt.lifecycleMu.Lock()
 	if rt.cancelStart != nil {
 		rt.lifecycleMu.Unlock()
@@ -696,10 +701,10 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
-	return ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, false)
+	return ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, false, nil)
 }
 
-func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, allowValidationHarness bool) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, allowValidationHarness bool, modelAliases llmselection.ModelAliases) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -714,6 +719,7 @@ func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llms
 	validationOpts.ProviderCredentials = opts.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	validationOpts.LLMProfile = profile
+	validationOpts.ModelAliases = modelAliases
 	validationOpts.ChannelPlans = opts.ChannelPlans
 	validationOpts.ChannelActivationPublication = opts.DeclaredChannelPublication
 	if !validationOpts.ChannelActivationPublication.Generation().Valid() {
@@ -795,9 +801,9 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
-	posture, err := cfg.ProcessExecutionPosture()
-	if err != nil {
-		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
+	posture := opts.ExecutionPosture
+	if !posture.Valid() {
+		return validatedRuntimeDeps{}, fmt.Errorf("command execution purpose is required before runtime construction")
 	}
 	if deps.WorkflowPersistence.Configured() && !deps.WorkflowPersistence.Valid() {
 		return validatedRuntimeDeps{}, fmt.Errorf("selected runtime workflow persistence mutation owner is required")
@@ -838,11 +844,11 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, allowValidationHarness)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, allowValidationHarness, cfg.LLM.Models)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
-	if err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source); err != nil {
+	if err := validateSelectedBackendModelAliasesForDeclaredAgents(posture, cfg, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
 	}
 	providerCredentialResolver := providerCredentialResolverForRuntimeOptions(opts)
@@ -1000,17 +1006,23 @@ func (rt *Runtime) PrepareAuthorActivityCatalog() error {
 		return fmt.Errorf("runtime author activity catalog requires runtime_instance_id and bundle_hash")
 	}
 	leases := make([]*runtimeauthoractivity.EventCatalogLease, 0, len(registrars))
-	for _, registrar := range registrars {
-		lease, err := registrar.RegisterAuthorActivityEventCatalog(rt.authorActivityScope, rt.authorActivityDescriptors)
-		if err != nil {
+	registered := false
+	defer func() {
+		if !registered {
 			for _, acquired := range leases {
 				acquired.Release()
 			}
+		}
+	}()
+	for _, registrar := range registrars {
+		lease, err := registrar.RegisterAuthorActivityEventCatalog(rt.authorActivityScope, rt.authorActivityDescriptors)
+		if err != nil {
 			return err
 		}
 		leases = append(leases, lease)
 	}
 	rt.authorActivityLeases = leases
+	registered = true
 	return nil
 }
 
@@ -1038,7 +1050,7 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 }
 
 func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
-	return newRuntime(ctx, deps, false)
+	return newRuntime(ctx, deps, deps.Options.ExecutionPosture == executionposture.MockOnly)
 }
 
 // NewValidationHarnessRuntime is the explicit non-production catalog execution
@@ -1297,7 +1309,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	if err != nil {
 		return nil, fmt.Errorf("build agent runtime resolver: %w", err)
 	}
-	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, rt.LLMRuntimes, rt.Workspace); err != nil {
+	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, rt.ExecutionPosture, cfg.LLM.Models, source, rt.Credentials, rt.LLMRuntimes, rt.Workspace); err != nil {
 		return nil, fmt.Errorf("native tool validation failed: %w", err)
 	} else {
 		if bootWarningsFatal() && len(warnings) > 0 {
@@ -1489,48 +1501,77 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	return rt, nil
 }
 
-func (rt *Runtime) Start(ctx context.Context) error {
-	prepared, err := rt.PrepareStart(ctx)
+func (rt *Runtime) Start(ctx context.Context) (startErr error) {
+	if rt == nil {
+		return fmt.Errorf("runtime is nil")
+	}
+	// Serialize the startup claim and its failure cleanup, not shutdown itself.
+	// A rejected contender never acquires another invocation's abort ownership.
+	rt.startupPrepareMu.Lock()
+	defer rt.startupPrepareMu.Unlock()
+	rt.lifecycleMu.Lock()
+	alreadyStarted := rt.cancelStart != nil
+	rt.lifecycleMu.Unlock()
+	if alreadyStarted {
+		return fmt.Errorf("runtime already started")
+	}
+	started := false
+	defer func() {
+		if !started {
+			startErr = errors.Join(startErr, rt.stopWithOptions(DefaultShutdownOptions()))
+		}
+	}()
+	prepared, err := rt.prepareStartLocked(ctx)
 	if err != nil {
 		return err
 	}
-	return prepared.Start()
+	if err := prepared.Start(nil); err != nil {
+		return err
+	}
+	started = true
+	return nil
 }
 
 // PreparedStartup owns a single prepared runtime's execution release. Preparation
 // installs subscriptions and validates startup, but does not admit managed
 // execution, recover deliveries, or release autonomous producers.
+// The composing caller owns abort: it must retire any registered standing
+// children before shutting down this runtime after failed preparation or release,
+// including panic unwinding. Runtime.Start provides that ownership standalone.
 type PreparedStartup struct {
 	mu      sync.Mutex
 	runtime *Runtime
-	start   func() error
+	start   func(func() error) error
 }
 
-func (s *PreparedStartup) Start() error {
+func (s *PreparedStartup) Start(completePreparedTopology func() error) error {
 	if s == nil {
 		return errors.New("prepared runtime startup is required")
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.start == nil {
+		s.mu.Unlock()
 		return errors.New("prepared runtime startup already consumed")
 	}
 	start := s.start
 	s.start = nil
+	s.mu.Unlock()
 	if s.runtime.shutdownAdmissionClosed() {
 		return errors.New("prepared runtime was retired before execution release")
 	}
-	if err := start(); err != nil {
-		s.runtime.cleanupStartFailure()
-		return err
-	}
-	return nil
+	return start(completePreparedTopology)
 }
 
 func (rt *Runtime) PrepareStart(ctx context.Context) (*PreparedStartup, error) {
 	if rt == nil {
 		return nil, fmt.Errorf("runtime is nil")
 	}
+	rt.startupPrepareMu.Lock()
+	defer rt.startupPrepareMu.Unlock()
+	return rt.prepareStartLocked(ctx)
+}
+
+func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, error) {
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
 	if err := rt.PreflightDynamicTopologyStartup(ctx); err != nil {
 		return nil, err
@@ -1538,8 +1579,7 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (*PreparedStartup, error) {
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		return nil, err
 	}
-	if err := rt.PrepareStartupLifecycle(ctx); err != nil {
-		rt.releaseAuthorActivityCatalog()
+	if err := rt.prepareStartupLifecycleLocked(ctx); err != nil {
 		return nil, err
 	}
 	ctx = rt.authorActivityContext(ctx)
@@ -1551,44 +1591,41 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (*PreparedStartup, error) {
 	if rt.shutdownAdmissionClosed() {
 		return nil, fmt.Errorf("runtime shutdown already started")
 	}
-	rt.lifecycleMu.Lock()
-	if rt.cancelStart != nil {
-		rt.lifecycleMu.Unlock()
-		return nil, fmt.Errorf("runtime already started")
-	}
 	startCtx, cancelStart := context.WithCancel(ctx)
-	grant := rt.startupGrant
-	if grant == nil {
-		cancelStart()
-		rt.lifecycleMu.Unlock()
-		rt.releaseAuthorActivityCatalog()
-		return nil, fmt.Errorf("runtime generation grant is required before start")
-	}
-	grantEvidence, grantErr := grant.Evidence()
-	if grantErr != nil {
-		cancelStart()
-		rt.lifecycleMu.Unlock()
-		rt.releaseAuthorActivityCatalog()
-		return nil, grantErr
-	}
-	if err := rt.Manager.HydrateStaticTopologyForStartup(ctx); err != nil {
-		cancelStart()
-		rt.lifecycleMu.Unlock()
-		rt.releaseAuthorActivityCatalog()
-		return nil, fmt.Errorf("hydrate static declaration topology: %w", err)
+	startInstalled := false
+	defer func() {
+		if !startInstalled {
+			cancelStart()
+		}
+	}()
+	var grantEvidence runtimestartupownership.GrantEvidence
+	if err := func() error {
+		rt.lifecycleMu.Lock()
+		defer rt.lifecycleMu.Unlock()
+		if rt.cancelStart != nil {
+			return fmt.Errorf("runtime already started")
+		}
+		grant := rt.startupGrant
+		if grant == nil {
+			return fmt.Errorf("runtime generation grant is required before start")
+		}
+		var err error
+		grantEvidence, err = grant.Evidence()
+		if err != nil {
+			return err
+		}
+		if err := rt.Manager.HydrateStaticTopologyForStartup(ctx); err != nil {
+			return fmt.Errorf("hydrate static declaration topology: %w", err)
+		}
+		rt.startCtx = startCtx
+		rt.cancelStart = cancelStart
+		rt.replacementQuiesced = false
+		startInstalled = true
+		return nil
+	}(); err != nil {
+		return nil, err
 	}
 	rt.emitBootProgress(5, "startup_ownership_lease", "ok", "grant="+grantEvidence.GrantID)
-	rt.startCtx = startCtx
-	rt.cancelStart = cancelStart
-	rt.replacementQuiesced = false
-	rt.lifecycleMu.Unlock()
-	started := false
-	defer func() {
-		if started {
-			return
-		}
-		rt.cleanupStartFailure()
-	}()
 	if rt.runLifecycleExecutor != nil {
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.SourceArtifactFact.BundleHash()}
 		registration, err := rt.runLifecycleCandidates.RegisterCompletionCandidateSink(
@@ -1725,10 +1762,17 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (*PreparedStartup, error) {
 			return nil, fmt.Errorf("canonicalize source-scoped dynamic topology before execution admission: %w", err)
 		}
 	}
-	started = true
-	return &PreparedStartup{runtime: rt, start: func() error {
-		if err := ctx.Err(); err != nil {
+	if rt.Scheduler != nil {
+		if err := rt.Scheduler.PrepareStartup(); err != nil {
+			return nil, fmt.Errorf("prepare scheduler before topology finalization: %w", err)
+		}
+	}
+	return &PreparedStartup{runtime: rt, start: func(completePreparedTopology func() error) error {
+		if err := startCtx.Err(); err != nil {
 			return err
+		}
+		if rt.shutdownAdmissionClosed() {
+			return fmt.Errorf("prepared runtime was shut down before release")
 		}
 		settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
 		if err != nil {
@@ -1749,6 +1793,11 @@ func (rt *Runtime) PrepareStart(ctx context.Context) (*PreparedStartup, error) {
 			if err := rt.Manager.CompleteDynamicFlowRuntimeStartupTopology(startCtx, startupTopology); err != nil {
 				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 				return fmt.Errorf("complete source-scoped dynamic topology: %w", err)
+			}
+			if completePreparedTopology != nil {
+				if err := completePreparedTopology(); err != nil {
+					return fmt.Errorf("complete prepared standing topology after publication: %w", err)
+				}
 			}
 			if replayAllowed {
 				startupRecoveryDecision.ManagerRecoveryAttempted = true
@@ -1861,6 +1910,11 @@ func (rt *Runtime) releaseAutonomousStartupProducers(ctx, startCtx context.Conte
 			rt.emitBootProgress(11, "schedule_restoration", "skipped", "no persistent timer owner available")
 		} else {
 			rt.emitBootProgress(11, "schedule_restoration", "ok", strings.Join(restoredFamilies, "; "))
+		}
+	}
+	if rt.Scheduler != nil {
+		if err := rt.Scheduler.ReleaseStartup(startCtx); err != nil {
+			return fmt.Errorf("release scheduler after recovery and continuation synchronization: %w", err)
 		}
 	}
 	if rt.Pipeline != nil {
@@ -2036,6 +2090,16 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	if err := rt.shutdownGate.Wait(drainCtx); err != nil {
 		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime ingress admission drain timed out after %s: %w", grace, err))
 	}
+	// Continuation dispatch may finalize agent readiness. Join that producer
+	// before manager teardown invalidates its lifecycle dependency.
+	if rt.deliveryContinuations != nil {
+		if err := rt.deliveryContinuations.Retire(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
+			if err := rt.deliveryContinuations.Retire(context.Background()); err != nil {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator join: %w", err))
+			}
+		}
+	}
 	if rt.Manager != nil {
 		deadline, _ := drainCtx.Deadline()
 		remaining := time.Until(deadline)
@@ -2076,11 +2140,6 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 		}
 	}
 	if rt.Bus != nil {
-		if rt.deliveryContinuations != nil {
-			if err := rt.deliveryContinuations.Retire(drainCtx); err != nil {
-				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator shutdown: %w", err))
-			}
-		}
 		if rt.deliverySignalRegistration != nil {
 			rt.deliverySignalRegistration.Release()
 			rt.deliverySignalRegistration = nil
@@ -2128,10 +2187,6 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	rt.lifecycleMu.Unlock()
 	rt.releaseAuthorActivityCatalog()
 	return shutdownErr
-}
-
-func (rt *Runtime) cleanupStartFailure() {
-	_ = rt.stopWithOptions(DefaultShutdownOptions())
 }
 
 func (rt *Runtime) Wait(ctx context.Context) {

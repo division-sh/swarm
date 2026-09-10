@@ -23,6 +23,7 @@ type cliStreamAccumulator struct {
 	visibleTools         []string
 	providerVisibleTools []string
 	mcpVisibleTools      []string
+	inventory            CLIInventoryObservation
 }
 
 type cliPendingToolCall struct {
@@ -202,7 +203,10 @@ func (a *cliStreamAccumulator) mergeStreamEvent(obj map[string]any) {
 }
 
 func (a *cliStreamAccumulator) captureDiagnostics(obj map[string]any) {
-	if a == nil || len(obj) == 0 {
+	// Only provider initialization is an inventory observation. Assistant, result,
+	// and tool payload fields cannot authorize or repair a provider tool surface.
+	if a == nil || !strings.EqualFold(strings.TrimSpace(asString(obj["type"])), "system") ||
+		!strings.EqualFold(strings.TrimSpace(asString(obj["subtype"])), "init") {
 		return
 	}
 	if value, ok := obj["mcp_servers"]; ok {
@@ -214,10 +218,16 @@ func (a *cliStreamAccumulator) captureDiagnostics(obj map[string]any) {
 		}
 	}
 	if value, ok := obj["tools"]; ok {
-		for _, name := range parseVisibleToolNames(value) {
-			a.appendVisibleTool(name)
+		names, valid := parseVisibleToolNames(value)
+		if !valid {
+			a.inventory = CLIInventoryInvalid
+			return
 		}
-		for _, name := range parseMCPVisibleToolNames(value) {
+		if a.inventory == CLIInventoryInvalid {
+			return
+		}
+		a.inventory = CLIInventoryValid
+		for _, name := range names {
 			a.appendVisibleTool(name)
 		}
 	}
@@ -243,66 +253,35 @@ func parseMCPServers(value any) map[string]string {
 	return out
 }
 
-func parseVisibleToolNames(value any) []string {
+func parseVisibleToolNames(value any) ([]string, bool) {
 	list, ok := value.([]any)
-	if !ok || len(list) == 0 {
-		return nil
+	if !ok {
+		return nil, false
 	}
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(list))
 	for _, item := range list {
+		var name string
 		switch typed := item.(type) {
 		case string:
-			name := strings.TrimSpace(typed)
-			if name != "" {
-				if _, ok := seen[name]; !ok {
-					seen[name] = struct{}{}
-					out = append(out, name)
-				}
-			}
+			name = strings.TrimSpace(typed)
 		case map[string]any:
-			name := strings.TrimSpace(asString(typed["name"]))
-			if name != "" {
-				if _, ok := seen[name]; !ok {
-					seen[name] = struct{}{}
-					out = append(out, name)
-				}
+			text, ok := typed["name"].(string)
+			if !ok {
+				return nil, false
 			}
+			name = strings.TrimSpace(text)
+		}
+		if name == "" {
+			return nil, false
+		}
+		if _, exists := seen[name]; !exists {
+			seen[name] = struct{}{}
+			out = append(out, name)
 		}
 	}
 	sort.Strings(out)
-	return out
-}
-
-func parseMCPVisibleToolNames(value any) []string {
-	list, ok := value.([]any)
-	if !ok || len(list) == 0 {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(list))
-	for _, item := range list {
-		switch typed := item.(type) {
-		case string:
-			name := strings.TrimSpace(typed)
-			if strings.HasPrefix(name, runtimeToolsMCPPrefix) {
-				if _, ok := seen[name]; !ok {
-					seen[name] = struct{}{}
-					out = append(out, name)
-				}
-			}
-		case map[string]any:
-			name := strings.TrimSpace(asString(typed["name"]))
-			if strings.HasPrefix(name, runtimeToolsMCPPrefix) {
-				if _, ok := seen[name]; !ok {
-					seen[name] = struct{}{}
-					out = append(out, name)
-				}
-			}
-		}
-	}
-	sort.Strings(out)
-	return out
+	return out, true
 }
 
 func (a *cliStreamAccumulator) appendVisibleTool(name string) {
@@ -394,6 +373,7 @@ func (a *cliStreamAccumulator) Response() *Response {
 		Raw:                  bytes.TrimSpace(a.raw.Bytes()),
 		VisibleTools:         append([]string(nil), a.visibleTools...),
 		ProviderVisibleTools: append([]string(nil), a.providerVisibleTools...),
+		CLIInventory:         a.inventory,
 		MCPServers:           a.mcpServers,
 		MCPVisibleTools:      append([]string(nil), a.mcpVisibleTools...),
 	}

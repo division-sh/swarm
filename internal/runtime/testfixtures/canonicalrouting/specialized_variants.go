@@ -502,14 +502,17 @@ func CopyScenarioSetup(t testing.TB) string {
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-setup-fixture\ninitial_state: new\nterminal_states: [done]\nstates: [new, done]\n")
-	writeLegacyInstanceFlow(t, root, "operating", "name: operating\nmode: static\ninitial_state: initializing\nterminal_states: [ready]\nstates: [initializing, waiting, ready]\npins:\n  inputs:\n    events: [opco.product_review_requested]\n", "opco.product_review_requested:\n  swarm:\n    source: external\n  note: text\n", "product:\n  product_id: text\n  note: text\n", `reviewer:
+	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-setup-fixture\n")
+	writeLegacyInstanceFlow(t, root, "operating", "name: operating\nmode: singleton\ninitial_state: waiting\nterminal_states: [ready]\nstates: [waiting, ready]\npins:\n  inputs:\n    events:\n      - event: opco.product_review_requested\n        source: harness\n", "opco.product_review_requested:\n  swarm:\n    source: external\n  product_id: text\n  note: text\n", "product:\n  product_id:\n    type: text\n    _unused_reason: scenario setup identity\n  note: text\n", `reviewer:
   execution_type: system_node
   subscribes_to: [opco.product_review_requested]
   gate_state:
     gates: [review_ready]
   event_handlers:
     opco.product_review_requested:
+      select_entity:
+        by:
+          product_id: payload.product_id
       data_accumulation:
         source_event: opco.product_review_requested
         writes:
@@ -529,7 +532,7 @@ setup:
 steps:
   - publish: opco.product_review_requested
     target: product
-    payload: {note: approved}
+    payload: {product_id: p-1, note: approved}
 expect:
   entities:
     - ref: product

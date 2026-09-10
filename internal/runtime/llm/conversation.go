@@ -144,7 +144,7 @@ func (c *Conversation) LastFrameID() string {
 	return c.lastFrameID
 }
 
-func (c *Conversation) RunManaged(ctx context.Context, draft agentframe.TurnDraft) (*Response, error) {
+func (c *Conversation) RunManaged(ctx context.Context, draft agentframe.TurnDraft) (response *Response, retErr error) {
 	if c == nil || c.kind != conversationManaged || c.seed == nil {
 		return nil, errors.New("managed conversation is not configured")
 	}
@@ -153,10 +153,11 @@ func (c *Conversation) RunManaged(ctx context.Context, draft agentframe.TurnDraf
 	}
 	causalEvent := draft.Event
 	c.causalEvent = &causalEvent
+	defer func() { retErr = errors.Join(retErr, c.releaseInvocationState(ctx)) }()
 	return c.stepManaged(ctx, draft)
 }
 
-func (c *Conversation) RunForkChat(ctx context.Context, input string) (*Response, error) {
+func (c *Conversation) RunForkChat(ctx context.Context, input string) (response *Response, retErr error) {
 	if c == nil || c.kind != conversationForkChat {
 		return nil, errors.New("fork-chat conversation is not configured")
 	}
@@ -164,7 +165,21 @@ func (c *Conversation) RunForkChat(ctx context.Context, input string) (*Response
 	if msg.Content == "" {
 		return nil, errors.New("fork-chat input is required")
 	}
+	defer func() { retErr = errors.Join(retErr, c.releaseInvocationState(ctx)) }()
 	return c.stepForkChat(ctx, msg)
+}
+
+func (c *Conversation) releaseInvocationState(ctx context.Context) error {
+	runtime, ok := c.runtime.(interface {
+		releaseInvocationState(context.Context, *Session) error
+	})
+	if !ok {
+		return nil
+	}
+	if err := runtime.releaseInvocationState(ctx, c.Session); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDraft) (*Response, error) {

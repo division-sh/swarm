@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -160,6 +161,8 @@ type Report struct {
 }
 
 type Options struct {
+	ExecutionPosture        executionposture.Posture
+	Purpose                 ValidationPurpose
 	Credentials             runtimecredentials.Store
 	ManagedCredentials      runtimemanagedcredentials.Store
 	EffectReachability      SourceBootEffectReachability
@@ -169,8 +172,25 @@ type Options struct {
 	ModelAliases            llmselection.ModelAliases
 }
 
+// ValidationPurpose separates portable declarations from executable admission.
+// ExecutionValidation retains the existing boot contract for runtime callers.
+type ValidationPurpose uint8
+
+const (
+	ExecutionValidation ValidationPurpose = iota
+	StructuralValidation
+)
+
+func (p ValidationPurpose) Valid() bool {
+	return p == ExecutionValidation || p == StructuralValidation
+}
+
 func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 	report := Report{}
+	if !opts.Purpose.Valid() {
+		report.Add(NewHardInvalidityFinding("workflow_contract_validation", "global", "invalid validation purpose", "Select structural validation or execution admission."))
+		return report
+	}
 	if source == nil {
 		report.Add(Finding{
 			CheckID:  "workflow_contract_validation",

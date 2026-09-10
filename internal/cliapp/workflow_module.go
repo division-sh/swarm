@@ -44,7 +44,7 @@ func NewSwarmWorkflowModuleWithRuntimeConfig(repoRoot, sourceRoot, platformSpecP
 }
 
 func loadConfiguredCLIWorkflowModule(repoRoot string, opts CLISourcePlatformSpecPathOptions) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, CLISourcePlatformSpecPaths, error) {
-	cfgResult, err := loadPackInventoryConfig(repoRoot, opts.ConfigPath)
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return nil, nil, CLISourcePlatformSpecPaths{}, err
 	}

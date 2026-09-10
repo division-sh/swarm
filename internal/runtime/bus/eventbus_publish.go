@@ -63,8 +63,9 @@ var ErrRuntimeIngressPaused = errors.New("runtime ingress is paused")
 var ErrRunDispatchBlocked = errors.New("run dispatch is blocked")
 
 const (
-	dispatchQueueRuntimeIngress = "runtime_ingress_queued"
-	dispatchQueueRunBlocked     = "run_dispatch_blocked"
+	dispatchQueueRuntimeIngress          = "runtime_ingress_queued"
+	dispatchQueueRunBlocked              = "run_dispatch_blocked"
+	dispatchQueueStartupCreationRecovery = "startup_creation_recovery"
 )
 
 func (eb *EventBus) runtimeIngressDispatchPaused(ctx context.Context, evt events.Event) (bool, error) {
@@ -588,6 +589,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	} else if reason != "" {
 		prepared.dispatchQueued = true
 		prepared.queueReason = reason
+	}
+	if publication.dynamicFlowCreation != nil && publication.dynamicFlowCreation.DispatchMode == runtimepipeline.DynamicFlowRuntimeCreationDispatchStartupRecovery {
+		prepared.dispatchQueued = true
+		prepared.queueReason = dispatchQueueStartupCreationRecovery
 	}
 	if prepared.requiresReceiver() {
 		receiver, receiverErr := eb.receiverProjection(ctx, evt.DeliveryContext())
