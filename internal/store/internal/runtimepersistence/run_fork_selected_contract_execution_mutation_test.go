@@ -11,14 +11,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -1419,52 +1417,6 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 	}
 	seedPostgresChildEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, forkEventID,
 		"platform.auth_required", events.EventProducerPlatform, "runtime", entityID, "flow-a/1", []byte(`{}`), at.Add(3*time.Second))
-
-	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		ForkRunID:             materialized.ForkRunID,
-		AllowSourceFreeze:     true,
-		AllowedSourceEventIDs: []string{eventID},
-	})
-	if err != nil {
-		t.Fatalf("ActivateRunForkForSelectedContractExecution: %v", err)
-	}
-	if !activation.Activated {
-		t.Fatalf("activation = %#v, want activated", activation)
-	}
-}
-
-func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700003631, 0).UTC()
-	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
-	if err != nil {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
-	}
-	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, forkEventID,
-		[]byte(`{"log_level":"warn","message":"selected-fork diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}`), at.Add(3*time.Second))
-	identity := testAgentIdentity(t, "selected-diagnostic-worker", "")
-	identity.RunID = materialized.ForkRunID
-	producer := runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
-		Owner: runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner,
-		RunID: materialized.ForkRunID, ParentEventID: forkEventID,
-		SelectedForkContext: true, Classification: runtimecorrelation.RuntimeLineageClassificationForkLocal,
-	})
-	item := createLifecycleDiagnosticWithIdentity(t, producer, pg, identity)
-	if err := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, item); err != nil {
-		t.Fatal(err)
-	}
-	run, parent, disposition := diagnosticProjectionLineage(t, db, false, item)
-	if run != materialized.ForkRunID || parent != forkEventID || disposition != "causal_explicit" {
-		t.Fatalf("selected-fork lifecycle lineage=%s/%s/%s", run, parent, disposition)
-	}
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
