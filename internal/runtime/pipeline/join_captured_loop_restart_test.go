@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
 )
 
@@ -20,11 +21,16 @@ func TestWorkflowExpressionAdapterCapturedLoop(t *testing.T) {
 		Loop: map[string]any{"revision_id": "captured", "attempt": 1, "flow_id": "private"},
 		Join: map[string]any{"completed": 1},
 	}
-	if ok, err := evaluator.EvalBool(`loop.revision_id == "captured" && join.completed == 1`, context); err != nil || !ok {
+	expression := `loop.revision_id == "captured" && join.completed == 1`
+	if _, err := evaluator.EvalBool(expression, context); err == nil {
+		t.Fatal("captured context granted join scope to ordinary evaluation")
+	}
+	options := workflowexpr.ValueExpressionOptions{AllowJoin: true}
+	if ok, err := evaluator.EvalBoolWithOptions(expression, context, options); err != nil || !ok {
 		t.Fatalf("adapter lost public captured context before lowering: %v %v", ok, err)
 	}
 	for _, expression := range []string{`_loop.revision_id == "captured"`, `loop.flow_id == "private"`, `loop.attempt.startsWith("1")`} {
-		if _, err := evaluator.EvalBool(expression, context); err == nil {
+		if _, err := evaluator.EvalBoolWithOptions(expression, context, options); err == nil {
 			t.Fatalf("adapter admitted unsupported loop expression %s", expression)
 		}
 	}

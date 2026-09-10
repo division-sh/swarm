@@ -24,7 +24,6 @@ func TestCompositionReceiverInitializationAndRepeatedBusinessWritesBothStores(t 
 				"entities.yaml": "budget:\n  spent_usd: {type: number, initial: 0}\n  status: {type: text, initial: pending}\n",
 				"events.yaml":   "spend.recorded:\n  amount_usd: number\n  business_key: text\n",
 				"nodes.yaml": `budget-writer:
-  id: budget-writer
   execution_type: system_node
   subscribes_to: [spend.recorded]
   event_handlers:
@@ -96,7 +95,6 @@ func TestCompositionReceiverInitializationFeedsArtifactCommitBothStores(t *testi
 `,
 				"events.yaml": "artifact_repo.commit_requested:\n  request_id: text\n  mvp_yaml: text\n",
 				"nodes.yaml": `artifact-node:
-  id: artifact-node
   execution_type: system_node
   subscribes_to: [artifact_repo.commit_requested]
   event_handlers:
