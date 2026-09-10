@@ -36,7 +36,7 @@ func sameDiagnosticJSON(a, b []byte) bool {
 	return ae == nil && be == nil && bytes.Equal(ac, bc)
 }
 
-func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, store eventCommitTxStore, postgres bool, item diaglog.LifecycleDiagnostic, record runtimepkg.RuntimeLogPersistenceRecord) (bool, error) {
+func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, store eventCommitTxStore, evidence lifecycleDiagnosticEvidenceReader, origins selectedForkLineageOwner, postgres bool, item diaglog.LifecycleDiagnostic, record runtimepkg.RuntimeLogPersistenceRecord) (bool, error) {
 	if err := item.Validate(); err != nil {
 		return false, err
 	}
@@ -131,6 +131,17 @@ func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, story *privat
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("admit lifecycle diagnostic history: %w", err)
 	}
+	occurrence, err := loadLifecycleDiagnosticOccurrence(ctx, tx, item.OutboxID)
+	if err != nil {
+		return false, err
+	}
+	// Reset retains immutable audit snapshots but may delete their live owners.
+	// Only live-run settlement requires the retained operation/fork relation.
+	if existingRun != "" {
+		if err := validateLifecycleDiagnosticHistory(ctx, tx, occurrence, origins, evidence); err != nil {
+			return false, err
+		}
+	}
 	receipt := lifecycleDiagnosticProjection{EventID: eventID, RunID: existingRun, Payload: record.Payload, CreatedAt: at, ExecutionMode: record.ExecutionMode}
 	receipt.ParentEventID, receipt.LineageDisposition = parent, disposition
 	facts := events.EventFacts{ID: eventID, Type: events.EventTypePlatformRuntimeLog,
@@ -197,7 +208,7 @@ func (s *EventPostgresOwner) PersistLifecycleDiagnostic(ctx context.Context, ite
 	inserted := false
 	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 		var err error
-		inserted, err = persistLifecycleDiagnosticTx(txctx, tx, story, effects, s, true, item, record)
+		inserted, err = persistLifecycleDiagnosticTx(txctx, tx, story, effects, s, s, s.runFork, true, item, record)
 		return err
 	})
 	return inserted && err == nil, err
@@ -213,7 +224,7 @@ func (s *EventSQLiteOwner) PersistLifecycleDiagnostic(ctx context.Context, item 
 	inserted := false
 	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite lifecycle diagnostic settlement", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 		var err error
-		inserted, err = persistLifecycleDiagnosticTx(txctx, tx, story, effects, s, false, item, record)
+		inserted, err = persistLifecycleDiagnosticTx(txctx, tx, story, effects, s, s, s.runFork, false, item, record)
 		return err
 	})
 	return inserted && err == nil, err

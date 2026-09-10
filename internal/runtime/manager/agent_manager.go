@@ -215,6 +215,9 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		opts.PersistenceRoles.LifecycleEffects,
 	)
 	lifecycle.baseContext = opts.BaseContext
+	if opts.LifecycleDiagnosticOrigin != (LifecycleDiagnosticOrigin{}) {
+		lifecycle.diagnosticOrigin = opts.LifecycleDiagnosticOrigin
+	}
 	lifecycle.executionPosture = opts.ExecutionPosture
 	if opts.WorkOwner != nil {
 		_ = lifecycle.prepareRunOwner(opts.BaseContext, opts.WorkOwner)
@@ -517,7 +520,7 @@ func (am *AgentManager) adoptPersistedAgentForLifecycle(
 	source semanticview.Source,
 	rec PersistedAgent,
 ) error {
-	if err := am.resolveAgentModel(&rec.Config); err != nil {
+	if err := am.validatePersistedAgentExecution(rec.Config); err != nil {
 		return err
 	}
 	if err := bindCanonicalAgentPrompt(source, &rec.Config); err != nil {
@@ -562,27 +565,47 @@ func (am *AgentManager) adoptPersistedAgentLifecycleOnly(ctx context.Context, re
 	return am.lifecycle.registerExecution(ctx, rec, false, sentinel, admission)
 }
 
+func (am *AgentManager) validatePersistedAgentExecution(cfg models.AgentConfig) error {
+	profile, err := llmselection.ResolveLiveBackend(am.llmBackend)
+	if err != nil {
+		return err
+	}
+	if _, err := runtimellm.ValidateAgentExecutionDescriptor(profile, cfg); err != nil {
+		return fmt.Errorf("agent %s execution descriptor: %w", cfg.ID, err)
+	}
+	if am.requireModelResolution && strings.TrimSpace(cfg.Model) == "" {
+		return fmt.Errorf("agent %s missing model", cfg.ID)
+	}
+	return nil
+}
+
 func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 	if cfg == nil {
 		return fmt.Errorf("agent config is required")
 	}
-	return resolveAgentModel(cfg, am.llmBackend, am.modelAliases, am.requireModelResolution)
+	return resolveAgentModel(cfg, am.executionPosture, am.llmBackend, am.modelAliases, am.requireModelResolution)
 }
 
-func resolveAgentModel(cfg *models.AgentConfig, llmBackend string, modelAliases llmselection.ModelAliases, requireModelResolution bool) error {
+func resolveAgentModel(cfg *models.AgentConfig, posture executionposture.Posture, llmBackend string, modelAliases llmselection.ModelAliases, requireModelResolution bool) error {
 	if cfg == nil {
 		return fmt.Errorf("agent config is required")
 	}
 	cfg.NormalizeRuntimeDescriptor()
-	configuredProfile, err := llmselection.ResolveActiveBackend(llmBackend)
+	configuredProfile, err := llmselection.ResolveLiveBackend(llmBackend)
 	if err != nil {
 		return fmt.Errorf("agent %s invalid configured llm backend %q: %w", strings.TrimSpace(cfg.ID), strings.TrimSpace(llmBackend), err)
 	}
-	resolved, err := runtimellm.ResolveAgentExecution(configuredProfile, llmselection.EffectiveModelAliases(modelAliases), *cfg)
-	if err != nil {
-		return fmt.Errorf("agent %s execution selection failed: %w", strings.TrimSpace(cfg.ID), err)
+	if cfg.ResolvedLLMBackend != "" {
+		if _, err := runtimellm.ValidateAgentExecutionDescriptor(configuredProfile, *cfg); err != nil {
+			return fmt.Errorf("agent %s execution descriptor: %w", cfg.ID, err)
+		}
+	} else {
+		resolved, err := runtimellm.ResolveAgentExecution(posture, configuredProfile, llmselection.EffectiveModelAliases(modelAliases), *cfg)
+		if err != nil {
+			return fmt.Errorf("agent %s execution selection failed: %w", strings.TrimSpace(cfg.ID), err)
+		}
+		*cfg = resolved.Actor
 	}
-	*cfg = resolved.Actor
 	if strings.TrimSpace(cfg.Model) == "" {
 		if requireModelResolution {
 			return fmt.Errorf("agent %s missing model", strings.TrimSpace(cfg.ID))

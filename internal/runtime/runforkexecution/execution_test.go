@@ -19,6 +19,7 @@ import (
 	"time"
 
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 
 	"github.com/google/uuid"
 
@@ -65,6 +66,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -923,7 +925,7 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 			ExecutionPosture: executionposture.MockOnly,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "mock_only") {
+	if err == nil || !strings.Contains(err.Error(), "command-selected mock execution rejects live execution") {
 		t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want exact live source-mode rejection", result, err)
 	}
 	if result.Materialization.ForkRunID != "" {
@@ -1590,7 +1592,6 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			if err != nil {
 				t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 			}
-			processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, tc.backend)
 
 			var cfg *config.Config
 			var providerCalls atomic.Int32
@@ -1644,6 +1645,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 				t.Fatalf("store provider credential: %v", err)
 			}
 			cfg = selectedForkAPIProviderConfig(tc.backend, tc.model, provider.URL)
+			processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, cfg)
 
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -1952,7 +1954,6 @@ func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabili
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, llmselection.BackendClaudeCLI)
 
 	captureDir := t.TempDir()
 	dockerPath := filepath.Join(captureDir, "fake-docker.sh")
@@ -2060,6 +2061,7 @@ fi
 		ClaudeCLI: config.ClaudeCLIConfig{Command: "claude", OutputFormat: "stream-json"},
 	}}
 	cfg.Workspace.DockerBin = dockerPath
+	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, cfg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2227,6 +2229,19 @@ func (s selectedForkWorkspaceLifecycle) ResolveWorkspace(context.Context, runtim
 
 func (s selectedForkWorkspaceLifecycle) ResolveWorkspaceForCapabilityAdmission(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
 	return s.target, nil
+}
+
+// Selected execution protocol proofs fake storage; real Docker tests prove its lifetime.
+type selectedForkClaudeState struct{}
+
+func (selectedForkClaudeState) Directory() string                       { return workspace.ClaudeStateDirectory }
+func (selectedForkClaudeState) CheckHead(context.Context, string) error { return nil }
+func (selectedForkClaudeState) Release(context.Context) error           { return nil }
+
+func (s selectedForkWorkspaceLifecycle) ResolveClaudeWorkspace(context.Context, runtimeactors.AgentConfig, workspace.ClaudeStateRequest, string) (*workspace.Target, error) {
+	target := *s.target
+	target.ClaudeState = selectedForkClaudeState{}
+	return &target, nil
 }
 
 func (selectedForkWorkspaceLifecycle) ValidateSource(context.Context, semanticview.Source) error {
@@ -2573,6 +2588,7 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 		return nil, errors.New("selected-fork startup capability surface missing")
 	}
 	response := &runtimellm.Response{
+		CLIInventory:    runtimellm.CLIInventoryValid,
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: surface.PlannedBindingNames(managedcapabilities.BindingMCPProvider),
 	}
@@ -2788,7 +2804,6 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, llmselection.BackendOpenAICompatible)
 	var providerCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		providerCalls.Add(1)
@@ -2804,6 +2819,8 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	if err := credentials.Set(ctx, llmselection.OpenAICompatibleCredentialEnv, "test-key"); err != nil {
 		t.Fatalf("store provider credential: %v", err)
 	}
+	cfg := selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "gpt-selected-fork", provider.URL)
+	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded, cfg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -2817,7 +2834,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
-			Config:              selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "gpt-selected-fork", provider.URL),
+			Config:              cfg,
 			ProviderCredentials: credentials, ProcessCapability: processCapability,
 			QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
 		},
@@ -2883,7 +2900,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
 	})
-	storetest.RequirePausedRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), forkRunID, now)
+	storetest.RequireRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), storetest.RunFixture{
+		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: storetest.ScenarioSetupOrigin(),
+		Artifact: sourceartifactfixture.Artifact(), StartedAt: now,
+	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
 		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
@@ -2947,7 +2967,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		LoadedSource: LoadedSelectedContractSource{
 			Selection:          selection,
 			Source:             selectedSource,
-			SourceArtifactFact: testEphemeralSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+			SourceArtifactFact: sourceartifactfixture.Fact(),
 		},
 		RecipientPlanning:     planning,
 		SourceRunID:           sourceRunID,
@@ -3011,7 +3031,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 
 	authority := winner.container.authority
 	targetIdentity := selectedContractTestAgentIdentityForRun(t, forkRunID, "selected-agent", "selected-authority-race")
-	seedSelectedExecutionTestAgent(t, ctx, winner.store, targetIdentity, now)
+	seedSelectedExecutionTestAgent(t, ctx, winner.store, targetIdentity, now, runtimemanager.LifecycleDiagnosticOrigin{
+		Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
+		SelectedFork: authority.SelectedFork, SourceRunID: baseRequest.Admission.SourceRunID, ForkEventID: baseRequest.Admission.ForkEventID,
+	})
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind:          runtimeeffects.UsageTargetAgentTurn,
 		ID:            uuid.NewString(),
@@ -4915,6 +4938,7 @@ func seedSelectedExecutionTestAgent(
 	selected storetest.AgentFixtureStore,
 	identity agentidentity.Identity,
 	at time.Time,
+	origins ...runtimemanager.LifecycleDiagnosticOrigin,
 ) {
 	t.Helper()
 	config := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
@@ -4929,8 +4953,18 @@ func seedSelectedExecutionTestAgent(
 		FlowPath:           identity.FlowInstance(),
 		Config:             []byte(`{}`),
 	})
-	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
-		Config: config, Status: "active", HiredBy: "test", StartedAt: at,
+	rec := runtimemanager.PersistedAgent{Config: config, Status: "active", HiredBy: "test", StartedAt: at}
+	if len(origins) == 0 {
+		if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, rec); err != nil {
+			t.Fatalf("seed selected-execution test agent: %v", err)
+		}
+		return
+	}
+	op := uuid.NewString()
+	if _, err := agentfixture.CommitStatic(t, ctx, selected, runtimemanager.AgentLifecycleTransition{
+		DiagnosticOrigin: origins[0], OperationID: op, OperationKind: "spawn", RequestHash: op,
+		Identity: identity, AgentID: identity.AgentID(), Trigger: "spawn", TargetEpoch: 1, TargetGeneration: 1,
+		TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: "fixture-v1", RunMode: runtimemanager.AgentRunModeStandard, Agent: &rec, Now: at,
 	}); err != nil {
 		t.Fatalf("seed selected-execution test agent: %v", err)
 	}

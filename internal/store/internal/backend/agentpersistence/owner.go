@@ -22,6 +22,14 @@ type DirectiveEventCommitter interface {
 	LoadDirectiveEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
 }
 
+type LifecycleDiagnosticEventOwner interface {
+	LoadLifecycleDiagnosticEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
+}
+
+type LifecycleDiagnosticOriginValidator interface {
+	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool) (string, error)
+}
+
 type DirectivePipelineOwner interface {
 	TerminalizePipelineObligationTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, runtimepipelineobligation.Disposition, time.Time) error
 }
@@ -39,12 +47,14 @@ type AgentSource interface {
 }
 
 type AgentPostgresOwner struct {
-	backend        *postgresbackend.Backend
-	schemaGuard    func() error
-	agents         AgentSource
-	events         DirectiveEventCommitter
-	pipeline       DirectivePipelineOwner
-	providerDrains ProviderAttemptDrainPostgresCapturer
+	diagnosticEvents  LifecycleDiagnosticEventOwner
+	diagnosticOrigins LifecycleDiagnosticOriginValidator
+	backend           *postgresbackend.Backend
+	schemaGuard       func() error
+	agents            AgentSource
+	events            DirectiveEventCommitter
+	pipeline          DirectivePipelineOwner
+	providerDrains    ProviderAttemptDrainPostgresCapturer
 }
 
 func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, agents AgentSource) (*AgentPostgresOwner, error) {
@@ -68,12 +78,30 @@ func (s *AgentPostgresOwner) requireCurrentSchema() error {
 }
 
 type AgentSQLiteOwner struct {
-	backend        *sqlitebackend.Backend
-	schemaGuard    func() error
-	agents         AgentSource
-	events         DirectiveEventCommitter
-	pipeline       DirectivePipelineOwner
-	providerDrains ProviderAttemptDrainSQLiteCapturer
+	diagnosticEvents  LifecycleDiagnosticEventOwner
+	diagnosticOrigins LifecycleDiagnosticOriginValidator
+	backend           *sqlitebackend.Backend
+	schemaGuard       func() error
+	agents            AgentSource
+	events            DirectiveEventCommitter
+	pipeline          DirectivePipelineOwner
+	providerDrains    ProviderAttemptDrainSQLiteCapturer
+}
+
+func (s *AgentPostgresOwner) BindLifecycleDiagnostics(events LifecycleDiagnosticEventOwner, origins LifecycleDiagnosticOriginValidator) error {
+	if s == nil || events == nil || origins == nil || s.diagnosticEvents != nil || s.diagnosticOrigins != nil {
+		return fmt.Errorf("lifecycle diagnostic dependencies must be bound exactly once")
+	}
+	s.diagnosticEvents, s.diagnosticOrigins = events, origins
+	return nil
+}
+
+func (s *AgentSQLiteOwner) BindLifecycleDiagnostics(events LifecycleDiagnosticEventOwner, origins LifecycleDiagnosticOriginValidator) error {
+	if s == nil || events == nil || origins == nil || s.diagnosticEvents != nil || s.diagnosticOrigins != nil {
+		return fmt.Errorf("lifecycle diagnostic dependencies must be bound exactly once")
+	}
+	s.diagnosticEvents, s.diagnosticOrigins = events, origins
+	return nil
 }
 
 func (s *AgentPostgresOwner) BindProviderAttemptDrains(owner ProviderAttemptDrainPostgresCapturer) error {

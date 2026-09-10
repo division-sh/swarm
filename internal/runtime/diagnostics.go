@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -63,11 +64,55 @@ type RuntimeLogPersistence interface {
 }
 
 type RuntimeLogPersistenceRecord struct {
+	EventID          string
+	CreatedAt        time.Time
 	RunID            string
 	Payload          []byte
 	PayloadAdmission events.PayloadAdmission
 	ParentEventID    string
 	ExecutionMode    executionmode.Mode
+}
+
+// RuntimeLogFacts are explicit persistence facts. Durable domain projections
+// supply their original occurrence; ordinary logs resolve these facts at call time.
+type RuntimeLogFacts struct {
+	EventID, RunID, ParentEventID, HandlerID string
+	CreatedAt                                time.Time
+	ExecutionMode                            executionmode.Mode
+}
+
+func EncodeRuntimeLogRecord(facts RuntimeLogFacts, e RuntimeLogEntry) (RuntimeLogPersistenceRecord, CanonicalRuntimeLogPayload, error) {
+	if e.Failure != nil {
+		if err := runtimefailures.ValidateEnvelope(*e.Failure); err != nil {
+			return RuntimeLogPersistenceRecord{}, CanonicalRuntimeLogPayload{}, err
+		}
+	}
+	detail, err := json.Marshal(e.Detail)
+	if err != nil {
+		return RuntimeLogPersistenceRecord{}, CanonicalRuntimeLogPayload{}, err
+	}
+	detailMap := map[string]any{}
+	if e.Detail != nil {
+		if err := json.Unmarshal(detail, &detailMap); err != nil {
+			return RuntimeLogPersistenceRecord{}, CanonicalRuntimeLogPayload{}, err
+		}
+	}
+	component, action := strings.TrimSpace(e.Component), strings.TrimSpace(e.Action)
+	if component == "" {
+		component = "runtime"
+	}
+	if action == "" {
+		action = "unknown"
+	}
+	encoded, err := json.Marshal(runtimeLogPayload(diaglog.NormalizeLevel(e.Level.String()).String(), component, action, e, detailMap, facts.RunID, facts.ParentEventID, facts.HandlerID))
+	if err != nil {
+		return RuntimeLogPersistenceRecord{}, CanonicalRuntimeLogPayload{}, err
+	}
+	payload, err := DecodeCanonicalRuntimeLogPayload(encoded)
+	if err != nil {
+		return RuntimeLogPersistenceRecord{}, CanonicalRuntimeLogPayload{}, err
+	}
+	return RuntimeLogPersistenceRecord{EventID: facts.EventID, CreatedAt: facts.CreatedAt, RunID: facts.RunID, ParentEventID: facts.ParentEventID, ExecutionMode: facts.ExecutionMode, Payload: encoded}, payload, nil
 }
 
 func NewRuntimeLogger(persistence RuntimeLogPersistence, posture executionposture.Posture, payloadAdmitter runtimebus.PayloadAdmitter) *RuntimeLogger {
@@ -293,8 +338,12 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	if handlerID == "" {
 		handlerID = strings.TrimSpace(asString(detailMap["handler_id"]))
 	}
-	payload := runtimeLogPayload(level, component, action, e, detailMap, runID, parentEventID, handlerID)
-	encoded, err := json.Marshal(payload)
+	mode := runtimeeffects.ExecutionMode(posture.RootMode())
+	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
+		mode = contextualMode
+	}
+	e.Level, e.Component, e.Action, e.Detail = diaglog.NormalizeLevel(level), component, action, detailMap
+	record, canonicalPayload, err := EncodeRuntimeLogRecord(RuntimeLogFacts{RunID: runID, ParentEventID: parentEventID, HandlerID: handlerID, ExecutionMode: executionmode.Mode(mode)}, e)
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
@@ -303,32 +352,22 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	}
 	admissionEvent, err := events.NewStandaloneDiagnosticDirectEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{
 		Type: events.EventTypePlatformRuntimeLog, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload: encoded, ExecutionMode: executionmode.Mode(runtimeeffects.ExecutionMode(posture.RootMode())),
+		Payload: record.Payload, ExecutionMode: record.ExecutionMode,
 	}})
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, fmt.Errorf("construct runtime log payload admission event: %w", err)
 	}
-	payloadAdmission, err := payloadAdmitter(ctx, admissionEvent, "")
+	record.PayloadAdmission, err = payloadAdmitter(ctx, admissionEvent, "")
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, fmt.Errorf("admit runtime log payload: %w", err)
 	}
-	admittedPayload := payloadAdmission.Payload()
-	canonicalPayload, err := DecodeCanonicalRuntimeLogPayload(admittedPayload)
+	record.Payload = record.PayloadAdmission.Payload()
+	canonicalPayload, err = DecodeCanonicalRuntimeLogPayload(record.Payload)
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
-	mode := runtimeeffects.ExecutionMode(posture.RootMode())
-	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
-		mode = contextualMode
-	}
-	record := RuntimeLogPersistenceRecord{
-		Payload:          admittedPayload,
-		PayloadAdmission: payloadAdmission,
-		ParentEventID:    parentEventID,
-		ExecutionMode:    executionmode.Mode(mode),
-	}
-	if hasRunID {
-		record.RunID = runID
+	if !hasRunID {
+		record.RunID = ""
 	}
 	if err := persistence.PersistRuntimeLog(ctx, record); err != nil {
 		return CanonicalRuntimeLogPayload{}, err

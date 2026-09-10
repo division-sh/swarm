@@ -249,11 +249,13 @@ func (c *agentLifecycleCoordinator) commitTerminalFlowMember(ctx context.Context
 func (am *AgentManager) launchTerminalFlowCompletion(lease *worklifetime.Lease, set *terminalFlowRetirement, commitErr error) {
 	go func() {
 		result := commitErr
+		var diagnosticErr error
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				result = errors.Join(result, fmt.Errorf("terminal flow completion panic: %v", recovered))
 			}
 			am.lifecycle.recordTerminalCompletion(result)
+			am.lifecycle.recordLifecycleDiagnosticFailure(diagnosticErr)
 			am.lifecycle.recordTerminalCompletion(lease.Done())
 		}()
 		result = errors.Join(result, am.completeTerminalRetirements(context.WithoutCancel(lease.Context()), set.retirements))
@@ -266,6 +268,7 @@ func (am *AgentManager) launchTerminalFlowCompletion(lease *worklifetime.Lease, 
 			}
 			am.lifecycle.mu.Unlock()
 		}
+		diagnosticErr = am.projectLifecycleDiagnostics(context.WithoutCancel(lease.Context()))
 	}()
 }
 
@@ -389,8 +392,16 @@ func (am *AgentManager) completeTerminalRetirements(ctx context.Context, retirem
 		}
 		result = errors.Join(result, err)
 	}
-	result = errors.Join(result, am.projectLifecycleDiagnostics(ctx))
 	return result
+}
+
+func (c *agentLifecycleCoordinator) recordLifecycleDiagnosticFailure(err error) {
+	if err == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.terminalErr = errors.Join(c.terminalErr, fmt.Errorf("lifecycle diagnostic projection: %w", err))
 }
 
 func (c *agentLifecycleCoordinator) recordTerminalCompletion(err error) {

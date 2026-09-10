@@ -52,6 +52,22 @@ type diagnosticSQLConn struct {
 	begin     func()
 }
 
+func (c diagnosticSQLConn) BindOperationScope(scope *pq.OperationScope) error {
+	return pq.BindOperationScope(c.Conn, scope)
+}
+func (c diagnosticSQLConn) ResetSession(ctx context.Context) error {
+	if resetter, ok := c.Conn.(driver.SessionResetter); ok {
+		return resetter.ResetSession(ctx)
+	}
+	return nil
+}
+func (c diagnosticSQLConn) IsValid() bool {
+	if validator, ok := c.Conn.(driver.Validator); ok {
+		return validator.IsValid()
+	}
+	return true
+}
+
 func (c diagnosticSQLConn) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
 	if c.begin != nil {
 		c.begin()

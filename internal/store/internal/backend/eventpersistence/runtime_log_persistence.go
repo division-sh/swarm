@@ -3,13 +3,15 @@ package eventpersistence
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/google/uuid"
 )
 
@@ -17,18 +19,104 @@ const runtimeLogEventName = "platform.runtime_log"
 
 const RuntimeLogEventName = runtimeLogEventName
 
-func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Event, error) {
-	var event events.Event
+func (s *EventPostgresOwner) ValidateRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, record runtimepkg.RuntimeLogPersistenceRecord) error {
+	admitted, err := s.admitRuntimeLogRecord(ctx, record)
+	if err != nil {
+		return err
+	}
+	got, found, err := loadPostgresEventIdentity(ctx, tx, record.EventID)
+	if err != nil {
+		return err
+	}
+	return validateRuntimeLogRecordTx(ctx, tx, postgresDeliveryAdapter, admitted, got, found)
+}
+
+func (s *EventSQLiteOwner) ValidateRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, record runtimepkg.RuntimeLogPersistenceRecord) error {
+	admitted, err := s.admitRuntimeLogRecord(ctx, record)
+	if err != nil {
+		return err
+	}
+	got, found, err := loadSQLiteEventIdentity(ctx, tx, record.EventID)
+	if err != nil {
+		return err
+	}
+	return validateRuntimeLogRecordTx(ctx, tx, mustDeliveryAdapter(storedelivery.DialectSQLite), admitted, got, found)
+}
+
+func validateRuntimeLogRecordTx(ctx context.Context, tx *sql.Tx, delivery *storedelivery.Adapter, admitted events.AdmittedEvent, got eventrecord.Record, found bool) error {
+	if !found {
+		return eventrecord.Missing(admitted.ID())
+	}
+	settlement, err := events.NewNoDeliverySettlement(events.EventWriteRuntimeLogDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	if err != nil {
+		return err
+	}
+	want, err := eventrecord.FromAdmitted(admitted, settlement)
+	if err != nil {
+		return err
+	}
+	if !want.Equal(got) {
+		return &eventIdentityConflictError{EventID: admitted.ID()}
+	}
+	deliveries, err := delivery.SnapshotsForEvent(ctx, tx, admitted.ID())
+	if err != nil {
+		return err
+	}
+	if len(deliveries) != 0 {
+		return fmt.Errorf("lifecycle diagnostic %s unexpectedly has deliveries", admitted.ID())
+	}
+	return nil
+}
+
+func admitRuntimeLogRecord(record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
 	if !record.PayloadAdmission.Valid() {
-		return event, fmt.Errorf("runtime log payload admission evidence is required")
+		return events.AdmittedEvent{}, fmt.Errorf("runtime log payload admission evidence is required")
 	}
 	if !bytes.Equal(record.Payload, record.PayloadAdmission.Payload()) {
-		return event, fmt.Errorf("runtime log payload differs from its admission evidence")
+		return events.AdmittedEvent{}, fmt.Errorf("runtime log payload differs from its admission evidence")
 	}
+	constructed, err := runtimeLogEvent(record)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	constructed, err = events.ApplyPayloadAdmission(constructed, record.PayloadAdmission)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+}
+
+func (s *EventPostgresOwner) admitRuntimeLogRecord(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
+	constructed, err := runtimeLogEvent(record)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	admitted, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return s.ensureEventPayloadAdmission(ctx, admitted)
+}
+
+func (s *EventSQLiteOwner) admitRuntimeLogRecord(ctx context.Context, record runtimepkg.RuntimeLogPersistenceRecord) (events.AdmittedEvent, error) {
+	constructed, err := runtimeLogEvent(record)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	admitted, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return s.ensureEventPayloadAdmission(ctx, admitted)
+}
+
+func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Event, error) {
+	var event events.Event
 	facts := events.EventFacts{
+		ID:       record.EventID,
 		Type:     events.EventType(runtimeLogEventName),
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload:  json.RawMessage(record.Payload), CreatedAt: time.Time{}, ExecutionMode: record.ExecutionMode,
+		Payload:  json.RawMessage(record.Payload), CreatedAt: record.CreatedAt, ExecutionMode: record.ExecutionMode,
 	}
 	runID := strings.TrimSpace(record.RunID)
 	parentEventID := strings.TrimSpace(record.ParentEventID)
@@ -45,7 +133,7 @@ func runtimeLogEvent(record runtimepkg.RuntimeLogPersistenceRecord) (events.Even
 	if err != nil {
 		return event, err
 	}
-	return events.ApplyPayloadAdmission(event, record.PayloadAdmission)
+	return event, nil
 }
 
 func (s *EventPostgresOwner) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
@@ -88,11 +176,7 @@ func (s *EventPostgresOwner) PersistRuntimeLog(ctx context.Context, record runti
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	constructed, err := runtimeLogEvent(record)
-	if err != nil {
-		return err
-	}
-	evt, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	evt, err := admitRuntimeLogRecord(record)
 	if err != nil {
 		return err
 	}
@@ -140,11 +224,7 @@ func (s *EventSQLiteOwner) PersistRuntimeLog(ctx context.Context, record runtime
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	constructed, err := runtimeLogEvent(record)
-	if err != nil {
-		return err
-	}
-	evt, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	evt, err := admitRuntimeLogRecord(record)
 	if err != nil {
 		return err
 	}
