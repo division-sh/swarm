@@ -18,15 +18,17 @@ import (
 type forkedDecisionConsumerSurface interface {
 	decisioncard.Store
 	CreateHumanTaskCard(context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation) error
+	LoadHumanTaskContinuation(context.Context, string) (decisioncard.HumanTaskContinuation, error)
 	CompleteHumanTaskOutcome(context.Context, string, string, time.Time) (decisioncard.HumanTaskContinuation, error)
 	CreateProposedEffectCard(context.Context, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
+	LoadProposedEffectContinuation(context.Context, string) (decisioncard.ProposedEffectContinuation, error)
 	CompleteProposedEffectRoute(context.Context, string, string, time.Time) (decisioncard.ProposedEffectContinuation, error)
 	SupersedeProposedEffectsForLoopGenerations(context.Context, string, string, []attemptgeneration.Generation, string, time.Time) error
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
 func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *testing.T) {
-	for _, backend := range []string{"postgres"} {
+	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
@@ -125,11 +127,14 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if fixture.postgres != nil && persisted.Status != decisioncard.StatusSuperseded {
-				t.Fatalf("postgres source card status = %q, want superseded", persisted.Status)
+			if persisted.Status != decisioncard.StatusSuperseded || persisted.SupersededReason != "run_forked" {
+				t.Fatalf("source card = %+v, want run_forked supersession", persisted)
 			}
-			if fixture.sqlite != nil && persisted.Status != decisioncard.StatusPending {
-				t.Fatalf("sqlite canonical frozen-row card status = %q, want preserved pending lineage", persisted.Status)
+			if human, err := surface.LoadHumanTaskContinuation(ctx, humanCard.CardID); err != nil || human.State != decisioncard.HumanTaskContinuationSuperseded {
+				t.Fatalf("source human continuation = %+v, %v", human, err)
+			}
+			if effect, err := surface.LoadProposedEffectContinuation(ctx, effectCard.CardID); err != nil || effect.State != decisioncard.ProposedEffectSuperseded {
+				t.Fatalf("source effect continuation = %+v, %v", effect, err)
 			}
 			if !errors.Is(surface.CreateDecisionCard(ctx, newCard), storerunlifecycle.ErrRunNotActive) {
 				t.Fatal("repeated frozen decision create did not remain fail-closed")

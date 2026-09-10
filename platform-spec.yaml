@@ -16327,6 +16327,12 @@ run_model:
         state history, decision/effect/directive evidence, and fork facts as immutable history. It does not dead-letter,
         settle, delete, migrate, copy, reopen, or reinterpret those rows as source execution. Only an actual live
         lease, claim, reservation, or in-progress authority blocks the freeze; historical rows do not.
+      terminal_effect_selection: >
+        The shared terminal lifecycle mutation owner makes one closed effect decision before mutation. Failed and
+        cancelled transitions terminalize deliveries; successful completion and the named fork-source transition do not.
+        Unsupported states fail closed and never inherit cancellation effects. This distinction does not suppress
+        the specified source-freeze decision/draft/held-continuation/route-obligation supersession, lifecycle evidence,
+        or atomic child activation. The delivery adapter does not reinterpret a run_forked reason as an exception.
       execution_admission: >
         Every independently mutable run-scoped claimant uses internal/store/runlifecycle.RequireActive in its existing
         transaction. RequireActive locks an existing running or paused row and never creates or reopens a run. Executable
