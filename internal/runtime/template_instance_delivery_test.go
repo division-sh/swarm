@@ -685,7 +685,6 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 
 type runtimeTestWorkflowModule struct {
 	source       semanticview.Source
-	workflow     *runtimepipeline.WorkflowDefinition
 	workflowNode []runtimepipeline.WorkflowNode
 	guards       runtimepipeline.GuardRegistry
 	actions      runtimepipeline.ActionRegistry
@@ -700,17 +699,12 @@ func newRuntimeTestWorkflowModule(t *testing.T, source semanticview.Source) runt
 		}
 		bundle.PackAdmission = projection
 	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	return &runtimeTestWorkflowModule{
 		source:       source,
-		workflow:     workflow,
 		workflowNode: nodes,
 		guards:       runtimepipeline.NewContractGuardRegistry(source),
 		actions:      runtimepipeline.NewContractActionRegistry(source),
@@ -718,9 +712,7 @@ func newRuntimeTestWorkflowModule(t *testing.T, source semanticview.Source) runt
 }
 
 func (m *runtimeTestWorkflowModule) SemanticSource() semanticview.Source { return m.source }
-func (m *runtimeTestWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
-}
+
 func (m *runtimeTestWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.workflowNode...)
 }

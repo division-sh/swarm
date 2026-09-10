@@ -1013,16 +1013,12 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(loaded.Source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(loaded.Source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	workflowOwner := selectedContractTestWorkflowModule{
-		source: loaded.Source, workflow: workflow, nodes: nodes,
+		source: loaded.Source, nodes: nodes,
 		guards:  runtimepipeline.NewContractGuardRegistry(loaded.Source),
 		actions: runtimepipeline.NewContractActionRegistry(loaded.Source),
 	}
@@ -1112,19 +1108,14 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 }
 
 type selectedContractTestWorkflowModule struct {
-	source   semanticview.Source
-	workflow *runtimepipeline.WorkflowDefinition
-	nodes    []runtimepipeline.WorkflowNode
-	guards   runtimepipeline.GuardRegistry
-	actions  runtimepipeline.ActionRegistry
+	source  semanticview.Source
+	nodes   []runtimepipeline.WorkflowNode
+	guards  runtimepipeline.GuardRegistry
+	actions runtimepipeline.ActionRegistry
 }
 
 func (m selectedContractTestWorkflowModule) SemanticSource() semanticview.Source {
 	return m.source
-}
-
-func (m selectedContractTestWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
 }
 
 func (m selectedContractTestWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {

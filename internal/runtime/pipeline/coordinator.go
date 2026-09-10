@@ -49,7 +49,8 @@ type ScenarioExecutionProfileReader interface {
 }
 
 type PipelineCoordinator struct {
-	bus Bus
+	previewState *runtimeengine.StateSnapshot
+	bus          Bus
 
 	mu sync.Mutex
 

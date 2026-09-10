@@ -34,9 +34,8 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source, node := targetedDeclaredKeyExecutionSource(t, "select_or_create")
 				module := proposedEffectProofModule{source: source,
-					workflow: runtimepipeline.NewWorkflowDefinition("review", []runtimepipeline.WorkflowStage{{Name: "active"}, {Name: "done", Terminal: true}}, nil),
-					nodes: []runtimepipeline.WorkflowNode{{Node: node, Subscriptions: []events.EventType{"work.keyed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType,
-						Policies: map[string]runtimepipeline.WorkflowEventPolicy{"work.keyed": {Consume: true}}}},
+					nodes: []runtimepipeline.WorkflowNode{{Node: node, Subscriptions: []events.EventType{"review/work.keyed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType,
+						Policies: map[string]runtimepipeline.WorkflowEventPolicy{"review/work.keyed": {Consume: true}}}},
 				}
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {
@@ -53,11 +52,11 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				unrelatedRoute := runtimeflowidentity.RouteForInstancePath(unrelatedPath)
 				unrelatedReadiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: unrelatedRoute.InstanceID, InstancePath: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath), HasStoredPath: true},
-					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: "1", ExecutionMode: executionmode.Live,
+					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
 				if _, err := pc.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 					InstanceID: unrelatedRoute.InstanceID, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
-					WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active", EntityType: "review_entity",
+					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
 					Fields: map[string]any{"account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
 				}, time.Now().UTC()); err != nil {
 					t.Fatal(err)
@@ -68,7 +67,7 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedRoute}); err != nil {
 					t.Fatal(err)
 				}
-				evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.keyed", "operator", "", []byte(`{"account_id":"appearing-key","item":"accepted"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+				evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "review/work.keyed", "operator", "", []byte(`{"account_id":"appearing-key","item":"accepted"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 				handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
 				if err != nil {
 					t.Fatal(err)
@@ -114,10 +113,10 @@ func TestReceiverCompositionFutureAppearanceBothStores(t *testing.T) {
 				}
 				readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 					Identity: runtimeflowidentity.Instance{TemplateID: "review", ScopeKey: "review", InstanceID: route.InstanceID, InstancePath: target.Route().FlowInstance, EntityID: target.Route().EntityID, HasStoredPath: true},
-					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: "1", ExecutionMode: executionmode.Live,
+					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
 				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, StorageRef: target.Route().FlowInstance, EntityID: target.Route().EntityID,
-					WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active", EntityType: "review_entity",
+					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
 					Fields: map[string]any{"account_id": key, "owner": "appeared"}, RuntimeReadiness: &readiness}
 				if _, err := pc.MaterializeInitialEntry(ctx, instance, time.Now().UTC()); err != nil {
 					t.Fatal(err)

@@ -699,16 +699,12 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 			t.Fatalf("restore fan-in route %s: %v", route.Identity.InstancePath, err)
 		}
 	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	module := conformanceLoadedWorkflowModule{
-		source: source, workflow: workflow, nodes: nodes,
+		source: source, nodes: nodes,
 		guards:  runtimepipeline.NewContractGuardRegistry(source),
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}

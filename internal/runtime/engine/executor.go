@@ -110,6 +110,7 @@ type executionFrame struct {
 	rule                      *runtimecontracts.HandlerRuleEntry
 	ruleSource                handlerRuleSource
 	ruleIndex                 int
+	loopEscaped               bool
 	payload                   map[string]any
 	accumulatorBucketRef      timeridentity.AccumulatorBucketRef
 	hasAccumulatorBucketRef   bool
@@ -626,6 +627,9 @@ func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSn
 
 func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) (executionFrame, error) {
 	state := req.State
+	if err := e.validateSourceStage(req.ExecutionFlowID.String(), state.CurrentState); err != nil {
+		return executionFrame{}, err
+	}
 	if state.StateCarrier.Fields == nil {
 		state.StateCarrier.Fields = map[string]any{}
 	}
@@ -1985,14 +1989,15 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 	if frame.rule != nil && strings.TrimSpace(frame.rule.AdvancesTo) != "" {
 		next = strings.TrimSpace(frame.rule.AdvancesTo)
 	}
-	if next == "" || next == frame.result.CurrentState {
+	if next == "" {
 		return nil
 	}
-	if e.deps.TransitionValidator != nil {
-		if err := e.deps.TransitionValidator.ValidateTransition(frame.result.CurrentState, next); err != nil {
-			frame.result.Status = OutcomeRejected
-			return err
-		}
+	if err := e.admitSelectedTransition(frame, next); err != nil {
+		frame.result.Status = OutcomeRejected
+		return err
+	}
+	if next == frame.result.CurrentState {
+		return nil
 	}
 	if err := e.advanceAdmittedLoop(frame, next); err != nil {
 		return err
@@ -2596,6 +2601,7 @@ func (e *Executor) buildWorkflowLifecycleEffect(frame *executionFrame) (runtimew
 		frame.req.Event,
 		strings.TrimSpace(frame.result.CurrentState),
 		toState,
+		frame.result.StateMutation.Transition,
 	)
 	if err != nil {
 		return runtimeworkflowlifecycle.Effect{}, false, err
@@ -3507,7 +3513,24 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 	case GuardFailureKill:
 		frame.result.Status = OutcomeKilled
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "kill")
-		if killedState := e.killStateTarget(frame.req.ExecutionFlowID.String()); killedState != "" {
+		graph, ok := semanticview.WorkflowStageTopology(e.deps.Source, frame.req.ExecutionFlowID.String())
+		if !ok {
+			return fmt.Errorf("guard termination requires compiled flow")
+		}
+		if killedState := graph.GuardTerminationTarget(); killedState != "" {
+			if killedState != frame.result.CurrentState {
+				if len(frame.result.GuardsEvaluated) == 0 {
+					return fmt.Errorf("guard termination requires compiled flow and evaluated guard")
+				}
+				cause, err := runtimeworkflowlifecycle.NewGuardTermination(graph, frame.req.Node, frame.req.HandlerEventKey, frame.result.GuardsEvaluated[len(frame.result.GuardsEvaluated)-1], frame.result.CurrentState, killedState, frame.result.GuardsEvaluated)
+				if err != nil {
+					return err
+				}
+				if err := cause.ValidateHandlerEvidence(frame.req.Handler); err != nil {
+					return err
+				}
+				frame.result.StateMutation.Transition = &cause
+			}
 			frame.result.NextState = killedState
 			frame.state.State.CurrentState = killedState
 			frame.result.StateMutation.NextState = killedState
@@ -3541,26 +3564,6 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 	default:
 		return fmt.Errorf("unsupported guard on_fail action %q", failureSpec.Action)
 	}
-}
-
-func (e *Executor) killStateTarget(flowID string) string {
-	if e == nil || e.deps.Source == nil {
-		return ""
-	}
-	flowID = strings.TrimSpace(flowID)
-	terminals := e.deps.Source.FlowTerminalStages(flowID)
-	states := e.deps.Source.FlowStates(flowID)
-	for _, stage := range terminals {
-		if strings.EqualFold(strings.TrimSpace(stage), "killed") {
-			return strings.TrimSpace(stage)
-		}
-	}
-	for _, stage := range states {
-		if strings.EqualFold(strings.TrimSpace(stage), "killed") {
-			return strings.TrimSpace(stage)
-		}
-	}
-	return ""
 }
 
 func mapsKeys(values map[string]any) []any {

@@ -14,7 +14,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -206,23 +205,12 @@ type runControlTimerWorkflowModule struct {
 
 func (m runControlTimerWorkflowModule) SemanticSource() semanticview.Source { return m.source }
 
-func runControlTimerBundle() *runtimecontracts.WorkflowContractBundle {
-	timers := []runtimecontracts.WorkflowTimerContract{{
-		ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
-		FlowID: ".",
-		Owner:  "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-		StartOn: "state:waiting", Delay: "1h",
-	}}
-	root := runtimecontracts.FlowContractView{
-		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: "run-stop-timer-proof", Mode: runtimecontracts.FlowModeStatic},
-	}
-	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-		Name: "run-stop-timer-proof", Version: "1", InitialStage: "waiting", TerminalStages: []string{"done"},
-		Timers: timers,
-	}, FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
-	}, FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema}}
+func runControlTimerBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return loadLifecyclePersistenceFixtureForTest(t, map[string]string{
+		"schema.yaml":   "name: run-stop-timer-proof\nstages:\n  waiting:\n    initial: true\n    timers:\n      - after: 1h\n        advances_to: done\n  done: {terminal: true}\n",
+		"entities.yaml": "test_entity: {}\n",
+	})
 }
 
 func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *testing.T) {
@@ -252,7 +240,7 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 				t.Fatal(err)
 			}
 
-			source := semanticview.Wrap(runControlTimerBundle())
+			source := semanticview.Wrap(runControlTimerBundle(t))
 			options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
 			options.Module = runControlTimerWorkflowModule{source: source}
 			options.TimerScheduler = scheduler

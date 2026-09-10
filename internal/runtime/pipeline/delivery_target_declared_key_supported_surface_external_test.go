@@ -15,10 +15,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -44,14 +42,10 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					source, node := targetedDeclaredKeyExecutionSource(t, acquisition)
 					module := proposedEffectProofModule{
 						source: source,
-						workflow: runtimepipeline.NewWorkflowDefinition("review", []runtimepipeline.WorkflowStage{
-							{Name: "active"},
-							{Name: "done", Terminal: true},
-						}, nil),
 						nodes: []runtimepipeline.WorkflowNode{{
-							Node: node, Subscriptions: []events.EventType{"work.keyed"},
+							Node: node, Subscriptions: []events.EventType{"review/work.keyed"},
 							ExecutionType: runtimecontracts.SystemNodeExecutionType,
-							Policies:      map[string]runtimepipeline.WorkflowEventPolicy{"work.keyed": {Consume: true}},
+							Policies:      map[string]runtimepipeline.WorkflowEventPolicy{"review/work.keyed": {Consume: true}},
 						}},
 					}
 					eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
@@ -80,13 +74,13 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					instances := []runtimepipeline.WorkflowInstance{
 						{
 							InstanceID: exactRoute.InstanceID, StorageRef: exactPath, EntityID: exactEntityID,
-							WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
+							WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active",
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"account_id": exactKey, "owner": "exact"},
 							EntityType: "review_entity",
 						},
 						{
 							InstanceID: competingRoute.InstanceID, StorageRef: competingPath, EntityID: competingEntityID,
-							WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
+							WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active",
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"account_id": payloadKey, "owner": "competing"},
 							EntityType: "review_entity",
 						},
@@ -98,7 +92,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 								InstancePath: instance.StorageRef, EntityID: instance.EntityID, HasStoredPath: true,
 							},
 							RunID: runID, BundleHash: bundleHash,
-							WorkflowVersion: "1", ExecutionMode: executionmode.Live,
+							WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 						}
 						instance.RuntimeReadiness = &readiness
 						if _, err := coordinator.MaterializeInitialEntry(ctx, instance, createdAt); err != nil {
@@ -122,7 +116,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 					}
 					target := events.RouteIdentity{FlowID: "review", FlowInstance: exactPath, EntityID: exactEntityID}
 					event := eventtest.ExistingRunRootIngress(
-						uuid.NewString(), "work.keyed", "operator", "", payload, 0, runID,
+						uuid.NewString(), "review/work.keyed", "operator", "", payload, 0, runID,
 						events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), createdAt.Add(time.Minute),
 					)
 					plan, err := eventBus.CheckPublishRecipientPlan(ctx, event)
@@ -205,56 +199,22 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 
 func targetedDeclaredKeyExecutionSource(t *testing.T, acquisition string) (semanticview.Source, runtimeidentity.ExecutableNode) {
 	t.Helper()
-	binding := []runtimecontracts.SelectEntityKeyBinding{{
-		Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id"),
-	}}
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
-	}
-	if acquisition == "select" {
-		handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: binding}
-	} else {
-		handler.SelectOrCreateEntity = &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}
-	}
-	flow := runtimecontracts.FlowContractView{
-		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Name: "review", Mode: runtimecontracts.FlowModeTemplate, InitialState: "active",
-			States: []string{"active", "done"}, TerminalStates: []string{"done"},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"work.keyed": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"key-consumer": {
-				ID: "key-consumer", SubscribesTo: []string{"work.keyed"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.keyed": handler},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "declared-key-execution", Version: "1",
-			FlowInitial:  map[string]string{"review": "active"},
-			FlowStates:   map[string][]string{"review": {"active", "done"}},
-			FlowTerminal: map[string][]string{"review": {"done"}},
-		},
-		FlowTree:    runtimeflowmodelTree(root),
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": flow.Schema},
-	}
-	bundle = admitTargetedDeclaredKeyContract(t, bundle)
+	bundle := admitTargetedDeclaredKeyContract(t, acquisition)
 	source := semanticview.Wrap(bundle)
 	node := externalPipelineSourceNode(t, source, "review", "key-consumer")
 	return source, node
 }
 
-func admitTargetedDeclaredKeyContract(t *testing.T, base *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+func admitTargetedDeclaredKeyContract(t *testing.T, acquisition string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
 
 		"schema.yaml":          "name: declared-key-execution\n",
-		"review/schema.yaml":   "name: review\nmode: template\ninitial_state: active\nstates: [active, done]\n",
-		"review/entities.yaml": "review_entity: {}\n",
+		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  active: {initial: true}\n  done: {terminal: true}\n",
+		"review/entities.yaml": "review_entity:\n  account_id: text\n",
+		"review/events.yaml":   "work.keyed:\n  account_id: text\n  item: text\n",
+		"review/nodes.yaml":    "key-consumer:\n  id: key-consumer\n  execution_type: system_node\n  subscribes_to: [work.keyed]\n  event_handlers:\n    work.keyed:\n      " + acquisition + "_entity:\n        by: {account_id: payload.account_id}\n      accumulate: {into: items, from: payload}\n",
 	}
 	for relative, body := range files {
 		path := filepath.Join(root, relative)
@@ -270,15 +230,5 @@ func admitTargetedDeclaredKeyContract(t *testing.T, base *runtimecontracts.Workf
 	if err != nil {
 		t.Fatalf("load declared-key contract: %v", err)
 	}
-	admitted.Semantics = base.Semantics
-	admitted.FlowTree = base.FlowTree
-	admitted.FlowSchemas = base.FlowSchemas
 	return admitted
-}
-
-func runtimeflowmodelTree(root runtimecontracts.FlowContractView) flowmodel.Tree[runtimecontracts.FlowContractView] {
-	return flowmodel.Tree[runtimecontracts.FlowContractView]{
-		Root: &root,
-		ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
-	}
 }

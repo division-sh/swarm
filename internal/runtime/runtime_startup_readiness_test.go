@@ -60,10 +60,6 @@ func (startupReadinessWorkflowModule) SemanticSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 }
 
-func (startupReadinessWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return &runtimepipeline.WorkflowDefinition{}
-}
-
 func (startupReadinessWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return nil
 }

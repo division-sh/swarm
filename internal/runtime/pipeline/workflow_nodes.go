@@ -33,7 +33,6 @@ type WorkflowNode struct {
 	Node             runtimeidentity.ExecutableNode
 	Subscriptions    []events.EventType
 	Produces         []events.EventType
-	OwnedTransitions []string
 	Timers           []string
 	ExecutionType    string
 	Implementation   string
@@ -264,7 +263,6 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 			Node:             node,
 			Subscriptions:    subscriptions,
 			Produces:         produces,
-			OwnedTransitions: append([]string{}, entry.OwnedTransitions...),
 			Timers:           workflowNodeTimerIDs(entry.Timers),
 			ExecutionType:    runtimecontracts.EffectiveSystemNodeExecutionType(entry),
 			Implementation:   strings.TrimSpace(entry.Implementation),

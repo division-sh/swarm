@@ -39,7 +39,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
+			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(t, false))
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
@@ -96,7 +96,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ParentConnect)
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	fixtureRoot := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
+	fixtureRoot := canonicalrouting.CopyParentConnectTimer(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
 		fixtureRoot,
@@ -105,10 +105,6 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 	if err != nil {
 		t.Fatalf("load parent-connect timer fixture: %v", err)
 	}
-	bundle.Semantics.Timers = []runtimecontracts.WorkflowTimerContract{{
-		ID: "waiting.work_ready", FlowID: "producer", Stage: "waiting", StageOwned: true,
-		Owner: "runtime", Event: "work.ready", StartOn: "state:waiting", Delay: "40ms",
-	}}
 	source := semanticview.Wrap(bundle)
 
 	for _, tc := range []struct {
@@ -199,7 +195,7 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			bundle := workflowTimerServedLifecycleBundle(true)
+			bundle := workflowTimerServedLifecycleBundle(t, true)
 			bundle.Semantics.Timers[0].Delay = "5s"
 			source := semanticview.Wrap(bundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
@@ -282,7 +278,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
+			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(t, false))
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
@@ -392,13 +388,6 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			lifecycleProbe := runtimelifecycleprobe.New()
 			module := proposedEffectProofModule{
 				source: source,
-				workflow: runtimepipeline.NewWorkflowDefinition("timer-proof", []runtimepipeline.WorkflowStage{
-					{Name: "waiting"},
-					{Name: "done", Terminal: true},
-				}, []runtimepipeline.WorkflowTransition{{
-					Name: "cancel", From: []runtimepipeline.WorkflowStateID{"waiting"}, To: "done",
-					Trigger: "timer.cancel", Node: controllerNode,
-				}}),
 				nodes: []runtimepipeline.WorkflowNode{{
 					Node: controllerNode, Subscriptions: []events.EventType{"timer-proof/timer.cancel"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
@@ -558,7 +547,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			bundle := workflowTimerServedLifecycleBundle(false)
+			bundle := workflowTimerServedLifecycleBundle(t, false)
 			bundle.Semantics.Timers[0].Delay = "200ms"
 			source := semanticview.Wrap(bundle)
 			validator := newFailOnceWorkflowTimerPayloadValidator()
@@ -654,7 +643,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
+			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(t, false))
 			failingOwner, failures := failNextWorkflowTimerPipelineDisposition(t, selected.events)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
@@ -907,27 +896,14 @@ func workflowTimerTestParseTime(raw string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("parse timestamp %q: %w", raw, lastErr)
 }
 
-func workflowTimerServedLifecycleBundle(recurring bool) *runtimecontracts.WorkflowContractBundle {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {}},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "timer-proof", Version: "1", InitialStage: "waiting", TerminalStages: []string{"done"},
-			Timers: []runtimecontracts.WorkflowTimerContract{{
-				ID: "waiting.timeout", FlowID: ".", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
-				Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-				StartOn: "state:waiting", Delay: "40ms", Recurring: recurring,
-			}},
-		},
-	}
-	root := &runtimecontracts.FlowContractView{
-		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: bundle.Semantics.Name},
-		Events: bundle.Events, Nodes: bundle.Nodes,
-	}
-	bundle.FlowTree.Root = root
-	bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{".": root}
-	bundle.RootSchema = &root.Schema
-	bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema}
+func workflowTimerServedLifecycleBundle(t *testing.T, recurring bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
+		"schema.yaml":   "name: timer-proof\nstages:\n  waiting:\n    initial: true\n    timers:\n      - {id: waiting.timeout, after: 40ms, advances_to: done}\n  done: {terminal: true}\n",
+		"entities.yaml": "test_entity: {}\n",
+	})
+	// Recurrence is a runtime scheduler variant; the admitted timer transition stays exact.
+	bundle.Semantics.Timers[0].Recurring = recurring
 	return bundle
 }
 
@@ -943,7 +919,7 @@ func workflowTimerRecurringCancellationSource(t *testing.T) semanticview.Source 
 	if err != nil {
 		t.Fatalf("load recurring timer cancellation fixture: %v", err)
 	}
-	timerBundle := workflowTimerServedLifecycleBundle(true)
+	timerBundle := workflowTimerServedLifecycleBundle(t, true)
 	timerBundle.Semantics.Timers[0].AdvancesTo = ""
 	bundle.Semantics.Timers = timerBundle.Semantics.Timers
 	return semanticview.Wrap(bundle)

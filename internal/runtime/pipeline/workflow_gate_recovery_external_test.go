@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -61,22 +64,18 @@ type gateRecoveryModule struct {
 	source semanticview.Source
 }
 
-func (m gateRecoveryModule) SemanticSource() semanticview.Source                   { return m.source }
-func (gateRecoveryModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition { return nil }
-func (gateRecoveryModule) WorkflowNodes() []runtimepipeline.WorkflowNode           { return nil }
-func (gateRecoveryModule) GuardRegistry() runtimepipeline.GuardRegistry            { return nil }
-func (gateRecoveryModule) ActionRegistry() runtimepipeline.ActionRegistry          { return nil }
+func (m gateRecoveryModule) SemanticSource() semanticview.Source          { return m.source }
+func (gateRecoveryModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { return nil }
+func (gateRecoveryModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
+func (gateRecoveryModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
 
 type proposedEffectProofModule struct {
-	source   semanticview.Source
-	workflow *runtimepipeline.WorkflowDefinition
-	nodes    []runtimepipeline.WorkflowNode
+	source semanticview.Source
+	nodes  []runtimepipeline.WorkflowNode
 }
 
 func (m proposedEffectProofModule) SemanticSource() semanticview.Source { return m.source }
-func (m proposedEffectProofModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
-}
+
 func (m proposedEffectProofModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }
@@ -348,7 +347,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			}))
 			defer server.Close()
 
-			bundle := proposedEffectProofBundle(server.URL)
+			bundle := proposedEffectProofBundle(t, server.URL, false)
 			source := semanticview.Wrap(bundle)
 			bundleSource := mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
@@ -361,8 +360,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				t.Fatal(err)
 			}
 			module := proposedEffectProofModule{
-				source:   source,
-				workflow: runtimepipeline.NewWorkflowDefinition("support", []runtimepipeline.WorkflowStage{{Name: "drafting"}}, nil),
+				source: source,
 				nodes: []runtimepipeline.WorkflowNode{{
 					Node: externalPipelineSourceNode(t, source, ".", "support"), Subscriptions: []events.EventType{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected", "platform.activity_requested"},
 					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
@@ -718,7 +716,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), now.Add(time.Minute))
 				storetest.CommitSemanticEvent(t, ctx, selected.events, decisionEvent)
-				source := semanticview.Wrap(proposedEffectProofBundle("http://127.0.0.1:1"))
+				source := semanticview.Wrap(proposedEffectProofBundle(t, "http://127.0.0.1:1", false))
 				canonicalBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source},
 					"platform.activity_requested", "send_support_reply.revision_requested", "send_support_reply.rejected")
 				if err != nil {
@@ -780,13 +778,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 	}{{"sqlite", openSQLiteGateRecoveryStore}, {"postgres", openPostgresGateRecoveryStore}} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected := tc.open(t)
-			bundle := proposedEffectProofBundle("http://127.0.0.1:1")
-			handler := bundle.Nodes["support"].EventHandlers["support.reply_drafted"]
-			handler.AdvancesTo = "queued"
-			node := bundle.Nodes["support"]
-			node.EventHandlers["support.reply_drafted"] = handler
-			bundle.Nodes["support"] = node
-			bundle.Semantics.NodeHandlers["support"]["support.reply_drafted"] = handler
+			bundle := proposedEffectProofBundle(t, "http://127.0.0.1:1", true)
 
 			source := semanticview.Wrap(bundle)
 			supportNode := externalPipelineSourceNode(t, source, ".", "support")
@@ -798,8 +790,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				t.Fatal(err)
 			}
 			module := proposedEffectProofModule{
-				source:   source,
-				workflow: runtimepipeline.NewWorkflowDefinition("support", []runtimepipeline.WorkflowStage{{Name: "drafting"}, {Name: "queued"}}, nil),
+				source: source,
 				nodes: []runtimepipeline.WorkflowNode{{
 					Node: supportNode, Subscriptions: []events.EventType{"support.reply_drafted"},
 					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
@@ -1014,7 +1005,7 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 				runID := uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				fixture := seedGateRecoveryForegroundRoute(t, selected, runID, time.Now().UTC())
-				bundle := gateRecoveryContractBundle()
+				bundle := gateRecoveryContractBundle(t)
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 					ContractBundle: semanticview.Wrap(bundle),
 					Interceptors:   []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: fixture.event.ID()}},
@@ -1075,7 +1066,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	t.Helper()
 	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 	entityID := uuid.NewString()
-	bundle := gateRecoveryContractBundle()
+	bundle := gateRecoveryContractBundle(t)
 	setupBus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatal(err)
@@ -1189,7 +1180,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	runID, entityID := uuid.NewString(), uuid.NewString()
 	insertGateRecoveryRun(t, tc, runID)
 	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
-	bundle := gateRecoveryTerminalContractBundle()
+	bundle := gateRecoveryTerminalContractBundle(t)
 	bus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatal(err)
@@ -1279,7 +1270,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	insertGateRecoveryRun(t, tc, runID)
 	ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 
-	bundle := gateRecoveryContractBundle()
+	bundle := gateRecoveryContractBundle(t)
 	bus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1421,64 +1412,50 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	return result
 }
 
-func proposedEffectProofBundle(serverURL string) *runtimecontracts.WorkflowContractBundle {
-	handler := runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
-		ID: "send_support_reply", Tool: "provider_write",
-		Input: map[string]runtimecontracts.ExpressionValue{
-			"chat_id": runtimecontracts.CELExpression("payload.chat_id"),
-			"text":    runtimecontracts.CELExpression("payload.text"),
-		},
-		Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "support_reply"},
-	}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"support.reply_drafted": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"support": {
-				ID: "support", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-				SubscribesTo: []string{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"support.reply_drafted":                 handler,
-					"send_support_reply.revision_requested": {},
-					"send_support_reply.rejected":           {},
-				},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "support", Version: "1", InitialStage: "drafting",
-			EventOwners: map[string][]string{
-				"support.reply_drafted":                 {"support"},
-				"send_support_reply.revision_requested": {"support"},
-				"send_support_reply.rejected":           {"support"},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"support": {
-					"support.reply_drafted":                 handler,
-					"send_support_reply.revision_requested": {},
-					"send_support_reply.rejected":           {},
-				},
-			},
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				"support": {
-					ID: "support", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected"},
-					Produces:             []string{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
-				},
-			},
-		},
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")), "text": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))}), runtimecontracts.ToolSchemaRequired("chat_id", "text")),
-
-				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
-				Method: "POST", URL: strings.TrimRight(serverURL, "/"),
-				Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"},
-				Body:    map[string]any{"chat_id": "{{input.chat_id}}", "text": "{{input.text}}"},
-			}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
-		},
+func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposal bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	files := map[string]string{
+		"schema.yaml":   "name: support\nstages:\n  drafting: {initial: true}\n",
+		"entities.yaml": "test_entity: {}\n",
+		"events.yaml":   "support.reply_drafted:\n  chat_id: text\n  text: text\n",
+		"nodes.yaml": `support:
+  id: support
+  execution_type: system_node
+  subscribes_to: [support.reply_drafted, send_support_reply.revision_requested, send_support_reply.rejected]
+  event_handlers:
+    support.reply_drafted:
+      activity:
+        id: send_support_reply
+        tool: provider_write
+        input: {chat_id: payload.chat_id, text: payload.text}
+        approval: {decision: support_reply}
+    send_support_reply.revision_requested: {}
+    send_support_reply.rejected: {}
+`,
+		"tools.yaml": fmt.Sprintf(`provider_write:
+  description: Send the approved support reply.
+  handler_type: http
+  effect_class: non_idempotent_write
+  credentials: [provider_token]
+  input_schema:
+    type: object
+    required: [chat_id, text]
+    properties:
+      chat_id: {type: string}
+      text: {type: string}
+  output_schema: {type: object}
+  http:
+    method: POST
+    url: %q
+    headers: {Authorization: 'Bearer {{credentials.provider_token}}'}
+    body: {chat_id: '{{input.chat_id}}', text: '{{input.text}}'}
+`, strings.TrimRight(serverURL, "/")),
 	}
-	return canonicalRootGateRecoveryBundle(bundle)
+	if queueAfterProposal {
+		files["schema.yaml"] += "  queued: {}\n"
+		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    support.reply_drafted:\n", "    support.reply_drafted:\n      advances_to: queued\n", 1)
+	}
+	return loadPipelineLifecycleFixtureBundle(t, files)
 }
 
 func waitForGateRecoveryQuiescence(t *testing.T, bus *runtimebus.EventBus, ctx context.Context) {
@@ -1589,51 +1566,48 @@ func loadProposedEffectProofRequest(t *testing.T, selected gateRecoveryStoreCase
 	return storetest.LoadCanonicalEventRecord(t, ctx, selected.events, eventID)
 }
 
-func gateRecoveryContractBundle() *runtimecontracts.WorkflowContractBundle {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema:   nil,
-		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"launch.approved": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "launch", Version: "1", InitialStage: "awaiting_review",
-			Gates: []runtimecontracts.WorkflowGatePlan{{
-				FlowID: ".", Stage: "awaiting_review", Decision: "launch_review",
-				Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{
-					"approve": {Verdict: "approve", AdvancesTo: "operating", Emit: runtimecontracts.EmitSpec{Event: "launch.approved"}},
-				},
-			}},
-		},
-	}
-	return canonicalRootGateRecoveryBundle(bundle)
+func gateRecoveryContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return loadGateRecoveryContractBundle(t, false)
 }
 
-func gateRecoveryTerminalContractBundle() *runtimecontracts.WorkflowContractBundle {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema:   nil,
-		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "launch", Version: "1", InitialStage: "awaiting_review", TerminalStages: []string{"completed"},
-			Gates: []runtimecontracts.WorkflowGatePlan{{
-				FlowID: ".", Stage: "awaiting_review", Decision: "launch_review",
-				Outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "completed"}},
-			}},
-		},
-	}
-	return canonicalRootGateRecoveryBundle(bundle)
+func gateRecoveryTerminalContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return loadGateRecoveryContractBundle(t, true)
 }
 
-func canonicalRootGateRecoveryBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
-	root := &runtimecontracts.FlowContractView{
-		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: bundle.Semantics.Name},
-		Nodes:  bundle.Nodes, Events: bundle.Events,
+func loadGateRecoveryContractBundle(t *testing.T, terminal bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	outcome := "          advances_to: operating\n          emit: launch.approved\n  operating: {}\n"
+	if terminal {
+		outcome = "          advances_to: completed\n  completed: {terminal: true}\n"
 	}
-	bundle.FlowTree.Root = root
-	bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{".": root}
-	bundle.RootSchema = &root.Schema
-	bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema}
+	files := map[string]string{
+		"schema.yaml": `name: launch
+stages:
+  awaiting_review:
+    initial: true
+    gate:
+      decision: launch_review
+      outcomes:
+        approve:
+` + outcome,
+		"entities.yaml": "test_entity: {}\n",
+	}
+	if !terminal {
+		files["events.yaml"] = "launch.approved: {}\n"
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("compile gate recovery declaration: %v", err)
+	}
 	return bundle
 }
 

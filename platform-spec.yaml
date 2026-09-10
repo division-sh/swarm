@@ -287,6 +287,59 @@ contract_formats:
     rule: Flow reachability, declared state membership, and flow-local pin event declarations resolve against this parsed
       owner. Runtime liveness and temporal progress are separate runtime concerns. Entity ownership is not selected in
       schema.yaml for normal flows; the single flow-owned `entities.yaml` entry is authoritative.
+    compiled_transition_admission:
+      implementation_tracker: '#2415'
+      owner: The selected flow's lossless compiled lifecycle topology.
+      rule: >
+        Verification, graph projection, execution admission, and durable
+        transition provenance consume the same compiled carriers. A carrier
+        retains exact flow, originating node and handler, advance carrier,
+        qualified rule reference where applicable, source and target stages,
+        and loop, timer, or decision/verdict association. Distinct carriers
+        sharing a source/target pair remain distinct. No flow-less pair lookup,
+        parallel workflow definition, display-label reconstruction, or first
+        matching edge may select execution authority.
+      selection: >
+        Execution admits the carrier actually selected by the handler or
+        lifecycle owner. An inherited handler target remains handler-owned;
+        the independently selected rule fact and the guards actually evaluated
+        accompany it into persistence. A rule-level advance retains its exact
+        qualified declaration identity. Source and target membership and
+        terminal-state guards are scoped to the exact executing flow, never
+        borrowed from another flow with equal stage names. This does not add
+        ordinary source-stage authoring: ordinary carriers retain their current
+        compiled nonterminal source set, create carriers their initial source,
+        and loop/join/timer/gate carriers their declared source restrictions.
+      lifecycle: >
+        Loop cap escape admits the compiled escape carrier, not the suppressed
+        ordinary repeat target. A stage timer retains its own timer/stage
+        carrier. A gate freezes the exact compiled verdict carrier alongside
+        its continuation; accepted decisions consume that frozen carrier and
+        recorded bundle pin, never reconstruct it from an ambient graph.
+        Compiled membership cannot replace activation, revision, generation,
+        decision, or selected-store compare-and-set checks. Initial entry and
+        evaluated guard termination are explicit lifecycle causes, not invented
+        authored edges. Guard termination must agree with the exact executing
+        handler's kill disposition, its evaluated check prefix and failed check,
+        and the compiled flow's existing kill-target selection; a fabricated
+        guard name or another declared stage is not termination authority.
+        A self transition or no advance creates no transition
+        history or stage-entry lifecycle effect.
+      persistence: >
+        The selected execution fact, state transition, accepted event, and
+        transition-bearing lifecycle effect must agree before mutation. A
+        handler transition binds to the independently admitted execution event
+        and exact resolved handler; agreement between proposed mutation and
+        effect alone is insufficient. Protocol joins and compiled connects use
+        canonical handler resolution, not event-name equality. Preview consumes
+        the same typed selected cause, rule fact, and evaluated guards as execution.
+        One advancing engine mutation carries exactly one matching lifecycle
+        transition effect. Durable history retains the exact selected cause
+        and evaluated guards through a private versioned codec; missing,
+        contradictory, or unknown evidence fails closed. Restart and readback
+        preserve that evidence, rather than deriving it from event names or
+        current source. There is no legacy transition-identity fallback or
+        selected-store compatibility reader.
     stages_authoring:
       status: merge_bearing_first_slice
       implementation_tracker: '#1845'
@@ -7825,7 +7878,8 @@ engine:
     - id: event_consumer_exists
       severity: warning
       scope: per-flow
-      trigger: An event is emitted (by a node handler or agent emit_events) but no node or agent subscribes to it. Suppressed
+      trigger: An event has a canonical producer endpoint (including effective handler/activity outputs, agent declarations,
+        timers, auto-emits, compiled stage-gate verdicts and bounded-loop escapes) but no supported consumer. Suppressed
         only by accepted external/non-derivable swarm.consumer proof or swarm.status metadata. Internal consumers are derived
         from topology owners; authored swarm.consumer values that restate internal handlers, agents, timers, pins, connect
         routes, runtime owners, or effective system-node helpers fail closed under event_metadata_authority.
@@ -7833,7 +7887,8 @@ engine:
     - id: event_producer_exists
       severity: warning
       scope: per-flow
-      trigger: An agent subscribes to an event that no node handler emits and no agent lists in emit_events. Suppressed if the
+      trigger: A supported subscriber consumes an event with no canonical producer endpoint, including compiled lifecycle
+        outcome producers. Suppressed if the
         event has accepted external/platform swarm.source proof, accepted external/non-derivable swarm.producer proof,
         swarm.status metadata, or an exact authoritative platform_events.catalog match. Internal producers are derived from
         topology owners; authored swarm.source or swarm.producer values that restate internal handlers, agents, timers, pins,
@@ -7845,7 +7900,8 @@ engine:
       trigger: An events.yaml entry authors legacy event metadata fields (`producer`, `consumer`, `_source`, `_producer`,
         `_consumer`, `_status`) or authors `swarm.source`, `swarm.producer`, or `swarm.consumer` values that deterministically
         restate internal topology roles. `swarm.*` event metadata is external/platform/non-derivable proof only; internal roles
-        are derived from handlers, agents, timers, fan_out, auto_emit_on_create, pins, connect routes, runtime owners, and
+        are derived from handlers, agents, timers, fan_out, auto_emit_on_create, compiled stage-gate outcomes and loop escapes,
+        pins, connect routes, runtime owners, and
         effective system-node helpers.
       when: boot-only
     - id: payload_field_coverage
@@ -8141,7 +8197,9 @@ engine:
       trigger: A product-declared event schema entry in `events.yaml` has no active authored role on the static verify surface.
         Active roles are limited to intra-flow local usage, explicit cross-flow qualified usage, root-local usage for root-declared
         events only, accepted external/platform `swarm.source` proof, accepted external `swarm.consumer` proof, same-flow timer
-        fire/start/cancel references, same-flow `fan_out.emit`, and same-flow `auto_emit_on_create`. It does not treat platform catalog membership, root-local
+        fire/start/cancel references, same-flow `fan_out.emit`, same-flow `auto_emit_on_create`, compiled same-flow gate outcome
+        emits and bounded-loop escape emits. An emitted but unconsumed lifecycle outcome is active schema usage and still
+        receives the ordinary dangling-output diagnosis. It does not treat platform catalog membership, root-local
         references into child-flow declarations, or coincidental same local names in other flows as proof.
       when: boot-only
     severity_behavior:
@@ -11485,6 +11543,15 @@ flow_model:
           connect_source_rule: Every inter_flow_connect edge preserves exact admitted schema.yaml file:line provenance; no path reconstruction is allowed. Missing provenance fails with connect_source_location_missing.
           endpoint_rule: >
             Producers, consumers, input pins, and output pins come from one immutable authored endpoint census.
+            Compiled stage-gate verdict emits and bounded-loop cap escape emits are producer endpoints, alongside
+            effective handler/activity, agent, timer, and auto-emit producers. Absent emits create no endpoint.
+            Gate endpoints preserve declaring flow, stage, decision and verdict; loop escapes preserve declaring flow
+            and loop identity. Both preserve admitted source-file/site/line evidence. Distinct sites sharing an event
+            remain distinct static endpoints without multiplying runtime publications or deliveries. Lifecycle endpoints
+            do not fabricate node, agent or timer identity and do not grant actor emission or public ingress authority.
+            Producer existence, dangling-output checks, dead-schema use, internal metadata roles, reserved-platform
+            producer claims, output-pin validation and readback consume this same census, including every eligible
+            producer family. They must not maintain handler-only substitutes for all-producer questions.
             Output pins are interface exposures and become delivery only through a lowered connect edge.
           resolution_rule: >
             Runnable connect edges are edge-only. Their resolution view projects supported receiver-owned input

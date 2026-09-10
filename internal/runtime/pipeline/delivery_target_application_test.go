@@ -126,16 +126,16 @@ func TestDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPaylo
 		t.Run(backend, func(t *testing.T) {
 			db, store := openHandlerEntityRequirementStore(t, backend)
 			bundle := workflowJoinLifecycleBundle(t)
-			node := bundle.Nodes["join-node"]
+			root := bundle.FlowTree.ByID["."]
+			node := root.Nodes["join-node"]
 			handler := node.EventHandlers["item.completed"]
 			handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
 				Field: "portfolio_id", Ref: "payload.portfolio_id", RefPath: paths.Parse("payload.portfolio_id"),
 			}}}
 			node.EventHandlers["item.completed"] = handler
-			bundle.Nodes["join-node"] = node
+			root.Nodes["join-node"] = node
 
-			plan := bundle.Semantics.Joins[0]
-			plan.Node = mustPipelineNode("", "join-node")
+			plan := exactCompiledJoinPlanForTest(bundle, ".")
 			source := exactWorkflowJoinSource{
 				Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
 			}

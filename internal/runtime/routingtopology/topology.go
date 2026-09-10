@@ -46,6 +46,10 @@ type Endpoint struct {
 	AgentID        string                              `json:"agent_id,omitempty"`
 	Role           string                              `json:"role,omitempty"`
 	TimerID        string                              `json:"timer_id,omitempty"`
+	StageID        string                              `json:"stage_id,omitempty"`
+	DecisionID     string                              `json:"decision_id,omitempty"`
+	Verdict        string                              `json:"verdict,omitempty"`
+	LoopID         string                              `json:"loop_id,omitempty"`
 	PinName        string                              `json:"pin_name,omitempty"`
 	Site           string                              `json:"site,omitempty"`
 	SourceFile     string                              `json:"source_file,omitempty"`
@@ -422,6 +426,10 @@ func endpointView(endpoint semanticview.AuthoredEventEndpoint) Endpoint {
 		AgentID:        strings.TrimSpace(endpoint.AgentID),
 		Role:           strings.TrimSpace(endpoint.Role),
 		TimerID:        strings.TrimSpace(endpoint.TimerID),
+		StageID:        endpoint.StageID,
+		DecisionID:     endpoint.DecisionID,
+		Verdict:        endpoint.Verdict,
+		LoopID:         endpoint.LoopID,
 		PinName:        strings.TrimSpace(endpoint.PinName),
 		Site:           strings.TrimSpace(endpoint.Site),
 		SourceFile:     strings.TrimSpace(endpoint.SourceFile),

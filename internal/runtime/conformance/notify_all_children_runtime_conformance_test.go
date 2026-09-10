@@ -1547,20 +1547,15 @@ func newNotifyAllChildrenRuntime(
 	case *failingNotifyAllChildrenSQLiteStore:
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	module := conformanceLoadedWorkflowModule{
-		source:   source,
-		workflow: workflow,
-		nodes:    nodes,
-		guards:   runtimepipeline.NewContractGuardRegistry(source),
-		actions:  runtimepipeline.NewContractActionRegistry(source),
+		source:  source,
+		nodes:   nodes,
+		guards:  runtimepipeline.NewContractGuardRegistry(source),
+		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{

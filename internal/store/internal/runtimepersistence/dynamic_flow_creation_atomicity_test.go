@@ -3,6 +3,8 @@ package runtimepersistence_test
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -62,13 +64,10 @@ type dynamicFlowCreationAtomicityFixture struct {
 type dynamicFlowCreationWorkflowModule struct{ source semanticview.Source }
 
 func (m dynamicFlowCreationWorkflowModule) SemanticSource() semanticview.Source { return m.source }
-func (dynamicFlowCreationWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
+
 func (dynamicFlowCreationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { return nil }
 func (dynamicFlowCreationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
 func (dynamicFlowCreationWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
-
 func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
@@ -155,6 +154,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
 	}
 
+	bundle := dynamicFlowCreationAtomicityBundle(t)
 	occurredAt := time.Now().UTC().Truncate(time.Microsecond)
 	identity := runtimeflowidentity.Instance{
 		TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
@@ -162,7 +162,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 	plan := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: identity, RunID: runID,
-		BundleHash: bundleHash, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
+		BundleHash: bundleHash, WorkflowVersion: bundle.Semantics.Version, ExecutionMode: executionmode.Live,
 		CreationEvent: &runtimepipeline.DynamicFlowRuntimeCreationEventPlan{
 			EventID: uuid.NewString(), EventType: "review/inst-1/task.started",
 			RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
@@ -186,7 +186,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	t.Cleanup(lease.Release)
 	eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
 		RuntimeInstanceID:  "11111111-1111-1111-1111-111111111111",
-		ContractBundle:     semanticview.Wrap(dynamicFlowCreationAtomicityBundle()),
+		ContractBundle:     semanticview.Wrap(bundle),
 		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
@@ -198,7 +198,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 	workflow = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture:        executionposture.Live,
-		Module:                  dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(dynamicFlowCreationAtomicityBundle())},
+		Module:                  dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(bundle)},
 		Persistence:             workflowPersistence,
 		RunLifecycle:            selected,
 		DeliveryStore:           selected,
@@ -228,7 +228,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 	result, err := workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: identity.InstancePath, EntityID: identity.EntityID, WorkflowName: identity.TemplateID,
-		WorkflowVersion: "1.0.0", RuntimeReadiness: &plan, CurrentState: "pending",
+		WorkflowVersion: bundle.Semantics.Version, RuntimeReadiness: &plan, CurrentState: "pending",
 		Config:     map[string]any{"name": "alpha"},
 		EntityType: "test_entity",
 	}, occurredAt)
@@ -244,27 +244,29 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 }
 
-func dynamicFlowCreationAtomicityBundle() *runtimecontracts.WorkflowContractBundle {
-	review := &runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.started": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}},
-		},
+func dynamicFlowCreationAtomicityBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"schema.yaml":          "name: dynamic-creation-proof\n",
+		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    events: [task.started]\nauto_emit_on_create:\n  event: task.started\n",
+		"review/entities.yaml": "test_entity:\n  name: text\n",
+		"review/events.yaml":   "task.started:\n  name: text\n",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	return &runtimecontracts.WorkflowContractBundle{
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{*review}},
-			ByID: map[string]*runtimecontracts.FlowContractView{"review": review},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"review": {
-				Mode:             "template",
-				Pins:             runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.started"}}}},
-				AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{Event: "task.started"},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{Version: "1.0.0"},
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("compile dynamic-flow lifecycle declaration: %v", err)
 	}
+	return bundle
 }
 
 func dynamicFlowCreationAtomicityEvent(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (events.Event, error) {

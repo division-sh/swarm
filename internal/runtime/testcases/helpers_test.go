@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -124,7 +125,10 @@ func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundl
 		time.Now().UTC(),
 	),
 
-		state, policyOverrides)
+		runtimeengine.StateSnapshot{
+			EntityID: runtimeidentity.NormalizeEntityID(state.EntityID), CurrentState: string(state.Stage),
+			StateCarrier: runtimeengine.NewStateCarrierWithOwners(state.Metadata, nil, state.Control, nil, nil),
+		}, policyOverrides)
 	if err != nil {
 		t.Fatalf("preview handler %s/%s: %v", nodeID, eventType, err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -17,6 +18,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
@@ -352,7 +354,10 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	cause := workflowTimerCause{OccurredAt: effect.OccurredAt(), ExecutionMode: effect.ExecutionMode()}
 	switch effect.Kind() {
 	case runtimeworkflowlifecycle.KindInitialEntry:
-		toState = strings.TrimSpace(effect.InitialStage())
+		if err := validateWorkflowInitialEntry(pc.SemanticSource(), *instance, effect.InitialStage()); err != nil {
+			return err
+		}
+		toState = effect.InitialStage()
 		cause.Kind = workflowTimerCauseInitial
 		cause.EventType = "state:" + toState
 		cause.ToState = toState
@@ -361,6 +366,17 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 		cause.EventID = effect.EventID()
 		cause.EventType = effect.EventType()
 		if transition, ok := effect.Transition(); ok {
+			if err := transition.Validate(); err != nil {
+				return err
+			}
+			if transition.To() != strings.TrimSpace(instance.CurrentState) || transition.FlowID() != strings.TrimSpace(instance.WorkflowName) {
+				return fmt.Errorf("workflow lifecycle transition disagrees with the prepared instance flow/stage")
+			}
+			if err := (pipelineEngineStateRepo{coordinator: pc}).validateMutationTransition(ctx, *instance, runtimeengine.StateMutation{
+				Transition: &transition, TriggerEventID: effect.EventID(), TriggerEventType: effect.EventType(), TriggeredAt: effect.OccurredAt(),
+			}, instance.WorkflowName); err != nil {
+				return err
+			}
 			fromState, toState = transition.From(), transition.To()
 			cause.Kind = workflowTimerCauseTransition
 			cause.TransitionID = transition.ID()
@@ -623,7 +639,19 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 			if err != nil {
 				return err
 			}
-			routesJSON, err := gateruntime.FreezeRoutes(frozenOutcomes)
+			graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), flowID)
+			if !ok {
+				return fmt.Errorf("gate requires compiled flow topology")
+			}
+			transitions := make(map[string]runtimecontracts.CompiledTransition, len(frozenOutcomes))
+			for verdict, outcome := range frozenOutcomes {
+				compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{DecisionID: gatePlan.Decision, Verdict: verdict}, nextStage, outcome.AdvancesTo)
+				if err != nil {
+					return err
+				}
+				transitions[verdict] = compiled
+			}
+			routesJSON, err := gateruntime.FreezeRoutes(frozenOutcomes, transitions)
 			if err != nil {
 				return fmt.Errorf("freeze gate %s continuation routes: %w", gatePlan.Decision, err)
 			}

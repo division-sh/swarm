@@ -14,33 +14,13 @@ import (
 )
 
 func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t *testing.T) {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"acceptor": {ID: "acceptor", ExecutionType: "system_node"},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "first-event-transition",
-			Version:      "1",
-			InitialStage: "waiting",
-			Stages: []runtimecontracts.WorkflowStageContract{
-				{ID: "waiting"},
-				{ID: "done"},
-			},
-			TerminalStages: []string{"done"},
-		},
-	}
-	workflow := NewWorkflowDefinition("first-event-transition", []WorkflowStage{
-		{Name: "waiting"},
-		{Name: "done", Terminal: true},
-	}, []WorkflowTransition{{
-		Name: "accept",
-		From: []WorkflowStateID{"waiting"},
-		To:   "done",
-	}})
-	module := handlerTestWorkflowModule("first-event-transition", "acceptor").(*previewWorkflowModule)
-	module.bundle.Semantics = bundle.Semantics
-	module.bundle.RootEntities = testEntityContractsForType("first_event_entity")
-	module.workflow = workflow
+	bundle := loadWorkflowTempBundle(t, map[string]string{
+		"schema.yaml":   "name: first-event-transition\ninitial_state: waiting\nstates: [waiting, done]\nterminal_states: [done]\n",
+		"entities.yaml": "first_event_entity: {}\n",
+		"events.yaml":   "request.accepted: {}\n",
+		"nodes.yaml":    "acceptor:\n  id: acceptor\n  execution_type: system_node\n  subscribes_to: [request.accepted]\n  event_handlers:\n    request.accepted:\n      advances_to: done\n",
+	})
+	module := &previewWorkflowModule{bundle: bundle}
 
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {

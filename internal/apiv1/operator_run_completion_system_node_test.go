@@ -156,38 +156,28 @@ func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycl
 }
 
 type runCompletionSystemNodeModule struct {
-	source   semanticview.Source
-	workflow *runtimepipeline.WorkflowDefinition
-	nodes    []runtimepipeline.WorkflowNode
-	guards   runtimepipeline.GuardRegistry
-	actions  runtimepipeline.ActionRegistry
+	source  semanticview.Source
+	nodes   []runtimepipeline.WorkflowNode
+	guards  runtimepipeline.GuardRegistry
+	actions runtimepipeline.ActionRegistry
 }
 
 func newRunCompletionSystemNodeModule(t *testing.T, source semanticview.Source) runtimepipeline.WorkflowModule {
 	t.Helper()
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	return runCompletionSystemNodeModule{
-		source:   source,
-		workflow: workflow,
-		nodes:    nodes,
-		guards:   runtimepipeline.NewContractGuardRegistry(source),
-		actions:  runtimepipeline.NewContractActionRegistry(source),
+		source:  source,
+		nodes:   nodes,
+		guards:  runtimepipeline.NewContractGuardRegistry(source),
+		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 }
 
 func (m runCompletionSystemNodeModule) SemanticSource() semanticview.Source {
 	return m.source
-}
-
-func (m runCompletionSystemNodeModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
 }
 
 func (m runCompletionSystemNodeModule) WorkflowNodes() []runtimepipeline.WorkflowNode {

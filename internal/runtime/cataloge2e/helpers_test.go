@@ -89,17 +89,12 @@ func loadContractYAML(t testing.TB, path string, out any) {
 
 func newFixtureWorkflowModule(bundle *runtimecontracts.WorkflowContractBundle) (runtimepipeline.WorkflowModule, error) {
 	source := semanticview.Wrap(bundle)
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		return nil, err
-	}
 	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		return nil, err
 	}
 	return &fixtureWorkflowModule{
 		source:         source,
-		workflow:       workflow,
 		workflowNodes:  workflowNodes,
 		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
@@ -159,7 +154,6 @@ func strictCatalogFixtureStartupPolicy() catalogFixtureStartupPolicy {
 
 type fixtureWorkflowModule struct {
 	source         semanticview.Source
-	workflow       *runtimepipeline.WorkflowDefinition
 	workflowNodes  []runtimepipeline.WorkflowNode
 	guardRegistry  runtimepipeline.GuardRegistry
 	actionRegistry runtimepipeline.ActionRegistry
@@ -167,10 +161,6 @@ type fixtureWorkflowModule struct {
 
 func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
 	return m.source
-}
-
-func (m *fixtureWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
 }
 
 func (m *fixtureWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {

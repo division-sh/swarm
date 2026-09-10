@@ -2919,10 +2919,11 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("seed mailbox notice: %v", err)
 	}
 
-	routes, err := gateruntime.FreezeRoutes(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {Verdict: "approve", AdvancesTo: "done"},
 		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
-	})
+	}
+	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, outcomes))
 	if err != nil {
 		t.Fatalf("FreezeRoutes: %v", err)
 	}
@@ -4119,7 +4120,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		"approve": {Verdict: "approve", AdvancesTo: "done"},
 		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
 	}
-	routes, err := gateruntime.FreezeRoutes(outcomes)
+	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, outcomes))
 	if err != nil {
 		t.Fatalf("freeze %s run.stop gate routes: %v", rt.Backend, err)
 	}

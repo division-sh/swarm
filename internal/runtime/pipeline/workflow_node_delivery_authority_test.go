@@ -237,40 +237,16 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			owner := newPipelineTestDeliveryOwnerForDB(t, workflowStore.testDB())
 			baseBus := &recordingPipelineBus{}
 			bus := &failOnceRetryPipelineBus{recordingPipelineBus: baseBus}
-			bundle := &runtimecontracts.WorkflowContractBundle{
-				RootEntities: testEntityContractsForType("test_entity"),
-				Nodes: map[string]runtimecontracts.SystemNodeContract{
-					"node-a": {ID: "node-a", ExecutionType: "system_node"},
-				},
-				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-					"handler_retry_base_seconds": {Value: int(retryBase / time.Second)},
-				}},
-				Events: map[string]runtimecontracts.EventCatalogEntry{
-					"source.evt":     {},
-					"node.completed": {},
-				},
-				Semantics: runtimecontracts.WorkflowSemanticView{
-					Name:    "delivery-retry",
-					Version: "v-test",
-					NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-						"node-a": {
-							"source.evt": {
-								Emit: runtimecontracts.EmitSpec{Event: "node.completed"},
-							},
-						},
-					},
-				},
-			}
-			node := bundle.Nodes["node-a"]
-			node.EventHandlers = bundle.Semantics.NodeHandlers["node-a"]
-			bundle.Nodes["node-a"] = node
+			bundle := loadWorkflowTempBundle(t, map[string]string{
+				"schema.yaml":   "name: delivery-retry\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
+				"entities.yaml": "test_entity: {}\n",
+				"events.yaml":   "source.evt: {}\nnode.completed: {}\n",
+				"nodes.yaml":    "node-a:\n  id: node-a\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      emit: node.completed\n",
+			})
+			bundle.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+				"handler_retry_base_seconds": {Value: int(retryBase / time.Second)},
+			}}
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
-			module.workflow = NewWorkflowDefinition("delivery-retry", []WorkflowStage{
-				{Name: "queued"},
-				{Name: "done", Terminal: true},
-			}, []WorkflowTransition{{
-				Name: "complete", From: []WorkflowStateID{"queued"}, To: "done", Node: pipelineNode(t, ".", "node-a"),
-			}})
 			module.workflowNodes = []WorkflowNode{{
 				Node: pipelineNode(t, ".", "node-a"), Subscriptions: []events.EventType{"source.evt"},
 				Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}},
@@ -295,7 +271,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			}
 			seedPipelineEventRecordForDialect(t, ctx, workflowStore.testDB(), dialect, evt)
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, WorkflowName: ".", WorkflowVersion: "v-test", CurrentState: "queued",
+				InstanceID: runID, StorageRef: runID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(), CurrentState: "queued",
 				EntityID:       entityID,
 				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),
 				EntityType: "test_entity",
@@ -396,42 +372,15 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
 	t.Helper()
 	bus := &recordingPipelineBus{}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootEntities: testEntityContractsForType("test_entity"),
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"source.evt": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: "system_node"},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "delivery-authority", Version: "v-test",
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"node-a": {
-					"source.evt": {
-						Rules: []runtimecontracts.HandlerRuleEntry{{
-							ID:         "complete",
-							Condition:  "true",
-							AdvancesTo: "done",
-						}},
-					},
-				},
-			},
-		},
-	}
-	node := bundle.Nodes["node-a"]
-	node.EventHandlers = bundle.Semantics.NodeHandlers["node-a"]
-	bundle.Nodes["node-a"] = node
+	// Delivery authority exercises unconditional advancement, not rule selection.
+	// The old raw rule was non-authored and produced a NotApplicable selection fact.
+	bundle := loadWorkflowTempBundle(t, map[string]string{
+		"schema.yaml":   "name: delivery-authority\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
+		"entities.yaml": "test_entity: {}\n",
+		"events.yaml":   "source.evt: {}\n",
+		"nodes.yaml":    "node-a:\n  id: node-a\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n",
+	})
 	module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
-	module.workflow = NewWorkflowDefinition("delivery-authority", []WorkflowStage{
-		{Name: "queued"},
-		{Name: "done", Terminal: true},
-	}, []WorkflowTransition{{
-		Name: "complete",
-		From: []WorkflowStateID{"queued"},
-		To:   "done",
-		Node: pipelineNode(t, ".", "node-a"),
-	}})
 	module.workflowNodes = []WorkflowNode{{
 		Node:          pipelineNode(t, ".", "node-a"),
 		Subscriptions: []events.EventType{"source.evt"},
@@ -473,7 +422,7 @@ func seedDeliveryAuthorityWorkflowInstance(t *testing.T, pc *PipelineCoordinator
 		StorageRef:      testPipelineRunID,
 		EntityID:        entityID,
 		WorkflowName:    ".",
-		WorkflowVersion: "v-test",
+		WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
 		EntityType:      "test_entity",

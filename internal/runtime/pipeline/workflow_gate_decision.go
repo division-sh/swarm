@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -549,14 +550,19 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		FlowID: identity.NormalizeFlowID(anchor.FlowID), Route: instanceRoute,
 		EntityID: identity.NormalizeEntityID(anchor.EntityID),
 	}
+	cause, err := runtimeworkflowlifecycle.NewCompiledTransition(route.Transition, handlerselection.NotApplicable(), nil)
+	if err != nil {
+		return err
+	}
 	preparedState, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, address, runtimeengine.StateMutation{
-		NextState: nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
+		Transition: &cause,
+		NextState:  nextStage, TriggerEventID: evt.ID(), TriggerEventType: string(evt.Type()),
 		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
 	})
 	if err != nil {
 		return err
 	}
-	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(instanceRoute, address.EntityID, evt, currentStage, nextStage)
+	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(instanceRoute, address.EntityID, evt, currentStage, nextStage, &cause)
 	if err != nil {
 		return err
 	}

@@ -293,7 +293,6 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 }
 
 func selectedContractActivityLoadedSource(source semanticview.Source, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
-	workflow := runtimepipeline.NewWorkflowDefinition("activity-fork-proof", []runtimepipeline.WorkflowStage{{Name: "pending"}}, nil)
 	nodes := []runtimepipeline.WorkflowNode{{
 		Node: mustRunForkNode("flow_a", "test-node"), ExecutionType: runtimecontracts.SystemNodeExecutionType,
 	}}
@@ -301,7 +300,7 @@ func selectedContractActivityLoadedSource(source semanticview.Source, selection 
 	return LoadedSelectedContractSource{
 		Selection: selection, Source: source, SourceArtifactFact: fact, EffectiveSourceIdentity: testEffectiveSourceIdentity(fact),
 		Module: selectedContractWorkflowModule{
-			source: source, workflow: workflow, nodes: nodes,
+			source: source, nodes: nodes,
 			guardRegistry: runtimepipeline.NewContractGuardRegistry(source), actionRegistry: runtimepipeline.NewContractActionRegistry(source),
 		},
 	}

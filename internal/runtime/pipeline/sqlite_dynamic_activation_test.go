@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -20,7 +18,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -506,18 +503,11 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 		},
 		Module: &previewWorkflowModule{
 			bundle: bundle,
-			workflow: NewWorkflowDefinition("root", []WorkflowStage{
-				{Name: "pending"},
-			}, nil),
 			workflowNodes: []WorkflowNode{
 				{
 					Node:          pipelineNode(t, ".", "fanout-node"),
 					Subscriptions: []events.EventType{"component_scaffold.batch_requested"},
 					Produces:      []events.EventType{"component_scaffold.spawn_requested"},
-				},
-				{
-					Node:          pipelineNode(t, ".", "spawn-node"),
-					Subscriptions: []events.EventType{"component_scaffold.spawn_requested"},
 				},
 				{
 					Node:          pipelineNode(t, ".", "nested-fanout-node"),
@@ -533,151 +523,43 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 
 func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	reviewFlow := &runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"fanout-node":        {ID: "fanout-node", ExecutionType: "system_node"},
-			"spawn-node":         {ID: "spawn-node", ExecutionType: "system_node"},
-			"nested-fanout-node": {ID: "nested-fanout-node", ExecutionType: "system_node"},
-		},
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &runtimecontracts.FlowContractView{
-				Path:     ".",
-				Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
-				Children: []runtimecontracts.FlowContractView{*reviewFlow},
-				Events: map[string]runtimecontracts.EventCatalogEntry{
-					"component_scaffold.batch_requested": {
-						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-							"components": {Type: "[json]"},
-						}},
-					},
-					"component_scaffold.spawn_requested": {
-						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-							"component_id": {Type: "text"},
-							"nested_items": {Type: "[text]"},
-						}},
-					},
-					"component_scaffold.task_requested": {
-						Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-							"component_id": {Type: "text"},
-							"task":         {Type: "text"},
-						}},
-					},
-				},
-			},
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".":      nil,
-				"review": reviewFlow,
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"review": {
-				Name:         "review",
-				Mode:         "template",
-				InitialState: "pending",
-				States:       []string{"pending"},
-				Pins: runtimecontracts.FlowPins{
-					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "component_scaffold.spawn_requested"}}},
-				},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "root", Version: "v-test",
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"fanout-node": {
-					"component_scaffold.batch_requested": {
-						FanOut: &runtimecontracts.FanOutSpec{
-							ItemsFrom: "payload.components",
-							As:        "component",
-							Identity:  "component.component_id",
-							Emit: runtimecontracts.EmitSpec{
-								Event: "component_scaffold.spawn_requested",
-								Fields: map[string]runtimecontracts.ExpressionValue{
-									"component_id": runtimecontracts.CELExpression("component.component_id"),
-									"nested_items": runtimecontracts.LiteralExpression([]any{"prepare", "publish"}),
-								},
-							},
-						},
-					},
-				},
-				"spawn-node": {
-					"component_scaffold.spawn_requested": {
-						Action: runtimecontracts.ActionSpec{
-							ID:             "create_flow_instance",
-							Template:       "review",
-							InstanceIDFrom: "payload.component_id",
-							ConfigFrom: &runtimecontracts.ConfigFromSpec{
-								Bindings: map[string]string{
-									"component_id": "payload.component_id",
-								},
-							},
-						},
-					},
-				},
-				"nested-fanout-node": {
-					"component_scaffold.spawn_requested": {
-						FanOut: &runtimecontracts.FanOutSpec{
-							ItemsFrom: "payload.nested_items",
-							As:        "nested_item",
-							Identity:  "nested_item",
-							Emit: runtimecontracts.EmitSpec{
-								Event: "component_scaffold.task_requested",
-								Fields: map[string]runtimecontracts.ExpressionValue{
-									"component_id": runtimecontracts.CELExpression("payload.component_id"),
-									"task":         runtimecontracts.CELExpression("nested_item"),
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	bundle.FlowTree.ByID["."] = bundle.FlowTree.Root
-	fanOutHandler := bundle.Semantics.NodeHandlers["fanout-node"]["component_scaffold.batch_requested"]
-	fanOutOwner, err := identity.AdmitExecutableNodeDeclaration(".", "fanout-node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fanOutHandler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(fanOutOwner, "component_scaffold.batch_requested", fanOutHandler)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bundle.Semantics.NodeHandlers["fanout-node"]["component_scaffold.batch_requested"] = fanOutHandler
-	nestedHandler := bundle.Semantics.NodeHandlers["nested-fanout-node"]["component_scaffold.spawn_requested"]
-	nestedOwner, err := identity.AdmitExecutableNodeDeclaration(".", "nested-fanout-node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	nestedHandler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(nestedOwner, "component_scaffold.spawn_requested", nestedHandler)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bundle.Semantics.NodeHandlers["nested-fanout-node"]["component_scaffold.spawn_requested"] = nestedHandler
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: sqlite-dynamic-activation-test\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := sourceartifact.AdmitDirectory(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	platformFile := filepath.Join(t.TempDir(), "platform-spec.yaml")
-	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bundle.SourceArtifact = artifact
-	bundle.Paths = runtimecontracts.ContractPaths{PlatformSpecFile: platformFile}
-	for _, nodeID := range []string{"fanout-node", "spawn-node", "nested-fanout-node"} {
-		node := bundle.Nodes[nodeID]
-		node.EventHandlers = bundle.Semantics.NodeHandlers[nodeID]
-		bundle.Nodes[nodeID] = node
-	}
-	bundle.FlowTree.Root.Nodes = bundle.Nodes
-	bundle.Events = bundle.FlowTree.Root.Events
-	return admitSyntheticEntityContractsForTest(t, bundle, "parent", map[string]string{"review": "test_entity"})
+	return loadWorkflowTempBundle(t, map[string]string{
+		"schema.yaml":          "name: root\nstages: []\n",
+		"entities.yaml":        "parent: {}\n",
+		"types.yaml":           "types:\n  Component:\n    component_id: text\n",
+		"events.yaml":          "component_scaffold.batch_requested:\n  components: '[Component]'\ncomponent_scaffold.spawn_requested:\n  component_id: text\n  nested_items: '[text]'\ncomponent_scaffold.task_requested:\n  component_id: text\n  task: text\n",
+		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    events: [component_scaffold.spawn_requested]\n",
+		"review/entities.yaml": "test_entity: {}\n",
+		"nodes.yaml": `fanout-node:
+  id: fanout-node
+  execution_type: system_node
+  event_handlers:
+    component_scaffold.batch_requested:
+      fan_out:
+        items_from: payload.components
+        as: component
+        identity: component.component_id
+        emit:
+          event: component_scaffold.spawn_requested
+          fields:
+            component_id: component.component_id
+            nested_items: {literal: [prepare, publish]}
+nested-fanout-node:
+  id: nested-fanout-node
+  execution_type: system_node
+  event_handlers:
+    component_scaffold.spawn_requested:
+      fan_out:
+        items_from: payload.nested_items
+        as: nested_item
+        identity: nested_item
+        emit:
+          event: component_scaffold.task_requested
+          fields:
+            component_id: payload.component_id
+            task: nested_item
+`,
+	})
 }
 
 func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *workflowInstanceStore, ctx context.Context, storageRef string) {

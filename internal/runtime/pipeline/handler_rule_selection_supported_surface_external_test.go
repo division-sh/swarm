@@ -58,8 +58,7 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 				policies[eventType] = runtimepipeline.WorkflowEventPolicy{Consume: true}
 			}
 			module := proposedEffectProofModule{
-				source:   source,
-				workflow: runtimepipeline.NewWorkflowDefinition(workflowName, []runtimepipeline.WorkflowStage{{Name: "active"}}, nil),
+				source: source,
 				nodes: []runtimepipeline.WorkflowNode{{
 					Node: node, Subscriptions: subscriptions, ExecutionType: runtimecontracts.SystemNodeExecutionType, Policies: policies,
 				}},

@@ -39,10 +39,6 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		}
 		states := normalizedGateSet(c.source.FlowStates(flowID))
 		terminal := normalizedGateSet(c.source.FlowTerminalStages(flowID))
-		if flowID == "." {
-			states = normalizedGateSet(workflowStageIDs(c.source.WorkflowStages()))
-			terminal = normalizedGateSet(c.source.WorkflowTerminalStages())
-		}
 		if _, ok := states[stage]; !ok {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("gate source stage %s is not declared", stage)))
 		}

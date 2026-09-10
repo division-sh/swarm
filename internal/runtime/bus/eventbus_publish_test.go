@@ -24,11 +24,13 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -515,7 +517,6 @@ func assertEventBusTerminalRunRefusal(
 
 type fixtureWorkflowModule struct {
 	source         semanticview.Source
-	workflow       *runtimepipeline.WorkflowDefinition
 	workflowNodes  []runtimepipeline.WorkflowNode
 	guardRegistry  runtimepipeline.GuardRegistry
 	actionRegistry runtimepipeline.ActionRegistry
@@ -523,10 +524,6 @@ type fixtureWorkflowModule struct {
 
 func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
 	return m.source
-}
-
-func (m *fixtureWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
 }
 
 func (m *fixtureWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
@@ -544,17 +541,12 @@ func (m *fixtureWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry 
 func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.WorkflowModule {
 	t.Helper()
 	source := semanticview.Wrap(bundle)
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	return &fixtureWorkflowModule{
 		source:         source,
-		workflow:       workflow,
 		workflowNodes:  workflowNodes,
 		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
@@ -3289,7 +3281,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			ParentEntityID:     rootEntityID,
 			WorkflowName:       "child",
 			WorkflowVersion:    bundle.WorkflowVersion(),
-			CurrentState:       "delegated",
+			CurrentState:       "waiting",
 		},
 		{
 			InstanceID:      "grandchild",
@@ -3297,7 +3289,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			EntityID:        grandchildEntityID,
 			WorkflowName:    "child/grandchild",
 			WorkflowVersion: bundle.WorkflowVersion(),
-			CurrentState:    "finished",
+			CurrentState:    "ready",
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), instance, instance.CreatedAt); err != nil {
@@ -3342,10 +3334,10 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	)
 	if _, err := runtimepipeline.PreviewContractHandlerExecution(
 		runtimedelivery.WithRoute(ctx, childRoute), bundle, claimNode, previewEvent,
-		runtimepipeline.WorkflowState{EntityID: childEntityID, Stage: "delegated", Metadata: map[string]any{
+		runtimeengine.StateSnapshot{EntityID: runtimeidentity.NormalizeEntityID(childEntityID), CurrentState: "waiting", StateCarrier: runtimeengine.NewStateCarrier(map[string]any{
 			"flow_path": childRoute.Target.Route().FlowInstance, "parent_flow_id": bundle.WorkflowName(),
 			"parent_flow_instance": eventBusTestRunID, "parent_entity_id": rootEntityID,
-		}}, nil,
+		}, nil, nil)}, nil,
 	); err != nil {
 		t.Fatalf("preview child completion: %v", err)
 	}
@@ -3634,9 +3626,6 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	source := semanticview.Wrap(bundle)
 	return &fixtureWorkflowModule{
 		source: source,
-		workflow: runtimepipeline.NewWorkflowDefinition("mixed-route", []runtimepipeline.WorkflowStage{
-			{Name: "active"},
-		}, nil),
 		workflowNodes: []runtimepipeline.WorkflowNode{
 			{
 				Node:          testRootNode(t, "project-observer"),
@@ -3864,9 +3853,9 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	previewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
 		eventBusTestRunID, previewEnvelope, rootSource, time.Now().UTC())
 	childPreviewCtx := runtimedelivery.WithRoute(ctx, rootConnectPlan.DeliveryRoutes[0])
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, testFlowNode(t, "child", "child-relay"), previewEvent, runtimepipeline.WorkflowState{
-		EntityID: childTarget.EntityID,
-		Stage:    "waiting",
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, testFlowNode(t, "child", "child-relay"), previewEvent, runtimeengine.StateSnapshot{
+		EntityID:     runtimeidentity.NormalizeEntityID(childTarget.EntityID),
+		CurrentState: "waiting",
 	}, nil); err != nil {
 		t.Fatalf("preview child connect delivery: %v", err)
 	}
@@ -3912,9 +3901,9 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	grandchildPreviewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
 		eventBusTestRunID, grandchildPreviewEnvelope, childSource, time.Now().UTC())
 	grandchildPreviewCtx := runtimedelivery.WithRoute(ctx, grandchildConnectPlan.DeliveryRoutes[0])
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(grandchildPreviewCtx, bundle, grandchildNode, grandchildPreviewEvent, runtimepipeline.WorkflowState{
-		EntityID: grandchildTarget.EntityID,
-		Stage:    "ready",
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(grandchildPreviewCtx, bundle, grandchildNode, grandchildPreviewEvent, runtimeengine.StateSnapshot{
+		EntityID:     runtimeidentity.NormalizeEntityID(grandchildTarget.EntityID),
+		CurrentState: "ready",
 	}, nil); err != nil {
 		t.Fatalf("preview grandchild connect delivery: %v", err)
 	}
@@ -3983,9 +3972,9 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("initial root route recipient = %#v, want exact node", initialPlan.DeliveryRoutes[0].Recipient)
 	}
 	initialPreviewCtx := runtimedelivery.WithRoute(ctx, initialPlan.DeliveryRoutes[0])
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(initialPreviewCtx, bundle, initialNode, initial, runtimepipeline.WorkflowState{
-		EntityID: rootEntityID,
-		Stage:    "idle",
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(initialPreviewCtx, bundle, initialNode, initial, runtimeengine.StateSnapshot{
+		EntityID:     runtimeidentity.NormalizeEntityID(rootEntityID),
+		CurrentState: "idle",
 	}, nil); err != nil {
 		t.Fatalf("preview initial root delivery: %v", err)
 	}

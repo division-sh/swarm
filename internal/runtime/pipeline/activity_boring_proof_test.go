@@ -472,8 +472,7 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
-			bundle:   bundle,
-			workflow: NewWorkflowDefinition("research", []WorkflowStage{{Name: "pending"}}, nil),
+			bundle: bundle,
 			workflowNodes: []WorkflowNode{{
 				Node:          mustActivityBoringNode("scanner"),
 				Subscriptions: []events.EventType{"source.requested"},
@@ -506,84 +505,38 @@ func activityBoringSource(serverURL string) semanticview.Source {
 
 func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Activity: runtimecontracts.ActivitySpec{
-			Tool: "source_scrape",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"url": runtimecontracts.CELExpression("payload.url"),
-			},
-		},
-	}
-	node := runtimecontracts.SystemNodeContract{
-		ID:            "scanner",
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		SubscribesTo:  []string{"source.requested"},
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"source.requested": handler,
-		},
-	}
-	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{
-			FlowPath: "research",
-		},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Name:         "research",
-			Mode:         runtimecontracts.FlowModeTemplate,
-			InitialState: "pending",
-			States:       []string{"pending"},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scanner": node,
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"source.requested": {},
-		},
-		Path: "research",
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	base := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "activity-boring-proof",
-			Version:      "v-test",
-			InitialStage: "pending",
-			FlowInitial:  map[string]string{"research": "pending"},
-			FlowStates:   map[string][]string{"research": []string{"pending"}},
-			EventOwners: map[string][]string{
-				"source.requested": {"scanner"},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"scanner": {
-					"source.requested": handler,
-				},
-			},
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				"scanner": {
-					ID:                   "scanner",
-					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"source.requested"},
-					Produces:             []string{"research.scanner_source_requested_source_scrape.succeeded", "research.scanner_source_requested_source_scrape.failed"},
-				},
-			},
-		},
-		FlowTree: runtimecontracts.FlowTree{
-			Root:   &root,
-			ByPath: map[string]*runtimecontracts.FlowContractView{"research": &flow},
-			ByID:   map[string]*runtimecontracts.FlowContractView{"research": &flow},
-		},
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-			}), runtimecontracts.ToolSchemaRequired("url")),
-
-				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
-					"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
-				}))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
-				Method: "GET",
-				URL:    strings.TrimRight(serverURL, "/") + "?url={{input.url}}",
-			})),
-		},
-	}
-	return admitSyntheticEntityContractsForTest(t, base, "", map[string]string{"research": "test_entity"})
+	return loadWorkflowTempBundle(t, map[string]string{
+		"schema.yaml":            "name: activity-boring-proof\nstages: []\n",
+		"research/schema.yaml":   "name: research\nmode: template\nstages:\n  pending: {initial: true}\n",
+		"research/entities.yaml": "test_entity:\n  marker: text\n",
+		"research/events.yaml":   "source.requested:\n  url: text\n",
+		"research/nodes.yaml": `scanner:
+  subscribes_to: [source.requested]
+  event_handlers:
+    source.requested:
+      activity:
+        tool: source_scrape
+        input:
+          url: {cel: payload.url}
+`,
+		"tools.yaml": fmt.Sprintf(`source_scrape:
+  description: Read a source.
+  handler_type: http
+  effect_class: read_only
+  http:
+    method: GET
+    url: %q
+  input_schema:
+    type: object
+    required: [url]
+    properties:
+      url: {type: string}
+  output_schema:
+    type: object
+    properties:
+      title: {type: string}
+`, strings.TrimRight(serverURL, "/")+"?url={{input.url}}"),
+	})
 }
 
 func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event {
@@ -831,7 +784,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 		StorageRef:      "research/" + entityID,
 		EntityID:        entityID,
 		WorkflowName:    "research",
-		WorkflowVersion: "v-test",
+		WorkflowVersion: fixture.pc.SemanticSource().WorkflowVersion(),
 		CurrentState:    "pending",
 		EnteredStageAt:  evt.CreatedAt(),
 		CreatedAt:       evt.CreatedAt(),

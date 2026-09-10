@@ -3,13 +3,22 @@ package gateruntime
 import (
 	"testing"
 	"time"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
-const testRoutesJSON = `{"approve":{"advances_to":"operating","emit":{"event":"","fields":{}},"emit_schema":{}}}`
+func testRoutesJSON(t *testing.T) string {
+	t.Helper()
+	raw, err := FreezeRoutes(map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "operating"}}, gateTestCompiledTransitions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
 
 func TestActivationLifecycleIsFencedAndDurable(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
-	activation, err := New("run-1", "root", "entity-1", "", "awaiting_review", "launch_review", "bundle-hash", testRoutesJSON, "stage.entered", now)
+	activation, err := New("run-1", "review/instance-1", "entity-1", "review", "waiting", "review_decision", "bundle-hash", testRoutesJSON(t), "stage.entered", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,7 +26,7 @@ func TestActivationLifecycleIsFencedAndDurable(t *testing.T) {
 	if err := Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	loaded, found, err := Load(buckets, "", "launch_review")
+	loaded, found, err := Load(buckets, "review", "review_decision")
 	if err != nil || !found {
 		t.Fatalf("Load = %#v, %v, %v", loaded, found, err)
 	}
@@ -34,7 +43,7 @@ func TestActivationLifecycleIsFencedAndDurable(t *testing.T) {
 
 func TestActivationRouteRequiresCommittedEventIdentity(t *testing.T) {
 	now := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
-	activation, err := New("run-1", "root", "entity-1", "", "awaiting_review", "launch_review", "bundle-hash", testRoutesJSON, "stage.entered", now)
+	activation, err := New("run-1", "review/instance-1", "entity-1", "review", "waiting", "review_decision", "bundle-hash", testRoutesJSON(t), "stage.entered", now)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -654,9 +654,6 @@ detail_record:
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
 			bundle: bundle,
-			workflow: NewWorkflowDefinition("treasury", []WorkflowStage{
-				{Name: "active"},
-			}, nil),
 		},
 		runBundleAvailability: selectEntityTestRunBundleAvailability{},
 	}

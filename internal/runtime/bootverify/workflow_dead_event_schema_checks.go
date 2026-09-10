@@ -21,6 +21,7 @@ type deadEventSchemaUsage struct {
 	agentEmitEvents    int
 	agentSubscriptions int
 	timerReferences    int
+	lifecycleEmits     int
 	fanOutEmit         int
 	autoEmitOnCreate   bool
 	externalSource     bool
@@ -35,6 +36,7 @@ func (u deadEventSchemaUsage) hasAny() bool {
 		u.agentEmitEvents > 0 ||
 		u.agentSubscriptions > 0 ||
 		u.timerReferences > 0 ||
+		u.lifecycleEmits > 0 ||
 		u.fanOutEmit > 0 ||
 		u.autoEmitOnCreate ||
 		u.externalSource ||
@@ -81,6 +83,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 				fileLabel,
 			),
 			Location: decl.Canonical,
+			Evidence: []string{fmt.Sprintf("Compiled lifecycle outcome emits: %d", usage.lifecycleEmits)},
 		})
 	}
 
@@ -133,6 +136,8 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 			usage.agentEmitEvents++
 		case semanticview.EventEndpointTimer:
 			usage.timerReferences++
+		case semanticview.EventEndpointGateOutcome, semanticview.EventEndpointLoopEscape:
+			usage.lifecycleEmits++
 		case semanticview.EventEndpointAutoEmit:
 			usage.autoEmitOnCreate = true
 		}

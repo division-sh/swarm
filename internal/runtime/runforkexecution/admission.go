@@ -52,7 +52,6 @@ type LoadedSelectedContractSource struct {
 
 type selectedContractWorkflowModule struct {
 	source         semanticview.Source
-	workflow       *runtimepipeline.WorkflowDefinition
 	nodes          []runtimepipeline.WorkflowNode
 	guardRegistry  runtimepipeline.GuardRegistry
 	actionRegistry runtimepipeline.ActionRegistry
@@ -60,10 +59,6 @@ type selectedContractWorkflowModule struct {
 
 func (m selectedContractWorkflowModule) SemanticSource() semanticview.Source {
 	return m.source
-}
-
-func (m selectedContractWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return m.workflow
 }
 
 func (m selectedContractWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
@@ -168,10 +163,6 @@ func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractS
 	if err := validateSelectedContractSelection("DB-loaded selected source loader", selection); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		return LoadedSelectedContractSource{}, err
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
@@ -190,7 +181,6 @@ func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractS
 		Cleanup:                 runtimeProjection.Release,
 		Module: selectedContractWorkflowModule{
 			source:         source,
-			workflow:       workflow,
 			nodes:          nodes,
 			guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 			actionRegistry: runtimepipeline.NewContractActionRegistry(source),

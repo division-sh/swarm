@@ -15,14 +15,9 @@ type semanticOnlyWorkflowRuntime struct {
 }
 
 func (s semanticOnlyWorkflowRuntime) SemanticSource() semanticview.Source { return s.source }
-func (semanticOnlyWorkflowRuntime) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
+
 func (semanticOnlyWorkflowRuntime) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (semanticOnlyWorkflowRuntime) TransitionEvaluator() runtimepipeline.TransitionEvaluator {
-	return nil
-}
-func (semanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.GuardRegistry { return nil }
+func (semanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 func (semanticOnlyWorkflowRuntime) ActionRegistry() runtimepipeline.ActionRegistry {
 	return nil
 }

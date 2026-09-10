@@ -11,9 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -42,9 +40,7 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 			for _, engine := range []string{"bridge", "declarative"} {
 				t.Run(engine+"/accumulator", func(t *testing.T) {
 					nodeKey := pipelineNode(t, ".", "node-a").Key()
-					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-accumulator", runtimecontracts.SystemNodeEventHandler{
-						Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
-					}, json.RawMessage(`{"item_id":"a"}`), nil, nil)
+					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-accumulator", "work.ready", json.RawMessage(`{"item_id":"a"}`), nil, nil)
 					if !result.handled {
 						t.Fatal("accumulator execution was not handled")
 					}
@@ -67,9 +63,7 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 					initialBuckets := map[string]any{nodeKey: map[string]any{
 						"handler_accumulators": map[string]any{nodeKey + ":work.ready": map[string]any{"items": []any{"a"}}},
 					}}
-					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-clear", runtimecontracts.SystemNodeEventHandler{
-						Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state", "pending_dedup", "revision_count"}},
-					}, nil, initialMetadata, initialBuckets)
+					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-clear", "work.clear", nil, initialMetadata, initialBuckets)
 					if !result.handled {
 						t.Fatal("clear execution was not handled")
 					}
@@ -86,9 +80,7 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 				})
 
 				t.Run(engine+"/guard_kill", func(t *testing.T) {
-					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-guard-kill", runtimecontracts.SystemNodeEventHandler{
-						Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"},
-					}, nil, nil, nil)
+					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-guard-kill", "work.kill", nil, nil, nil)
 					if !result.handled || (result.status != "" && result.status != HandlerOutcomeKilled) {
 						t.Fatalf("guard kill outcome = handled:%t status:%q, want handled killed outcome", result.handled, result.status)
 					}
@@ -183,7 +175,7 @@ func executeExistingOwnerBehavior(
 	pc *PipelineCoordinator,
 	engine string,
 	name string,
-	handler runtimecontracts.SystemNodeEventHandler,
+	eventType string,
 	payload json.RawMessage,
 	metadata map[string]any,
 	stateBuckets map[string]any,
@@ -210,14 +202,18 @@ func executeExistingOwnerBehavior(
 		t.Fatalf("seed %s workflow instance: %v", name, err)
 	}
 
+	node := pipelineNode(t, ".", "node-a")
+	handler, found := pc.SemanticSource().ExecutableNodeEventHandlers(node)[eventType]
+	if !found {
+		t.Fatalf("missing declared handler %q", eventType)
+	}
 	sourceEvent := handlerTestRootIngress(
-		uuid.NewString(), "work.ready", "", "", payload, 0, runID, "",
+		uuid.NewString(), events.EventType(eventType), "", "", payload, 0, runID, "",
 		handlerTestWorkflowEnvelope(".", flowInstance, entityID), time.Now().UTC(),
 	)
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: flowInstance, EntityID: entityID}
 	seedExactOnceEvent(t, pc.workflowStore, ctx, sourceEvent)
 	evt := eventtest.TargetRouted(sourceEvent, target)
-	node := pipelineNode(t, ".", "node-a")
 	deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(node),
 		Target:    events.MustExistingEntityTarget(target),
@@ -237,7 +233,7 @@ func executeExistingOwnerBehavior(
 		}
 	case "declarative":
 		var executed *HandlerOutcome
-		executed, err = newCoordinatorHandlerExecutionEngine(pc, node).ExecuteHandlerSteps(deliveryCtx, handler, evt, "work.ready")
+		executed, err = newCoordinatorHandlerExecutionEngine(pc, node).ExecuteHandlerSteps(deliveryCtx, handler, evt, eventType)
 		result.handled = executed != nil && executed.Handled
 	default:
 		t.Fatalf("unknown handler execution engine %q", engine)
@@ -258,37 +254,9 @@ type existingOwnerExecutionResult struct {
 }
 
 func handlerEntityRequirementExecutionSource() semanticview.Source {
-	flow := runtimecontracts.FlowContractView{
-		Path:   ".",
-		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}, "work.emitted": {}},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Name: "review", Mode: runtimecontracts.FlowModeStatic, InitialState: "active",
-			States: []string{"active", "killed"}, TerminalStates: []string{"killed"},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {ID: "node-a", ExecutionType: runtimecontracts.SystemNodeExecutionType},
-		},
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides("../../..", "testdata/entity-requirement-execution", "")
+	if err != nil {
+		panic(err)
 	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics:    runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1"},
-		RootSchema:   &flow.Schema,
-		RootEntities: testEntityContractsForType("test_entity"),
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{".": &flow},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": flow.Schema},
-	}
-	return handlerEntityRequirementSemanticSource{Source: semanticview.Wrap(bundle)}
-}
-
-type handlerEntityRequirementSemanticSource struct {
-	semanticview.Source
-}
-
-func (s handlerEntityRequirementSemanticSource) ExecutableNodeSource(node runtimeidentity.ExecutableNode) (runtimecontracts.ContractItemSource, bool) {
-	if node.Equal(mustPipelineNode(".", "node-a")) {
-		return runtimecontracts.ContractItemSource{FlowPath: ".", Family: "nodes"}, true
-	}
-	return s.Source.ExecutableNodeSource(node)
+	return semanticview.Wrap(bundle)
 }

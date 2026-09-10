@@ -741,16 +741,12 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowDefinition: %v", err)
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	module := conformanceLoadedWorkflowModule{
-		source: source, workflow: workflow, nodes: nodes,
+		source: source, nodes: nodes,
 		guards: runtimepipeline.NewContractGuardRegistry(source), actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, runtimepipeline.PipelineCoordinatorOptions{

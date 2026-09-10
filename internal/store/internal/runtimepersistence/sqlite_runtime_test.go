@@ -671,10 +671,6 @@ func (m sqliteFlowActivationWorkflowModule) SemanticSource() semanticview.Source
 	return m.source
 }
 
-func (m sqliteFlowActivationWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
-
 func (m sqliteFlowActivationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return nil
 }
@@ -885,7 +881,19 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
 	}
-	return admitStateOnlyAcquisitionEntityContracts(t, base, []string{"review"})
+	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
+		"schema.yaml":          "name: flow-activation-proof\n",
+		"review/schema.yaml":   "name: review\nmode: template\nstages:\n  pending: {initial: true}\npins:\n  inputs:\n    events: [task.started]\n",
+		"review/entities.yaml": "review_item: {}\n",
+		"review/events.yaml":   "task.started: {}\n",
+	})
+	// The actor authority fixture supplies its admitted test intent separately
+	// from the compiled flow declaration.
+	bundle.FlowTree.ByID["review"].Agents = reviewFlow.Agents
+	bundle.FlowTree.ByID["review"].AgentURIs = reviewFlow.AgentURIs
+	bundle.URIRegistry = base.URIRegistry
+	bundle.Semantics.Version = base.Semantics.Version
+	return bundle
 }
 
 func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, templateID, instanceID, parentEntityID, flowPath string) runtimepipeline.FlowInstanceActivationRequest {
@@ -1371,7 +1379,14 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	owner := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
+	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
+		"schema.yaml":        "name: persistence-proof\n",
+		"root/schema.yaml":   "name: root\nmode: template\nstages:\n  qualified: {initial: true}\n",
+		"root/entities.yaml": "company:\n  score: decimal\n",
+	})
+	options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(store), store)
+	options.Module = sqliteFlowActivationWorkflowModule{source: semanticview.Wrap(bundle)}
+	owner := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	createdAt := time.Now().UTC()
 	if _, err := owner.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{

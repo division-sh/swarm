@@ -193,13 +193,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			progressed.Fields["priority"] = 9
 			progressed.Gates = map[string]bool{"approved": true}
 			progressed.StateBuckets = map[string]any{"totals": map[string]any{"accepted": 4}}
-			progressed.TransitionHistory = append(progressed.TransitionHistory, WorkflowTransitionRecord{
-				TransitionID:   "activate",
-				From:           "pending",
-				To:             "active",
-				TriggerEventID: "event-2",
-				FiredAt:        occurredAt.Add(time.Minute),
-			})
+			progressed.TransitionHistory = append(progressed.TransitionHistory, lifecycleTransitionRecordFixtureForTest(t, "review", "pending", "active", "event-2", occurredAt.Add(time.Minute)))
 			if err := store.upsert(ctx, progressed); err != nil {
 				t.Fatalf("persist legitimate workflow progress: %v", err)
 			}
@@ -838,7 +832,7 @@ func TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers(t *testing
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	ensurePipelineTestRun(t, store, runID)
-	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle())
+	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle(t))
 	pc := &PipelineCoordinator{
 		module:        &pipelineFixtureWorkflowModule{source: source},
 		workflowStore: store,
@@ -1645,8 +1639,7 @@ type staticSemanticWorkflowModule struct {
 	source semanticview.Source
 }
 
-func (m staticSemanticWorkflowModule) SemanticSource() semanticview.Source   { return m.source }
-func (staticSemanticWorkflowModule) WorkflowDefinition() *WorkflowDefinition { return nil }
-func (staticSemanticWorkflowModule) WorkflowNodes() []WorkflowNode           { return nil }
-func (staticSemanticWorkflowModule) GuardRegistry() GuardRegistry            { return nil }
-func (staticSemanticWorkflowModule) ActionRegistry() ActionRegistry          { return nil }
+func (m staticSemanticWorkflowModule) SemanticSource() semanticview.Source { return m.source }
+func (staticSemanticWorkflowModule) WorkflowNodes() []WorkflowNode         { return nil }
+func (staticSemanticWorkflowModule) GuardRegistry() GuardRegistry          { return nil }
+func (staticSemanticWorkflowModule) ActionRegistry() ActionRegistry        { return nil }

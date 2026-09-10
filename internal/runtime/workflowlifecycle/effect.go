@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
@@ -19,21 +21,15 @@ const (
 )
 
 type Transition struct {
-	from string
-	to   string
-	id   string
-}
-
-func NewTransition(from, to, id string) (Transition, error) {
-	transition := Transition{
-		from: strings.TrimSpace(from),
-		to:   strings.TrimSpace(to),
-		id:   strings.TrimSpace(id),
-	}
-	if transition.from == "" || transition.to == "" || transition.id == "" || transition.from == transition.to {
-		return Transition{}, fmt.Errorf("workflow lifecycle transition requires distinct from/to states and exact identity")
-	}
-	return transition, nil
+	from         string
+	to           string
+	id           string
+	compiled     *contracts.CompiledTransition
+	selection    handlerselection.HandlerRuleSelectionFact
+	guards       []string
+	guardNode    identity.ExecutableNode
+	guardHandler string
+	guardName    string
 }
 
 func (t Transition) From() string { return t.from }
@@ -84,8 +80,8 @@ func NewAcceptedEvent(route runtimeflowidentity.Route, entityID identity.EntityI
 	}
 	if transition != nil {
 		value := *transition
-		if value.from == "" || value.to == "" || value.id == "" || value.from == value.to {
-			return Effect{}, fmt.Errorf("accepted workflow event has an incomplete transition")
+		if err := value.Validate(); err != nil {
+			return Effect{}, err
 		}
 		effect.transition = &value
 	}

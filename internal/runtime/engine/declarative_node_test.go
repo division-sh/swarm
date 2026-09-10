@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -43,6 +44,10 @@ func TestNewDeclarativeNode_StoresNodeID(t *testing.T) {
 
 func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+			".": runtimecontracts.BuildWorkflowStageTopology(".", "pending", []string{"pending", "done"}, nil,
+				[]runtimecontracts.HandlerTransitionSemantic{{Node: testRootExecutableNode(t, "node-a"), EventType: "task.completed", AdvancesTo: "done"}}, nil, nil),
+		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.completed": {},
 		},
@@ -68,10 +73,11 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	executableNode := testRootExecutableNode(t, "node-a")
 	node := NewDeclarativeNode(executableNode, exec)
 	result, err := node.Handle(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     executableNode,
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		State:    StateSnapshot{CurrentState: "pending"},
+		ExecutionFlowID: identity.NormalizeFlowID("."),
+		EntityID:        "entity-1",
+		Node:            executableNode,
+		Event:           eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		State:           StateSnapshot{CurrentState: "pending"},
 	})
 	if err != nil {
 		t.Fatalf("Handle error: %v", err)
@@ -106,7 +112,11 @@ func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 
 func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+				".": runtimecontracts.BuildWorkflowStageTopology(".", "", nil, nil, nil, nil, nil),
+			},
+		}}),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -118,11 +128,12 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	executableNode := testRootExecutableNode(t, "node-a")
 	node := NewDeclarativeNode(executableNode, exec)
 	result, err := node.Handle(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     executableNode,
-		Event:    eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler:  runtimecontracts.SystemNodeEventHandler{ClearGates: []string{"gate_a"}},
-		State:    StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"gate_a": true}, nil)},
+		ExecutionFlowID: identity.NormalizeFlowID("."),
+		EntityID:        "entity-1",
+		Node:            executableNode,
+		Event:           eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler:         runtimecontracts.SystemNodeEventHandler{ClearGates: []string{"gate_a"}},
+		State:           StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"gate_a": true}, nil)},
 	})
 	if err != nil {
 		t.Fatalf("Handle error: %v", err)

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,7 +25,6 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -44,9 +45,7 @@ type runForkGateWorkflowModule struct {
 }
 
 func (m runForkGateWorkflowModule) SemanticSource() semanticview.Source { return m.source }
-func (runForkGateWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
+
 func (runForkGateWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
 func (runForkGateWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 func (runForkGateWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
@@ -61,6 +60,37 @@ type runForkGateSelectedStoreProof struct {
 	ProposedEffectForkLocal     bool
 	ProposedEffectReplyDetached bool
 	ProposedEffectInputRetained bool
+}
+
+func runForkRootGateBundleForTest(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	for name, contents := range map[string]string{
+		"schema.yaml": `name: root
+stages:
+  awaiting_review:
+    initial: true
+    gate:
+      decision: root_review
+      outcomes:
+        approve:
+          advances_to: done
+          emit: run_fork.compiled_root_gate_approved
+  done: {terminal: true}
+`,
+		"entities.yaml": "default: {}\n",
+		"events.yaml":   "run_fork.compiled_root_gate_approved: {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("compile root gate declaration: %v", err)
+	}
+	return bundle
 }
 
 func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
@@ -231,14 +261,24 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			requireRunningRunForTest(t, ctx, selected, sourceRunID, now)
 			requireRunningRunForTest(t, ctx, selected, forkRunID, now)
 
-			rootRoutes, err := gateruntime.FreezeRoutes(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			rootOutcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
 				"approve": {
 					Verdict:    "approve",
 					AdvancesTo: "done",
-					Emit:       runtimecontracts.EmitSpec{Event: "run_fork.root_gate_approved"},
+					Emit:       runtimecontracts.EmitSpec{Event: "run_fork.compiled_root_gate_approved"},
 					EmitSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
 				},
-			})
+			}
+			rootBundle := runForkRootGateBundleForTest(t)
+			rootGraph, found := rootBundle.WorkflowStageTopology(".")
+			if !found {
+				t.Fatal("root gate declaration has no compiled topology")
+			}
+			rootTransition, err := rootGraph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{DecisionID: "root_review", Verdict: "approve"}, "awaiting_review", "done")
+			if err != nil {
+				t.Fatal(err)
+			}
+			rootRoutes, err := gateruntime.FreezeRoutes(rootOutcomes, map[string]runtimecontracts.CompiledTransition{"approve": rootTransition})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -260,7 +300,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 					"approve": {
 						Verdict:    "approve",
 						AdvancesTo: "done",
-						Emit:       runtimecontracts.EmitSpec{Event: "run_fork.root_gate_approved"},
+						Emit:       runtimecontracts.EmitSpec{Event: "run_fork.compiled_root_gate_approved"},
 						EmitSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
 					},
 				}),
@@ -333,21 +373,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err != nil {
 				t.Fatal(err)
 			}
-			rootFlow := runtimecontracts.FlowContractView{
-				Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-				Schema: runtimecontracts.FlowSchemaDocument{Name: "root", Mode: runtimecontracts.FlowModeStatic},
-			}
-			gateBundle := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				Semantics:    runtimecontracts.WorkflowSemanticView{Name: "root", Version: "1"},
-				RootEntities: runtimecontracts.EntityContractsDocument{"default": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
-				FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-					Root: &rootFlow, ByID: map[string]*runtimecontracts.FlowContractView{".": &rootFlow},
-				},
-				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": rootFlow.Schema},
-				Events: map[string]runtimecontracts.EventCatalogEntry{
-					"run_fork.root_gate_approved": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}},
-				},
-			})
+			gateBundle := semanticview.Wrap(rootBundle)
 			eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: gateBundle})
 			if err != nil {
 				t.Fatalf("construct fork root gate event bus: %v", err)
@@ -406,7 +432,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				outputCountQuery = `SELECT COUNT(*) FROM events WHERE event_name = $1 AND run_id = $2::uuid`
 			}
 			stateErr := db.QueryRowContext(pipelineCtx, stateQuery, forkRunID, forkRunID).Scan(&currentState)
-			outputErr := db.QueryRowContext(pipelineCtx, outputCountQuery, "run_fork.root_gate_approved", forkRunID).Scan(&outputCount)
+			outputErr := db.QueryRowContext(pipelineCtx, outputCountQuery, "run_fork.compiled_root_gate_approved", forkRunID).Scan(&outputCount)
 			if stateErr != nil || currentState != "done" {
 				t.Fatalf("fork root gate state=%q state_err=%v activation=%#v output_count=%d output_err=%v intercept_outcome=%#v, want done/routed/one", currentState, stateErr, routedActivation, outputCount, outputErr, outcome)
 			}
@@ -426,7 +452,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 					WHERE event_name = $1 AND run_id = $2::uuid
 				`
 			}
-			if err := db.QueryRowContext(pipelineCtx, outputQuery, "run_fork.root_gate_approved", forkRunID).Scan(&outputEventID, &outputRunID, &outputEntityID, &outputFlowInstance, &outputParentID); err != nil {
+			if err := db.QueryRowContext(pipelineCtx, outputQuery, "run_fork.compiled_root_gate_approved", forkRunID).Scan(&outputEventID, &outputRunID, &outputEntityID, &outputFlowInstance, &outputParentID); err != nil {
 				t.Fatalf("load fork root gate output: %v", err)
 			}
 			if outputEventID == "" || outputRunID != forkRunID || outputEntityID != forkRunID || outputFlowInstance != forkRunID || outputParentID != stageDecisionEventID {

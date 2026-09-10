@@ -1091,7 +1091,13 @@ func platformProducerEndpointFindings(source semanticview.Source, endpoint seman
 			return fmt.Sprintf("flow %s auto_emit_on_create references reserved platform.* namespace event %s", location, eventType)
 		}
 	default:
-		return nil
+		location = endpoint.ProducerDescription()
+		catalogMessage = func(eventType string) string {
+			return fmt.Sprintf("%s emits platform-emitted event %s; platform owns this event", location, eventType)
+		}
+		reservedMessage = func(eventType string) string {
+			return fmt.Sprintf("%s emits reserved platform.* namespace event %s", location, eventType)
+		}
 	}
 	finding, ok := platformProducerClaimFinding(source, eventType, location, catalogMessage, reservedMessage)
 	if !ok {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,8 +68,7 @@ func newExactWorkflowJoinHarness(
 	t.Helper()
 	store, ctx := storeCase.open(t)
 	bundle := workflowJoinLifecycleBundle(t)
-	plan := bundle.Semantics.Joins[0]
-	plan.Node = mustPipelineNode(flowID, "join-node")
+	plan := exactCompiledJoinPlanForTest(bundle, flowID)
 	source := exactWorkflowJoinSource{
 		Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
 		nodeFlowID: flowID, overrideNodeOwner: true,
@@ -89,8 +89,9 @@ func newExactWorkflowJoinHarness(
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: uuid.NewString(), StorageRef: harness.path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 		EntityID: harness.entityID, CurrentState: initialState, EnteredStageAt: time.Now().UTC(),
-		Fields:     map[string]any{"expected": append([]any{}, members...)},
-		EntityType: "test_entity",
+		Fields:       map[string]any{"expected": append([]any{}, members...)},
+		StateBuckets: map[string]any{"entity_projection": map[string]any{"expected": append([]any{}, members...)}},
+		EntityType:   "test_entity",
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -196,35 +197,25 @@ type exactJoinScope struct {
 }
 
 func exactRootAndFlowJoinSource(bundle *runtimecontracts.WorkflowContractBundle) exactWorkflowJoinSource {
-	plan := bundle.Semantics.Joins[0]
-	rootPlan := plan
-	rootPlan.Node = mustPipelineNode("", "join-node")
-	flowPlan := plan
-	flowPlan.Node = mustPipelineNode("orders", "join-node")
+	rootPlan := exactCompiledJoinPlanForTest(bundle, ".")
+	flowPlan := exactCompiledJoinPlanForTest(bundle, "orders")
 	return exactWorkflowJoinSource{
 		Source: workflowJoinLifecycleRootAndFlowSource(bundle),
 		plans:  []runtimecontracts.WorkflowJoinPlan{rootPlan, flowPlan},
 	}
 }
 
+func exactCompiledJoinPlanForTest(bundle *runtimecontracts.WorkflowContractBundle, flowID string) runtimecontracts.WorkflowJoinPlan {
+	for _, plan := range bundle.Semantics.Joins {
+		if plan.Node.Equal(mustPipelineNode(flowID, "join-node")) && plan.HandlerEvent == "item.completed" {
+			return plan
+		}
+	}
+	panic("fixture has no exact compiled join plan")
+}
+
 func workflowJoinLifecycleRootAndFlowSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
-	clone := *bundle
-	root := *bundle.FlowTree.Root
-	root.Children = append([]runtimecontracts.FlowContractView(nil), root.Children...)
-	root.Nodes = make(map[string]runtimecontracts.SystemNodeContract, len(bundle.Nodes))
-	for nodeID, node := range bundle.Nodes {
-		root.Nodes[nodeID] = node
-	}
-	clone.FlowTree.Root = &root
-	clone.FlowTree.ByID = make(map[string]*runtimecontracts.FlowContractView, len(bundle.FlowTree.ByID))
-	for flowID, view := range bundle.FlowTree.ByID {
-		clone.FlowTree.ByID[flowID] = view
-	}
-	clone.FlowTree.ByID["."] = &root
-	if len(root.Children) > 0 {
-		clone.FlowTree.ByID["orders"] = &root.Children[0]
-	}
-	return semanticview.Wrap(&clone)
+	return semanticview.Wrap(bundle)
 }
 
 func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, declarationFlowID, path string) exactJoinScope {
@@ -435,7 +426,7 @@ func TestWorkflowJoinDeclarationRefUsesExactExecutionScope(t *testing.T) {
 		Source: workflowJoinLifecycleRootAndFlowSource(bundle),
 		plans:  []runtimecontracts.WorkflowJoinPlan{rootPlan, flowPlan},
 	}
-	handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
+	handler := source.ExecutableNodeEventHandlers(mustPipelineNode(".", "join-node"))["item.completed"]
 
 	rootRef, err := workflowJoinDeclarationRef(source, pipelineNode(t, "", "join-node"), "item.completed", handler)
 	if err != nil || rootRef.FlowPath() != "." {
@@ -465,8 +456,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 			t.Run(storeCase.name+"/"+scope.name, func(t *testing.T) {
 				store, ctx := storeCase.open(t)
 				bundle := workflowJoinLifecycleBundle(t)
-				plan := bundle.Semantics.Joins[0]
-				plan.Node = mustPipelineNode(scope.flowID, "join-node")
+				plan := exactCompiledJoinPlanForTest(bundle, scope.flowID)
 				source := exactWorkflowJoinSource{
 					Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
 					nodeFlowID: scope.flowID, overrideNodeOwner: true,
@@ -520,7 +510,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 					t.Fatalf("armed activation = found:%v activation:%#v ref:%#v err:%v", found, armedActivation, armedRef, err)
 				}
 
-				handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
+				handler := source.ExecutableNodeEventHandlers(joinNode)["item.completed"]
 				deliver := func(coordinator *PipelineCoordinator, id, member string) error {
 					envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
 					if scope.flowID != "" {
@@ -569,34 +559,23 @@ func TestSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothStores(t *
 		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
 			t.Run(storeCase.name+"/"+order.name, func(t *testing.T) {
 				store, ctx := storeCase.open(t)
-				bundle := workflowJoinLifecycleBundle(t)
-				orders := bundle.FlowTree.ByID["orders"]
-				joinNode := orders.Nodes["join-node"]
-				first := pipelineFlowPathNode(t, "a", "join-node")
-				second := pipelineFlowPathNode(t, "b", "join-node")
-				children := []runtimecontracts.FlowContractView{
-					{Path: "a", Paths: runtimecontracts.FlowContractPaths{FlowPath: "a", NodesFile: "a/nodes.yaml"}, Schema: orders.Schema, Events: orders.Events, Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": joinNode}},
-					{Path: "b", Paths: runtimecontracts.FlowContractPaths{FlowPath: "b", NodesFile: "b/nodes.yaml"}, Schema: orders.Schema, Events: orders.Events, Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": joinNode}},
+				files := workflowJoinLifecycleFixtureFiles(false, "")
+				for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
+					for _, flowID := range []string{"a", "b"} {
+						files[flowID+"/"+name] = strings.Replace(files["orders/"+name], "name: orders", "name: "+flowID, 1)
+					}
+					delete(files, "orders/"+name)
 				}
-				plan := bundle.Semantics.Joins[0]
-				firstPlan, secondPlan := plan, plan
-				firstPlan.Node, secondPlan.Node = first, second
-				plans := []runtimecontracts.WorkflowJoinPlan{firstPlan, secondPlan}
+				bundle := loadWorkflowTempBundle(t, files)
+				plans := []runtimecontracts.WorkflowJoinPlan{exactCompiledJoinPlanForTest(bundle, "a"), exactCompiledJoinPlanForTest(bundle, "b")}
 				if order.reverse {
-					children[0], children[1] = children[1], children[0]
 					plans[0], plans[1] = plans[1], plans[0]
+					children := bundle.FlowTree.Root.Children
+					children[0], children[1] = children[1], children[0]
+					for i := range children {
+						bundle.FlowTree.ByID[children[i].Path] = &children[i]
+					}
 				}
-				bundle.FlowTree.Root.Children = children
-				bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{
-					".": bundle.FlowTree.Root,
-					"a": &bundle.FlowTree.Root.Children[0],
-					"b": &bundle.FlowTree.Root.Children[1],
-				}
-				if order.reverse {
-					bundle.FlowTree.ByID["a"], bundle.FlowTree.ByID["b"] = bundle.FlowTree.ByID["b"], bundle.FlowTree.ByID["a"]
-				}
-				bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{"a": orders.Schema, "b": orders.Schema}
-				bundle = admitSyntheticEntityContractsForTest(t, bundle, "test_entity", map[string]string{"a": "test_entity", "b": "test_entity"})
 				source := exactWorkflowJoinSource{Source: semanticview.Wrap(bundle), plans: plans}
 				schedules := &recordingGenericScheduleWakeupOwner{}
 				newCoordinator := func() *PipelineCoordinator {
@@ -779,14 +758,8 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
 				h := newExactWorkflowJoinHarness(t, storeCase, flowID, "awaiting", []any{"a", "b"})
-				observer := runtimecontracts.SystemNodeContract{ID: "observer", ExecutionType: "system_node"}
-				h.bundle.Nodes["observer"] = observer
-				h.bundle.FlowTree.ByID["orders"].Nodes["observer"] = observer
+				h.bundle = workflowJoinLifecycleBundleWithOptions(t, false, "repeat")
 				declarationFlowID := pipelineDeclarationFlowPath(flowID)
-				h.bundle.Semantics.Loops = []runtimecontracts.WorkflowLoopPlan{{
-					FlowID: declarationFlowID, ID: "revision", RevisionField: "revision_id",
-					MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, EntryStage: "awaiting", RegionStages: []string{"awaiting"},
-				}}
 				h.source.Source = workflowJoinLifecycleRootAndFlowSource(h.bundle)
 				h.pc = h.newCoordinator()
 				createdAt := time.Now().UTC()
@@ -955,13 +928,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		t.Run(storeCase.name, func(t *testing.T) {
 			h := newExactWorkflowJoinHarness(t, storeCase, "orders", "awaiting", []any{"a", "b"})
-			observer := runtimecontracts.SystemNodeContract{ID: "observer", ExecutionType: "system_node"}
-			h.bundle.Nodes["observer"] = observer
-			h.bundle.FlowTree.ByID["orders"].Nodes["observer"] = observer
-			h.bundle.Semantics.Loops = []runtimecontracts.WorkflowLoopPlan{{
-				FlowID: "orders", ID: "revision", RevisionField: "revision_id",
-				MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, EntryStage: "awaiting", RegionStages: []string{"awaiting", "ready"},
-			}}
+			h.bundle = workflowJoinLifecycleBundleWithOptions(t, false, "reentrant")
 			h.source.Source = workflowJoinLifecycleRootAndFlowSource(h.bundle)
 			h.pc = h.newCoordinator()
 			createdAt := time.Now().UTC()
@@ -986,8 +953,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			}
 
 			firstSchedule := h.armInitial()
-			handler := h.bundle.Nodes["join-node"].EventHandlers["item.completed"]
-			handler.Loop = &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "awaiting"}
+			handler := h.source.ExecutableNodeEventHandlers(mustPipelineNode(h.flowID, "join-node"))["item.completed"]
 			for _, member := range []string{"a", "b"} {
 				event := eventtest.RunCreatingRootIngress(
 					uuid.NewString(), events.EventType("item.completed"), "operator", "",
@@ -1040,10 +1006,9 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 
 			beforeStale := h.instance()
 			h.restart()
-			if _, err := h.fire(h.scheduleEvent(firstSchedule, "stale-first-generation")); err != nil {
-				if envelope, ok := runtimefailures.EnvelopeFromError(err); !ok || envelope.Class != runtimefailures.ClassUnexpectedArrival {
-					t.Fatalf("stale generation result = %v envelope=%#v", err, envelope)
-				}
+			_, staleErr := h.fire(h.scheduleEvent(firstSchedule, "stale-first-generation"))
+			if envelope, ok := runtimefailures.EnvelopeFromError(staleErr); !ok || envelope.Class != runtimefailures.ClassStaleArrival || envelope.Detail.Code != "loop_revision_stale" {
+				t.Fatalf("stale generation result = %v envelope=%#v", staleErr, envelope)
 			}
 			afterStale := h.instance()
 			if !exactJoinSemanticStateEqual(beforeStale, afterStale) {

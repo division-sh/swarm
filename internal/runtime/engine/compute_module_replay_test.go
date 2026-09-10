@@ -197,6 +197,9 @@ func computeModuleReplaySource(t *testing.T) semanticview.Source {
 		t.Fatal(err)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+			"render": runtimecontracts.BuildWorkflowStageTopology("render", "pending", []string{"pending"}, nil, nil, nil, nil),
+		}},
 		SourceArtifact: artifact,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &flow,
@@ -226,8 +229,9 @@ func newComputeModuleReplayExecutor(t *testing.T, source semanticview.Source) *r
 func computeModuleReplayExecutionRequest(t *testing.T) runtimeengine.ExecutionRequest {
 	t.Helper()
 	return runtimeengine.ExecutionRequest{
-		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		Node:     identitytest.FlowNode(t, "render", "render-node"),
+		ExecutionFlowID: identity.NormalizeFlowID("render"),
+		EntityID:        identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		Node:            identitytest.FlowNode(t, "render", "render-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("render.requested"),
