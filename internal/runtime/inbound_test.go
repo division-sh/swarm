@@ -695,6 +695,29 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 	if evt.Type() != events.EventType("inbound.github.raw.push") {
 		t.Fatalf("event type = %q, want inbound.github.raw.push", evt.Type())
 	}
+	wantTarget := events.RouteIdentity{FlowID: store.target.FlowPath, FlowInstance: store.target.FlowInstance, EntityID: store.target.EntityID}
+	target := store.target
+	target.AdmissionPlan, err = g.catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "customer-a", Provider: "github", SigningSecret: "github-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := target.AdmissionPlan.AdmitRequest(providertriggers.Request{
+		Provider: "github", Target: providertriggers.Target{EntityID: target.EntityID, EntitySlug: target.EntitySlug, WebhookSecret: "github-secret"},
+		Method: http.MethodPost, Body: body, Headers: req.Header, Payload: map[string]any{"zen": "Keep it logically awesome."}, Received: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected, _, _, _, err := projectInboundPublication(target, admitted, store.record.Request, time.Now(), executionposture.Live, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected) != 1 || projected[0].Event.TargetRoute() != wantTarget {
+		t.Fatalf("raw provider projection = %#v, want exact admitted target %#v", projected, wantTarget)
+	}
+	if evt.RoutingSource().Kind() != events.RoutingSourceExternalIngress || evt.RoutingSource().Route().FlowID != store.target.FlowPath {
+		t.Fatalf("provider source was relabeled: %#v", evt.RoutingSource())
+	}
 	var payload map[string]any
 	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)

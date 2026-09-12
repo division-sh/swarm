@@ -10347,7 +10347,9 @@ tool_model:
       generic HTTP ingress executor only after that exact target and its immutable InboundAdmissionPlan are resolved. It
       consumes `runtime_ingress.queueable_ingress.inbound.webhook`, executes only that plan, persists the inbound dedupe
       marker and every raw/normalized output through one selected-store provider-delivery transaction, and publishes only
-      the typed outputs returned by the plan. The raw output retains the exact standing target. Normalized outputs retain
+      the typed outputs returned by the plan. The raw output retains the exact standing target, including its admitted
+      declaration flow ID, concrete instance path and entity ID. Routing must not reconstruct the declaration flow ID
+      from the instance path. Normalized outputs retain
       the standing RunID but carry no fixed FlowInstance target, so exact external input-pin resolution owns template
       select-or-create. The gateway never reinterprets standing pins or normalized paths at request time.
       Provider manifests may also return an authenticated response-only result when the provider protocol requires a
