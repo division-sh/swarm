@@ -1,5 +1,9 @@
 # Receiver Post-Revision Future Capability
 
+T17's original dynamic sibling gate/fork success oracle is retained under #642
+with its exact proof-policy distinction in
+[lifecycle_template_sibling_fork_README.md](lifecycle_template_sibling_fork_README.md).
+
 Completed ordinary arrival-join history is a separate #642 capability. Its exact
 G19 success oracle and reproduction instructions are documented in
 [fork_retained_join_README.md](fork_retained_join_README.md).
