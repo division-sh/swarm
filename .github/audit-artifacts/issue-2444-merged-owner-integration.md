@@ -14,6 +14,30 @@ race detection (46.577s). CLI read-window/validation and configured-monitor-dead
 spec controls pass with TEST_POSTGRES_BIN supplied (0.423s). Final rerun remains
 pending; the full managed run is first in the shared capacity queue.
 
+## Second Full Qualification and Bounded Test Repairs
+
+The second managed full run on rebased master `2344162f9` failed; it is not
+closure proof. CLI, serve, catalog, pipeline and both backend packages passed.
+Release E2E failed its node-identity readback, and runtime persistence timed out
+after reporting contention, claim-cleanup and semantic-fixture failures.
+
+The node-identity proof combined an older event snapshot with newer quiescence;
+it now requires terminal delivery readback in the observed snapshot. Three real
+process repetitions on SQLite/PostgreSQL passed (55.799s).
+
+The remaining contention, shared bulk-retirement and source-set-install tests
+held SQL barriers while joining cancellation. They now release the exact barrier
+before joining admitted drain, retaining cancellation and unchanged-state checks.
+The post-commit cleanup test requires its disposed claim to be stale rather than
+reusable. The native fork-claim fixture now creates its run through the canonical
+lifecycle fixture owner instead of raw semantic SQL. No runtime policy or guard
+was relaxed.
+
+Focused contention/takeover/claim/fixture tests passed (19.473s), the native claim
+fixture passed (0.993s), and the wider process-capability cancellation/takeover/
+release-failure census passed (9.191s). Final race and full qualification remain
+pending; these receipts do not replace a final-head complete pass.
+
 ## Baseline and Boundary
 
 - Actual merged master: `0d7513f76bea234a7c153f488c7167847d1d8bd5` (#2445).

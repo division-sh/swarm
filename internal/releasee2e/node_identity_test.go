@@ -166,6 +166,15 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 		if len(diagnosis.FailedDeliveries) != 0 {
 			return false, fmt.Errorf("failed deliveries: %s", diagnosis.FailedDeliveries)
 		}
+		// Diagnose and event.list are separate snapshots. Do not accept a
+		// newer quiescent diagnosis with earlier in-progress event readback.
+		for _, event := range observed {
+			for _, delivery := range event.Deliveries {
+				if !delivery.Terminal {
+					return false, nil
+				}
+			}
+		}
 		return countGoldenEvents(observed, prefix+"work.processed") == 1 && diagnosis.Run.Status == "completed" && diagnosis.TestQuiescence.Ready, nil
 	})
 	if err != nil {
