@@ -199,14 +199,20 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(catalog.Release)
-				sourceID, entityID, eventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+				sourceID, eventID := uuid.NewString(), uuid.NewString()
+				entityID := sourceID
 				at := time.Unix(1700002200, 0).UTC()
+				historicalTarget := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceID, EntityID: entityID}
 				route := selectedExecutionEntitylessNodeRoute("source-only-node")
 				if surface == "activation_gate" || backend == "sqlite" {
-					route = selectedExecutionTestAgentRoute(t, sourceID, "source-agent-that-must-not-route", "flow-a/1")
+					route = selectedExecutionTestAgentRoute(t, sourceID, "source-agent-that-must-not-route", "")
+					route.Target = events.MustExistingEntityTarget(historicalTarget)
 				}
 				if backend == "postgres" {
-					seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(t, db, sourceID, entityID, eventID, "item.received", at, "test_entity", executionmode.Mock, route, nil, loaded.SourceArtifactFact)
+					seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(t, db, sourceID, entityID, eventID, "item.received", at, "test_entity", executionmode.Mock, route, nil, events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), loaded.SourceArtifactFact)
+					if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance=$1 WHERE run_id=$2::uuid AND entity_id=$3::uuid`, sourceID, sourceID, entityID); err != nil {
+						t.Fatal(err)
+					}
 					seedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, entityID, at)
 					captureSelectedExecutionSourceRevision(t, db, sourceID)
 				} else {
@@ -313,7 +319,7 @@ func seedSelectedRuntimeOutcomeSQLite(t *testing.T, ctx context.Context, selecte
 	})
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	if err := selected.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-		RunID: runID, EntityID: entityID, FlowInstance: "flow-a/1", EntityType: "test_entity", Name: "Selected Execution Entity",
+		RunID: runID, EntityID: entityID, FlowInstance: runID, EntityType: "test_entity", Name: "Selected Execution Entity",
 		CurrentState: "pending", FieldsJSON: json.RawMessage(`{"name":"Selected Execution Entity"}`), CreatedAt: at.Add(-time.Second),
 		Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "selected-execution-test", HandlerStep: "seed"},
 	}); err != nil {
@@ -323,9 +329,9 @@ func seedSelectedRuntimeOutcomeSQLite(t *testing.T, ctx context.Context, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
+	envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: entityID})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", payload, 0, runID,
-		envelope, eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID), at, executionmode.Mock)
+		envelope, events.NoRoutingSource(), at, executionmode.Mock)
 	event, err = eventfixture.BindPayload(event)
 	if err != nil {
 		t.Fatal(err)
