@@ -295,6 +295,9 @@ func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) seman
 			FlowInitial:  map[string]string{flowID: "active"},
 			FlowStates:   map[string][]string{flowID: {"active", "done"}},
 			FlowTerminal: map[string][]string{flowID: {"done"}},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+				flowID: runtimecontracts.BuildWorkflowStageTopology(flowID, "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
+			},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},

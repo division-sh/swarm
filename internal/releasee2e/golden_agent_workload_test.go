@@ -1106,16 +1106,16 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenTurns(t, ctx, rpc, runID, events, candidateIDs)
+	assertGoldenTurns(t, ctx, rpc, runID, events, entitySet, candidateIDs)
 	expectedCounts := map[string]int{
-		"search.requested":                   1,
-		"scout.requested":                    1,
-		"scout/scout.work.requested":         1,
-		"scout/scout.completed":              1,
-		"candidate.requested":                len(candidateIDs),
-		"candidate/candidate.work.requested": len(candidateIDs),
+		"search.requested":           1,
+		"scout.requested":            1,
+		"scout/scout.work.requested": 1,
+		"scout/scout.completed":      1,
+		"candidate.requested":        len(candidateIDs),
 	}
 	for _, entity := range entitySet.candidates {
+		expectedCounts[entity.FlowInstance+"/candidate.work.requested"] = 1
 		expectedCounts[entity.FlowInstance+"/candidate.analyzed"] = 1
 		expectedCounts[entity.FlowInstance+"/candidate.completed"] = 1
 	}
@@ -1373,7 +1373,7 @@ func assertGoldenAgentTeardown(t *testing.T, agents []goldenAgentSummary) {
 	}
 }
 
-func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, events []goldenEvent, candidateIDs []string) {
+func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, events []goldenEvent, entities goldenEntitySet, candidateIDs []string) {
 	t.Helper()
 	type turnExpectation struct {
 		agentID   string
@@ -1388,8 +1388,8 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		wantByTrigger[event.EventID] = turnExpectation{agentID: agentID, eventName: event.EventName}
 	}
 	addTrigger(goldenSingleNamedEvent(t, events, "scout/scout.work.requested"), "scout-worker")
-	for _, event := range goldenNamedEvents(t, events, "candidate/candidate.work.requested", len(candidateIDs)) {
-		addTrigger(event, "candidate-worker")
+	for _, candidateID := range candidateIDs {
+		addTrigger(goldenSingleNamedEvent(t, events, entities.candidates[candidateID].FlowInstance+"/candidate.work.requested"), "candidate-worker")
 	}
 
 	conversations := listGoldenConversations(t, ctx, rpc, runID)
@@ -1555,14 +1555,13 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 	assertGoldenDeliveryToEntity(t, scoutCompleted, "node", "scout-collector", "existing_entity", ".", entities.root)
 
 	candidateRequested := goldenNamedEvents(t, events, "candidate.requested", len(candidateIDs))
-	candidateWork := goldenNamedEvents(t, events, "candidate/candidate.work.requested", len(candidateIDs))
 	for _, candidateID := range candidateIDs {
 		entity := entities.candidates[candidateID]
 		requested := goldenCandidateEvent(t, candidateRequested, candidateID)
 		assertGoldenCandidatePayload(t, requested, candidateID, false)
 		assertGoldenSingleDelivery(t, requested, "node", "candidate-intake", "materializing_entity", "candidate", entity)
 
-		work := goldenCandidateEvent(t, candidateWork, candidateID)
+		work := goldenSingleNamedEvent(t, events, entity.FlowInstance+"/candidate.work.requested")
 		assertGoldenCandidatePayload(t, work, candidateID, false)
 		assertGoldenSingleDelivery(t, work, "agent", "candidate-worker", "existing_entity", "candidate", entity)
 

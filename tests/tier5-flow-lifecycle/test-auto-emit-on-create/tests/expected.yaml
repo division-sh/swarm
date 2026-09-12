@@ -8,10 +8,10 @@ expected:
   entity_state: spawned
   emitted_events:
     - worker/worker-001/auto.started
-    - worker/auto.processed
+    - worker/worker-001/auto.processed
   causal_events:
     - worker/worker-001/auto.started
-    - worker/auto.processed
+    - worker/worker-001/auto.processed
   flow_instance_created:
     template: worker
     instance_id: worker-001
