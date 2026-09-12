@@ -1402,6 +1402,13 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	supervisor.resetRequests = runtimeRequests
 	supervisor.resetContexts = runtimeContexts
 	supervisor.resetGeneration = 1
+	if family, available := stores.RunFork(); available {
+		supervisor.selected, supervisor.selectedProcess = &family, processWorkOwner
+	}
+	if err := selectedLifecycle.SetSelectedForkSupervisor(supervisor); err != nil {
+		presenter.fail(5, "selected_fork_context", err)
+		return 1
+	}
 	apiCapabilityRequest := selectedAPICapabilityRequest{
 		RepoRoot:                repo,
 		PlatformSpecPath:        resolvedPlatformSpecPath,
@@ -1419,17 +1426,37 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		RuntimeContextManager:   runtimeContextManager,
 		RuntimeSupervisor:       supervisor,
 		NoticePresentation:      noticePresentation,
+		SelectedFork:            supervisor.selected,
 	}
 	apiStoreCaps, err := buildSelectedAPICapabilities(stores, apiCapabilityRequest)
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
+	if apiStoreCaps.SelectedForkRetirement != nil {
+		if rt == nil {
+			if err := apiStoreCaps.SelectedForkRetirement.RetireSelectedContexts(ctx); err != nil {
+				presenter.fail(5, "selected_fork_empty_topology", err)
+				return 1
+			}
+		} else {
+			if err := apiStoreCaps.SelectedForkProcess.BindSelectedProcess(ctx, processWorkOwner, processCapability); err != nil {
+				presenter.fail(5, "selected_fork_process", err)
+				return 1
+			}
+			if _, err := apiStoreCaps.SelectedForkProcess.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture)); err != nil {
+				presenter.fail(5, "selected_fork_recovery", err)
+				return 1
+			}
+		}
+	}
 	storeDeps := stores.RuntimeDeps()
 	idempotency := stores.Idempotency()
 	readyFn := func() bool { return ready.Load() }
 	buildExecution := func(primary serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error) {
-		return buildServeRuntimeExecution(stores, apiCapabilityRequest, primary, toolGatewayBinding)
+		request := apiCapabilityRequest
+		request.SelectedFork = supervisor.selected
+		return buildServeRuntimeExecution(stores, request, primary, toolGatewayBinding)
 	}
 	supervisor.resetBuildExecution = buildExecution
 	if rt != nil {
@@ -1509,7 +1536,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		supervisor.executionDispatch(),
 		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager, supervisor: supervisor}, Idempotency: idempotency}),
 		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: idempotency}),
-		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Confirmation: channelOnboarding, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency, Now: opts.TestChannelOnboardingNow}),
 		apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: channelOnboarding, Channels: operatorChannels}),
 	)

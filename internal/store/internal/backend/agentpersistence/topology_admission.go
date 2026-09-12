@@ -33,6 +33,8 @@ func authorizeAgentTopologyMutation(ctx context.Context, tx *sql.Tx, req runtime
 		return topologyConflict(req, "ephemeral_execution_is_not_persistable")
 	}
 	switch req.Topology.Authority.Kind {
+	case runtimeagenttopology.AuthoritySelectedForkDeclarationPlan:
+		return authorizeSelectedDeclarationMutation(ctx, tx, req)
 	case runtimeagenttopology.AuthorityStaticDeclarationPlan:
 		return authorizeStaticDeclarationMutation(ctx, tx, req, sqlite)
 	case runtimeagenttopology.AuthorityFlowReadinessPlan:
@@ -42,6 +44,42 @@ func authorizeAgentTopologyMutation(ctx context.Context, tx *sql.Tx, req runtime
 	default:
 		return topologyConflict(req, "unknown_topology_authority")
 	}
+}
+
+func authorizeSelectedDeclarationMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) error {
+	authority := req.Topology.Authority.Selected
+	var raw []byte
+	var fingerprint string
+	if err := tx.QueryRowContext(ctx, `SELECT execution.declaration_plan, execution.declaration_plan_fingerprint
+		FROM runtime_generation_grants AS grant_fact
+		JOIN run_fork_selected_contract_runtime_executions AS execution ON execution.execution_id=grant_fact.selected_execution_id
+		WHERE grant_fact.grant_id=$1 ORDER BY grant_fact.state_version DESC LIMIT 1`, req.ProcessBinding.GenerationGrantID).Scan(&raw, &fingerprint); err != nil {
+		return fmt.Errorf("load selected declaration owner: %w", err)
+	}
+	var plan runtimeagenttopology.SelectedDeclarationPlan
+	if err := canonicaljson.DecodeInto(raw, &plan); err != nil {
+		return err
+	}
+	if err := plan.Validate(); err != nil {
+		return err
+	}
+	if authority.RunID != req.Identity.RunID || authority.BundleHash != plan.BundleHash || authority.PlanFingerprint != plan.Revision || fingerprint != plan.Revision {
+		return topologyConflict(req, "selected_declaration_coordinate_mismatch")
+	}
+	identity, err := req.Identity.Plan()
+	if err != nil {
+		return err
+	}
+	for _, desired := range plan.Agents {
+		if desired.Identity != identity {
+			continue
+		}
+		if desired.ConfigRevision != req.ConfigRevision {
+			return topologyConflict(req, "selected_declaration_config_mismatch")
+		}
+		return nil
+	}
+	return topologyConflict(req, "selected_declaration_agent_not_admitted")
 }
 
 func authorizeStaticDeclarationMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, sqlite bool) error {

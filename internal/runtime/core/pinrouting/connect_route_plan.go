@@ -641,10 +641,27 @@ type ConnectRecipientRegistration struct {
 	recipient   ConnectRecipient
 }
 
+// ConnectRecipientAssociation retains the compiled plan and receiver pin that
+// admitted a recipient, before recipients are flattened across plans.
+type ConnectRecipientAssociation struct {
+	planIdentity     events.ConnectPlanIdentity
+	receiverIdentity events.ConnectReceiverIdentity
+	recipient        ConnectRecipient
+}
+
+func (a ConnectRecipientAssociation) PlanIdentity() events.ConnectPlanIdentity {
+	return a.planIdentity
+}
+func (a ConnectRecipientAssociation) ReceiverIdentity() events.ConnectReceiverIdentity {
+	return a.receiverIdentity
+}
+func (a ConnectRecipientAssociation) Recipient() ConnectRecipient { return a.recipient }
+
 type ConnectRecipientEvaluation struct {
 	matched                   bool
 	requiresRuntimeResolution bool
 	recipients                []ConnectRecipient
+	associations              []ConnectRecipientAssociation
 	plans                     []events.ConnectPlanEvaluation
 	err                       error
 }
@@ -655,6 +672,12 @@ func (e ConnectRecipientEvaluation) RequiresRuntimeResolution() bool {
 }
 func (e ConnectRecipientEvaluation) Recipients() []ConnectRecipient {
 	return append([]ConnectRecipient(nil), e.recipients...)
+}
+
+// Associations returns accepted per-plan recipients. Ledger remains the
+// evaluation error boundary and must succeed before these facts are consumed.
+func (e ConnectRecipientEvaluation) Associations() []ConnectRecipientAssociation {
+	return append([]ConnectRecipientAssociation(nil), e.associations...)
 }
 func (e ConnectRecipientEvaluation) Ledger() (events.ConnectEvaluationLedger, error) {
 	if e.err != nil {
@@ -1613,6 +1636,11 @@ func (g CompiledConnectGraph) EvaluateMaterializedRecipients(plan ConnectRoutePl
 		return evaluation
 	}
 	evaluation.plans = append(evaluation.plans, entry)
+	for _, recipient := range recipients {
+		evaluation.associations = append(evaluation.associations, ConnectRecipientAssociation{
+			planIdentity: planID, receiverIdentity: plan.ReceiverPinIdentity().EvidenceIdentity(), recipient: recipient,
+		})
+	}
 	evaluation.recipients = normalizeConnectRecipients(evaluation.recipients)
 	return evaluation
 }
@@ -1637,6 +1665,7 @@ func (g CompiledConnectGraph) EvaluateSourceRecipients(sourceEvent SourceEvent, 
 		}
 		part := g.EvaluateMaterializedRecipients(plan, targets, registrations)
 		evaluation.recipients = append(evaluation.recipients, part.recipients...)
+		evaluation.associations = append(evaluation.associations, part.associations...)
 		evaluation.plans = append(evaluation.plans, part.plans...)
 		if part.err != nil {
 			evaluation.err = part.err

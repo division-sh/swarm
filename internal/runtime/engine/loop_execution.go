@@ -6,6 +6,8 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -16,6 +18,16 @@ func validateHandlerLoopRuntime(handler runtimecontracts.SystemNodeEventHandler)
 }
 
 func (e *Executor) stepLoop(frame *executionFrame) error {
+	if frame.req.Handler.Join != nil {
+		if handle, ref, ok := timeridentity.ParseJoinHandle(frame.payload); ok {
+			if handle.EventType() != string(frame.req.Event.Type()) || !ref.Declaration().Equal(frame.req.JoinDeclaration.Declaration()) {
+				return fmt.Errorf("join lifecycle event disagrees with its exact handle and declaration")
+			}
+			// StepJoin owns disposition and captured context. A deferred outcome is
+			// not another ordinary arrival and must not re-run its loop operation.
+			return nil
+		}
+	}
 	operation := frame.req.Handler.Loop
 	if operation == nil {
 		return e.rejectUnadmittedLoopHandler(frame)
@@ -129,6 +141,12 @@ func (e *Executor) rejectUnadmittedLoopHandler(frame *executionFrame) error {
 }
 
 func (e *Executor) advanceAdmittedLoop(frame *executionFrame, next string) error {
+	if frame != nil && frame.joinLoopGeneration.Valid() {
+		current, err := loopruntime.GenerationCurrent(frame.state.State.StateCarrier.StateBuckets, frame.joinLoopGeneration, "")
+		if err != nil || !current {
+			return fmt.Errorf("join outcome cannot advance a noncurrent captured loop generation: %v", err)
+		}
+	}
 	if frame == nil || frame.loopPlan == nil || frame.loopActivation == nil || frame.req.Handler.Loop == nil {
 		return nil
 	}
@@ -141,6 +159,39 @@ func (e *Executor) advanceAdmittedLoop(frame *executionFrame, next string) error
 		return err
 	}
 	return storeLoopActivation(frame, activation)
+}
+
+func (e *Executor) bindJoinLoopContext(frame *executionFrame, ref timeridentity.JoinRef) error {
+	generation := ref.Generation()
+	if generation == (attemptgeneration.Generation{}) {
+		if frame.req.Handler.Loop != nil {
+			return fmt.Errorf("loop-owned join outcome is missing its captured generation")
+		}
+		frame.state.SetLoop(nil)
+		return nil
+	}
+	plan, ok := workflowLoopPlan(e.deps.Source, generation.FlowID, generation.LoopID)
+	if !ok || generation.FlowID != frame.req.ExecutionFlowID.String() || generation.RevisionField != plan.RevisionField {
+		return fmt.Errorf("join captured generation has no exact compiled loop owner")
+	}
+	if operation := frame.req.Handler.Loop; operation != nil {
+		_, loopID, err := operation.Operation()
+		if err != nil || loopID != generation.LoopID {
+			return fmt.Errorf("join captured generation disagrees with its handler loop")
+		}
+	}
+	activation, found, err := loopruntime.Load(frame.state.State.StateCarrier.StateBuckets, generation.FlowID, generation.LoopID)
+	if err != nil || !found {
+		return fmt.Errorf("join captured loop owner is unavailable: %v", err)
+	}
+	context, err := activation.CapturedContext(generation)
+	if err != nil {
+		return err
+	}
+	frame.state.SetLoop(context)
+	frame.loopPlan, frame.loopActivation = &plan, &activation
+	frame.joinLoopGeneration = generation
+	return nil
 }
 
 func storeLoopActivation(frame *executionFrame, activation loopruntime.Activation) error {

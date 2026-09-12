@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -19,6 +20,10 @@ type RunControlController interface {
 	Stop(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error)
 	Pause(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error)
 	Continue(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error)
+}
+
+type SelectedForkStopOwner interface {
+	StopSelectedFork(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, bool, error)
 }
 
 type runControlRecoveryResult struct {
@@ -57,6 +62,11 @@ func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerO
 	if err != nil {
 		return nil, err
 	}
+	if action == "pause" || action == "continue" {
+		if err := requireNormalRunControl(ctx, opts.SelectedForkControls, runID, runfork.SelectedControl("run."+action)); err != nil {
+			return nil, err
+		}
+	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
@@ -70,8 +80,20 @@ func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerO
 		TTL:            runControlIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
+		controlReq := runtimeruncontrol.TransitionRequest{
+			RunID: runID, Reason: "operator_request", ControlledBy: "api.v1", Now: now,
+		}
+		var result runtimeruncontrol.TransitionResult
+		var selectedStop bool
+		var err error
+		if action == "stop" && opts.SelectedForkStop != nil {
+			result, selectedStop, err = opts.SelectedForkStop.StopSelectedFork(ctx, controlReq)
+			if err != nil {
+				return apiidempotency.Completion{}, runControlError(runID, err)
+			}
+		}
 		controller := opts.Controller
-		if runtimeContextManager(opts.RuntimeContexts) != nil {
+		if !selectedStop && runtimeContextManager(opts.RuntimeContexts) != nil {
 			var err error
 			var selected selectedRuntimeContext
 			ctx, selected, _, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, runID)
@@ -83,17 +105,11 @@ func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerO
 			}
 			controller = selected.Runtime.RunControl
 		}
-		controlReq := runtimeruncontrol.TransitionRequest{
-			RunID:        runID,
-			Reason:       "operator_request",
-			ControlledBy: "api.v1",
-			Now:          now,
-		}
-		var result runtimeruncontrol.TransitionResult
-		var err error
 		switch action {
 		case "stop":
-			result, err = controller.Stop(ctx, controlReq)
+			if !selectedStop {
+				result, err = controller.Stop(ctx, controlReq)
+			}
 		case "pause":
 			result, err = controller.Pause(ctx, controlReq)
 		case "continue":

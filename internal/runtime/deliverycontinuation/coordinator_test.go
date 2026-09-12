@@ -172,6 +172,21 @@ func coordinatorOwnershipState(c *Coordinator, deliveryID string) (ownershipStat
 	return current.state, ok
 }
 
+func acquireCoordinatorTestCapability(c *Coordinator, id string) (worklifetime.DeliveryContinuation, error) {
+	result, err := c.Acquire(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := result.Validate(id); err != nil {
+		return nil, err
+	}
+	capability, acquired := result.Acquired()
+	if !acquired {
+		return nil, errors.New("expected acquired capability")
+	}
+	return capability, nil
+}
+
 func TestCoordinatorStartRequiresExplicitExhaustionBeforeReadiness(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
@@ -289,10 +304,13 @@ func TestCoordinatorCapabilityTransfersExactlyOnce(t *testing.T) {
 		Status:     runtimedelivery.StatusFailed,
 		Authority:  authority,
 	}
+	if err := coordinator.observe(snapshot.DeliveryID); err != nil {
+		t.Fatal(err)
+	}
 	if err := coordinator.Retain(snapshot); err != nil {
 		t.Fatalf("retain retry continuation: %v", err)
 	}
-	first, err := coordinator.Acquire(snapshot.DeliveryID)
+	first, err := acquireCoordinatorTestCapability(coordinator, snapshot.DeliveryID)
 	if err != nil {
 		t.Fatalf("acquire retained continuation: %v", err)
 	}
@@ -302,7 +320,7 @@ func TestCoordinatorCapabilityTransfersExactlyOnce(t *testing.T) {
 	if _, err := first.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err == nil {
 		t.Fatal("duplicate continuation return succeeded")
 	}
-	second, err := coordinator.Acquire(snapshot.DeliveryID)
+	second, err := acquireCoordinatorTestCapability(coordinator, snapshot.DeliveryID)
 	if err != nil {
 		t.Fatalf("reacquire returned continuation: %v", err)
 	}
@@ -312,8 +330,8 @@ func TestCoordinatorCapabilityTransfersExactlyOnce(t *testing.T) {
 	if _, err := second.Resolve(context.Background(), worklifetime.DeliveryContinuationConsume); err == nil {
 		t.Fatal("duplicate continuation consumption succeeded")
 	}
-	if _, err := coordinator.Acquire(snapshot.DeliveryID); err == nil {
-		t.Fatal("consumed continuation remained locally claimable")
+	if acquired, err := coordinator.Acquire(snapshot.DeliveryID); err != nil || acquired.Disposition() != worklifetime.DeliveryAlreadyOwned {
+		t.Fatalf("attempt ownership was not preserved: %+v %v", acquired, err)
 	}
 }
 
@@ -334,7 +352,7 @@ func TestCoordinatorCarrierReturnSignalsRedispatch(t *testing.T) {
 	if err := coordinator.observe("delivery-returned"); err != nil {
 		t.Fatal(err)
 	}
-	capability, err := coordinator.Acquire("delivery-returned")
+	capability, err := acquireCoordinatorTestCapability(coordinator, "delivery-returned")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +625,7 @@ func TestCoordinatorAttemptOwnershipReconcilesFromExactStoreState(t *testing.T) 
 	if err := coordinator.observe(deliveryID); err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := coordinator.Acquire(deliveryID)
+	carrier, err := acquireCoordinatorTestCapability(coordinator, deliveryID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,8 +664,8 @@ func TestCoordinatorAttemptOwnershipReconcilesFromExactStoreState(t *testing.T) 
 	if _, _, err := coordinator.reconcileHeld(context.Background()); err != nil {
 		t.Fatalf("reconcile terminal delivery: %v", err)
 	}
-	if _, ok := coordinatorOwnershipState(coordinator, deliveryID); ok {
-		t.Fatal("terminal delivery retained a process-local continuation owner")
+	if state, ok := coordinatorOwnershipState(coordinator, deliveryID); !ok || state != ownershipTerminal {
+		t.Fatal("terminal delivery lost its explicit fence")
 	}
 }
 
@@ -673,14 +691,14 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 	if err := coordinator.Release("terminal-before-claim"); err != nil {
 		t.Fatalf("release unclaimed terminal continuation: %v", err)
 	}
-	if _, err := coordinator.Acquire("terminal-before-claim"); err == nil {
-		t.Fatal("terminal continuation remained claimable")
+	if acquired, err := coordinator.Acquire("terminal-before-claim"); err != nil || acquired.Disposition() != worklifetime.DeliveryTerminallyFenced {
+		t.Fatalf("terminal fence was not preserved: %+v %v", acquired, err)
 	}
 
 	if err := coordinator.observe("terminal-with-carrier"); err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := coordinator.Acquire("terminal-with-carrier")
+	carrier, err := acquireCoordinatorTestCapability(coordinator, "terminal-with-carrier")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,8 +714,8 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 	if resolution, err := carrier.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationTerminal {
 		t.Fatalf("return late terminal carrier: %v", err)
 	}
-	if _, ok := coordinatorOwnershipState(coordinator, "terminal-with-carrier"); ok {
-		t.Fatal("late terminal carrier return retained a process-local owner")
+	if state, ok := coordinatorOwnershipState(coordinator, "terminal-with-carrier"); !ok || state != ownershipTerminal {
+		t.Fatal("late terminal carrier return lost its terminal fence")
 	}
 	if err := coordinator.Release("terminal-with-carrier"); err != nil {
 		t.Fatalf("repeat exact terminal release: %v", err)
@@ -706,7 +724,7 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 	if err := coordinator.observe("terminal-during-consume"); err != nil {
 		t.Fatal(err)
 	}
-	consumeCarrier, err := coordinator.Acquire("terminal-during-consume")
+	consumeCarrier, err := acquireCoordinatorTestCapability(coordinator, "terminal-during-consume")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,14 +734,14 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 	if resolution, err := consumeCarrier.Resolve(context.Background(), worklifetime.DeliveryContinuationConsume); err != nil || resolution != worklifetime.DeliveryContinuationTerminal {
 		t.Fatalf("terminal carrier consume resolution = %d, %v; want terminal", resolution, err)
 	}
-	if _, ok := coordinatorOwnershipState(coordinator, "terminal-during-consume"); ok {
-		t.Fatal("terminal consume retained a process-local owner")
+	if state, ok := coordinatorOwnershipState(coordinator, "terminal-during-consume"); !ok || state != ownershipTerminal {
+		t.Fatal("terminal consume lost its terminal fence")
 	}
 
 	if err := coordinator.observe("terminal-during-reconcile"); err != nil {
 		t.Fatal(err)
 	}
-	reconciledCarrier, err := coordinator.Acquire("terminal-during-reconcile")
+	reconciledCarrier, err := acquireCoordinatorTestCapability(coordinator, "terminal-during-reconcile")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -742,8 +760,8 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 	if resolution, err := reconciledCarrier.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationTerminal {
 		t.Fatalf("reconciled terminal carrier resolution = %d, %v; want terminal", resolution, err)
 	}
-	if _, ok := coordinatorOwnershipState(coordinator, "terminal-during-reconcile"); ok {
-		t.Fatal("reconciled terminal carrier retained a process-local owner")
+	if state, ok := coordinatorOwnershipState(coordinator, "terminal-during-reconcile"); !ok || state != ownershipTerminal {
+		t.Fatal("reconciled terminal carrier lost its terminal fence")
 	}
 }
 
@@ -875,7 +893,7 @@ scansDrained:
 		t.Fatalf("topology block was reported as an execution failure: %v", err)
 	default:
 	}
-	capability, err := coordinator.Acquire(deliveryID)
+	capability, err := acquireCoordinatorTestCapability(coordinator, deliveryID)
 	if err != nil {
 		t.Fatalf("route-deferred continuation was not retained: %v", err)
 	}

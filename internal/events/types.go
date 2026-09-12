@@ -63,6 +63,7 @@ const (
 	EventAdmissionChild              EventAdmissionClass = "child"
 	EventAdmissionReplay             EventAdmissionClass = "replay"
 	EventAdmissionSelectedForkReplay EventAdmissionClass = "selected_fork_replay"
+	EventAdmissionInheritedFanOut    EventAdmissionClass = "inherited_fan_out"
 )
 
 type EventProducerType string
@@ -665,12 +666,14 @@ func (r DeliveryRecipient) LocalID() string {
 func (r DeliveryRecipient) Code() string { return r.kind.storageCode() }
 
 type DeliveryRoute struct {
-	Recipient         DeliveryRecipient         `json:"-"`
-	AgentIdentity     agentidentity.Identity    `json:"agent_identity,omitempty"`
-	Target            DeliveryTargetOwnership   `json:"delivery_target_ownership,omitempty"`
-	Context           DeliveryContext           `json:"delivery_context,omitempty"`
-	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
-	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
+	Recipient         DeliveryRecipient           `json:"-"`
+	AgentIdentity     agentidentity.Identity      `json:"agent_identity,omitempty"`
+	Target            DeliveryTargetOwnership     `json:"delivery_target_ownership,omitempty"`
+	Context           DeliveryContext             `json:"delivery_context,omitempty"`
+	PayloadProjection DeliveryPayloadProjection   `json:"delivery_payload_projection,omitempty"`
+	ConnectClaim      ConnectExecutionClaim       `json:"connect_execution_claim,omitempty"`
+	Materialization   ReceiverMaterializationPlan `json:"-"`
+	Initialization    ReceiverInitialization      `json:"-"`
 }
 
 type deliveryRouteWire struct {
@@ -681,6 +684,8 @@ type deliveryRouteWire struct {
 	Context           DeliveryContext           `json:"delivery_context,omitempty"`
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
 	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
+	Materialization   json.RawMessage           `json:"receiver_materialization_plan,omitempty"`
+	Initialization    *ReceiverInitialization   `json:"receiver_initialization,omitempty"`
 }
 
 func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
@@ -688,9 +693,28 @@ func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
 	if err := r.ConnectClaim.validateRecipient(r.Recipient); err != nil {
 		return nil, err
 	}
+	var materialization json.RawMessage
+	var initialization *ReceiverInitialization
+	if !r.Initialization.Empty() {
+		if err := r.Initialization.ValidateRoute(r); err != nil {
+			return nil, err
+		}
+		copy := r.Initialization
+		initialization = &copy
+	}
+	if !r.Materialization.Empty() {
+		if err := r.Materialization.validateDependent(r); err != nil {
+			return nil, err
+		}
+		var err error
+		materialization, err = json.Marshal(r.Materialization)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return json.Marshal(deliveryRouteWire{
 		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), AgentIdentity: r.AgentIdentity,
-		Target: r.Target, Context: r.Context, PayloadProjection: r.PayloadProjection, ConnectClaim: r.ConnectClaim,
+		Target: r.Target, Context: r.Context, PayloadProjection: r.PayloadProjection, ConnectClaim: r.ConnectClaim, Materialization: materialization, Initialization: initialization,
 	})
 }
 
@@ -719,7 +743,14 @@ func (r *DeliveryRoute) UnmarshalJSON(raw []byte) error {
 		Recipient: recipient, AgentIdentity: wire.AgentIdentity, Target: wire.Target,
 		Context: wire.Context, PayloadProjection: wire.PayloadProjection, ConnectClaim: wire.ConnectClaim,
 	}.Normalized()
-	return nil
+	if wire.Initialization != nil {
+		r.Initialization = *wire.Initialization
+		if err := r.Initialization.ValidateRoute(*r); err != nil {
+			return err
+		}
+	}
+	*r, err = RestoreDeliveryMaterialization(*r, wire.Materialization)
+	return err
 }
 
 // ConnectExecutionClaim is the opaque proof that one delivery was admitted
@@ -767,6 +798,17 @@ func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, rec
 }
 
 func (c ConnectExecutionClaim) Empty() bool { return !c.present }
+
+func (c ConnectExecutionClaim) ReceiverIdentity() (ConnectReceiverIdentity, bool) {
+	if !c.present {
+		return ConnectReceiverIdentity{}, false
+	}
+	return AdmitConnectReceiverIdentity(c.receiverPinDigest), true
+}
+
+func (c ConnectExecutionClaim) ReceiverEvent() (EventType, bool) {
+	return EventType(c.handlerEvent), c.present && c.handlerEvent != ""
+}
 
 func (c ConnectExecutionClaim) validateRecipient(recipient DeliveryRecipient) error {
 	if c.Empty() {
@@ -953,7 +995,27 @@ func ParseDeliveryRouteIdentity(raw string) (DeliveryRouteIdentity, error) {
 // relevant route fact. The normalized route remains persisted for exact
 // duplicate comparison and hydration.
 func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
+	if !r.Materialization.Empty() {
+		if err := r.Materialization.validateDependent(r); err != nil {
+			return DeliveryRouteIdentity{}, err
+		}
+	}
+	return r.identity(true)
+}
+
+// The dependency binds the agent's pre-dependency execution facts. Its final
+// durable route identity additionally includes that dependency. Node route
+// identities never omit execution facts and cannot carry a dependency.
+func (r DeliveryRoute) identity(includeMaterialization bool) (DeliveryRouteIdentity, error) {
 	r = r.Normalized()
+	var initialization *ReceiverInitialization
+	if !r.Initialization.Empty() {
+		if err := r.Initialization.ValidateRoute(r); err != nil {
+			return DeliveryRouteIdentity{}, err
+		}
+		copy := r.Initialization
+		initialization = &copy
+	}
 	if r.Recipient.Empty() {
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type and id are required")
 	}
@@ -990,22 +1052,31 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 		claim := r.ConnectClaim
 		connectClaim = &claim
 	}
+	var materialization *ReceiverMaterializationPlan
+	if includeMaterialization && !r.Materialization.Empty() {
+		copy := r.Materialization
+		materialization = &copy
+	}
 	canonical, err := json.Marshal(struct {
-		SubscriberType string                  `json:"subscriber_type"`
-		SubscriberID   string                  `json:"subscriber_id"`
-		AgentIdentity  agentidentity.Identity  `json:"agent_identity,omitempty"`
-		Target         DeliveryTargetOwnership `json:"target_ownership"`
-		Context        DeliveryContext         `json:"context"`
-		Projection     map[string]string       `json:"projection"`
-		ConnectClaim   *ConnectExecutionClaim  `json:"connect_claim,omitempty"`
+		SubscriberType  string                       `json:"subscriber_type"`
+		SubscriberID    string                       `json:"subscriber_id"`
+		AgentIdentity   agentidentity.Identity       `json:"agent_identity,omitempty"`
+		Target          DeliveryTargetOwnership      `json:"target_ownership"`
+		Context         DeliveryContext              `json:"context"`
+		Projection      map[string]string            `json:"projection"`
+		ConnectClaim    *ConnectExecutionClaim       `json:"connect_claim,omitempty"`
+		Materialization *ReceiverMaterializationPlan `json:"receiver_materialization_plan,omitempty"`
+		Initialization  *ReceiverInitialization      `json:"receiver_initialization,omitempty"`
 	}{
-		SubscriberType: r.Recipient.Code(),
-		SubscriberID:   r.Recipient.ID(),
-		AgentIdentity:  r.AgentIdentity,
-		Target:         r.Target,
-		Context:        r.Context,
-		Projection:     projection.Fields(),
-		ConnectClaim:   connectClaim,
+		SubscriberType:  r.Recipient.Code(),
+		SubscriberID:    r.Recipient.ID(),
+		AgentIdentity:   r.AgentIdentity,
+		Target:          r.Target,
+		Context:         r.Context,
+		Projection:      projection.Fields(),
+		ConnectClaim:    connectClaim,
+		Materialization: materialization,
+		Initialization:  initialization,
 	})
 	if err != nil {
 		return DeliveryRouteIdentity{}, fmt.Errorf("encode delivery route identity: %w", err)
@@ -1035,6 +1106,7 @@ type Event struct {
 	operatorRef     *OperatorReferenceProvenance
 	selectedFork    *SelectedForkLineage
 	payloadSchema   *PayloadSchemaBinding
+	inheritedFanOut *InheritedFanOutOrigin
 }
 
 type deliveryContextKey struct{}
@@ -1082,16 +1154,17 @@ type EventLineage struct {
 }
 
 type EventFacts struct {
-	ID            string
-	Type          EventType
-	Producer      ProducerClaim
-	TaskID        string
-	Payload       json.RawMessage
-	ChainDepth    int
-	Envelope      EventEnvelope
-	RoutingSource RoutingSource
-	CreatedAt     time.Time
-	ExecutionMode executionmode.Mode
+	inheritedFanOut *InheritedFanOutOrigin
+	ID              string
+	Type            EventType
+	Producer        ProducerClaim
+	TaskID          string
+	Payload         json.RawMessage
+	ChainDepth      int
+	Envelope        EventEnvelope
+	RoutingSource   RoutingSource
+	CreatedAt       time.Time
+	ExecutionMode   executionmode.Mode
 }
 
 type RunCreatingRootIngressEventInput struct {
@@ -1435,21 +1508,22 @@ func newSemanticEvent(class EventAdmissionClass, rootIntent rootIngressRunIntent
 		return Event{}, fmt.Errorf("selected-fork lineage is only valid for selected-fork replay events")
 	}
 	evt := Event{
-		admissionClass: EventAdmissionClass(strings.TrimSpace(string(class))),
-		rootIntent:     rootIntent,
-		id:             strings.TrimSpace(facts.ID),
-		eventType:      eventType,
-		producer:       producer,
-		taskID:         strings.TrimSpace(facts.TaskID),
-		payload:        payload,
-		chainDepth:     facts.ChainDepth,
-		runID:          strings.TrimSpace(runID),
-		parentEventID:  strings.TrimSpace(parentEventID),
-		createdAt:      facts.CreatedAt,
-		executionMode:  facts.ExecutionMode,
-		routingSource:  facts.RoutingSource,
-		operatorRef:    operatorRef,
-		selectedFork:   selectedFork,
+		admissionClass:  EventAdmissionClass(strings.TrimSpace(string(class))),
+		rootIntent:      rootIntent,
+		id:              strings.TrimSpace(facts.ID),
+		eventType:       eventType,
+		producer:        producer,
+		taskID:          strings.TrimSpace(facts.TaskID),
+		payload:         payload,
+		chainDepth:      facts.ChainDepth,
+		runID:           strings.TrimSpace(runID),
+		parentEventID:   strings.TrimSpace(parentEventID),
+		createdAt:       facts.CreatedAt,
+		executionMode:   facts.ExecutionMode,
+		routingSource:   facts.RoutingSource,
+		operatorRef:     operatorRef,
+		selectedFork:    selectedFork,
+		inheritedFanOut: facts.inheritedFanOut,
 	}
 	evt.setEnvelopeClaim(envelope)
 	if !evt.createdAt.IsZero() {
@@ -1607,6 +1681,10 @@ func (e Event) Clone() Event {
 	if e.payloadSchema != nil {
 		binding := *e.payloadSchema
 		cloned.payloadSchema = &binding
+	}
+	if e.inheritedFanOut != nil {
+		origin := *e.inheritedFanOut
+		cloned.inheritedFanOut = &origin
 	}
 	return cloned
 }
@@ -1883,6 +1961,8 @@ func (r DeliveryRoute) Normalized() DeliveryRoute {
 		Context:           r.Context.Normalized(),
 		PayloadProjection: r.PayloadProjection.Normalized(),
 		ConnectClaim:      r.ConnectClaim,
+		Materialization:   r.Materialization,
+		Initialization:    r.Initialization,
 	}
 }
 
@@ -1918,6 +1998,7 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 // execution classes.
 func ValidateDeliveryRoutes(in []DeliveryRoute) error {
 	owners := make(map[deliveryExecutionSlotKey]DeliveryTargetOwnership, len(in))
+	initializers := make(map[deliveryExecutionSlotKey]ReceiverInitialization, len(in))
 	for index, route := range in {
 		route = route.Normalized()
 		if !route.Recipient.IsAgent() && !route.Recipient.IsNode() {
@@ -1934,6 +2015,10 @@ func ValidateDeliveryRoutes(in []DeliveryRoute) error {
 			)
 		}
 		owners[key] = route.Target
+		if prior, found := initializers[key]; found && !prior.Equal(route.Initialization) {
+			return fmt.Errorf("delivery execution slot has conflicting initialization suppliers")
+		}
+		initializers[key] = route.Initialization
 	}
 	return ValidateDeliveryRouteProjections(in)
 }

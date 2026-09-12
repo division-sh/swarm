@@ -172,6 +172,37 @@ func preparedPublishEvent(admitted events.AdmittedEvent, settlement events.Route
 	return prepared, true, nil
 }
 
+// A duplicate is a read of the committed aggregate, not permission to trust the
+// caller's route projection or repair damaged delivery evidence.
+func (s *EventPostgresOwner) validateDuplicatePublicationTx(ctx context.Context, tx *sql.Tx, row eventrecord.Record) error {
+	snapshots, err := s.DeliverySnapshotsForEventTx(ctx, tx, row.EventID)
+	if err != nil {
+		return err
+	}
+	return validateDuplicatePublication(row, snapshots)
+}
+
+func (s *EventSQLiteOwner) validateDuplicatePublicationTx(ctx context.Context, tx *sql.Tx, row eventrecord.Record) error {
+	snapshots, err := s.DeliverySnapshotsForEventTx(ctx, tx, row.EventID)
+	if err != nil {
+		return err
+	}
+	return validateDuplicatePublication(row, snapshots)
+}
+
+func validateDuplicatePublication(row eventrecord.Record, snapshots []runtimedelivery.Snapshot) error {
+	admitted, err := decodeEventRecord(row)
+	if err != nil {
+		return err
+	}
+	settlement, err := row.DecodeSettlement()
+	if err != nil {
+		return err
+	}
+	_, _, err = preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
+	return err
+}
+
 func jsonSemanticallyEqual(left, right []byte) bool {
 	var leftValue, rightValue any
 	leftDecoder := json.NewDecoder(bytes.NewReader(left))

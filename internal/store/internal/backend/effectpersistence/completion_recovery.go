@@ -84,7 +84,7 @@ type completionRecoveryAuthorityEvidence struct {
 
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
-func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, allowed map[string]struct{}, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -112,7 +112,8 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		  AND g.flow_instance=o.flow_instance
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
-		  AND `+postgresProviderCompletionRecoveryOwnerPredicate+`
+		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id::text=$2) OR
+		  ($2='' AND o.authority_kind<>'selected_contract_fork' AND `+postgresProviderCompletionRecoveryOwnerPredicate+`
 		  AND (
 		    a.lease_expires_at <= $1 OR
 		    (o.authority_kind='normal_agent' AND (
@@ -125,9 +126,10 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		        AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		    ))
 		  )
+		  ))
 		ORDER BY a.authorized_at,a.attempt_id
 		FOR UPDATE OF o,a
-	`, now)
+	`, now, selectedExecutionID)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, fmt.Errorf("list completion attempts for recovery: %w", err)
 	}
@@ -139,7 +141,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, story, effects, true, attempts, now)
 }
 
-func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, allowed map[string]struct{}, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -167,7 +169,8 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		  AND g.flow_instance=o.flow_instance
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
-		  AND `+sqliteProviderCompletionRecoveryOwnerPredicate+`
+		  AND ((o.authority_kind='selected_contract_fork' AND o.selected_execution_id=?) OR
+		  (?='' AND o.authority_kind<>'selected_contract_fork' AND `+sqliteProviderCompletionRecoveryOwnerPredicate+`
 		  AND (
 		    a.lease_expires_at <= ? OR
 		    (o.authority_kind='normal_agent' AND (
@@ -180,8 +183,9 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		        AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		    ))
 		  )
+		  ))
 		ORDER BY a.authorized_at,a.attempt_id
-	`, now)
+	`, selectedExecutionID, selectedExecutionID, now)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, fmt.Errorf("list sqlite completion attempts for recovery: %w", err)
 	}
@@ -498,12 +502,6 @@ func reconcileCompletionParentAuthorities(ctx context.Context, tx *sql.Tx, postg
 		if _, err := tx.ExecContext(ctx, `UPDATE conversation_fork_turns f SET state='outcome_uncertain',lease_expires_at=NULL,failure=$1::jsonb,terminal_at=$2,updated_at=$2 WHERE f.state='executing' AND f.lease_expires_at<=$2 AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.fork_turn_id=f.fork_turn_id AND a.state IN ('authorized','launched','response_observed'))`, string(uncertainFailure), now); err != nil {
 			return fmt.Errorf("recover executing forkchat groups: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions e SET state='failed',lease_expires_at=NULL,failure=CASE WHEN e.state='prepared' THEN $1::jsonb ELSE $2::jsonb END,terminal_at=$3,updated_at=$3 WHERE e.state IN ('prepared','running') AND e.lease_expires_at<=$3 AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=e.execution_id AND a.state IN ('authorized','launched','response_observed'))`, string(preparedFailure), string(uncertainFailure), now); err != nil {
-			return fmt.Errorf("fail expired selected-contract runtime executions: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='closed',updated_at=$1 WHERE state='failed' AND terminal_at=$1`, now); err != nil {
-			return fmt.Errorf("close recovered selected-contract runtime executions: %w", err)
-		}
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE conversation_fork_turns SET state='abandoned',lease_expires_at=NULL,failure=?,terminal_at=?,updated_at=? WHERE state='prepared' AND lease_expires_at<=?`, string(preparedFailure), now, now, now); err != nil {
@@ -511,12 +509,6 @@ func reconcileCompletionParentAuthorities(ctx context.Context, tx *sql.Tx, postg
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE conversation_fork_turns AS f SET state='outcome_uncertain',lease_expires_at=NULL,failure=?,terminal_at=?,updated_at=? WHERE f.state='executing' AND f.lease_expires_at<=? AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.fork_turn_id=f.fork_turn_id AND a.state IN ('authorized','launched','response_observed'))`, string(uncertainFailure), now, now, now); err != nil {
 		return fmt.Errorf("recover sqlite executing forkchat groups: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions AS e SET state='failed',lease_expires_at=NULL,failure=CASE WHEN e.state='prepared' THEN ? ELSE ? END,terminal_at=?,updated_at=? WHERE e.state IN ('prepared','running') AND e.lease_expires_at<=? AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=e.execution_id AND a.state IN ('authorized','launched','response_observed'))`, string(preparedFailure), string(uncertainFailure), now, now, now); err != nil {
-		return fmt.Errorf("fail expired sqlite selected-contract runtime executions: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='closed',updated_at=? WHERE state='failed' AND terminal_at=?`, now, now); err != nil {
-		return fmt.Errorf("close recovered sqlite selected-contract runtime executions: %w", err)
 	}
 	return nil
 }

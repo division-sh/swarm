@@ -948,6 +948,16 @@ func (*flowActivationTestStore) ProcessExecutionBinding() (ProcessExecutionBindi
 	binding := lifecycleProbeProcessBinding()
 	return binding, binding.Validate()
 }
+
+func (*flowActivationTestStore) InspectRunExecutionOwnership(ctx context.Context, runID string) (RunExecutionOwnership, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		return 0, err
+	}
+	return RunExecutionOwned, nil
+}
 func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	lifecycleKey := flowActivationLifecycleKey(req)
 	if req.TargetPhase == AgentLifecycleTerminated {

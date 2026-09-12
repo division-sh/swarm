@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -63,6 +64,25 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 				t.Fatalf("owner = %#v, want %#v", got, test.want.Normalized())
 			}
 		})
+	}
+}
+
+func TestTargetOwnerDedupPreservesUnavailableEvidenceInBothOrders(t *testing.T) {
+	blueprint := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}
+	active := ActiveTargetDescriptor{ID: "one", FlowInstance: blueprint.FlowInstance, EntityID: eventtest.UUID("exact-owner")}
+	unavailable := active
+	unavailable.Availability = runtimepipeline.NewDeliveryTargetAvailability("active", "draining", false)
+	for _, descriptors := range [][]ActiveTargetDescriptor{{active, unavailable}, {unavailable, active}} {
+		projection := selectedRunTargetOwnerProjection{required: true}
+		for _, descriptor := range descriptors {
+			projection.descriptors = appendActiveTargetDescriptor(projection.descriptors, descriptor)
+		}
+		if len(projection.descriptors) != 2 {
+			t.Fatalf("dedup erased contradictory availability: %#v", projection.descriptors)
+		}
+		if _, err := projection.resolveSelectedRoute(blueprint); err == nil || !strings.Contains(err.Error(), "owner is unavailable") {
+			t.Fatalf("agent/exact-route projection admitted unavailable receiver: %v", err)
+		}
 	}
 }
 
@@ -382,7 +402,7 @@ func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
 	}
 }
 
-func TestPendingAgentLifecycleConsumesExactMaterializingOwner(t *testing.T) {
+func TestPendingAgentLifecycleRequiresInitializationBeyondExactMaterializingOwner(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "reviewer", "materializing-target-proof", "review", "one", "review/one")
 	target := events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one-future-owner"),
@@ -400,13 +420,15 @@ func TestPendingAgentLifecycleConsumesExactMaterializingOwner(t *testing.T) {
 		required:         true,
 	}
 
-	resolved, err := projection.resolveRoutePlan(plan)
-	if err != nil {
-		t.Fatalf("resolve pending materializing agent target: %v", err)
+	owner, err := projection.resolveSelectedRoute(target)
+	if err != nil || !owner.MaterializingEntity() || owner.Route() != target.Normalized() {
+		t.Fatalf("resolved owner = %#v, err=%v, want exact materializing target %#v", owner, err, target.Normalized())
 	}
-	routes := resolved.DeliveryRoutes()
-	if len(routes) != 1 || !routes[0].Target.MaterializingEntity() || routes[0].Target.Route() != target.Normalized() {
-		t.Fatalf("resolved routes = %#v, want exact materializing agent target %#v", routes, target.Normalized())
+	// Ownership alone cannot substitute for a compiled activation or node
+	// initializer. The real activation's positive case is exercised through
+	// EventBus, publication and both stores, not a fabricated descriptor here.
+	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "no admitted initialization supplier") {
+		t.Fatalf("future owner without initialization: %v", err)
 	}
 
 	projection.descriptors[0].Materializing = false

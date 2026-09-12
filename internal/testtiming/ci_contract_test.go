@@ -321,7 +321,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
-	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
+	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-selected", "serveapp-other", "serveapp-standing"}
 	var serveappPatterns []*regexp.Regexp
 	for _, id := range serveappUnits {
 		unit, exists := policy.Units[id]
@@ -377,7 +377,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
 	}
-	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-full-03", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-06"}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
 	for _, unitID := range storeRuntimeUnits {
 		unit, exists := policy.Units[unitID]

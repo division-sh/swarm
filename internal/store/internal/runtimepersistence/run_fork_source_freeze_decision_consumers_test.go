@@ -3,6 +3,9 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,15 +21,17 @@ import (
 type forkedDecisionConsumerSurface interface {
 	decisioncard.Store
 	CreateHumanTaskCard(context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation) error
+	LoadHumanTaskContinuation(context.Context, string) (decisioncard.HumanTaskContinuation, error)
 	CompleteHumanTaskOutcome(context.Context, string, string, time.Time) (decisioncard.HumanTaskContinuation, error)
 	CreateProposedEffectCard(context.Context, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
+	LoadProposedEffectContinuation(context.Context, string) (decisioncard.ProposedEffectContinuation, error)
 	CompleteProposedEffectRoute(context.Context, string, string, time.Time) (decisioncard.ProposedEffectContinuation, error)
 	SupersedeProposedEffectsForLoopGenerations(context.Context, string, string, []attemptgeneration.Generation, string, time.Time) error
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
 func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *testing.T) {
-	for _, backend := range []string{"postgres"} {
+	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
@@ -70,6 +75,30 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 				t.Fatal(err)
 			}
 
+			// The lifecycle write follows all card, draft, held-continuation and
+			// route-obligation supersessions in the same named operation.
+			trigger := fmt.Sprintf(`CREATE TRIGGER freeze_effect_failure BEFORE UPDATE ON runs WHEN OLD.run_id='%s' AND NEW.status='forked' BEGIN SELECT RAISE(ABORT, 'freeze_effect_failure'); END`, fixture.sourceRun)
+			drop := `DROP TRIGGER freeze_effect_failure`
+			var lifecycle storerunlifecycle.OperationOwner = fixture.sqlite
+			if fixture.postgres != nil {
+				lifecycle = fixture.postgres
+				trigger = fmt.Sprintf(`CREATE FUNCTION freeze_effect_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'freeze_effect_failure'; END $$; CREATE TRIGGER freeze_effect_failure BEFORE UPDATE ON runs FOR EACH ROW WHEN (OLD.run_id='%s' AND NEW.status='forked') EXECUTE FUNCTION freeze_effect_failure()`, fixture.sourceRun)
+				drop = `DROP TRIGGER freeze_effect_failure ON runs`
+			}
+			if _, err := fixture.db.ExecContext(ctx, trigger); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshotForkHistoricalExecutionTables(t, fixture.db, fixture.postgres != nil)
+			_, _, err = lifecycle.ForkRunSource(ctx, storerunlifecycle.ForkSourceRequest{RunID: fixture.sourceRun, ContinuedAsRunID: fixture.continued, EndedAt: fixture.forkedAt})
+			if err == nil || !strings.Contains(err.Error(), "freeze_effect_failure") {
+				t.Fatalf("freeze did not reach injected post-supersession fault: %v", err)
+			}
+			if after := snapshotForkHistoricalExecutionTables(t, fixture.db, fixture.postgres != nil); !reflect.DeepEqual(before, after) {
+				t.Fatal("failed freeze retained partial lifecycle, decision, draft, task, effect, route or story changes")
+			}
+			if _, err := fixture.db.ExecContext(ctx, drop); err != nil {
+				t.Fatal(err)
+			}
 			fixture.freeze(t)
 
 			newCard := newDecisionCardTestCard(t, fixture.sourceRun, now.Add(time.Minute))
@@ -125,11 +154,14 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if fixture.postgres != nil && persisted.Status != decisioncard.StatusSuperseded {
-				t.Fatalf("postgres source card status = %q, want superseded", persisted.Status)
+			if persisted.Status != decisioncard.StatusSuperseded || persisted.SupersededReason != "run_forked" {
+				t.Fatalf("source card = %+v, want run_forked supersession", persisted)
 			}
-			if fixture.sqlite != nil && persisted.Status != decisioncard.StatusPending {
-				t.Fatalf("sqlite canonical frozen-row card status = %q, want preserved pending lineage", persisted.Status)
+			if human, err := surface.LoadHumanTaskContinuation(ctx, humanCard.CardID); err != nil || human.State != decisioncard.HumanTaskContinuationSuperseded {
+				t.Fatalf("source human continuation = %+v, %v", human, err)
+			}
+			if effect, err := surface.LoadProposedEffectContinuation(ctx, effectCard.CardID); err != nil || effect.State != decisioncard.ProposedEffectSuperseded {
+				t.Fatalf("source effect continuation = %+v, %v", effect, err)
 			}
 			if !errors.Is(surface.CreateDecisionCard(ctx, newCard), storerunlifecycle.ErrRunNotActive) {
 				t.Fatal("repeated frozen decision create did not remain fail-closed")

@@ -2,11 +2,13 @@ package bootverify
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestWave1EntityResolverSplitsBusinessEntityAndPlatformEntity(t *testing.T) {
@@ -125,6 +127,24 @@ func TestEntityContractDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 	})
 }
 
+func TestRetiredReceiverSelectorsRejectEveryIngressShape(t *testing.T) {
+	for _, selector := range []canonicalrouting.SelectEntityAcquisition{canonicalrouting.SelectEntityAcquire, canonicalrouting.SelectOrCreateEntityAcquire} {
+		for _, template := range []bool{false, true} {
+			for _, external := range []bool{false, true} {
+				for _, producer := range []bool{false, true} {
+					for _, renamed := range []bool{false, true} {
+						name := fmt.Sprintf("selector-%d/template-%t/external-%t/producer-%t/renamed-%t", selector, template, external, producer, renamed)
+						t.Run(name, func(t *testing.T) {
+							root := canonicalrouting.CopySelectEntityDemotion(t, canonicalrouting.SelectEntityDemotionOptions{TemplateReceiver: template, Acquisition: selector, External: external, WithProducer: producer, RenameReceiverPin: renamed})
+							assertRetiredReceiverSelectorRejected(t, root)
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestRun_RejectsSelectEntityByPlatformEntitySourceAuthority(t *testing.T) {
 	for _, acquisition := range []string{"select_entity", "select_or_create_entity"} {
 		t.Run(acquisition, func(t *testing.T) {
@@ -138,14 +158,7 @@ treasury-node:
         by:
           vertical_id: _entity.id
 `)
-			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if !reportContains(report.Errors(), "select_entity_validation", "must resolve from payload.*") ||
-				!reportContains(report.Errors(), "select_entity_validation", "_entity.id") {
-				t.Fatalf("expected %s to reject _entity source authority, got %#v", acquisition, report.Errors())
-			}
+			assertRetiredReceiverSelectorRejected(t, root)
 		})
 	}
 }

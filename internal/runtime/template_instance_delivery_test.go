@@ -240,6 +240,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
+	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 	bus.SetInterceptors(pc)
 
 	spinup := eventtest.ExistingRunRootIngress(
@@ -344,6 +345,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
+	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 	bus.SetInterceptors(pc)
 
 	spinup := eventtest.ExistingRunRootIngress(
@@ -523,6 +525,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
+	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 	mailbox := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999913",
 		events.EventType("approval.completed"),
@@ -644,6 +647,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
+	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 
 	mailbox := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999912",

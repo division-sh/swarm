@@ -42,6 +42,7 @@ type ValueExpressionOptions struct {
 	AllowBareItem    bool
 	ItemAlias        string
 	AllowJoin        bool
+	JoinOnly         bool
 	RequireBool      bool
 	JoinResultType   runtimecontracts.CatalogTypeReference
 	JoinContext      JoinContext
@@ -79,6 +80,9 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	expression = strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
 	if expression == "" {
 		return fmt.Errorf("workflow data expression is empty")
+	}
+	if err := validateAuthoredContextRoots(expression, opts); err != nil {
+		return err
 	}
 	if expressionReferencesFanOutField(expression, "target") {
 		return fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
@@ -122,6 +126,9 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 	compiled, issues := env.Check(parsed)
 	if issues != nil && issues.Err() != nil {
 		return nil, issues.Err()
+	}
+	if err := validateLoopAccesses(compiled, opts); err != nil {
+		return nil, err
 	}
 	typeChecked := compiled
 	// Payload reads are structurally typed before this point. Other roots keep
@@ -220,6 +227,7 @@ func EvalJoinBool(expression string, join map[string]any, resultType runtimecont
 		AllowJoin:      true,
 		RequireBool:    true,
 		JoinResultType: resultType,
+		JoinOnly:       true,
 	})
 	if err != nil {
 		return false, err
@@ -246,6 +254,9 @@ func EvalValueResultWithOptions(expression string, ctx ValueContext, opts ValueE
 	normalized := strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
 	if normalized == "" {
 		return ValueResult{}, fmt.Errorf("workflow data expression is empty")
+	}
+	if err := validateAuthoredContextRoots(normalized, opts); err != nil {
+		return ValueResult{}, err
 	}
 	if expressionReferencesFanOutField(normalized, "target") {
 		return ValueResult{}, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
@@ -843,7 +854,6 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 		cel.Variable("policy", cel.DynType),
 		cel.Variable("computed", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
-		cel.Variable("_loop", cel.DynType),
 		cel.Function("count_ge",
 			cel.Overload(
 				"count_ge_dyn_dyn",
@@ -864,7 +874,7 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 	if err != nil {
 		return nil, err
 	}
-	for _, root := range []string{"entity", "join"} {
+	for _, root := range []string{"entity", "join", "_loop"} {
 		rootType, ok := provider.rootType(root)
 		if !ok {
 			rootType = cel.DynType

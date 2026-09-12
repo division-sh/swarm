@@ -34,6 +34,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 		key := runForkRevisionSubscriberKey(durable.EventID, string(durable.SubscriberClass), durable.SubscriberID)
 		deliveryKeys[key] = struct{}{}
 		item := runfork.RunForkPendingWork{
+			ClaimVersion:    durable.ClaimVersion,
 			EventID:         strings.TrimSpace(durable.EventID),
 			EventName:       strings.TrimSpace(event.EventName),
 			FlowInstance:    strings.TrimSpace(event.FlowInstance),
@@ -95,10 +96,6 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 	return out, nil
 }
 
-func LoadRunForkPendingWorkFromRevision(snapshot *RunForkRevisionSnapshot) ([]runfork.RunForkPendingWork, error) {
-	return loadRunForkPendingWorkFromRevision(snapshot)
-}
-
 func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.Snapshot, deadLetter bool) string {
 	if deadLetter || snapshot.Status == runtimedelivery.StatusDeadLetter {
 		return runfork.RunForkPendingClassificationDeadLetter
@@ -117,12 +114,26 @@ func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.Snapshot, deadLett
 	}
 }
 
-func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState, pending []runfork.RunForkPendingWork) (runForkAdmissionEvidence, error) {
+func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState, pending []runfork.RunForkPendingWork, fanOut []runfork.RunForkFanOutObligation) (runForkAdmissionEvidence, error) {
 	facts := loadRunForkSourceFactsFromRevision(snapshot, entities)
+	ownedSchedules, err := validateRunForkBarrierSchedules(snapshot, fanOut)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	if err := admitRunForkTerminalBarrierHistory(snapshot, fanOut, pending); err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
 	relevantTimer := false
 	entityIDs := stringSliceSet(facts.EntityIDs)
 	flowInstances := stringSliceSet(facts.FlowInstances)
 	for _, timer := range snapshot.Timers {
+		if _, owned := ownedSchedules[timer.TimerID]; owned {
+			continue
+		}
+		if timer.RunID == snapshot.RunID {
+			relevantTimer = true
+			break
+		}
 		if _, ok := entityIDs[strings.TrimSpace(timer.EntityID)]; ok && strings.TrimSpace(timer.EntityID) != "" {
 			relevantTimer = true
 			break
@@ -202,10 +213,6 @@ func loadRunForkSourceFactsFromRevision(snapshot *runForkRevisionSnapshot, entit
 		FlowInstances: stringSetValues(flowSet),
 		SourceFlows:   stringSetValues(sourceFlowSet),
 	}
-}
-
-func LoadRunForkSourceFactsFromRevision(snapshot *RunForkRevisionSnapshot, entities []runfork.RunForkEntityState) RunForkSourceFacts {
-	return loadRunForkSourceFactsFromRevision(snapshot, entities)
 }
 
 func runForkRevisionSubscriberKey(eventID, subscriberType, subscriberID string) string {

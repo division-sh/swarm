@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
@@ -47,8 +48,11 @@ func mustRunForkTestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
 }
 
 type runForkTestWorkFixture struct {
-	process *worklifetime.Process
-	runtime *worklifetime.RuntimeOccurrence
+	process      *worklifetime.Process
+	runtime      *worklifetime.RuntimeOccurrence
+	mu           sync.Mutex
+	capabilities map[startupownership.Store]startupownership.ProcessCapability
+	owners       map[startupownership.Store]SelectedContractExecutionOwner
 }
 
 var runForkTestWorkFixtures sync.Map
@@ -89,6 +93,8 @@ func testGatewayWorkOwner(t testing.TB) *worklifetime.RuntimeOccurrence {
 func runForkTestContext(t testing.TB) context.Context {
 	t.Helper()
 	ctx := worklifetime.WithOccurrence(context.Background(), testGatewayWorkOwner(t))
+	fixture, _ := runForkTestWorkFixtures.Load(t)
+	ctx = worklifetime.WithProcess(ctx, fixture.(*runForkTestWorkFixture).process)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	return runtimeauthoractivity.WithScope(
 		ctx,

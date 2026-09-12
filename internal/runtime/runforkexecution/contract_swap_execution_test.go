@@ -99,7 +99,7 @@ func testContractSwapExecutionInputs(t *testing.T) (
 		SourceEventID: "source-event",
 		EventName:     "work.begin",
 		Recipients: []runfork.RunForkContractFrontierRecipient{
-			testNodeFrontierRecipient("selected-node", "flow-a/selected-node", "selected_contracts"),
+			testNodeFrontierRecipient(mustRunForkNode("flow-a", "selected-node"), "work.begin", "flow-a/selected-node", "selected_contracts"),
 		},
 		Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 	}}

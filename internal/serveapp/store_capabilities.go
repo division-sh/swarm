@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -8,11 +9,13 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
-	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -34,7 +37,9 @@ type selectedAPICapabilities struct {
 	ConversationForkLifecycle apiv1.ConversationForkLifecycleStore
 	RunForkAvailability       apiv1.RunForkAvailabilityStore
 	RunFork                   apiv1.RunForkExecutor
-	RunForkSelector           apiv1.RunForkExecutorSelector
+	SelectedForkControls      apiv1.SelectedForkControlAdmission
+	SelectedForkRetirement    selectedForkContextRetirement
+	SelectedForkProcess       selectedForkProcessOwner
 	RuntimeContexts           *runtime.RuntimeContextManager
 	ResetCoordinator          apiv1.DestructiveResetCoordinator
 }
@@ -56,9 +61,12 @@ type selectedAPICapabilityRequest struct {
 	ProcessCapability       runtimestartupownership.ProcessCapability
 	PlatformPackBases       *packartifact.PlatformPackBaseGenerationOwner
 	NoticePresentation      runtimetools.InformationalNoticePresentationSink
+	SelectedFork            *storeselected.RunFork
 }
 
-func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+var buildSelectedAPICapabilities = constructSelectedAPICapabilities
+
+func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 	caps := selectedAPICapabilities{
 		Database: owner.Pinger(), Runs: owner.Runs(), Entities: owner.Entities(), Agents: owner.Agents(),
 		Conversations: owner.Conversations(), Observability: owner.Observability(),
@@ -72,7 +80,11 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 	if _, available := owner.DestructiveReset(); available {
 		caps.ResetCoordinator = buildSelectedResetCoordinator(owner, req.ProcessCapability, req.RuntimeSupervisor)
 	}
-	if family, available := owner.RunFork(); available {
+	family, available := owner.RunFork()
+	if req.SelectedFork != nil {
+		family, available = *req.SelectedFork, true
+	}
+	if available {
 		artifactStore := owner.SourceArtifactStore()
 		if artifactStore == nil {
 			return selectedAPICapabilities{}, fmt.Errorf("run.fork requires selected source artifact reader")
@@ -85,7 +97,6 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 		executor := apiv1.SelectedContractRunForkExecutor{
 			ExecuteSelectedContractRunFork: family.Execute,
 			SourceLoader:                   loader,
-			ContractSelection:              runforkadmission.SelectedContractSelection(req.Source),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config: req.Config, ExecutionPosture: req.ExecutionPosture,
 				EntityStore: deps.ToolEntityStore, HumanTaskStore: deps.HumanTaskStore,
@@ -98,7 +109,9 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 		}
 		caps.RunForkAvailability = family.Availability()
 		caps.RunFork = executor
-		caps.RunForkSelector = executor
+		caps.SelectedForkControls = family
+		caps.SelectedForkRetirement = family
+		caps.SelectedForkProcess = family
 	}
 	return caps, nil
 }
@@ -117,4 +130,10 @@ func buildSelectedResetCoordinator(owner *storeselected.Owner, capability runtim
 		Cleaner:    runtimedestructivereset.Cleaner{Store: processOwnedDestructiveResetStore{capability: capability}},
 		Containers: runtimedestructivereset.ManagedContainerStopper{Runtime: supervisor}, RuntimeContexts: supervisor,
 	}
+}
+
+type selectedForkProcessOwner interface {
+	apiv1.SelectedForkStopOwner
+	BindSelectedProcess(context.Context, *worklifetime.Process, runtimestartupownership.ProcessCapability) error
+	RecoverSelectedForkContexts(context.Context, effects.RecoveryRequest) ([]runfork.SelectedForkRecoveryResult, error)
 }

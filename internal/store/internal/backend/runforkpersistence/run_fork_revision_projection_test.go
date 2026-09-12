@@ -1,4 +1,4 @@
-package runtimepersistence
+package runforkpersistence
 
 import (
 	"bytes"
@@ -67,9 +67,11 @@ func TestRunForkRevisionProjectionReconstructsExactPayloadBytes(t *testing.T) {
 		[]byte(`{"b":2,"a":1}`),
 		[]byte(`{"value":1.0}`),
 	} {
-		snapshot := &runForkRevisionSnapshot{}
-		raw := []byte(`{"event_id":"event-1","event_name":"proof","payload_base64":"` + base64.StdEncoding.EncodeToString(payload) + `"}`)
-		if err := appendRunForkRevisionFact(snapshot, runforkrevision.FamilyEvents, runForkRevisionedFact{FirstRevision: 1, Revision: 1}, raw); err != nil {
+		snapshot := &runForkRevisionSnapshot{RunID: "10000000-0000-0000-0000-000000000001", Revision: 1}
+		raw := []byte(`{"event_id":"20000000-0000-0000-0000-000000000001","event_name":"proof","payload_base64":"` + base64.StdEncoding.EncodeToString(payload) + `"}`)
+		if err := appendRunForkHistoricalFact(snapshot, runForkHistoricalFactContext{
+			RunID: snapshot.RunID, Family: runforkrevision.FamilyEvents, Key: "20000000-0000-0000-0000-000000000001", FirstRevision: 1, Revision: 1,
+		}, raw); err != nil {
 			t.Fatalf("append exact payload fact %q: %v", payload, err)
 		}
 		if len(snapshot.Events) != 1 || !bytes.Equal(snapshot.Events[0].Payload, payload) {
@@ -79,12 +81,11 @@ func TestRunForkRevisionProjectionReconstructsExactPayloadBytes(t *testing.T) {
 }
 
 func TestRunForkRevisionProjectionRejectsMalformedSourceRoute(t *testing.T) {
-	snapshot := &runForkRevisionSnapshot{}
-	err := appendRunForkRevisionFact(
+	snapshot := &runForkRevisionSnapshot{RunID: "10000000-0000-0000-0000-000000000001", Revision: 1}
+	err := appendRunForkHistoricalFact(
 		snapshot,
-		runforkrevision.FamilyEvents,
-		runForkRevisionedFact{FirstRevision: 1, Revision: 1},
-		[]byte(`{"event_id":"event-1","event_name":"producer/scan.requested","routing_source":{"kind":"concrete_template_instance","route":{"flow_instance":17}}}`),
+		runForkHistoricalFactContext{RunID: snapshot.RunID, Family: runforkrevision.FamilyEvents, Key: "20000000-0000-0000-0000-000000000001", FirstRevision: 1, Revision: 1},
+		[]byte(`{"event_id":"20000000-0000-0000-0000-000000000001","event_name":"producer/scan.requested","routing_source":{"kind":"concrete_template_instance","route":{"flow_instance":17}}}`),
 	)
 	if err == nil || !strings.Contains(err.Error(), "decode run fork events revision fact") {
 		t.Fatalf("malformed source route error = %v, want typed revision decode failure", err)

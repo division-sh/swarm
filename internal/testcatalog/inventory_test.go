@@ -294,7 +294,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal/releasee2e"), runs); err != nil {
 		t.Fatal(err)
 	}
-	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-other", "serveapp-standing"}
+	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-selected", "serveapp-other", "serveapp-standing"}
 	catalogUnits := []string{"catalog-replay-1", "catalog-replay-2", "catalog-replay-3", "catalog-runtime", "catalog-runtime-staged"}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
 		var selectors []string

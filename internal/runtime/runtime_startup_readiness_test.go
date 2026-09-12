@@ -487,7 +487,7 @@ func (r startupAbortCatalogRegistrar) RegisterAuthorActivityEventCatalog(scope a
 }
 
 type startupReadinessFailingGrant struct {
-	startupownership.GenerationGrant
+	startupownership.LiveGenerationGrant
 	cause         error
 	evidencePanic any
 }
@@ -496,7 +496,7 @@ func (g startupReadinessFailingGrant) Evidence() (startupownership.GrantEvidence
 	if g.evidencePanic != nil {
 		panic(g.evidencePanic)
 	}
-	return g.GenerationGrant.Evidence()
+	return g.LiveGenerationGrant.Evidence()
 }
 
 func (g startupReadinessFailingGrant) MarkProbesSettled(context.Context, []string) (startupownership.GrantEvidence, error) {
@@ -530,10 +530,10 @@ func TestRuntimeStartOwnsEarlyFailureAndPanicCleanup(t *testing.T) {
 				rt.CloseAdmission()
 			}
 			if phase == "release_error" {
-				rt.startupGrant = startupReadinessFailingGrant{GenerationGrant: grant, cause: cause}
+				rt.startupGrant = startupReadinessFailingGrant{LiveGenerationGrant: grant, cause: cause}
 			}
 			if phase == "grant_panic" {
-				rt.startupGrant = startupReadinessFailingGrant{GenerationGrant: grant, evidencePanic: cause}
+				rt.startupGrant = startupReadinessFailingGrant{LiveGenerationGrant: grant, evidencePanic: cause}
 			}
 			rt.Options.BootProgress = func(event BootProgressEvent) {
 				if (phase == "prepare_panic" && event.Step == 5) || (phase == "release_panic" && event.Step == 16) {

@@ -24,8 +24,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.SchemaCount != 236 {
 		t.Fatalf("schema count = %d, want 236", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 67 {
-		t.Fatalf("error code count = %d, want 67", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 68 {
+		t.Fatalf("error code count = %d, want 68", report.ErrorCodeCount)
 	}
 	if report.MutatingMethodCount != 30 {
 		t.Fatalf("mutating method count = %d, want 30", report.MutatingMethodCount)
@@ -133,8 +133,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Components.Schemas) != 236 {
 		t.Fatalf("generated OpenRPC schemas = %d, want 236", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 67 {
-		t.Fatalf("generated OpenRPC errors = %d, want 67", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 68 {
+		t.Fatalf("generated OpenRPC errors = %d, want 68", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
@@ -338,10 +338,17 @@ func TestGeneratedOpenRPCBundleIdentityDescriptionsPreserveConstraints(t *testin
 		runForkParams[param.Name] = param
 	}
 	assertOpenRPCParamDescriptionContains(t, "run.fork", runForkParams, "bundle_hash",
-		"#976",
-		"loaded/boot-pinned RuntimeContextManager BundleContext",
+		"exact retained target artifact",
+		"independent process-owned selected preparation",
+		"Loaded normal runtime membership is irrelevant",
 		"BUNDLE_UNAVAILABLE",
 		"BUNDLE_DATA_INTEGRITY_ERROR",
+	)
+	if _, ok := runForkParams["confirm_source_freeze"]; ok {
+		t.Fatal("generated run.fork still accepts retired freeze consent")
+	}
+	assertOpenRPCParamDescriptionContains(t, "run.fork", runForkParams, "allow_source_freeze",
+		"permanently freezing", "advanced source stays independently live", "Terminal sources refuse",
 	)
 }
 
@@ -365,6 +372,10 @@ func TestFilesystemSourceAuthorityPublishesOnlyAdmittedArtifactRuntimeMethods(t 
 	assertScalarValue(t, mustMappingValue(t, multi, "status"), "source_artifact_authority")
 	assertScalarValue(t, mustMappingValue(t, multi, "canonical_owner"), "platform-spec.yaml#filesystem_source_model")
 	assertScalarValue(t, mustYAMLPath(t, multi, "generated_artifact_policy", "current_openrpc_status"), "run_fork_only")
+	publicationProof := mustYAMLPath(t, multi, "explicit_splits", "publication", "fork_journey_proof")
+	assertScalarContains(t, publicationProof, "never public publication")
+	assertScalarContains(t, publicationProof, "journey remains pending this publication work")
+	assertScalarContains(t, publicationProof, "no retired register command is restored")
 
 	methods := mustYAMLPath(t, root, "api_specification", "method_catalog")
 	for _, retired := range []string{"bundle.register", "bundle.delete", "bundle.list", "bundle.get", "bundle.agents"} {

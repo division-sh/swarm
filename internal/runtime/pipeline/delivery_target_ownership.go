@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -22,6 +21,33 @@ import (
 type DeliveryTargetOwnerCandidate struct {
 	Route         events.RouteIdentity
 	Materializing bool
+	Availability  DeliveryTargetAvailability
+}
+
+// DeliveryTargetAvailability is immutable state/companion evidence, not a
+// receiver-selection policy. Missing companion rows are admitted by the reader
+// as active state-only ownership; an existing inactive companion is not absent.
+type DeliveryTargetAvailability struct {
+	stage    string
+	inactive bool
+}
+
+func NewDeliveryTargetAvailability(stage, status string, terminated bool) DeliveryTargetAvailability {
+	return DeliveryTargetAvailability{stage: strings.TrimSpace(stage), inactive: terminated || !strings.EqualFold(strings.TrimSpace(status), "active")}
+}
+
+func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID string) error {
+	if a.inactive {
+		return fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
+	}
+	if source != nil {
+		for _, terminal := range source.FlowTerminalStages(flowID) {
+			if strings.EqualFold(strings.TrimSpace(terminal), a.stage) {
+				return fmt.Errorf("receiver target owner is unavailable: terminal state %q", a.stage)
+			}
+		}
+	}
+	return nil
 }
 
 // DeliveryTargetHandler is the admitted, non-durable receiver fact consumed by
@@ -75,6 +101,12 @@ func (h DeliveryTargetHandler) Node() runtimeidentity.ExecutableNode {
 	return h.node
 }
 
+// EventOverride returns the admitted handler-local event without localizing or
+// inferring a replacement from a publication envelope.
+func (h DeliveryTargetHandler) EventOverride() (events.EventType, bool) {
+	return h.eventType, h.present && h.eventType != ""
+}
+
 // ExecutionFlowID derives the runtime flow scope without changing the
 // declaration coordinate. Root project nodes have an explicitly empty owning
 // flow in ExecutableNode and execute in the bundle's root flow.
@@ -107,6 +139,24 @@ func (h DeliveryTargetHandler) resolve(source semanticview.Source, eventType eve
 	return resolved.Handler, resolved.Matched
 }
 
+// MaterializesReceiver consumes the same handler compatibility policy used by
+// target classification and execution. A select-only observer never becomes a
+// materializer merely because another same-plan owner is future-valued.
+func (h DeliveryTargetHandler) MaterializesReceiver(source semanticview.Source, eventType events.EventType) (bool, error) {
+	handler, found := h.resolve(source, eventType)
+	if !found {
+		return false, fmt.Errorf("receiver materializer lacks an admitted handler")
+	}
+	if h.eventType != "" {
+		eventType = h.eventType
+	}
+	policy, err := CompileDeliveryTargetCompatibilityPolicy(source, h.Node(), h.ExecutionFlowID(source), eventType, handler)
+	if err != nil {
+		return false, err
+	}
+	return policy.Dependency.materializes(), nil
+}
+
 // AdmitDeliveryTargetHandler admits one exact authored declaration owner. The
 // concrete event is resolved later so wildcard subscriptions remain bounded by
 // the same owner without freezing a pattern as an executable handler.
@@ -125,14 +175,12 @@ func AdmitDeliveryTargetHandler(source semanticview.Source, node runtimeidentity
 }
 
 type DeliveryTargetOwnershipRequest struct {
-	Context           context.Context
-	Source            semanticview.Source
-	Event             events.Event
-	Recipient         events.DeliveryRecipient
-	Blueprint         events.RouteIdentity
-	Handler           DeliveryTargetHandler
-	Candidates        []DeliveryTargetOwnerCandidate
-	WorkflowInstances WorkflowInstancePersistenceReader
+	Source     semanticview.Source
+	Event      events.Event
+	Recipient  events.DeliveryRecipient
+	Blueprint  events.RouteIdentity
+	Handler    DeliveryTargetHandler
+	Candidates []DeliveryTargetOwnerCandidate
 }
 
 // DeliveryTargetEntityDependency is the closed execution-semantic state
@@ -161,35 +209,14 @@ func (d DeliveryTargetEntityDependency) materializes() bool {
 	return d == DeliveryTargetEntityMaterializing
 }
 
-// DeliveryTargetAcquisition is the closed receiver acquisition policy. The
-// zero value means that exact route evidence, rather than a key lookup, owns
-// receiver selection.
-type DeliveryTargetAcquisition uint8
-
-const (
-	DeliveryTargetAcquisitionNone DeliveryTargetAcquisition = iota
-	DeliveryTargetAcquisitionCreate
-	DeliveryTargetAcquisitionSelect
-	DeliveryTargetAcquisitionSelectOrCreate
-)
-
-func (a DeliveryTargetAcquisition) Valid() bool {
-	return a <= DeliveryTargetAcquisitionSelectOrCreate
-}
-
-func (a DeliveryTargetAcquisition) UsesDeclaredKey() bool {
-	return a == DeliveryTargetAcquisitionSelect || a == DeliveryTargetAcquisitionSelectOrCreate
-}
-
 // DeliveryTargetCompatibilityPolicy is the canonical receiver contract shared
 // by routing admission, boot verification, and stamped execution.
 type DeliveryTargetCompatibilityPolicy struct {
-	Dependency  DeliveryTargetEntityDependency
-	Acquisition DeliveryTargetAcquisition
+	Dependency DeliveryTargetEntityDependency
 }
 
 func (p DeliveryTargetCompatibilityPolicy) Validate() error {
-	if !p.Dependency.Valid() || !p.Acquisition.Valid() {
+	if !p.Dependency.Valid() {
 		return fmt.Errorf("invalid delivery target compatibility policy")
 	}
 	return nil
@@ -202,7 +229,6 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if !req.Recipient.IsNode() {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("delivery target ownership classification requires a node recipient")
 	}
-	declarationBoundTarget := false
 	if isJoinLifecycleEvent(req.Event.Type()) {
 		recipient, target, handler, ok, err := ResolveWorkflowJoinOccurrenceDeliveryTarget(req.Source, req.Event)
 		if err != nil {
@@ -219,7 +245,6 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		}
 		req.Handler = handler
 		req.Blueprint = target
-		declarationBoundTarget = true
 	}
 	blueprint := req.Blueprint.Normalized()
 	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
@@ -235,21 +260,6 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
-	if deliveryTargetHandlerUsesDeclaredKey(handler, policy.Acquisition) && !req.Event.HasTargetRoute() && !declarationBoundTarget {
-		// Declared-key acquisition owns selection only for an explicitly untargeted
-		// event. A targeted event or declaration-bound lifecycle occurrence already
-		// carries admitted exact receiver evidence; re-resolving its payload key
-		// could redirect it to another entity.
-		blueprint = events.RouteIdentity{FlowID: flowID}
-		acquired, err := acquireDeliveryTargetByDeclaredKey(req.Context, req.WorkflowInstances, req.Source, flowID, req.Recipient.ID(), handler, req.Event, policy.Acquisition)
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, err
-		}
-		blueprint = acquired.Route()
-		req.Candidates = []DeliveryTargetOwnerCandidate{{
-			Route: acquired.Route(), Materializing: acquired.MaterializingEntity(),
-		}}
-	}
 	if strings.TrimSpace(flowID) == strings.TrimSpace(semanticview.RootExecutionFlowID(req.Source)) {
 		blueprint, err = selectedRunRootTargetBlueprint(req.Source, req.Event, blueprint, req.Event.HasTargetRoute())
 		if err != nil {
@@ -262,7 +272,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if blueprint.FlowInstance == "" {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint requires an exact flow instance")
 	}
-	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(blueprint, req.Candidates)
+	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(req.Source, blueprint, req.Candidates)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
@@ -280,7 +290,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		return events.NewMaterializingEntityTarget(materializing[0])
 	}
 	if len(existing) == 1 && len(materializing) == 0 {
-		if policy.Acquisition == DeliveryTargetAcquisitionCreate {
+		if handler.CreateEntity {
 			planned, err := canonicalHandlerMaterializationTarget(req.Source, flowID, handler, req.Event, blueprint)
 			if err != nil {
 				return events.DeliveryTargetOwnership{}, err
@@ -291,10 +301,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		}
 		return events.NewExistingEntityTarget(existing[0])
 	}
-	if policy.Acquisition == DeliveryTargetAcquisitionSelect {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_entity target owner is missing for flow %q", flowID)
-	}
-	if policy.Acquisition == DeliveryTargetAcquisitionCreate || policy.Acquisition == DeliveryTargetAcquisitionSelectOrCreate || policy.Dependency == DeliveryTargetEntityMaterializing {
+	if policy.Dependency == DeliveryTargetEntityMaterializing {
 		planned, err := canonicalHandlerMaterializationTarget(req.Source, flowID, handler, req.Event, blueprint)
 		if err != nil {
 			return events.DeliveryTargetOwnership{}, err
@@ -351,6 +358,15 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	if handlerFact.Empty() {
 		return fmt.Errorf("receiver %s requires an admitted target handler", recipient.ID())
 	}
+	if isJoinLifecycleEvent(evt.Type()) {
+		declaredRecipient, target, declaredHandler, found, err := ResolveWorkflowJoinOccurrenceDeliveryTarget(source, evt)
+		if err != nil {
+			return err
+		}
+		if !found || recipient != declaredRecipient || !handlerFact.Node().Equal(declaredHandler.Node()) || handlerFact.eventType != declaredHandler.eventType || owner.Route() != target {
+			return fmt.Errorf("stamped join lifecycle ownership contradicts its exact declaration occurrence")
+		}
+	}
 	flowID := handlerFact.ExecutionFlowID(source)
 	route := owner.Route()
 	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
@@ -374,7 +390,7 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	}
 	switch {
 	case owner.EntitylessReceiver():
-		if policy.Dependency != DeliveryTargetEntityOptional || policy.Acquisition != DeliveryTargetAcquisitionNone {
+		if policy.Dependency != DeliveryTargetEntityOptional {
 			return fmt.Errorf("entityless_receiver ownership disagrees with entity-scoped handler %s", recipient.ID())
 		}
 	case owner.MaterializingEntity():
@@ -386,7 +402,7 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 			return fmt.Errorf("materializing_entity ownership disagrees with canonical future identity: stamped=%#v planned=%#v", owner.Route(), planned)
 		}
 	case owner.ExistingEntity():
-		if policy.Acquisition == DeliveryTargetAcquisitionCreate {
+		if handler.CreateEntity {
 			planned, err := canonicalHandlerMaterializationTarget(source, flowID, handler, evt, owner.Route())
 			if err != nil {
 				return err
@@ -402,230 +418,20 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 }
 
 // CompileDeliveryTargetCompatibilityPolicy is the shared verifier/runtime
-// policy owner. Handler fields own execution dependency; explicit acquisition
-// declarations and exact input resolution own acquisition independently.
+// policy owner. Composition has already selected the receiving instance;
+// handler fields describe only its state dependency and initialization.
 func CompileDeliveryTargetCompatibilityPolicy(source semanticview.Source, node runtimeidentity.ExecutableNode, flowID string, eventType events.EventType, handler SystemNodeEventHandler) (DeliveryTargetCompatibilityPolicy, error) {
 	flowID = strings.TrimSpace(flowID)
 	if source != nil && !node.Valid() {
 		return DeliveryTargetCompatibilityPolicy{}, fmt.Errorf("delivery target compatibility requires exact executable node identity")
 	}
 	policy := DeliveryTargetCompatibilityPolicy{
-		Dependency:  handlerExecutionEntityRequirementForNode(source, node, eventType, flowID, handler),
-		Acquisition: deliveryTargetHandlerAcquisition(handler),
-	}
-	endpointAcquisition, err := deliveryTargetEndpointAcquisition(source, flowID, eventType)
-	if err != nil {
-		return DeliveryTargetCompatibilityPolicy{}, err
-	}
-	if endpointAcquisition != DeliveryTargetAcquisitionNone {
-		if policy.Acquisition != DeliveryTargetAcquisitionNone && policy.Acquisition != endpointAcquisition {
-			return DeliveryTargetCompatibilityPolicy{}, fmt.Errorf("handler acquisition %s contradicts input resolution %s", deliveryTargetAcquisitionCode(policy.Acquisition), deliveryTargetAcquisitionCode(endpointAcquisition))
-		}
-		policy.Acquisition = endpointAcquisition
+		Dependency: handlerExecutionEntityRequirementForNode(source, node, eventType, flowID, handler),
 	}
 	if err := policy.Validate(); err != nil {
 		return DeliveryTargetCompatibilityPolicy{}, err
 	}
 	return policy, nil
-}
-
-func deliveryTargetHandlerAcquisition(handler SystemNodeEventHandler) DeliveryTargetAcquisition {
-	switch {
-	case handler.CreateEntity:
-		return DeliveryTargetAcquisitionCreate
-	case handler.SelectEntity != nil && !handler.SelectEntity.Empty():
-		return DeliveryTargetAcquisitionSelect
-	case handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty():
-		return DeliveryTargetAcquisitionSelectOrCreate
-	default:
-		return DeliveryTargetAcquisitionNone
-	}
-}
-
-func deliveryTargetHandlerUsesDeclaredKey(handler SystemNodeEventHandler, acquisition DeliveryTargetAcquisition) bool {
-	return (acquisition == DeliveryTargetAcquisitionSelect && handler.SelectEntity != nil && !handler.SelectEntity.Empty()) ||
-		(acquisition == DeliveryTargetAcquisitionSelectOrCreate && handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty())
-}
-
-func deliveryTargetEndpointAcquisition(source semanticview.Source, flowID string, eventType events.EventType) (DeliveryTargetAcquisition, error) {
-	if source == nil || strings.TrimSpace(flowID) == "" || strings.TrimSpace(string(eventType)) == "" {
-		return DeliveryTargetAcquisitionNone, nil
-	}
-	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, string(eventType))
-	if association.Status == semanticview.EndpointAssociationAmbiguous {
-		return DeliveryTargetAcquisitionNone, association.Err()
-	}
-	endpoint, ok := association.Endpoint()
-	if !ok {
-		return DeliveryTargetAcquisitionNone, nil
-	}
-	switch endpoint.ResolutionMode {
-	case runtimecontracts.FlowInputResolutionModeCreate:
-		return DeliveryTargetAcquisitionCreate, nil
-	case runtimecontracts.FlowInputResolutionModeSelect:
-		return DeliveryTargetAcquisitionSelect, nil
-	case runtimecontracts.FlowInputResolutionModeSelectOrCreate:
-		return DeliveryTargetAcquisitionSelectOrCreate, nil
-	default:
-		return DeliveryTargetAcquisitionNone, nil
-	}
-}
-
-func deliveryTargetAcquisitionCode(acquisition DeliveryTargetAcquisition) string {
-	switch acquisition {
-	case DeliveryTargetAcquisitionCreate:
-		return "create_entity"
-	case DeliveryTargetAcquisitionSelect:
-		return "select_entity"
-	case DeliveryTargetAcquisitionSelectOrCreate:
-		return "select_or_create_entity"
-	default:
-		return "none"
-	}
-}
-
-func acquireDeliveryTargetByDeclaredKey(
-	ctx context.Context,
-	reader WorkflowInstancePersistenceReader,
-	source semanticview.Source,
-	flowID, nodeID string,
-	handler SystemNodeEventHandler,
-	evt events.Event,
-	acquisition DeliveryTargetAcquisition,
-) (events.DeliveryTargetOwnership, error) {
-	if !acquisition.UsesDeclaredKey() {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("declared-key acquisition requires select or select-or-create policy")
-	}
-	if reader == nil {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_unavailable: workflow instance reader is required for node %s flow %s", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID))
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	var (
-		expected map[string]any
-		err      error
-	)
-	if acquisition == DeliveryTargetAcquisitionSelect {
-		expected, err = selectEntityExpectedValues(handler.SelectEntity, evt)
-	} else {
-		expected, err = selectOrCreateEntityExpectedValues(handler.SelectOrCreateEntity, evt)
-	}
-	if err != nil {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_invalid: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	}
-	selectionOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID, evt.RunID())
-	if err != nil {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	}
-	stateRecords, err := reader.SelectActiveWorkflowEntityStates(
-		ctx,
-		evt.RunID(),
-		selectionOwner,
-		selectEntityFieldSelectors(expected),
-		source.FlowTerminalStages(flowID),
-	)
-	if err != nil {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	}
-	matches := make([]WorkflowInstance, 0, len(stateRecords))
-	for _, record := range stateRecords {
-		candidate, err := decodeDeliveryTargetWorkflowEntityState(source, flowID, evt.RunID(), record)
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-		}
-		if !workflowInstanceOwnedByFlow(source, candidate, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, candidate) || !selectEntityCandidateMatches(candidate, expected) {
-			continue
-		}
-		matches = append(matches, candidate)
-	}
-	switch len(matches) {
-	case 0:
-		if acquisition == DeliveryTargetAcquisitionSelect {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_entity_no_match: node %s flow %s found no entity matching declared key", strings.TrimSpace(nodeID), strings.TrimSpace(flowID))
-		}
-		return acquireSelectOrCreateMaterializingTarget(ctx, reader, source, flowID, nodeID, evt, expected)
-	case 1:
-		route, err := deliveryTargetRouteForWorkflowInstance(source, flowID, matches[0])
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_no_match: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-		}
-		return events.NewExistingEntityTarget(route)
-	default:
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_ambiguous: node %s flow %s found %d entities matching declared key", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), len(matches))
-	}
-}
-
-func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader WorkflowInstancePersistenceReader, source semanticview.Source, flowID, nodeID string, evt events.Event, expected map[string]any) (events.DeliveryTargetOwnership, error) {
-	route, err := selectOrCreateEntityMaterializationTarget(source, flowID, evt, expected)
-	if err != nil {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	}
-	identityRoute, err := workflowInstanceRouteForExecution(source, flowID, route.FlowInstance)
-	if err != nil {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	}
-	entityID := runtimeidentity.NormalizeEntityID(route.EntityID)
-	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), identityRoute)
-	if err != nil {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	}
-	existing, ok, err := reader.LoadWorkflowInstance(ctx, flowIdentity)
-	if err != nil {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	}
-	if !ok {
-		record, stateExists, stateErr := reader.LoadWorkflowEntityState(ctx, flowIdentity, entityID)
-		if stateErr != nil {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), stateErr)
-		}
-		if stateExists {
-			existing, err = decodeDeliveryTargetWorkflowEntityState(source, flowID, evt.RunID(), record)
-			if err != nil {
-				return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-			}
-			ok = true
-		}
-	}
-	if ok {
-		if !workflowInstanceOwnedByFlow(source, existing, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, existing) || !selectEntityCandidateMatches(existing, expected) {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_conflict: node %s flow %s deterministic entity %s exists but does not match declared active key", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), route.EntityID)
-		}
-		existingRoute, err := deliveryTargetRouteForWorkflowInstance(source, flowID, existing)
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, err
-		}
-		if existingRoute != route {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_conflict: deterministic target %#v disagrees with persisted target %#v", route, existingRoute)
-		}
-		return events.NewExistingEntityTarget(existingRoute)
-	}
-	return events.NewMaterializingEntityTarget(route)
-}
-
-func selectOrCreateEntityMaterializationTarget(source semanticview.Source, flowID string, evt events.Event, expected map[string]any) (events.RouteIdentity, error) {
-	flowID = strings.TrimSpace(flowID)
-	if source != nil && flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
-		route, err := workflowInstanceRouteForExecution(source, flowID, evt.RunID())
-		if err != nil {
-			return events.RouteIdentity{}, err
-		}
-		return events.RouteIdentity{
-			FlowID:       flowID,
-			FlowInstance: route.InstancePath,
-			EntityID:     runtimeflowidentity.EntityID(route.InstancePath),
-		}.Normalized(), nil
-	}
-	instanceID, err := selectOrCreateEntityInstanceID(source, flowID, expected)
-	if err != nil {
-		return events.RouteIdentity{}, err
-	}
-	identity := deriveFlowInstanceIdentity(source, flowID, instanceID)
-	return events.RouteIdentity{
-		FlowID:       flowID,
-		FlowInstance: identity.InstancePath,
-		EntityID:     identity.EntityID,
-	}.Normalized(), nil
 }
 
 func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID, runID string, record WorkflowEntityStatePersistenceRecord) (WorkflowInstance, error) {
@@ -675,19 +481,10 @@ func deliveryTargetRouteForWorkflowInstance(source semanticview.Source, flowID s
 }
 
 func deliveryTargetWorkflowInstanceUnavailable(source semanticview.Source, flowID string, instance WorkflowInstance) bool {
-	status := strings.TrimSpace(instance.Status)
-	if !strings.EqualFold(status, "active") || !instance.TerminatedAt.IsZero() {
-		return true
-	}
-	for _, terminal := range source.FlowTerminalStages(flowID) {
-		if strings.EqualFold(strings.TrimSpace(terminal), strings.TrimSpace(instance.CurrentState)) {
-			return true
-		}
-	}
-	return false
+	return NewDeliveryTargetAvailability(instance.CurrentState, instance.Status, !instance.TerminatedAt.IsZero()).Validate(source, flowID) != nil
 }
 
-func matchingDeliveryTargetOwnerCandidates(blueprint events.RouteIdentity, candidates []DeliveryTargetOwnerCandidate) ([]events.RouteIdentity, []events.RouteIdentity, error) {
+func matchingDeliveryTargetOwnerCandidates(source semanticview.Source, blueprint events.RouteIdentity, candidates []DeliveryTargetOwnerCandidate) ([]events.RouteIdentity, []events.RouteIdentity, error) {
 	blueprint = blueprint.Normalized()
 	exact := make([]DeliveryTargetOwnerCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -700,6 +497,11 @@ func matchingDeliveryTargetOwnerCandidates(blueprint events.RouteIdentity, candi
 		}
 		if blueprint.EntityID != "" && route.EntityID != blueprint.EntityID {
 			return nil, nil, fmt.Errorf("receiver target owner candidate entity %q disagrees with receiver entity %q for instance %q", route.EntityID, blueprint.EntityID, blueprint.FlowInstance)
+		}
+		if !candidate.Materializing {
+			if err := candidate.Availability.Validate(source, blueprint.FlowID); err != nil {
+				return nil, nil, err
+			}
 		}
 		candidate.Route = route
 		exact = append(exact, candidate)
@@ -760,11 +562,11 @@ var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClass
 	"Activity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		return activityEntityRequirement(handler.Activity)
 	},
-	"CreateEntity":         noHandlerEntityRequirement,
-	"SelectEntity":         noHandlerEntityRequirement,
-	"SelectOrCreateEntity": noHandlerEntityRequirement,
-	"Description":          noHandlerEntityRequirement,
-	"EvidenceTarget":       noHandlerEntityRequirement,
+	"CreateEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
+		return materializingWhen(handler.CreateEntity)
+	},
+	"Description":    noHandlerEntityRequirement,
+	"EvidenceTarget": noHandlerEntityRequirement,
 	"Emit": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		return materializingWhen(emitSpecReferencesEntity(handler.Emit))
 	},

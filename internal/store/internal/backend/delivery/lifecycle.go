@@ -129,7 +129,7 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 				return err
 			}
 		}
-		result, err = postgresDeliveryAdapter.ClaimExactResult(txctx, tx, story, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+		result, err = s.receiverAdapter.ClaimExactResult(txctx, tx, story, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		if err != nil || strings.TrimSpace(result.Snapshot.RunID) == "" {
 			return err
 		}
@@ -154,7 +154,7 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 				return err
 			}
 		}
-		result, err = sqliteDeliveryAdapter.ClaimExactResult(txctx, tx, story, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+		result, err = s.receiverAdapter.ClaimExactResult(txctx, tx, story, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		if err != nil || strings.TrimSpace(result.Snapshot.RunID) == "" {
 			return err
 		}
@@ -170,7 +170,7 @@ func (s *DeliveryPostgresOwner) ScanDeliveryContinuations(ctx context.Context, a
 	var page runtimedelivery.ContinuationPage
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		page, err = postgresDeliveryAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
+		page, err = s.receiverAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func (s *DeliverySQLiteOwner) ScanDeliveryContinuations(ctx context.Context, aut
 	var page runtimedelivery.ContinuationPage
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		page, err = sqliteDeliveryAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
+		page, err = s.receiverAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
 			return err
 		}
@@ -248,7 +248,7 @@ func (s *DeliveryPostgresOwner) ObserveDeliveryContinuation(
 	var observation runtimedelivery.ContinuationObservation
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		observation, err = postgresDeliveryAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
+		observation, err = s.receiverAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
 		return err
 	})
 	return observation, err
@@ -265,7 +265,7 @@ func (s *DeliverySQLiteOwner) ObserveDeliveryContinuation(
 	var observation runtimedelivery.ContinuationObservation
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		observation, err = sqliteDeliveryAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
+		observation, err = s.receiverAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
 		return err
 	})
 	return observation, err
@@ -347,7 +347,11 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginSuccessTx(
 	sideEffects []string,
 	duration time.Duration,
 ) error {
-	if _, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
+	snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
+	if err != nil {
+		return err
+	}
+	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 		return err
 	}
 	return effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries)
@@ -362,7 +366,11 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
 	sideEffects []string,
 	duration time.Duration,
 ) error {
-	if _, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
+	snapshot, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
+	if err != nil {
+		return err
+	}
+	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 		return err
 	}
 	return effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries)
@@ -382,6 +390,9 @@ func (s *DeliveryPostgresOwner) SettleWorkflowNodeSuccessTx(
 ) (runtimedelivery.Snapshot, error) {
 	snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, selection)
 	if err != nil {
+		return runtimedelivery.Snapshot{}, err
+	}
+	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
 	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
@@ -406,6 +417,9 @@ func (s *DeliverySQLiteOwner) SettleWorkflowNodeSuccessTx(
 	if err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
+	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
+		return runtimedelivery.Snapshot{}, err
+	}
 	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
@@ -422,6 +436,9 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginFailureTx(
 ) error {
 	snapshot, err := postgresDeliveryAdapter.SettleFailure(ctx, tx, story, claim, settlement)
 	if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+		return err
+	}
+	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 		return err
 	}
 	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
@@ -451,6 +468,9 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginFailureTx(
 ) error {
 	snapshot, err := sqliteDeliveryAdapter.SettleFailure(ctx, tx, story, claim, settlement)
 	if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+		return err
+	}
+	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 		return err
 	}
 	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
@@ -651,6 +671,9 @@ func postgresDeliveryMutation(s *DeliveryPostgresOwner, ctx context.Context, ope
 		if err != nil || strings.TrimSpace(snapshot.RunID) == "" {
 			return err
 		}
+		if err := settleReceiverDependentsTx(txctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
+			return err
+		}
 		return effects.Add(snapshot.RunID, privaterunforkrevision.FamilyEventDeliveries)
 	})
 	return snapshot, err
@@ -665,9 +688,42 @@ func sqliteDeliveryMutation(s *DeliverySQLiteOwner, ctx context.Context, operati
 		if err != nil || strings.TrimSpace(snapshot.RunID) == "" {
 			return err
 		}
+		if err := settleReceiverDependentsTx(txctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
+			return err
+		}
 		return effects.Add(snapshot.RunID, privaterunforkrevision.FamilyEventDeliveries)
 	})
 	return snapshot, err
+}
+
+func settleReceiverDependentsTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, adapter *Adapter, materializer runtimedelivery.Snapshot, recordDiagnostic func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimedeadletters.Record, bool) error) error {
+	terminalizations, err := adapter.TerminalizeMaterializationDependents(ctx, tx, story, materializer)
+	if err != nil || len(terminalizations) == 0 {
+		return err
+	}
+	var record eventrecord.Record
+	var found bool
+	if adapter.dialect == DialectSQLite {
+		record, found, err = eventrecordsqlite.Load(ctx, tx, materializer.EventID)
+	} else {
+		record, found, err = eventrecordpostgres.Load(ctx, tx, materializer.EventID)
+	}
+	if err != nil {
+		return err
+	}
+	if !found {
+		return eventrecord.Missing(materializer.EventID)
+	}
+	for _, terminalization := range terminalizations {
+		diagnostic, err := deliveryDeadLetterRecord(record, terminalization.Current)
+		if err != nil {
+			return err
+		}
+		if err := recordDiagnostic(ctx, tx, story, effects, diagnostic, true); err != nil {
+			return err
+		}
+	}
+	return effects.Add(materializer.RunID, privaterunforkrevision.FamilyEventDeliveries)
 }
 
 func (s *DeliveryPostgresOwner) Snapshot(ctx context.Context, deliveryID string) (runtimedelivery.Snapshot, error) {

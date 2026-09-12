@@ -499,7 +499,15 @@ initial_state: ready
 terminal_states: [done]
 states: [ready, done]
 `,
-		"repo-scaffold/entities.yaml": "test_entity: {}\n",
+		"repo-scaffold/entities.yaml": `test_entity:
+  repo_url: text
+  current_ref: text
+  file_manifest: ArtifactManifest
+  status: text
+  failure: json
+  last_request_id: text
+  last_source_event_id: text
+`,
 		"repo-scaffold/types.yaml": `types:
   ArtifactProvenance:
     artifact_type: text

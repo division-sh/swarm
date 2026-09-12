@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -48,7 +51,9 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 						}
 					})
 					opts.TestRuntimeContextsReadyHook = func(contexts *runtime.RuntimeContextManager) { proof.Contexts = contexts }
+					captured := captureSelectedResetSupervisor(t)
 					endpoint, stop := startResetRecoveryServedBoot(t, opts)
+					previousSupervisor := <-captured
 					initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 						"event_name": "item.received", "bundle_hash": hash,
 						"payload": map[string]any{"item_id": "predecessor"}, "idempotency_key": uuid.NewString(),
@@ -71,13 +76,37 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 					if err := proof.DB.QueryRow("SELECT phase FROM runtime_reset_operations").Scan(&actualPhase); err != nil || actualPhase != phase {
 						t.Fatalf("interrupted phase=%s, want %s: %v", actualPhase, phase, err)
 					}
+					previousSupervisor.operationMu.Lock()
+					previousSelected := previousSupervisor.selected
+					previousProcess := previousSupervisor.selectedProcess
+					previousSupervisor.operationMu.Unlock()
 					stop()
+					if _, _, err := previousSelected.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: uuid.NewString()}); !errors.Is(err, worklifetime.ErrRetired) {
+						t.Fatalf("previous boot selected admission survived shutdown: %v", err)
+					}
 					// A restart may not replace the admitted reset sources with the
 					// current directory, nor re-ingest it after a source-clearing reset.
 					if err := os.WriteFile(filepath.Join(source, "schema.yaml"), []byte("invalid: ["), 0o600); err != nil {
 						t.Fatal(err)
 					}
+					captured = captureSelectedResetSupervisor(t)
 					endpoint, _ = startResetRecoveryServedBoot(t, opts)
+					recoveredSupervisor := <-captured
+					recoveredSupervisor.operationMu.Lock()
+					recoveredSelected := recoveredSupervisor.selected
+					recoveredProcess := recoveredSupervisor.selectedProcess
+					recoveredSupervisor.operationMu.Unlock()
+					if recoveredSelected == nil || recoveredSelected == previousSelected || recoveredProcess == nil || recoveredProcess == previousProcess {
+						t.Fatal("startup adopted a predecessor selected family or process identity")
+					}
+					_, selectedRun, controlErr := recoveredSelected.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: uuid.NewString()})
+					if clear {
+						if selectedRun || !errors.Is(controlErr, worklifetime.ErrRetired) {
+							t.Fatalf("cleared startup admitted selected execution: selected=%v err=%v", selectedRun, controlErr)
+						}
+					} else if selectedRun || controlErr != nil {
+						t.Fatalf("retained startup failed to reconcile selected controls: selected=%v err=%v", selectedRun, controlErr)
+					}
 					if err := proof.DB.QueryRow("SELECT phase FROM runtime_reset_operations").Scan(&actualPhase); err != nil || actualPhase != "completed" {
 						t.Fatalf("recovered phase=%s: %v", actualPhase, err)
 					}
@@ -105,6 +134,11 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 					if response.Error != nil {
 						t.Fatalf("recovered outcome replay: %+v", response.Error)
 					}
+					recoveredSupervisor.operationMu.Lock()
+					if recoveredSupervisor.selected != recoveredSelected {
+						t.Error("startup outcome replay replaced selected family")
+					}
+					recoveredSupervisor.operationMu.Unlock()
 				})
 			}
 		}

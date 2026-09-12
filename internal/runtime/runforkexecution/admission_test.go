@@ -39,7 +39,7 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:             forkRunID,
 		BindingReader:         reader,
-		SourceLoader:          sourceLoader,
+		LoadedSource:          sourceLoader.loaded,
 		FrontierAdmission:     frontier,
 		RouteAdmission:        routeAdmission,
 		RouteTopology:         routeTopology,
@@ -52,8 +52,8 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	if reader.requestedForkRunID != forkRunID {
 		t.Fatalf("binding reader fork_run_id = %q, want %q", reader.requestedForkRunID, forkRunID)
 	}
-	if sourceLoader.requestedSelection != binding.ContractSelection {
-		t.Fatalf("source loader selection = %#v, want binding selection %#v", sourceLoader.requestedSelection, binding.ContractSelection)
+	if sourceLoader.requestedSelection.Mode != "" {
+		t.Fatal("execution admission reloaded the prepared source")
 	}
 	if admission.Owner != runfork.RunForkSelectedContractExecutionAdmissionOwner ||
 		admission.FutureExecutionOwner != runfork.RunForkSelectedContractExecutionOwner ||
@@ -118,7 +118,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresDeferredWorkAdmission(t 
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      sourceLoader,
+		LoadedSource:      sourceLoader.loaded,
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
@@ -140,7 +140,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnMissingBinding(t *t
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{err: errors.New("selected contract binding not found")},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(selection)},
+		LoadedSource:      testLoadedSelectedSource(selection),
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission),
@@ -162,7 +162,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnUnavailableSelected
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{Selection: binding.ContractSelection}},
+		LoadedSource:      LoadedSelectedContractSource{Selection: binding.ContractSelection},
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission),
@@ -188,11 +188,11 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnSourceMismatch(t *t
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:     forkRunID,
 		BindingReader: &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader: &fakeSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{
+		LoadedSource: LoadedSelectedContractSource{
 			Selection:          mismatched,
 			Source:             testSelectedSource(mismatched),
 			SourceArtifactFact: testEphemeralSourceArtifactFact(runForkTestBundleHash),
-		}},
+		},
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     testSelectedContractRouteTopologyFromAdmission(t, frontier, routeAdmission),
@@ -216,7 +216,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalEvidence(t *tes
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		LoadedSource:      testLoadedSelectedSource(binding.ContractSelection),
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
@@ -240,7 +240,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleModelFrontier(
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		LoadedSource:      testLoadedSelectedSource(binding.ContractSelection),
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
@@ -264,7 +264,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalRouteTopology(t
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		LoadedSource:      testLoadedSelectedSource(binding.ContractSelection),
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
@@ -288,7 +288,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteTopologyF
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		LoadedSource:      testLoadedSelectedSource(binding.ContractSelection),
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
@@ -317,7 +317,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteTopologyF
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		LoadedSource:      testLoadedSelectedSource(binding.ContractSelection),
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
@@ -357,7 +357,7 @@ func TestBuildSelectedContractExecutionAdmissionRejectsForgedRouteTopology(t *te
 	_, err = BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		LoadedSource:      testLoadedSelectedSource(binding.ContractSelection),
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
@@ -381,7 +381,7 @@ func TestBuildSelectedContractExecutionAdmissionRejectsForgedRecipientPlanning(t
 	_, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
 		BindingReader:     &fakeSelectedContractBindingReader{binding: binding},
-		SourceLoader:      &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)},
+		LoadedSource:      testLoadedSelectedSource(binding.ContractSelection),
 		FrontierAdmission: frontier,
 		RouteAdmission:    routeAdmission,
 		RouteTopology:     routeTopology,
@@ -655,42 +655,20 @@ func TestSourceArtifactSelectedContractSourceLoaderLoadsCrossBundleTargetSelecti
 	}
 }
 
-func TestAdmittedSelectedContractSourceLoaderBindsExactPersistedBundleSelection(t *testing.T) {
-	repoRoot := runForkExecutionRepoRoot(t)
-	sourceRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution")
-	selection := runfork.RunForkContractSelection{
-		Mode: runfork.RunForkContractSelectionModeSelectedContracts,
+func TestSourceArtifactSelectedContractLoaderRejectsCrossedTargetRequest(t *testing.T) {
+	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
+	record := persistedSourceArtifactForTest(t, bundle)
+	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{record: record}
+	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: artifactStore}
+	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}
+	_, err := loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{
+		SourceRunID: uuid.NewString(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), Selection: selection,
+	})
+	if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) {
+		t.Fatalf("crossed target request error = %v", err)
 	}
-	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: sourceRoot}).LoadRunForkSelectedContractSource(context.Background(), selection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	persisted, err := runtimecorrelation.NewSourceArtifactFact(loaded.SourceArtifactFact.BundleHash())
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err := scenarioexecution.NewEffectiveSourceIdentity(persisted, "sha256:"+strings.Repeat("9", 64))
-	if err != nil {
-		t.Fatal(err)
-	}
-	loader, err := NewAdmittedSelectedContractSourceLoader(loaded.Selection, loaded.Module, persisted, identity)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	target := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: persisted.BundleHash()}
-	admitted, err := loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{Selection: target})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if admitted.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
-		admitted.Selection.BundleHash != persisted.BundleHash() {
-		t.Fatalf("admitted target selection = %#v", admitted.Selection)
-	}
-
-	target.BundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
-	if _, err := loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{Selection: target}); err == nil || !strings.Contains(err.Error(), "does not match") {
-		t.Fatalf("mismatched bundle selection error = %v", err)
+	if artifactStore.requestedBundleHash != "" {
+		t.Fatal("crossed target reached artifact loading")
 	}
 }
 
@@ -970,6 +948,7 @@ type fakeSelectedContractBindingReader struct {
 }
 
 type fakeSelectedContractSourceLoader struct {
+	original           *LoadedSelectedContractSource
 	loaded             LoadedSelectedContractSource
 	err                error
 	requestedSelection runfork.RunForkContractSelection
@@ -992,15 +971,19 @@ func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *tes
 				return nil
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: loaded}
+			var owned LoadedSelectedContractSource
 			_, err := loadRunForkSelectedContractSource(context.Background(), loader, SelectedContractSourceLoadRequest{
 				SourceArtifactFact: tc.expectedFact,
 				Selection:          selection,
-			})
+			}, &owned)
 			if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want %s %s", err, runbundle.CodeBundleDataIntegrityError, tc.want)
 			}
-			if !cleaned {
-				t.Fatal("mismatched selected source was not cleaned up")
+			if cleaned || owned.Cleanup == nil {
+				t.Fatal("mismatched selected source escaped its cleanup owner")
+			}
+			if err := cleanupLoadedSelectedContractSource(owned); err != nil || !cleaned {
+				t.Fatalf("owned cleanup: %v", err)
 			}
 		})
 	}
@@ -1015,6 +998,9 @@ func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSource(_ c
 }
 
 func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	if l.original != nil && req.Selection.Mode == runfork.RunForkContractSelectionModeSelectedContracts && req.SourceArtifactFact.BundleHash() == "" {
+		return *l.original, l.err
+	}
 	return l.LoadRunForkSelectedContractSource(ctx, req.Selection)
 }
 
@@ -1198,14 +1184,17 @@ func testContractFrontierAdmission(selection runfork.RunForkContractSelection) r
 			RuntimeEventOwners:      []string{mustRunForkNode("flow-a", "alpha-intake").Key()},
 			WorkflowNodeSubscribers: []string{mustRunForkNode("flow-b", "beta-intake").Key()},
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				testNodeFrontierRecipient("alpha-intake", "flow-a/alpha-intake", "selected_contracts"),
+				testNodeFrontierRecipient(mustRunForkNode("flow-a", "alpha-intake"), "work.begin", "flow-a/alpha-intake", "selected_contracts"),
 			},
 		}},
 	}
 }
 
 func testSelectedContractRouteAdmission(frontier runfork.RunForkContractFrontierAdmission) runfork.RunForkSelectedContractRouteAdmission {
-	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	if err != nil {
+		panic(err)
+	}
 	return runfork.RunForkSelectedContractRouteAdmission{
 		Owner:                          runfork.RunForkSelectedContractRouteAdmissionOwner,
 		FutureRouteReconstructionOwner: runfork.RunForkSelectedContractExecutionOwner + ".route_reconstruction",

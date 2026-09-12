@@ -146,6 +146,12 @@ func ReplaceGeneration(buckets map[string]map[string]any, activation Activation,
 	if err != nil {
 		return err
 	}
+	if oldKey != activation.Key() {
+		joins, _ := buckets[joinNodeBucketKey(oldNode)][bucketKey].(map[string]any)
+		if _, exists := joins[activation.Key()]; exists {
+			return fmt.Errorf("join generation destination is already occupied")
+		}
+	}
 	if err := Store(buckets, activation); err != nil {
 		return err
 	}
@@ -463,6 +469,9 @@ func List(stateBuckets map[string]map[string]any) ([]Activation, error) {
 			}
 			if joinNodeBucketKey(activation.JoinRef().Node()) != nodeID {
 				return nil, fmt.Errorf("join activation node identity contradicts its state bucket")
+			}
+			if activation.Key() != key {
+				return nil, fmt.Errorf("join activation identity contradicts its state bucket key")
 			}
 			out = append(out, activation)
 		}

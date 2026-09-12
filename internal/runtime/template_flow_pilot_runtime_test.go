@@ -81,6 +81,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		WorkflowInstances:  pc,
 		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
+	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 
 	evt := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999952",

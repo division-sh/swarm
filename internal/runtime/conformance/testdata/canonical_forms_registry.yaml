@@ -368,12 +368,12 @@ rows:
     paths: "nodes.<node>.event_handlers.<event>.*"
     owner: SystemNodeEventHandler.UnmarshalYAML
     information:
-      choice: [action, activity, create_entity, select_entity, select_or_create_entity, emit, on_success, guard, advances_to, sets_gate, clear_gates, data_accumulation, loop, on_complete, rules, accumulate, join, compute, query, fan_out, group_by, filter, reduce, count, clear, template, instance_id_from, config_from, from, dedup_by]
+      choice: [action, activity, create_entity, emit, on_success, guard, advances_to, sets_gate, clear_gates, data_accumulation, loop, on_complete, rules, accumulate, join, compute, query, fan_out, group_by, filter, reduce, count, clear, template, instance_id_from, config_from, from, dedup_by]
       annotation: [description, _note, evidence_target]
     spelling:
       canonical_candidate: effect_owned_nested_mapping
       retired_duplicates: [action_options_repeated_as_handler_siblings]
-      already_retired: [condition, logic, branch, emits, payload_transform, on_below_threshold, on_dedup, on_pass]
+      already_retired: [condition, logic, branch, emits, payload_transform, on_below_threshold, on_dedup, on_pass, select_entity, select_or_create_entity]
     f2_bug: "template/instance_id_from/config_from can be authored both inside action and beside action; action-local silently wins on conflict"
     corpus: {handlers: 31, duplicate_action_option_uses: 0}
 
@@ -778,7 +778,7 @@ wave_1:
       internal/runtime/testfixtures/canonicalrouting/resolution_variants.go: mutation_base
       internal/runtime/testfixtures/canonicalrouting/root_connect.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/sealed_package.go: positive_producer_and_mutation_base
-      internal/runtime/testfixtures/canonicalrouting/select_entity_demotion.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/select_entity_demotion.go: positive_producer_and_explicit_retired_negative
       internal/runtime/testfixtures/canonicalrouting/supported_surface_routing.go: positive_producer
       internal/runtime/testfixtures/canonicalrouting/target_owner_diamond.go: positive_producer_and_mutation_base
   closure: "all three rows reject retired spellings and admit only canonical forms"

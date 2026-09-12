@@ -13,8 +13,8 @@ import (
 )
 
 // DecodeHistoricalSnapshot validates the canonical persisted delivery fact
-// captured by run-fork revisioning. It deliberately excludes claim tokens;
-// historical readback is evidence, never a capability.
+// captured by run-fork revisioning, including persisted connect-route evidence.
+// It excludes live worker claim tokens; historical readback is never a capability.
 func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	var fact struct {
 		DeliveryID                string                           `json:"delivery_id"`
@@ -27,6 +27,8 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		DeliveryTargetOwnership   events.DeliveryTargetOwnership   `json:"delivery_target_ownership"`
 		DeliveryContext           events.DeliveryContext           `json:"delivery_context"`
 		DeliveryPayloadProjection events.DeliveryPayloadProjection `json:"delivery_payload_projection"`
+		ConnectClaim              events.ConnectExecutionClaim     `json:"connect_execution_claim"`
+		ReceiverMaterialization   json.RawMessage                  `json:"receiver_materialization_plan"`
 		Status                    string                           `json:"status"`
 		RetryCount                int                              `json:"retry_count"`
 		MaxRetries                int                              `json:"max_retries"`
@@ -77,10 +79,26 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		Recipient:     recipient,
 		AgentIdentity: fact.AgentIdentity, Target: fact.DeliveryTargetOwnership, Context: fact.DeliveryContext,
 		PayloadProjection: fact.DeliveryPayloadProjection,
+		ConnectClaim:      fact.ConnectClaim,
 	}.Normalized()
+	route, err = events.RestoreReceiverMaterializationRecord(route, fact.ReceiverMaterialization)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !route.Materialization.Empty() && (route.Materialization.RunID() != fact.RunID || route.Materialization.EventID() != fact.EventID) {
+		return Snapshot{}, fmt.Errorf("historical receiver dependency publication identity mismatch")
+	}
+	if !route.Initialization.Empty() {
+		if err := route.Initialization.ValidatePublication(fact.RunID, fact.EventID); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	derived, err := route.Identity()
 	if err != nil || derived != identity {
 		return Snapshot{}, fmt.Errorf("%w: historical delivery route identity mismatch", ErrConflict)
+	}
+	if err := validateDeliveryRouteOwningRun(fact.RunID, route); err != nil {
+		return Snapshot{}, fmt.Errorf("%w: historical delivery ownership: %v", ErrConflict, err)
 	}
 	snapshot := Snapshot{
 		DeliveryID: fact.DeliveryID, EventID: fact.EventID, RunID: fact.RunID,

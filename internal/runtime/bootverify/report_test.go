@@ -6278,13 +6278,7 @@ treasury-node:
           - source_field: amount_usd
             target_field: spent_usd
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "static multi-row entity ownership is retired") {
-		t.Fatalf("expected retired static select_entity error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsSelectOrCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
@@ -6302,13 +6296,7 @@ treasury-node:
           - source_field: amount_usd
             target_field: spent_usd
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "static multi-row entity ownership is retired") {
-		t.Fatalf("expected retired static select_or_create_entity error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsSelectEntityWithSourceEnvelopeAuthority(t *testing.T) {
@@ -6322,13 +6310,7 @@ treasury-node:
         by:
           vertical_id: payload.entity_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "must not use source envelope authority") {
-		t.Fatalf("expected select_entity source authority error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsSelectOrCreateEntityWithSourceEnvelopeAuthority(t *testing.T) {
@@ -6342,13 +6324,7 @@ treasury-node:
         by:
           vertical_id: payload.entity_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "select_or_create_entity") || !reportContains(report.Errors(), "select_entity_validation", "must not use source envelope authority") {
-		t.Fatalf("expected select_or_create_entity source authority error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsSelectEntityWithEnvelopeTargetField(t *testing.T) {
@@ -6362,13 +6338,7 @@ treasury-node:
         by:
           entity_id: payload.vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "is not an entity contract field selection target") {
-		t.Fatalf("expected select_entity envelope target field error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsPlatformEntityDataAccumulationWriteTarget(t *testing.T) {
@@ -6446,13 +6416,7 @@ treasury-node:
         by:
           vertical_id: payload.missing_vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "select_or_create_entity") || !reportContains(report.Errors(), "select_entity_validation", "references undeclared payload field") {
-		t.Fatalf("expected select_or_create_entity undeclared payload field error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsSelectEntityWithUndeclaredPayloadRef(t *testing.T) {
@@ -6466,13 +6430,7 @@ treasury-node:
         by:
           vertical_id: payload.missing_vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "references undeclared payload field") {
-		t.Fatalf("expected select_entity undeclared payload field error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsSelectEntityWithCreateEntity(t *testing.T) {
@@ -6487,13 +6445,7 @@ treasury-node:
         by:
           vertical_id: payload.vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "must not declare create_entity with select_entity or select_or_create_entity") {
-		t.Fatalf("expected create_entity/select_entity error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsSelectOrCreateEntityWithCreateEntity(t *testing.T) {
@@ -6508,13 +6460,7 @@ treasury-node:
         by:
           vertical_id: payload.vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "must not declare create_entity with select_entity or select_or_create_entity") {
-		t.Fatalf("expected create_entity/select_or_create_entity error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_RejectsSelectEntityWithSelectOrCreateEntity(t *testing.T) {
@@ -6531,13 +6477,7 @@ treasury-node:
         by:
           vertical_id: payload.vertical_id
 `)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "select_entity_validation", "must not declare both select_entity and select_or_create_entity") {
-		t.Fatalf("expected select_entity/select_or_create_entity error, got %#v", report.Errors())
-	}
+	assertRetiredReceiverSelectorRejected(t, root)
 }
 
 func TestRun_AllowsTemplateFlowInputPinHandlersWithoutCreateEntity(t *testing.T) {
@@ -6848,8 +6788,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 74 {
-		t.Fatalf("bootCheckRegistry count = %d, want 74", got)
+	if got := len(bootCheckRegistry); got != 71 {
+		t.Fatalf("bootCheckRegistry count = %d, want 71", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -7947,6 +7887,15 @@ func loadFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.Work
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	fixtureRoot := filepath.Join(repoRoot, relativeRoot)
 	return loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
+}
+
+func assertRetiredReceiverSelectorRejected(t *testing.T, root string) {
+	t.Helper()
+	repo := repoRootForBootverifyTest(t)
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err == nil || !strings.Contains(err.Error(), "RETIRED: handler field") || !strings.Contains(err.Error(), "composition boundary") {
+		t.Fatalf("retired selector must fail before boot with actionable composition guidance: %v", err)
+	}
 }
 
 func loadFixtureBundleAt(t *testing.T, repoRoot, fixtureRoot, platformSpec string) *runtimecontracts.WorkflowContractBundle {

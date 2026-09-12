@@ -16,6 +16,35 @@ type DeliveryCarrierGuard struct {
 	resolution   DeliveryContinuationResolution
 }
 
+type directDeliveryCarrierKey struct{}
+
+func (g *DeliveryCarrierGuard) Resolution() (DeliveryContinuationResolution, bool) {
+	if g == nil {
+		return 0, false
+	}
+	return g.resolution, g.resolved
+}
+
+// WithDirectDeliveryCarrier borrows the caller's scoped guard for synchronous
+// node interception. It neither acquires nor settles a second continuation.
+func WithDirectDeliveryCarrier(ctx context.Context, guard *DeliveryCarrierGuard) (context.Context, error) {
+	if guard == nil || guard.continuation == nil {
+		return ctx, errors.New("direct delivery carrier is required")
+	}
+	return context.WithValue(ctx, directDeliveryCarrierKey{}, guard), nil
+}
+
+func DirectDeliveryCarrier(ctx context.Context, deliveryID string) (*DeliveryCarrierGuard, bool, error) {
+	guard, ok := ctx.Value(directDeliveryCarrierKey{}).(*DeliveryCarrierGuard)
+	if !ok {
+		return nil, false, nil
+	}
+	if guard == nil || guard.continuation == nil || guard.continuation.DeliveryID() != deliveryID {
+		return nil, true, errors.New("direct delivery carrier belongs to another delivery")
+	}
+	return guard, true, nil
+}
+
 func NewEventDeliveryCarrierGuard(delivery *EventDelivery) (*DeliveryCarrierGuard, error) {
 	if delivery == nil {
 		return nil, errors.New("local delivery carrier is required")
@@ -86,7 +115,7 @@ func (g *DeliveryCarrierGuard) Complete(report func(error)) (DeliveryContinuatio
 	if g.delivery != nil {
 		resolution, err = g.delivery.completeCarrier()
 	} else if g.continuation != nil {
-		resolution, err = g.continuation.Resolve(context.WithoutCancel(g.ctx), DeliveryContinuationReturn)
+		resolution, err = g.continuation.Resolve(context.WithoutCancel(g.ctx), DeliveryContinuationReturnUnqueued)
 	} else {
 		return 0, errors.New("delivery carrier capability is required")
 	}

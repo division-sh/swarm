@@ -63,15 +63,15 @@ func (o *selectedDeliveryTransfers) AcceptCommitted(proofs []runtimedelivery.Dur
 	return nil
 }
 
-func (o *selectedDeliveryTransfers) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (o *selectedDeliveryTransfers) Acquire(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	held, exists := o.held[deliveryID]
 	if !exists || held != selectedDeliveryPublication {
-		return nil, fmt.Errorf("selected delivery %s is not publication-owned", deliveryID)
+		return worklifetime.DeliveryAcquisition{}, fmt.Errorf("selected delivery %s is not publication-owned", deliveryID)
 	}
 	o.held[deliveryID] = selectedDeliveryCarrier
-	return &selectedDeliveryCapability{owner: o, deliveryID: deliveryID}, nil
+	return worklifetime.AcquiredDelivery(&selectedDeliveryCapability{owner: o, deliveryID: deliveryID}), nil
 }
 
 func (*selectedDeliveryTransfers) Retain(runtimedelivery.Snapshot) error {
@@ -121,7 +121,7 @@ func (c *selectedDeliveryCapability) Resolve(_ context.Context, intent worklifet
 	if c == nil || c.owner == nil {
 		return 0, errors.New("selected delivery capability is required")
 	}
-	if intent != worklifetime.DeliveryContinuationReturn && intent != worklifetime.DeliveryContinuationConsume {
+	if intent != worklifetime.DeliveryContinuationReturn && intent != worklifetime.DeliveryContinuationReturnUnqueued && intent != worklifetime.DeliveryContinuationConsume {
 		return 0, errors.New("selected delivery continuation resolution intent is invalid")
 	}
 	c.mu.Lock()
@@ -141,14 +141,14 @@ func (c *selectedDeliveryCapability) Resolve(_ context.Context, intent worklifet
 		c.settled = true
 		return worklifetime.DeliveryContinuationTerminal, nil
 	}
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent != worklifetime.DeliveryContinuationConsume {
 		c.owner.held[c.deliveryID] = selectedDeliveryPublication
 	} else {
 		c.owner.held[c.deliveryID] = selectedDeliveryAttempt
 	}
 	c.owner.mu.Unlock()
 	c.settled = true
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent != worklifetime.DeliveryContinuationConsume {
 		return worklifetime.DeliveryContinuationReturned, nil
 	}
 	return worklifetime.DeliveryContinuationConsumed, nil

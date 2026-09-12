@@ -161,7 +161,6 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		ActiveAgents:          eventStore,
 		ActiveFlows:           eventStore,
 		TargetOwners:          eventStore,
-		WorkflowInstances:     eventStore,
 		PreparedEvents:        eventStore,
 		TargetFailureRecorder: eventStore,
 		RunOrigins:            eventStore,

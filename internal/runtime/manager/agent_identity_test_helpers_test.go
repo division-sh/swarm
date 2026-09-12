@@ -60,6 +60,13 @@ func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 	return admission
 }
 
+func managerTestEphemeralTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
+	t.Helper()
+	admission := managerTestTopologyAdmission(t)
+	admission.Lifetime = runtimeagenttopology.LifetimeEphemeral
+	return admission
+}
+
 func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfig) (PersistedAgent, error) {
 	ensureManagerTestSemanticSource(am)
 	var err error
@@ -97,6 +104,10 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 	rec.Topology, err = runtimeagenttopology.StaticAdmission(
 		plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
 	)
+	if am.lifecycle.persistence() == nil {
+		// Pure execution fixtures have no durable run or retained process.
+		rec.Topology.Lifetime = runtimeagenttopology.LifetimeEphemeral
+	}
 	return rec, err
 }
 

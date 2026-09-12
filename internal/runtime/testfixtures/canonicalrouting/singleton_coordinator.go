@@ -136,9 +136,6 @@ coordinator-indexer:
   subscribes_to: [lead.observed]
   event_handlers:
     lead.observed:
-      select_entity:
-        by:
-          coordinator_id: payload.coordinator_id
       data_accumulation:
         writes:
 ` + singletonCoordinatorWritesYAML(t, variant)

@@ -65,6 +65,9 @@ type DeliveryContinuationIntent uint8
 const (
 	DeliveryContinuationReturn DeliveryContinuationIntent = iota + 1
 	DeliveryContinuationConsume
+	// ReturnUnqueued yields a capability still owned by the dispatch stack.
+	// Its deferral names an existing wake owner; it must not wake itself.
+	DeliveryContinuationReturnUnqueued
 )
 
 type DeliveryContinuationResolution uint8
@@ -153,7 +156,7 @@ func (d *EventDelivery) resolveContinuation(intent DeliveryContinuationIntent) (
 	if d == nil {
 		return 0, errors.New("local delivery is required")
 	}
-	if intent != DeliveryContinuationReturn && intent != DeliveryContinuationConsume {
+	if intent != DeliveryContinuationReturn && intent != DeliveryContinuationConsume && intent != DeliveryContinuationReturnUnqueued {
 		return 0, errors.New("delivery continuation resolution intent is invalid")
 	}
 	d.mu.Lock()
@@ -208,7 +211,18 @@ func (d *EventDelivery) Complete() error {
 	return err
 }
 
+// CompleteUnqueued settles failed send admission before a receiver owns the
+// carrier. A queued/dequeued carrier must use Complete instead.
+func (d *EventDelivery) CompleteUnqueued() error {
+	_, err := d.completeCarrierWithIntent(DeliveryContinuationReturnUnqueued)
+	return err
+}
+
 func (d *EventDelivery) completeCarrier() (DeliveryContinuationResolution, error) {
+	return d.completeCarrierWithIntent(DeliveryContinuationReturn)
+}
+
+func (d *EventDelivery) completeCarrierWithIntent(intent DeliveryContinuationIntent) (DeliveryContinuationResolution, error) {
 	if d == nil {
 		return 0, errors.New("local delivery is required")
 	}
@@ -224,7 +238,7 @@ func (d *EventDelivery) completeCarrier() (DeliveryContinuationResolution, error
 	d.settling = true
 	d.mu.Unlock()
 
-	result, resolveErr := d.resolveContinuation(DeliveryContinuationReturn)
+	result, resolveErr := d.resolveContinuation(intent)
 	if resolveErr != nil {
 		d.mu.Lock()
 		d.settling = false

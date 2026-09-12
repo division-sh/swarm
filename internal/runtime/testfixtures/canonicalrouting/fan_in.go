@@ -77,7 +77,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 	case FanInBarrierNoWindow:
 		applyClosedReplacement(t, receiverSchema, "          window: payload.period_id\n", "")
 		applyClosedReplacement(t, receiverNodes, "        window:\n          from: entity.period_id\n", "")
-		applyClosedReplacement(t, receiverNodes, "      select_entity:\n        by:\n          portfolio_id: payload.portfolio_id\n", "      create_entity: true\n")
+		applyClosedReplacement(t, receiverNodes, "    portfolio.setup:\n", "    portfolio.setup:\n      create_entity: true\n")
 	case FanInBarrierReentrantNoWindow:
 		applyClosedReplacement(t, receiverSchema, "          window: payload.period_id\n", "")
 		applyClosedReplacement(t, receiverNodes, "        window:\n          from: entity.period_id\n", "")

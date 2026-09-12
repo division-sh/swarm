@@ -123,31 +123,25 @@ func selectedContractTestProcessCapability(
 	t testing.TB,
 	ctx context.Context,
 	selected runtimestartupownership.Store,
-	loaded LoadedSelectedContractSource,
-	configs ...*config.Config,
 ) runtimestartupownership.ProcessCapability {
 	t.Helper()
 	if selected == nil {
 		t.Fatal("selected-contract topology fixture requires a selected store")
 	}
-	bundleHash := loaded.SourceArtifactFact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
-	modelOptions := runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live, SemanticSource: loaded.Source, ReceiverExecution: eventreceiver.NormalExecution()}
-	if len(configs) > 0 {
-		modelOptions.LLMBackend = configs[0].LLM.Backend
-		modelOptions.ModelAliases = configs[0].LLM.Models
-	}
-	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, modelOptions)
-	desired, err := manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
-	if err != nil {
-		t.Fatalf("compile selected-contract declaration topology: %v", err)
-	}
-	if err := manager.Shutdown(); err != nil {
-		t.Fatalf("close selected-contract declaration compiler: %v", err)
-	}
-	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
-	if err != nil {
-		t.Fatalf("construct selected-contract source set: %v", err)
+	_ = runForkTestContext(t)
+	value, _ := runForkTestWorkFixtures.Load(t)
+	fixture := value.(*runForkTestWorkFixture)
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	if capability := fixture.capabilities[selected]; capability != nil {
+		select {
+		case <-capability.Done():
+		default:
+			if err := capability.ProveCurrent(ctx); err != nil {
+				t.Fatal(err)
+			}
+			return capability
+		}
 	}
 	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "selected-contract-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
@@ -155,12 +149,10 @@ func selectedContractTestProcessCapability(
 	if err != nil {
 		t.Fatalf("acquire selected-contract process capability: %v", err)
 	}
-	if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
-		OperationID: uuid.NewString(), Plan: plan,
-	}); err != nil {
-		_ = capability.Release(context.Background())
-		t.Fatalf("install selected-contract source set: %v", err)
+	if fixture.capabilities == nil {
+		fixture.capabilities = make(map[runtimestartupownership.Store]runtimestartupownership.ProcessCapability)
 	}
+	fixture.capabilities[selected] = capability
 	t.Cleanup(func() {
 		if err := capability.Release(context.Background()); err != nil {
 			t.Errorf("release selected-contract process capability: %v", err)
@@ -329,7 +321,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		},
 	}
 	foundNotify := false
-	for _, definition := range builder.preflight.tools.ToolDefinitionsForActor(actor) {
+	for _, definition := range builder.tools.ToolDefinitionsForActor(actor) {
 		if definition.Name == runtimetools.NotifyHumanToolName {
 			foundNotify = true
 			break
@@ -338,7 +330,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	if !foundNotify {
 		t.Fatalf("selected-contract fork executor omitted canonical %s", runtimetools.NotifyHumanToolName)
 	}
-	resolved, err := builder.preflight.runtimes.ResolveAgentRuntime(actor)
+	resolved, err := builder.runtimes.ResolveAgentRuntime(actor)
 	if err != nil {
 		t.Fatalf("resolve selected-contract exact mock runtime: %v", err)
 	}
@@ -356,9 +348,10 @@ func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity
 	planning := runfork.RunForkSelectedContractRecipientPlanning{
 		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner,
 		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
+			EventName: "work.requested",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				testAgentFrontierRecipient("shared-agent", "review/inst-1", "", mustTestAgentPlan(first)),
-				testAgentFrontierRecipient("shared-agent", "review/inst-2", "", mustTestAgentPlan(second)),
+				testAgentFrontierRecipient(mustTestAgentPlan(first), "work.requested", "review/inst-1", ""),
+				testAgentFrontierRecipient(mustTestAgentPlan(second), "work.requested", "review/inst-2", ""),
 			},
 		}},
 	}
@@ -393,7 +386,19 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 		ID: "shared-agent", Identity: sourceIdentity, FlowPath: sourceIdentity.FlowInstance(), Role: "worker", ExecutionMode: "live",
 	})
 	config.Identity = agentidentity.Identity{}
+	revision, err := runtimemanager.AgentConfigPlanRevision(config, declarationPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := selectedContractTestDeclarationTopology(t).Authority.Static.BundleHash
+	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(hash, []runtimeagenttopology.DesiredAgent{{
+		Identity: declarationPlan, Source: runtimeagenttopology.SourceCoordinate{BundleHash: hash}, ConfigRevision: revision,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan := selectedContractAgentRuntimePlan{
+		Declarations: declarations,
 		Proof: SelectedContractAgentRuntimeMaterialization{
 			AgentRecipientPlans:  []agentidentity.Plan{declarationPlan},
 			ConfiguredAgentPlans: []agentidentity.Plan{declarationPlan},
@@ -439,93 +444,33 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	if err != nil {
 		t.Fatal(err)
 	}
-	authority := runtimeeffects.Authority{
-		Kind: runtimeeffects.AuthoritySelectedContractFork, ID: "00000000-0000-0000-0000-000000000311",
-		SelectedFork: runtimeeffects.SelectedContractForkAuthority{
-			ExecutionID: "00000000-0000-0000-0000-000000000311", ForkRunID: "00000000-0000-0000-0000-000000000312", Generation: 1,
-			AdmissionFingerprint: "admission", ContainerPlanFingerprint: "container", ActorCensusFingerprint: "actors", EffectiveConfigFingerprint: "config",
-		},
-		ExecutionOwner: "self-release-scope-test", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
-		ExecutionMode: runtimeeffects.ExecutionModeLive,
-	}
+	forkRunID := uuid.NewString()
 	wantScope := runtimeauthoractivity.BundleScope("00000000-0000-0000-0000-000000000313", sourceFact.BundleHash())
-	initiatingCtx, cancel := context.WithCancel(context.Background())
-	ctx := selectedForkExecutionTestContext(t, initiatingCtx, authority)
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
+	initiatingCtx, cancel := context.WithCancel(runForkTestContext(t))
+	ctx := runtimecorrelation.WithSourceArtifactFact(initiatingCtx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: authority.SelectedFork.ForkRunID, Source: sourceFact,
+		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: forkRunID, Source: sourceFact,
 		Artifact: bundle.SourceArtifact,
 	})
-	sourceRunID, forkEventID := uuid.NewString(), uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, Source: sourceFact, Artifact: bundle.SourceArtifact,
-	})
-	storetest.CommitSemanticEvent(t, ctx, selected, eventtest.PersistedProjection(forkEventID, events.EventType("item.received"), "test", "", []byte(`{}`), 0, sourceRunID, "", events.EventEnvelope{}, time.Now().UTC()))
-	if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at) VALUES ($1,$2,$3,$4,'selected_contracts',$5)`, uuid.NewString(), authority.SelectedFork.ForkRunID, sourceRunID, forkEventID, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	forkAdmission := runfork.RunForkSelectedContractExecutionAdmission{
-		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
-		NonMutating: true, ForkRunID: authority.SelectedFork.ForkRunID, SourceRunID: sourceRunID, ForkEventID: forkEventID,
-		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
-		AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
-		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1", DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
-	}
-	issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
-		Admission: forkAdmission, ContainerPlanFingerprint: "container", ActorCensusFingerprint: "actors", EffectiveConfigFingerprint: "config", ExecutionMode: runtimeeffects.ExecutionModeLive, Now: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	authority, err = selected.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "self-release-scope-test", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx = selectedForkExecutionTestContext(t, initiatingCtx, authority)
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
-	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
-	admission, ok := managedexecution.FromContext(ctx)
-	if !ok {
-		t.Fatal("selected-contract test admission is missing")
-	}
-	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
-		authority,
-		admission,
-		liveTestCompletionController(selected, selected, selected, selectedForkDiscardSpendProjection{}),
-		runtimecorrelation.RuntimeLineage{},
-	)
-	if err != nil {
-		t.Fatalf("construct selected-contract receiver execution: %v", err)
-	}
-	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
-		ContractBundle:     source,
-		ExecutionPosture:   executionposture.Live,
-		SourceArtifactFact: sourceFact,
-		WorkOwner:          owner,
-		ReceiverExecution:  receiverExecution,
-	})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
 	identity := selectedContractTestRootAgentIdentity(t, "fork-agent")
 	declaration, err := identity.Plan()
 	if err != nil {
 		t.Fatalf("selected-contract declaration plan: %v", err)
 	}
-	config := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
+	agentConfig := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
 		ID: "fork-agent", Identity: identity, FlowID: ".", Role: "worker", Model: llmselection.ModelAliasRegular,
-		ExecutionMode: "live", Subscriptions: []string{"item.received"},
+		ExecutionMode: "live", LLMBackend: llmselection.BackendAnthropic, Subscriptions: []string{"item.received"},
 	})
-	config.Identity = agentidentity.Identity{}
+	agentConfig.Identity = agentidentity.Identity{}
 	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(
 		runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live},
-		runtimemanager.AgentMaterializationBlueprint{Config: config, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
+		runtimemanager.AgentMaterializationBlueprint{Config: agentConfig, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
 	)
 	if err != nil {
 		t.Fatalf("resolve selected-contract declaration blueprint: %v", err)
 	}
-	record, err := blueprint.Materialize(authority.SelectedFork.ForkRunID)
+	record, err := blueprint.Materialize(forkRunID)
 	if err != nil {
 		t.Fatalf("materialize selected-contract declaration: %v", err)
 	}
@@ -534,44 +479,55 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 		t.Fatalf("selected-contract declaration revision: %v", err)
 	}
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: sourceFact.BundleHash()}
-	sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, []runtimeagenttopology.DesiredAgent{{
+	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(coordinate.BundleHash, []runtimeagenttopology.DesiredAgent{{
 		Identity: declaration, Source: coordinate, ConfigRevision: revision,
 	}})
 	if err != nil {
-		t.Fatalf("selected-contract source set: %v", err)
+		t.Fatalf("selected-contract declarations: %v", err)
 	}
-	processCapability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "selected-contract-cancellation-test", BootID: uuid.NewString(), RuntimeInstanceID: wantScope.RuntimeInstanceID,
-	})
-	if err != nil {
-		t.Fatalf("acquire selected-contract process capability: %v", err)
-	}
-	t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
-	if _, err := processCapability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: sourceSet}); err != nil {
-		t.Fatalf("install selected-contract source set: %v", err)
-	}
-	topology, err := runtimeagenttopology.StaticAdmission(sourceSet.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
+	processCapability := selectedContractTestProcessCapability(t, ctx, selected)
+	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
+	topology, err := runtimeagenttopology.SelectedDeclarationAdmission(forkRunID, declarations)
 	if err != nil {
 		t.Fatalf("construct selected-contract static topology: %v", err)
 	}
-
-	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Admission:    forkAdmission,
-		Owner:        selectedContractExecutionOwnerForTest(t, selected),
-		LoadedSource: LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact},
-		AgentRuntime: selectedContractAgentRuntimePlan{
-			Records: []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
-			Options: SelectedContractAgentRuntimeOptions{
-				ExecutionPosture:  executionposture.Live,
-				ProcessCapability: processCapability,
-				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-					return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
-				},
-				AgentManagerOptions: runtimemanager.AgentManagerOptions{
-					WorkOwner: owner, ReceiverExecution: receiverExecution,
-				},
+	loaded := LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
+	agents := selectedContractAgentRuntimePlan{
+		Declarations: declarations, Blueprints: []runtimemanager.AgentMaterializationBlueprint{blueprint},
+		Records: []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
+		Options: SelectedContractAgentRuntimeOptions{
+			ExecutionPosture: executionposture.Live, ProcessCapability: processCapability,
+			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
+			AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+				return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
 			},
 		},
+	}
+	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, forkRunID, agents)
+	ctx = selectedForkExecutionTestContext(t, ctx, authority)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
+	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		t.Fatal("selected-contract test admission is missing")
+	}
+	receiverExecution, err := eventreceiver.SelectedContractForkExecution(authority, admission,
+		liveTestCompletionController(selected, selected, selected, selectedForkDiscardSpendProjection{}), runtimecorrelation.RuntimeLineage{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		ContractBundle: source, ExecutionPosture: executionposture.Live, SourceArtifactFact: sourceFact,
+		WorkOwner: owner, ReceiverExecution: receiverExecution,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agents.Options.AgentManagerOptions = runtimemanager.AgentManagerOptions{WorkOwner: owner, ReceiverExecution: receiverExecution}
+	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
+		Owner: executionOwner, LoadedSource: loaded,
+		Prepared: prepared, AgentRuntime: agents, Admission: executionAdmission,
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntime: %v", err)
@@ -583,8 +539,8 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	}
 	select {
 	case <-grantDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for selected-contract generation retirement")
+	default:
+		t.Fatal("shutdown returned before selected-contract generation retirement")
 	}
 }
 

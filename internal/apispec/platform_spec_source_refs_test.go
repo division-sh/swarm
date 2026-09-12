@@ -30,8 +30,6 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 		"description",
 		"description_field",
 		"create_entity",
-		"select_entity",
-		"select_or_create_entity",
 		"guard",
 		"accumulate",
 		"compute",
@@ -61,6 +59,11 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 		}
 	}
 
+	for _, retired := range []string{"select_entity", "select_or_create_entity"} {
+		if hasMappingKey(handlerFields, retired) {
+			t.Fatalf("spec restored retired handler grammar %s", retired)
+		}
+	}
 	expectedExpressionContext := map[string]bool{
 		"description":     true,
 		"namespaces":      true,

@@ -14,6 +14,7 @@ const (
 	DispatchTerminal
 	DispatchDeferred
 	DispatchFatal
+	DispatchAlreadyOwned
 )
 
 // DispatchWakeAuthority identifies the already-live owner whose committed
@@ -24,6 +25,7 @@ const (
 	DispatchWakeAgentRouteLifecycle DispatchWakeAuthority = iota + 1
 	DispatchWakeInternalSubscriptionLifecycle
 	DispatchWakeCarrierReturn
+	DispatchWakeDeliveryLifecycle
 )
 
 func (a DispatchWakeAuthority) String() string {
@@ -34,6 +36,8 @@ func (a DispatchWakeAuthority) String() string {
 		return "internal_subscription_lifecycle"
 	case DispatchWakeCarrierReturn:
 		return "carrier_return"
+	case DispatchWakeDeliveryLifecycle:
+		return "delivery_lifecycle"
 	default:
 		return ""
 	}
@@ -50,6 +54,10 @@ type DispatchResult struct {
 
 func Transferred() DispatchResult {
 	return DispatchResult{disposition: DispatchTransferred}
+}
+
+func AlreadyOwned() DispatchResult {
+	return DispatchResult{disposition: DispatchAlreadyOwned}
 }
 
 func TerminallySettled() DispatchResult {
@@ -73,7 +81,7 @@ func (r DispatchResult) Failure() error                       { return r.err }
 
 func (r DispatchResult) Validate() error {
 	switch r.disposition {
-	case DispatchTransferred, DispatchTerminal:
+	case DispatchTransferred, DispatchTerminal, DispatchAlreadyOwned:
 		if r.wake != 0 || r.err != nil {
 			return errors.New("settled delivery continuation dispatch result carries extra authority")
 		}

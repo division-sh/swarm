@@ -17,6 +17,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -181,6 +182,18 @@ func executeOperatorEventReplay(
 	if eventID == "" {
 		return eventReplayResult{}, NewInvalidParamsError(map[string]any{"field": "event_id", "reason": "required parameter is missing"})
 	}
+	if opts.SelectedForkControls != nil {
+		original, err := opts.Observability.LoadOperatorEvent(ctx, eventID)
+		if errors.Is(err, operatorread.ErrEventNotFound) {
+			return eventReplayResult{}, NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": eventID})
+		}
+		if err != nil {
+			return eventReplayResult{}, err
+		}
+		if err := requireNormalRunControl(ctx, opts.SelectedForkControls, original.RunID, runfork.SelectedControl(req.Method)); err != nil {
+			return eventReplayResult{}, err
+		}
+	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return eventReplayResult{}, err
@@ -247,6 +260,9 @@ func performEventReplay(
 		return eventReplayPerformed{}, NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": eventID})
 	}
 	if err != nil {
+		return eventReplayPerformed{}, err
+	}
+	if err := requireNormalRunControl(ctx, opts.SelectedForkControls, original.RunID, runfork.SelectedControl(req.Method)); err != nil {
 		return eventReplayPerformed{}, err
 	}
 	if runtimeContextManager(opts.RuntimeContexts) != nil {
@@ -354,6 +370,9 @@ func ensureEventReplayAudit(
 		return NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": stored.EventID})
 	}
 	if err != nil {
+		return err
+	}
+	if err := requireNormalRunControl(ctx, opts.SelectedForkControls, original.RunID, runfork.SelectedControl(req.Method)); err != nil {
 		return err
 	}
 	if runtimeContextManager(opts.RuntimeContexts) != nil {

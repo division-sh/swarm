@@ -396,6 +396,8 @@ type SessionTerminalOwner interface {
 // never crosses process composition; callers receive ProcessCapability.
 type RetainedSession interface {
 	runtimedestructivereset.OperationStore
+	InspectRunExecutionOwnership(context.Context, GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error)
+	ProveSelectedForkGenerationGrant(context.Context, GrantEvidence) error
 	Authority() (Authority, error)
 	ProveCurrent(context.Context) error
 	MonitorProveCurrent(context.Context, time.Duration) error

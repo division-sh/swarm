@@ -124,7 +124,7 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 					cfg.LLM.Backend = "anthropic"
 					probe := &diagnosticForkActivationProbe{SelectedContractForkLifecycle: forkStore, t: t, h: h, scenario: scenario}
 					result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
-						SourceRunID: catalogRuntimeRunID, At: event.ID(), ConfirmSourceFreeze: true,
+						SourceRunID: catalogRuntimeRunID, At: event.ID(), AllowSourceFreeze: true,
 						Owner: selectedContractExecutionOwnerForCatalogHarness(t, h, probe), SourceLoader: loader, ContractSelection: selection,
 						AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
 					})

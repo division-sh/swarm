@@ -15,7 +15,34 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
+
+func TestSupervisorPreservesSelectedRetirementFailureAcrossShutdownBranches(t *testing.T) {
+	for _, managed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "managed"}[managed], func(t *testing.T) {
+			rt := &runtime.Runtime{}
+			supervisor := newProcessLifecycleSupervisor(nil, rt)
+			// An incomplete construction is an explicit selected-retirement
+			// failure; successful normal shutdown cannot erase that evidence.
+			supervisor.selected = &storeselected.RunFork{}
+			if supervisor.selected.RetireSelectedContexts(context.Background()) == nil {
+				t.Fatal("incomplete selected owner unexpectedly proves retirement")
+			}
+			supervisor.shutdownRuntime = func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error { return nil }
+			if managed {
+				manager, err := runtime.NewRuntimeContextManager(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				supervisor.SetRuntimeContextManager(manager, mustServeTestEphemeralSourceArtifactFact(runtimeContextTestHash("a")))
+			}
+			if err := supervisor.ShutdownProcessWithOptions(context.Background(), runtime.DefaultShutdownOptions()); err == nil {
+				t.Fatal("normal shutdown erased selected-retirement failure")
+			}
+		})
+	}
+}
 
 func TestSupervisorReleasesConstructedProjectionOnlyAfterSuccessfulJoin(t *testing.T) {
 	for _, failJoin := range []bool{false, true} {

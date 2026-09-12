@@ -30,7 +30,9 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -330,7 +332,7 @@ func installExternalRuntimeTestGeneration(
 	ctx context.Context,
 	selected any,
 	runtime *runtimepkg.Runtime,
-) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant) {
+) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant) {
 	t.Helper()
 	store, ok := selected.(runtimestartupownership.Store)
 	if !ok {
@@ -406,7 +408,7 @@ func installExternalManagerTestGeneration(
 	t testing.TB,
 	ctx context.Context,
 	manager *runtimemanager.AgentManager,
-	grant runtimestartupownership.GenerationGrant,
+	grant runtimestartupownership.LiveGenerationGrant,
 ) {
 	t.Helper()
 	if manager == nil || grant == nil {
@@ -431,6 +433,24 @@ func installExternalManagerTestGeneration(
 	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
 		t.Fatalf("install external manager test generation: %v", err)
 	}
+}
+
+func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selected agentfixture.Store, manager *runtimemanager.AgentManager, source semanticview.Source) {
+	t.Helper()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
+	if err != nil {
+		t.Fatalf("admit external manager fixture generation: %v", err)
+	}
+	installExternalManagerTestGeneration(t, ctx, manager, grant)
 }
 
 type externalRuntimeTestDurableEventStore interface {
@@ -458,7 +478,7 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 		ReplyContext: durable, RunLifecycle: durable,
 		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
 		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
-		ActiveFlows: durable, TargetOwners: durable, WorkflowInstances: durable, PreparedEvents: durable,
+		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }

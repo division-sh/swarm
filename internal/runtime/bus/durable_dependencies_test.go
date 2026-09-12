@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -122,14 +121,8 @@ func (unexpectedDurableTestRoles) LoadWorkflowInstance(context.Context, runtimef
 func (unexpectedDurableTestRoles) ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) SelectActiveWorkflowInstances(context.Context, string, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowInstance, error) {
-	return nil, errUnexpectedDurableTestRole
-}
 func (unexpectedDurableTestRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
 	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, errUnexpectedDurableTestRole
-}
-func (unexpectedDurableTestRoles) SelectActiveWorkflowEntityStates(context.Context, string, runtimepipeline.WorkflowEntityStateSelectionOwner, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return nil, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error) {
 	return PreparedPublishEvent{}, false, errUnexpectedDurableTestRole
@@ -183,9 +176,6 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.TargetOwners == nil {
 		deps.TargetOwners = defaults
 	}
-	if deps.WorkflowInstances == nil {
-		deps.WorkflowInstances = defaults
-	}
 	if deps.PreparedEvents == nil {
 		deps.PreparedEvents = defaults
 	}
@@ -238,9 +228,6 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(SelectedRunTargetOwnerLister); ok {
 		deps.TargetOwners = role
 	}
-	if role, ok := selected.(runtimepipeline.WorkflowInstancePersistenceReader); ok {
-		deps.WorkflowInstances = role
-	}
 	if role, ok := selected.(PreparedPublishEventReader); ok {
 		deps.PreparedEvents = role
 	}
@@ -256,7 +243,7 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	return deps
 }
 
-func TestDurableDependenciesRequireWorkflowInstanceStateReaderAtConstruction(t *testing.T) {
+func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 	roles := unexpectedDurableTestRoles{}
 	store := newTargetRouteMemoryStore()
 	deps := DurableDependencies{
@@ -272,10 +259,6 @@ func TestDurableDependenciesRequireWorkflowInstanceStateReaderAtConstruction(t *
 		PipelineObligations: store.PipelineObligations(),
 		ReceiverExecution:   eventreceiver.NormalExecution(),
 	}
-	if _, err := NewEventBusWithOptions(store, opts); err == nil || !strings.Contains(err.Error(), "workflow instance/state reader") {
-		t.Fatalf("missing workflow reader validation error = %v", err)
-	}
-	opts.Durable.WorkflowInstances = roles
 	if _, err := NewEventBusWithOptions(store, opts); err != nil {
 		t.Fatalf("construct with complete durable dependencies: %v", err)
 	}

@@ -2,10 +2,10 @@ package runforkexecution
 
 import (
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -35,17 +35,20 @@ func BuildSelectedContractRouteTopology(req SelectedContractRouteTopologyRequest
 	if err := validateSelectedContractRouteAdmission(admission, routeAdmission); err != nil {
 		return runfork.RunForkSelectedContractRouteTopology{}, err
 	}
-	return canonicalSelectedContractRouteTopology(admission, routeAdmission), nil
+	return canonicalSelectedContractRouteTopology(admission, routeAdmission)
 }
 
-func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission) runfork.RunForkSelectedContractRouteTopology {
+func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission) (runfork.RunForkSelectedContractRouteTopology, error) {
 	blockers := []runfork.RunForkUnsupportedBlocker{{
 		Code:    runfork.RunForkBlockerSelectedContractRouteTopologyNonMutating,
 		Message: "selected-contract route topology is non-mutating; route persistence, recipient delivery writes, and handler execution remain separately gated",
 	}}
 	dynamicDisposition := runfork.RunForkSelectedContractDispositionForkLocalTruth
 	dynamicFlowInstances := sortedTrimmedStrings(routeAdmission.DynamicFlowInstances)
-	dynamicProofs := selectedContractDynamicRouteTopologyProofs(frontier, routeAdmission, dynamicFlowInstances)
+	dynamicProofs, err := selectedContractDynamicRouteTopologyProofs(frontier, routeAdmission, dynamicFlowInstances)
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteTopology{}, err
+	}
 	dynamicSupported := len(dynamicFlowInstances) == 0 || len(dynamicProofs) == len(dynamicFlowInstances)
 	if len(dynamicFlowInstances) > 0 && !dynamicSupported {
 		dynamicDisposition = runfork.RunForkSelectedContractDispositionFailClosed
@@ -62,7 +65,10 @@ func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFron
 		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
 	}
 
-	staticEvents := selectedContractRouteTopologyEvents(routeAdmission.SelectedRouteEvents)
+	staticEvents, err := selectedContractRouteTopologyEvents(routeAdmission.SelectedRouteEvents)
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteTopology{}, err
+	}
 	return runfork.RunForkSelectedContractRouteTopology{
 		Owner:                          runfork.RunForkSelectedContractRouteTopologyOwner,
 		RouteAdmissionOwner:            routeAdmission.Owner,
@@ -88,7 +94,7 @@ func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFron
 		BlockedSiblings:                selectedContractRouteTopologyBlockedSiblings(),
 		InvalidPaths:                   selectedContractRouteTopologyInvalidPaths(),
 		UnsupportedBlockers:            blockers,
-	}
+	}, nil
 }
 
 func BuildSelectedContractExecutionModel(req SelectedContractExecutionModelRequest) (runfork.RunForkSelectedContractExecution, error) {
@@ -175,7 +181,10 @@ func validateSelectedContractRouteTopology(frontier runfork.RunForkContractFront
 	if strings.TrimSpace(topology.FrontierAdmissionOwner) != runfork.RunForkContractFrontierAdmissionOwner {
 		return fmt.Errorf("selected-contract route topology must consume %s; got %q", runfork.RunForkContractFrontierAdmissionOwner, topology.FrontierAdmissionOwner)
 	}
-	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	if err != nil {
+		return err
+	}
 	if topology.FrontierEventCount != frontierEventCount {
 		return fmt.Errorf("selected-contract route topology frontier count mismatch: got %d want %d", topology.FrontierEventCount, frontierEventCount)
 	}
@@ -188,8 +197,15 @@ func validateSelectedContractRouteTopology(frontier runfork.RunForkContractFront
 	if err := validateSelectionMatches("route topology", frontier.ContractSelection, topology.ContractSelection); err != nil {
 		return err
 	}
-	canonical := canonicalSelectedContractRouteTopology(frontier, routeAdmission)
-	if !reflect.DeepEqual(topology, canonical) {
+	canonical, err := canonicalSelectedContractRouteTopology(frontier, routeAdmission)
+	if err != nil {
+		return err
+	}
+	equal, err := runfork.EqualSelectedContractRouteTopology(topology, canonical)
+	if err != nil {
+		return err
+	}
+	if !equal {
 		return fmt.Errorf("selected-contract route topology does not match canonical route-admission evidence")
 	}
 	return nil
@@ -208,7 +224,10 @@ func validateSelectedContractRouteAdmission(frontier runfork.RunForkContractFron
 	if strings.TrimSpace(routeAdmission.FrontierAdmissionOwner) != runfork.RunForkContractFrontierAdmissionOwner {
 		return fmt.Errorf("selected-contract route admission must consume %s; got %q", runfork.RunForkContractFrontierAdmissionOwner, routeAdmission.FrontierAdmissionOwner)
 	}
-	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	if err != nil {
+		return err
+	}
 	if routeAdmission.FrontierEventCount != frontierEventCount {
 		return fmt.Errorf("selected-contract route admission frontier count mismatch: got %d want %d", routeAdmission.FrontierEventCount, frontierEventCount)
 	}
@@ -236,20 +255,25 @@ func equalStringSlices(left, right []string) bool {
 	return true
 }
 
-func selectedContractRouteTopologyEvents(events []runfork.RunForkSelectedContractRouteEvent) []runfork.RunForkSelectedContractRouteEvent {
-	if len(events) == 0 {
-		return nil
+func selectedContractRouteTopologyEvents(in []runfork.RunForkSelectedContractRouteEvent) ([]runfork.RunForkSelectedContractRouteEvent, error) {
+	if len(in) == 0 {
+		return nil, nil
 	}
-	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(events))
-	for _, event := range events {
+	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(in))
+	for _, event := range in {
+		recipients, err := sortedFrontierRecipients(event.DerivedRecipients)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, runfork.RunForkSelectedContractRouteEvent{
-			SourceEventID:     event.SourceEventID,
-			EventName:         event.EventName,
-			DerivedRecipients: append([]runfork.RunForkContractFrontierRecipient(nil), event.DerivedRecipients...),
-			Disposition:       runfork.RunForkSelectedContractDispositionForkLocalTruth,
+			SourceEventID:            event.SourceEventID,
+			EventName:                event.EventName,
+			DerivedRecipients:        recipients,
+			HistoricalDeliveryRoutes: append([]events.DeliveryRoute(nil), event.HistoricalDeliveryRoutes...),
+			Disposition:              runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		})
 	}
-	return out
+	return out, nil
 }
 
 func selectedContractDynamicRouteTopologyOwner(instances []string) string {
@@ -259,9 +283,9 @@ func selectedContractDynamicRouteTopologyOwner(instances []string) string {
 	return runfork.RunForkSelectedContractDynamicRouteTopologyOwner
 }
 
-func selectedContractDynamicRouteTopologyProofs(frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission, instances []string) []runfork.RunForkSelectedContractDynamicTopologyProof {
+func selectedContractDynamicRouteTopologyProofs(frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission, instances []string) ([]runfork.RunForkSelectedContractDynamicTopologyProof, error) {
 	if len(instances) == 0 {
-		return nil
+		return nil, nil
 	}
 	evidence := selectedContractDynamicTopologyEvidence(frontier, routeAdmission)
 	proofs := make([]runfork.RunForkSelectedContractDynamicTopologyProof, 0, len(instances))
@@ -270,7 +294,10 @@ func selectedContractDynamicRouteTopologyProofs(frontier runfork.RunForkContract
 		if !ok || !item.hasFrontierFlowInstance || len(item.recipients) == 0 || len(item.eventNames) == 0 {
 			continue
 		}
-		recipients := sortedFrontierRecipients(item.recipients)
+		recipients, err := sortedFrontierRecipients(item.recipients)
+		if err != nil {
+			return nil, err
+		}
 		if len(recipients) == 0 {
 			continue
 		}
@@ -282,7 +309,7 @@ func selectedContractDynamicRouteTopologyProofs(frontier runfork.RunForkContract
 			Disposition:       runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		})
 	}
-	return proofs
+	return proofs, nil
 }
 
 type selectedContractDynamicTopologyEvidenceItem struct {
@@ -319,9 +346,7 @@ func selectedContractDynamicTopologyEvidence(frontier runfork.RunForkContractFro
 			if normalizeRouteInstance(recipient.Path) != instance {
 				continue
 			}
-			item.recipients = append(item.recipients, runfork.NewRunForkContractFrontierRecipient(
-				recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentPlan,
-			))
+			item.recipients = append(item.recipients, recipient)
 		}
 	}
 	for _, event := range frontier.FrontierEvents {

@@ -160,7 +160,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	if err != nil {
 		return "", workflowExpressionContext{}, err
 	}
-	return workflowexpr.RewriteLoopRoot(normalized), normalizedCtx, nil
+	return normalized, normalizedCtx, nil
 }
 
 func rewriteWorkflowExpressionEntityNullPresenceChecks(expression string) string {

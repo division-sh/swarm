@@ -96,7 +96,7 @@ func requireForkedSourceRefusal(t *testing.T, label string, err error) {
 }
 
 func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t *testing.T) {
-	for _, backend := range []string{"postgres"} {
+	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()

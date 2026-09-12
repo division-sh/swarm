@@ -102,8 +102,9 @@ type Executor struct {
 
 type executionFrame struct {
 	ctx                       context.Context
+	deliveryTarget            runtimepinrouting.CurrentDeliveryTarget
 	req                       ExecutionRequest
-	emitLineage               *events.EventLineage
+	fanOutEmission            *fanoutobligation.OrdinalEmission
 	base                      BaseContext
 	state                     ExecutionState
 	result                    ExecutionResult
@@ -125,6 +126,7 @@ type executionFrame struct {
 	loopPlan                  *runtimecontracts.WorkflowLoopPlan
 	loopActivation            *loopruntime.Activation
 	collectionPlan            runtimecontracts.WorkflowHandlerCollectionPlan
+	joinLoopGeneration        attemptgeneration.Generation
 }
 
 type handlerRuleSource string
@@ -203,15 +205,6 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	}
 	if err := validateHandlerLoopRuntime(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
-	}
-	if req.Handler.CreateEntity && req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() {
-		return fmt.Errorf("%w: handler declares both create_entity and select_entity", ErrInvalidConfig)
-	}
-	if req.Handler.CreateEntity && req.Handler.SelectOrCreateEntity != nil && !req.Handler.SelectOrCreateEntity.Empty() {
-		return fmt.Errorf("%w: handler declares both create_entity and select_or_create_entity", ErrInvalidConfig)
-	}
-	if req.Handler.SelectEntity != nil && !req.Handler.SelectEntity.Empty() && req.Handler.SelectOrCreateEntity != nil && !req.Handler.SelectOrCreateEntity.Empty() {
-		return fmt.Errorf("%w: handler declares both select_entity and select_or_create_entity", ErrInvalidConfig)
 	}
 	if err := validateHandlerComputeSpecs(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
@@ -657,8 +650,10 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	if err != nil {
 		return executionFrame{}, err
 	}
+	delivery, deliveryPresent := runtimedelivery.RouteFromContext(ctx)
 	return executionFrame{
 		ctx:                      ctx,
+		deliveryTarget:           runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent),
 		req:                      req,
 		base:                     base,
 		payload:                  payload,
@@ -822,6 +817,15 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 			"row_id": spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
+	if internal && generation.Valid() && activation.CloseReason == joinruntime.CloseReasonStageExit {
+		current, err := loopruntime.GenerationCurrent(frame.state.State.StateCarrier.StateBuckets, generation, "")
+		if err != nil {
+			return false, err
+		}
+		if !current {
+			return false, e.joinArrivalFailure(frame, failures.ClassUnexpectedArrival, "join_generation_superseded", spec, window, "")
+		}
+	}
 	if internal && timerKind == timeridentity.TimerHandleJoinComplete {
 		if activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete || !activation.OutcomePending || activation.OutcomeFired {
 			frame.result.Status = OutcomeDiscarded
@@ -946,6 +950,9 @@ func (e *Executor) stepFanOutDeliveryJoin(frame *executionFrame, plan runtimecon
 		return false, err
 	}
 	frame.state.Join = summary.Context()
+	if err := e.bindJoinLoopContext(frame, joinRef); err != nil {
+		return false, err
+	}
 	frame.rule = &plan.Spec.OnComplete
 	frame.ruleSource = handlerRuleSourceJoinOnComplete
 	frame.ruleIndex = 0
@@ -977,6 +984,9 @@ func (e *Executor) storeJoinActivation(frame *executionFrame, activation joinrun
 }
 
 func (e *Executor) selectJoinOutcome(frame *executionFrame, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource, activation joinruntime.Activation) error {
+	if err := e.bindJoinLoopContext(frame, activation.JoinRef()); err != nil {
+		return err
+	}
 	frame.state.Join = activation.Context()
 	frame.rule = rule
 	frame.ruleSource = source
@@ -1910,10 +1920,13 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 		delete(entity, source.Field)
 		delete(stateFields, source.Field)
 	}
-	var deliveryRoute *events.DeliveryRoute
+	var receiver *fanoutobligation.ExecutionReceiver
 	if route, ok := runtimedelivery.RouteFromContext(frame.ctx); ok {
-		copy := route
-		deliveryRoute = &copy
+		projected, err := fanoutobligation.ProjectExecutionReceiver(route)
+		if err != nil {
+			return fanoutobligation.IntentRequest{}, err
+		}
+		receiver = &projected
 	}
 	request := fanoutobligation.IntentRequest{
 		Key: fanoutobligation.IntentKey{
@@ -1926,7 +1939,7 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 			NodeKey: frame.req.Node.Key(), ExecutionFlowID: frame.req.ExecutionFlowID.String(), Route: frame.req.Route,
 			EntityID: frame.req.EntityID.String(), HandlerEventKey: frame.req.HandlerEventKey,
 			CurrentState: frame.state.State.CurrentState, ChainDepth: frame.req.ChainDepth,
-			ProducerSource: frame.req.ProducerSource, DeliveryRoute: deliveryRoute, Lineage: events.LineageFromEvent(frame.req.Event),
+			ProducerSource: frame.req.ProducerSource, Receiver: receiver, Lineage: events.LineageFromEvent(frame.req.Event),
 			Entity: entity, PlatformEntity: cloneStringAnyMap(ctx.PlatformEntity.Raw()), Computed: cloneStringAnyMap(ctx.Computed.Raw()),
 			Accumulated: cloneStringAnyMap(ctx.Accumulated.Raw()), Join: cloneStringAnyMap(ctx.Join.Raw()), Loop: cloneStringAnyMap(ctx.Loop.Raw()),
 			StateFields: stateFields, StateBookkeeping: cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping),
@@ -3277,6 +3290,16 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			}
 			continue
 		}
+		if write.Value.HasRefValue() {
+			value, ok, err := evalExpressionValue(current, frame.state, write.Value, joinExpressionOptions(frame))
+			if err != nil || !ok {
+				return fmt.Errorf("data_accumulation target %s: reference %s unavailable: %v", target, write.Value.Ref, err)
+			}
+			if err := e.writeStepValue(frame, target, value); err != nil {
+				return fmt.Errorf("data_accumulation target %s: %w", target, err)
+			}
+			continue
+		}
 		if write.Value.HasCELValue() {
 			value, err := evalWorkflowValueExpression(current, frame.state, write.Value.CEL, joinExpressionOptions(frame))
 			if err != nil {
@@ -3576,18 +3599,18 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 		resolution.Envelope.Source = events.RouteIdentity{}
 	}
 	lineage := events.LineageFromEvent(frame.req.Event)
-	if frame.emitLineage != nil {
-		lineage = *frame.emitLineage
+	facts := events.EventFacts{
+		Type:     events.EventType(strings.TrimSpace(eventType)),
+		Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: frame.req.Node.Key()},
+		Payload:  encoded, ChainDepth: chainDepth, Envelope: resolution.Envelope,
+		RoutingSource: routingSource, CreatedAt: createdAt,
 	}
-	evt, err := events.NewChildEvent(events.ChildEventInput{
-		Facts: events.EventFacts{
-			Type:     events.EventType(strings.TrimSpace(eventType)),
-			Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: frame.req.Node.Key()},
-			Payload:  encoded, ChainDepth: chainDepth, Envelope: resolution.Envelope,
-			RoutingSource: routingSource, CreatedAt: createdAt,
-		},
-		Lineage: lineage,
-	})
+	var evt events.Event
+	if frame.fanOutEmission != nil {
+		evt, err = frame.fanOutEmission.NewEvent(facts)
+	} else {
+		evt, err = events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: lineage})
+	}
 	if err != nil {
 		return EmitIntent{}, fmt.Errorf("construct emitted event: %w", err)
 	}
@@ -3595,7 +3618,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	return EmitIntent{
 		Event:         evt,
 		ChainDepth:    chainDepth,
-		ParentEventID: strings.TrimSpace(lineage.ParentEventID),
+		ParentEventID: evt.ParentEventID(),
 	}, nil
 }
 
@@ -3623,14 +3646,13 @@ func nextPersistenceSafeEmitTime(now, previous time.Time) time.Time {
 }
 
 func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {
-	delivery, deliveryPresent := runtimedelivery.RouteFromContext(frame.ctx)
 	input := runtimepinrouting.ResolutionInput{
 		Source:               e.deps.Source,
 		FlowID:               frame.req.ExecutionFlowID.String(),
 		EventType:            strings.TrimSpace(eventType),
 		RoutingSource:        frame.req.ProducerSource,
 		StructuralParent:     structuralParentFromState(frame.state.State.StateCarrier.Fields),
-		CurrentDeliveryOwner: runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent),
+		CurrentDeliveryOwner: frame.deliveryTarget,
 	}
 	resolution := runtimepinrouting.ResolveEnvelope(input, envelope)
 	if err := runtimepinrouting.FailureError(resolution.Failure); err != nil {

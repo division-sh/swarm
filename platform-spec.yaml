@@ -564,11 +564,69 @@ contract_formats:
         attempt; started, uncertain, missing, or otherwise non-terminal dispatch evidence
         fails the fork closed. Source-run approval never authorizes a fork-local provider
         call. Policy-inconsistent evidence also fails the fork closed.
+        Repeated recorded-result materialization confirms the complete child
+        attempt against the projected source evidence: exact owner and request
+        coordinates, generation, status and execution mode, result identity and
+        payload, failure, input hash, detached reply authority and copied times.
+        Matching request/result IDs alone do not establish agreement. Conflicting
+        evidence fails without overwriting the row or appending a lifecycle story;
+        an unchanged repeat is a no-op. JSON evidence uses the canonical semantic
+        value comparison, not byte order or a second numeric interpretation.
+      fork_generation_correspondence: >
+        One transient correspondence owns source-to-child generation projection.
+        Its source is the exact admitted run/entity snapshot at the fixed fork
+        revision, including valid ancestor-fork activations; its destination is
+        the canonical child run/entity projection. Every reference must be owned
+        by that source activation in all six generation coordinates. Translation
+        uses the existing deterministic fork identity owner and preserves the
+        referenced attempt, not the latest source or child attempt. Duplicate
+        activation evidence, contradictory scope or cap, an unknown reference,
+        and an occupied projection destination fail closed; no first-match,
+        field-name, revision-only or substring election is authoritative.
+        Source-bound and already-child-bound references are distinct operations.
+        Actual child ownership must agree with the correspondence before use.
+        Selected activity request payloads are child-bound before publication.
+        Pipeline decoding consumes those exact request, parent and generation
+        coordinates without repeating source-to-child translation; execution
+        admission still validates their current ownership and stage.
+        Later lawful child repeat or close preserves historical ownership but
+        does not grant current execution permission. Accumulator keys omit the
+        revision-field coordinate: strict key decoding preserves this partial
+        reference and only the admitted source activation can complete it.
+        Projection leaves all source input unchanged on success or failure and
+        detaches nested child values, including when no loop is present. Absence
+        of a loop bucket cannot hide a nonempty dependent generation reference.
+        Ordinary payload carriage is admitted from the original source run's
+        immutable artifact, never the replacement selected artifact. The shared
+        declaration owner recognizes the required text revision property and
+        explicit loop.revision_id mapping used by verification. All applicable
+        original input and emission sites must agree on the property's loop
+        meaning; ambiguous evidence fails closed without reconstructing which
+        rule executed. An equal string value or familiar property name alone
+        cannot turn business data into generation lineage.
+        Selected preparation and supported historical delivery replay consume
+        that same artifact-bound declaration admission together with immutable
+        source event evidence and fixed-revision state. Historical activation
+        resolves its source run through canonical fork origin, then rechecks
+        the original artifact binding in the replay transaction. These checks
+        do not expand historical replay capability or current execution policy.
+        Fan-out loop context preserves all seven declared execution coordinates,
+        including cap and revision-field meaning; dependent barrier generation
+        must agree before translation. Frozen business values remain detached
+        and retain exact integer and double values through capsule persistence
+        and repeated materialization. Original trigger lineage remains evidence,
+        not a payload-wide instruction to replace matching values.
       expression_context: >
         `loop.id`, `loop.activation_id`, `loop.revision_id`, `loop.attempt`, and
         `loop.max_attempts` are available after loop admission. The CEL
         implementation may lower this root internally, but `loop.*` is the only
-        authored spelling.
+        authored spelling. These are the complete authored members; internal
+        carriage coordinates are not additional expression fields. Join outcome
+        expressions bind them to the join's captured generation, including an
+        owned historical attempt, never a current replacement iteration. The
+        same captured identity survives pending outcomes, owner reconstruction,
+        restart, and supported fork correspondence. Historical ownership does
+        not override cancellation, terminality, or execution-policy refusals.
       projection: >
         Reserved persisted loop buckets are not readable or writable through
         authored accumulator/data/clear paths. Supported entity/tool readbacks
@@ -1254,6 +1312,36 @@ contract_formats:
           operator_injected event carrying the exact opaque, source-validated root_input API publication endpoint for that
           event. An unadmitted child, operator-injected, replay, runtime, or platform event with the same event name cannot
           acquire external-input receiver authority and MUST fail before event-delivery or receiver mutation.
+          A separately admitted selected fork may process only starting inputs selected by its fixed frontier/history
+          admission. Its existing non-executable preparation owner consumes strictly decoded, fixed-revision publication
+          identity, payload/schema identity and target facts and resolves the supported inputs against the exact selected
+          artifact using canonical input and payload validation. This path does not require the original API request
+          context. Its closed projection retains source/event identity, original publication class, execution mode,
+          payload, schema bundle/flow/event/digest/class, envelope targets, typed routing source and optional operator
+          reference provenance. Payload evidence uses canonical stored bytes, not diagnostic JSON; live source loading
+          must agree with the fixed revision and prepared coordinates before publication. Only recorded root/operator
+          publications with absent or provider-admitted ingress routing
+          source enter this input validator; explicit producer/control routes and platform schemas retain their existing
+          selected route/activity owners and acquire no public-input authority from their event class. A recorded `.`
+          schema flow selects the root-input endpoint; the ordinary root API's absent flow selects only the exact declared
+          root event schema, never a root-input fan-out. A concrete ordinary flow selects only that exact endpoint.
+          The selected owner consumes the canonical endpoint census, route table and publication matcher, not a second
+          router. Validation must precede fork materialization, source freezing and business execution; missing,
+          ambiguous or incompatible input evidence fails closed. Root publication may admit multiple declared inputs,
+          while explicit target restrictions and per-recipient completed/pending dispositions remain binding.
+          Agent-plan flow resolution must use the selected declaration and exact execution route through the canonical
+          agent semantic-scope owner, both for frontier/publication filtering and per-recipient payload validation.
+          An agent name owner is a declaration URI, never a flow ID or a substitute for that resolution. Completed
+          historical effects are reconstructed, not redelivered. Missing delivery rows do not establish pending work.
+          Completion excludes only the same exact source execution slot, including full agent plan/run or node handler,
+          flow instance and connect claim; source entity IDs are not transferred as fork ownership. Historical non-agent
+          delivery refusal remains binding even when a mixed completed/pending frontier is projected correctly.
+          The validation result is bound to exact source/event/selected-plan evidence and consumed without widening at
+          delivery, under the existing selected execution, binding, fencing and recipient guards. Changed evidence fails
+          before delivery or receiver mutation. Selected replay remains selected_fork_replay; it is never relabeled as
+          operator injection or root ingress. No old request-context persistence, additional permission lifecycle, replay
+          allowlist, ordinary-publication guard relaxation or expansion of unsupported historical/deferred execution is
+          authorized by this rule.
         retired_paths: |
           Unique same-name sibling output-pin inference and unconnected root/sibling emit inference are retired as both producer
           proof and producer-pattern authority. `swarm.source: external`
@@ -1339,9 +1427,10 @@ contract_formats:
             one generation-consistent selected-run projection classifies every node target as exactly one closed typed variant:
             existing_entity carries the exact selected entity owner; materializing_entity carries the exact future entity ID
             produced by the canonical materialization owner; entityless_receiver carries explicit entity absence only when no
-            admitted receiver-owner evidence exists. One closed compatibility policy has two independent axes. The handler
-            execution dependency is entity_optional, existing_required, or materializing. Receiver acquisition is none,
-            create, select, or select_or_create. Classification accounts for durable state buckets, lifecycle transitions and gates, guard kill,
+            admitted receiver-owner evidence exists. One closed compatibility policy classifies the handler execution
+            dependency as entity_optional, existing_required, or materializing. Flow instance keys and compiled input/edge
+            resolution select the receiving instance; handlers cannot acquire or select another receiver. Classification
+            accounts for durable state buckets, lifecycle transitions and gates, guard kill,
             approval lifecycle, persistent clears, evidence recording, accumulation, joins, and nested rule sites rather than
             inferring dependency only from authored entity references. Entity-optional means that execution can proceed without
             entity state; it does not forbid an exact existing or admitted materializing receiver owner. No supported handler
@@ -1349,17 +1438,14 @@ contract_formats:
             not ownership of the parent's state. References to persisted platform entity identity, state, or gates are existing-entity
             requirements; flow-instance platform metadata alone remains route metadata and does not invent entity ownership.
             An exact admitted same-plan materializing owner may satisfy an entity-optional or existing-required handler and a
-            later select handler in the same plan.
+            later existing-required handler in the same plan.
             Handler-derived materialization MUST agree with the canonical future identity. Routing, stamped validation,
-            and pipeline execution consume that same compatibility owner. External or admitted mixed-provenance handlers using
-            select or select_or_create resolve 0/1/N declared-key cardinality before publication; that acquisition result
-            produces the exact receiving route instead of consuming a source/path-derived preselection. Zero select matches and
-            multiple matches fail closed. Zero select_or_create matches stamp the deterministic future route; if that exact row
-            appears before execution it is accepted only when its identity and declared key agree, otherwise execution fails.
-            Declared-key acquisition is authorized only by explicit target absence. An event carrying an admitted exact target
-            consumes that target for select and select_or_create handlers; payload-key matches cannot redirect it to another owner.
-            Declared-key cardinality reads the run-scoped entity_state registry through one source-backed exact receiving-flow
-            owner. Every candidate route is classified against the complete admitted authored-flow set and is accepted only
+            and pipeline execution consume that same compatibility owner. External and mixed-provenance inputs use the same
+            composition-selected receiving instance. Missing required state fails before publication; explicit or implicit
+            initialization stamps only that instance's canonical future entity. If its row appears before execution, exact
+            ownership, type and state must agree. Business payload matches never redirect an admitted target, and an unavailable
+            exact owner is never treated as missing or recreated. Target evidence reads the run-scoped entity_state registry
+            through one source-backed exact receiving-flow owner. Every candidate route is classified against the complete admitted authored-flow set and is accepted only
             when exactly one authored flow grammar claims it and that flow is the receiver. Static and singleton flows admit
             only their exact authored scope. Template flows admit exactly one scalar concrete instance segment under their
             authored scope. The bundle root is owned by the closed coordinate consisting of the canonical authored root
@@ -1370,15 +1456,19 @@ contract_formats:
             materializing_entity, and entityless_receiver), stamped-target validation, target application, state-only decode,
             and engine mutation without a delivery application consumes that exact coordinate before persistence access or
             mutation. Root EventBus delivery planning, root connect materialization, declared-agent projection, and root gate,
-            loop, and timer declaration matching consume the same authored root owner. Zero-match root select_or_create
-            materializes the exact current run route and derives its future entity from that route. Any flow or run mismatch
+            loop, and timer declaration matching consume the same authored root owner. Root connect planning projects the
+            exact authored-root/current-run blueprint without requiring pre-existing state or inheriting source entity data.
+            The canonical handler classifier then admits existing state, initialization of that route's canonical entity,
+            or entityless execution. A root agent's declaration route remains root; its execution coordinates project to the
+            exact run for dependency admission and state readback. Planned agents are never fabricated active descriptors.
+            Any flow or run mismatch
             fails before event, delivery, settlement, entity-state, or lifecycle mutation.
             Reads of the exact receiver persistence aggregate MUST observe entity state and its lifecycle companion from one
             database statement snapshot (or one explicitly consistent transaction snapshot). Consumers MUST NOT assemble a
             presence value from independently timed reads that can fabricate absent, state-only, or lifecycle-only evidence.
             An overlap between a template instance spelling and an authored child scope is ambiguous and fails closed. A
             nested child row never becomes a parent candidate even when it shares the declared key and has no
-            lifecycle companion. Broad selection, exact select_or_create appearance, target application, and engine preparation
+            lifecycle companion. Composition resolution, exact state appearance, target application, and engine preparation
             all consume this same classifier before assigning workflow identity; caller relabeling is forbidden.
             A matching active state row remains selectable before its flow_instances lifecycle companion exists; when a
             companion exists, any non-active lifecycle (including draining or terminated) excludes that row. Joining through lifecycle as a prerequisite
@@ -1404,7 +1494,52 @@ contract_formats:
             publication is not ownership evidence. Node intents are classified
             independently against the selected-run snapshot. A node's speculative materialization result is not receiving
             activation evidence for an agent; only actual selected ownership or an admitted receiver activation plan supplies
-            that authority, so intent order cannot create it. Missing,
+            that authority, so intent order cannot create it. Each future agent receiver carries closed ReceiverInitialization
+            evidence binding its publication run/event and exact future target to either flow_lifecycle or node_delivery.
+            A node_delivery supplier additionally identifies the exact executable initializer node. This evidence is projected
+            from the admitted flow activation or canonical handler classifier; equal pins or future targets never establish
+            initialization responsibility. An optional observer does not become another initializer. The evidence is part of
+            durable route identity and the full route wire, and shares the existing receiver_materialization_plan JSON record
+            with the optional node dependency. Missing, contradictory, old-form or crossed supplier records fail closed.
+            The closed ReceiverMaterializationPlan binds the exact run,
+            publication, admitted RoutingSource, materializing target, materializer delivery route identity and complete
+            dependent agent route identities. Dependent identities in this plan identify their pre-binding routes; each
+            final durable agent route identity includes the complete plan. The materializer retains its ordinary route
+            identity. Complete publication validation checks both directions of this relation, rejects ambiguous suppliers,
+            and cannot accept a dropped dependent plan. The plan is committed with the publication and delivery obligations,
+            never manufactured from current descriptors during recovery. It is future ownership, not evidence of execution.
+            A node-supplied agent cannot drop its dependency, including when every dependent plan is erased. A flow-lifecycle
+            supplier has no fictitious node dependency: its exact activation commits initialization, and claim/readiness
+            admission still requires the exact persisted state and admitted lifecycle. Ordinary and historical hydration
+            consume the same supplier/dependency record and validate its publication identity. Ordinary agent-only fork
+            replay validates the complete source publication at the selected revision. A node supplier requires the exact
+            initializer's successful settlement at that revision; flow and node suppliers both require exact reconstructed
+            receiver state. Replay projects that state through the canonical entity ownership owner and rechecks the child
+            row in the activation transaction, admitting existing_entity without a copied source initialization dependency.
+            Existing root receivers use the same projection. An unfinished initializer cannot be omitted or fabricated as
+            child work. Untargeted agent receivers retain their explicit absence of entity ownership. Agent claims and continuation
+            eligibility for node-supplied state require the exact materializer's successful settlement and actual
+            persisted target state admitted by the workflow target owner, the exact
+            admitted agent lifecycle cell, and the matching live normal or selected generation grant. An agent descriptor
+            with an explicit entity must agree; lawful descriptor absence does not erase the materializer's exact ownership.
+            The claim transaction consumes the shared generation-authority mutation fence on either a pooled or retained
+            connection and revalidates the exact current grant inside it. Readiness scans are observations, never admission.
+            A completed materializer remains valid
+            when normal startup rebinds an unfinished agent delivery to
+            a successor runtime generation. Its immutable completed evidence remains bound to the same run, publication,
+            compiled route and source artifact; the agent still requires its own current admitted grant. Pending
+            materializers must retain exact execution-authority agreement, and no normal/selected crossing is admitted.
+            Awaiting materialization or readiness
+            creates no agent attempt, timer or polling loop; canonical commit and readiness signals wake the existing
+            continuation owner. Retryable materialization retains its existing retry policy. Terminal materializer failure
+            atomically terminalizes its dependent obligations through the delivery owner, with exact failure/outcome and
+            dead-letter evidence and no provider execution. Run cancellation retains the ordinary run-terminalization owner.
+            A successful node settlement without its exact target state terminalizes dependents as
+            receiver_materialization_missing rather than pretending the entity exists or waiting forever. Agent-only
+            template activation uses its existing lifecycle commit owner, but a future-target agent still requires exact
+            persisted state and readiness before claim. Publication duplicates validate the stored aggregate; they never
+            trust a caller's replacement plan or repair damaged dependency evidence.
+            Missing,
             ambiguous, malformed, stale, foreign, contradictory, or disagreeing owner evidence fails before event, delivery,
             settlement, lifecycle, warning, or reply mutation during publication admission. A nested static receiver uses
             only its actual receiving-owned entity or receiving activation. Supported create and auto-materializing work
@@ -1426,9 +1561,11 @@ contract_formats:
             Root route absence is represented by AgentIdentity route presence, never by a nullable or inferred
             identity. Duplicate, restart, selected-fork, historical replay, claim/scan, settlement, handler execution, and
             public observation preserve the originally stamped target variant and AgentIdentity without current-owner
-            re-resolution. Boot verification and runtime compile the same dependency/acquisition policy; unsupported explicit
-            static/default-static multi-row, template, stateless, and normal in-topology acquisition surfaces fail closed
-            before runtime.
+            re-resolution. Boot verification and runtime consume the same execution dependency policy. A noninitializing
+            input handler may use existing selected state or run without state when entity-optional; boot does not require
+            every handler to initialize it. Missing required state remains a runtime admission failure. Retired handler-side
+            receiver selection fails strict authoring admission in every flow mode and ingress context; static multi-row
+            ownership remains unsupported.
           no_delivery_postcondition: |
             Every admitted persisted event settles atomically to exactly one typed arm: one or more durable DeliveryRoute
             obligations, or one closed no-delivery disposition. The six exhaustive write classes are normal EventBus
@@ -2936,7 +3073,7 @@ handler_specification:
   dependency_graph:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
-    graph: "\nentity acquisition (optional — create_entity materializes the canonical receiving-flow primary entity; select_entity resolves exactly one target-flow-owned existing entity; select_or_create_entity resolves or creates one target-flow-owned entity by declared key)\n  └→ query (optional — pre-fetch cross-entity\
+    graph: "\nreceiver state initialization (optional; canonical receiving-flow primary entity at the admitted composition-selected instance, never another receiver election)\n  └→ query (optional — pre-fetch cross-entity\
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate (optional open/windowed stream admission; never waits or closes)\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
@@ -3015,119 +3152,6 @@ handler_specification:
         demands contained coordinator state, or a
         child flow. Historical rows are not silently rewritten by this retirement; actual persisted-row migration is
         separately gated.'
-    select_entity:
-      field: select_entity
-      type: object
-      purpose: Resolve exactly one existing entity owned by the receiving flow before any other handler processing. This is
-        the service-owned acquisition primitive for stateful typed input-pin handlers where the incoming cross-flow request
-        addresses an existing target-flow resource by declared business key, not by source-provided entity identity.
-      default: absent — handler consumes its admitted receiver ownership under the dependency/acquisition policy
-      when_to_use: When an event arriving from outside the flow represents a request against an already-existing service
-        entity owned by the receiving flow. Example — OpCo emits a typed spend event with vertical_id, and Treasury selects
-        its own budget entity whose vertical_id matches the payload. The source flow must not provide the target entity_id,
-        entity_type, or flow_instance.
-      schema:
-        by: map of target entity field name to explicit payload reference. Each key MUST be a declared field on the receiving
-          flow's entity contract. Each value MUST be a payload.* reference from the triggering event schema.
-      execution_position: First step in the dependency graph. Runs before query, guard, accumulate, data_accumulation,
-        advances_to, emit, and action. Establishes the entity context for the entire handler.
-      entity_selection:
-        ownership_scope: Only entities owned by the receiving flow are candidates. Source-flow entities, source event envelope
-          identity, arbitrary parent/child path inference, and caller-provided target entity identity are not authoritative.
-        matching: Every select_entity.by binding must match exactly one receiving-flow entity field value. Zero matches fail
-          closed. More than one match fails closed. Missing payload refs fail closed.
-        selected_context: The selected entity_id and flow_instance become the handler entity context for state, guard,
-          data_accumulation, emit.fields, and state transition processing.
-      pin_routing_interaction:
-        receiver_context_order: 'For admitted external or mixed-provenance no-target events, select_entity resolves exactly one
-          receiving-flow row by declared key before publication and stamps that exact delivery target. Other admitted routes
-          consume their exact target evidence. Handler execution never late-binds or falls back to event.source.'
-        canonical_uses: External webhook ingress, events declared with swarm.source beginning with external, and rare mixed-provenance
-          event types where in-topology producers set event.target but external producers arrive without target.
-        non_canonical_use: In-topology receivers for pin-declared events whose producers are also in the pin topology. Pin routing
-          already supplies event.target; select_entity is a hard invalidity under the normal composition model and should
-          be replaced with receiver scalar instance/source/resolution plus parent connect routing.
-        boot_verify: Redundant normal in-topology select_entity is a hard invalidity. Stateful static/default-static authored
-          handlers using select_entity fail closed because static multi-row ownership is retired. Missing select_entity on
-          external/no-target static handlers is not repaired by requiring the retired acquisition field; authors must use
-          a supported template, singleton, contained-state, or child-flow model.
-      restrictions:
-        lifecycle_scope: Not valid for authored stateful static/default-static input-pin multi-row ownership. Stateless flows
-          do not have stateful entity acquisition. Template flows acquire entities through create_flow_instance.
-        with_create_entity: PROHIBITED. A handler must either materialize the canonical receiving-flow primary entity with
-          create_entity or select an existing target-flow-owned entity with select_entity, never both.
-        source_authority: PROHIBITED. select_entity keys must not target platform envelope/control fields such as entity_id,
-          entity_type, flow_instance, current_state, workflow_name, or workflow_version. Payload refs must not be
-          payload.entity_id, payload.entity_type, or payload.flow_instance. `_entity.*` and `event.*` refs are readable
-          elsewhere only where explicitly supported; they are not selector source authority.
-        compatibility: PROHIBITED. select_entity does not restore generic existing-entity cross-flow continuation and does
-          not allow a source flow to directly name or mutate another flow's entity row.
-      interactions:
-        with_accumulate: ALLOWED. Accumulate operates on the selected target-flow-owned entity after acquisition.
-        with_guard: ALLOWED. Guards evaluate against the selected entity state before same-handler writes.
-        with_data_accumulation: ALLOWED. Writes are validated against the selected entity's receiving-flow contract and remain
-          subject to same-flow ownership enforcement.
-        with_advances_to: ALLOWED. State transitions advance only the selected receiving-flow entity.
-        with_query: ALLOWED. Query runs after acquisition and cannot replace select_entity ownership checks.
-    select_or_create_entity:
-      field: select_or_create_entity
-      type: object
-      purpose: Resolve one existing entity owned by the receiving flow by declared business key, or deterministically mint
-        that receiving-flow entity when no active match exists. This is the replay-safe service-owned acquisition primitive
-        for typed input-pin handlers whose target service must own the entity identity.
-      default: absent — handler operates on the resolved inbound event entity context unless create_entity or select_entity is declared
-      when_to_use: When an event arriving from outside the flow represents a request against a receiving-flow service entity
-        that may not exist yet, and the receiving service can define the entity by stable payload keys. Example — a spec-repo
-        service receives a typed repo request keyed by source validation case and artifact type, then resolves or creates
-        the service-owned repo entity. The source flow must not provide the target entity_id, entity_type, or flow_instance.
-      schema:
-        by: map of target entity field name to explicit payload reference. Each key MUST be a declared field on the receiving
-          flow's entity contract. Each value MUST be a payload.* reference from the triggering event schema.
-      execution_position: First step in the dependency graph. Runs before query, guard, accumulate, data_accumulation,
-        advances_to, emit, and action. Establishes the entity context for the entire handler.
-      entity_acquisition:
-        ownership_scope: Only entities owned by the receiving flow are candidates. Source-flow entities, source event envelope
-          identity, arbitrary parent/child path inference, caller-provided target entity identity, and product-authored UUID
-          derivation are not authoritative.
-        matching: Every select_or_create_entity.by binding must match receiving-flow entity fields. One active match selects
-          that entity. Zero active matches deterministically creates one receiving-flow entity from the declared key. More
-          than one match fails closed. Missing payload refs fail closed.
-        deterministic_identity: The runtime derives the minted entity identity from the receiving flow ownership scope and
-          the canonical declared key. Contracts do not call a generic UUID helper and source flows do not provide target IDs.
-        selected_context: The selected or created entity_id and flow_instance become the handler entity context for state,
-          guard, data_accumulation, emit.fields, action, and state transition processing.
-      pin_routing_interaction:
-        receiver_context_order: 'For admitted external or mixed-provenance no-target events, select_or_create_entity resolves one
-          existing receiving-flow row or stamps one deterministic future row before publication. Other admitted routes consume
-          their exact delivery target. Execution accepts only that committed route and never late-binds or falls back to
-          event.source.'
-        canonical_uses: External or mixed-provenance events where the receiving service owns the entity identity and may need
-          to mint the entity on zero-match.
-        non_canonical_use: In-topology pin routing where lowered parent connect, structural fallback, or target_set delivery
-          already supplies the receiver route context.
-        boot_verify: Redundant normal in-topology select_or_create_entity is a hard invalidity. Stateful static/default-static
-          authored handlers using select_or_create_entity fail closed because static multi-row ownership is retired.
-      restrictions:
-        lifecycle_scope: Not valid for authored stateful static/default-static input-pin multi-row ownership. Stateless flows
-          do not have stateful entity acquisition. Template flows acquire entities through create_flow_instance.
-        with_create_entity: 'PROHIBITED. A handler must choose exactly one acquisition mode: create_entity, select_entity,
-          or select_or_create_entity.'
-        with_select_entity: PROHIBITED. select_entity and select_or_create_entity cannot appear on the same handler.
-        source_authority: PROHIBITED. select_or_create_entity keys must not target platform envelope/control fields such as
-          entity_id, entity_type, flow_instance, current_state, workflow_name, or workflow_version. Payload refs must not be
-          payload.entity_id, payload.entity_type, or payload.flow_instance. `_entity.*` and `event.*` refs are readable
-          elsewhere only where explicitly supported; they are not selector source authority.
-        compatibility: PROHIBITED. select_or_create_entity does not restore generic existing-entity cross-flow continuation
-          and does not allow a source flow to directly name or mutate another flow's entity row.
-      interactions:
-        with_accumulate: ALLOWED. Accumulate operates on the acquired target-flow-owned entity after acquisition.
-        with_guard: ALLOWED. Guards evaluate against the acquired entity state before same-handler writes.
-        with_data_accumulation: ALLOWED. Writes are validated against the acquired entity's receiving-flow contract and remain
-          subject to same-flow ownership enforcement.
-        with_advances_to: ALLOWED. State transitions advance only the acquired receiving-flow entity.
-        with_action: ALLOWED. Actions execute with the acquired entity context. Built-ins such as artifact_repo_commit may
-          use _entity.id as a service-owned opaque repo_id without exposing product-specific target identity to Swarm.
-        with_query: ALLOWED. Query runs after acquisition and cannot replace select_or_create_entity ownership checks.
     guard:
       field: guard
       type: object — single check OR list of checks
@@ -3691,6 +3715,11 @@ handler_specification:
           Carries the exact bundle-qualified compiled plan reference, trigger/run/delivery/route lineage, and only mutable
           or turn-local expression values needed after the handler returns. The retained bundle and semantic digest must
           still prove the same element before any ordinal is evaluated.
+          Its receiver projection carries only the exact executable node and typed target ownership, validated against
+          the capsule execution coordinates. It is not a delivery route or publication obligation: initialization
+          suppliers and dependency plans remain with their original publication and are never copied into a capsule.
+          Normal and resumed emission consume the same target classifier. A child projection retains historical
+          trigger lineage without minting a child trigger or treating source initialization as child authority.
         progress: >-
           Cardinality plus one contiguous cursor represents the unissued suffix. Each visited ordinal receives exactly
           one immutable committed-publication or deterministic semantic-rejection outcome. Cancellation terminalizes the
@@ -3718,13 +3747,49 @@ handler_specification:
           terminality or generation supersession. Startup, multiprocess serving, destructive reset, diagnostics, and
           global-work accounting consume this same owner.
         fork: >-
-          fan_out_obligations is a closed fixed-revision family. A child inherits exact capsule, source, cardinality,
+          fan_out_obligations is a closed fixed-revision family. A child inherits frozen capsule data, source, cardinality,
           cursor, terminal prefix, and exact delivery-barrier state at the selected revision, resets operational
           claim/tuning facts, and never reissues the prefix. An armed barrier resumes against the child-local intent;
           closed-unfired work receives one child-local schedule; fired, dead-lettered, and suppressed states remain
           terminal. Same-contract and selected-contract execution require the same stable element identity and semantic
           digest. Unsupported historical prefix work, a missing retained source artifact, or digest disagreement fails closed;
           source event and delivery rows are never copied.
+          Capsule node/declaration, handler, current state, chain depth, ancestor lineage and all frozen business,
+          computed and state maps retain their exact values. Only execution entity/route, typed producer source,
+          delivery target ownership and declared loop generation project to the child through the canonical
+          source/entity ownership and generation owners. Producer and receiver roles are independently validated;
+          absent ownership cannot be replaced by the source entity. Non-root entities retain their owner. Barrier
+          registration and child schedules consume the same projected executable coordinates. A retained entity-field
+          source keeps its exact ancestor run/entity/mutation reference; it is not renamed to the child execution
+          entity. Reading it requires exact retained revision and ancestor-lineage proof. Same-run captures still
+          require the executing entity. Repeat projection changes neither source history nor frozen business values.
+          Historical barrier materialization admits only the complete fixed-revision relation between the intent,
+          declaration/digest, typed handle, route/entity, summary, activation/key, due basis and lifecycle state.
+          Unmatched, additional or contradictory schedules remain unsupported; a timer label or terminal barrier
+          flag alone grants no exception. Materialization does not dispatch an occurrence. Closed-pending inheritance
+          creates exactly one fresh child-local activation and repeats create none; terminal inheritance creates no
+          activation. This historical materialization rule does not grant pending selected execution: the separate
+          3d_selected_contract_timer_route_policy still requires an admitted deferred-work owner under #642.
+          A dead-lettered barrier occurrence is terminal failure history, never replay work. The fixed-revision
+          admission owner must join the exact barrier and activation to its canonical occurrence, recipient route,
+          settled delivery claim version, immutable failed outcome and dead-letter record. Revision capture retains
+          those claim/outcome facts in the existing dead_letters family. Only that exact recipient receives the typed
+          terminal-history projection consumed by replay admission, selected frontier and materialization; other
+          recipients on the event remain independently classified. Missing or contradictory evidence fails closed.
+          Terminal status is not rewritten to delivered, and no child occurrence, delivery or schedule is created.
+          A newly executed suffix ordinal of an inherited intent is not a replay or root ingress. It carries an
+          explicit inherited_fan_out origin: destination run, original trigger run/event (possibly an ancestor of
+          the immediate source), triggering delivery, declaration identity, pinned bundle and semantic digest,
+          and ordinal. source_event_id remains absent; ordinary child causal parents remain strictly same-run.
+          One ordinal-emission owner projects this distinction for evaluation and validates it for chunk commit.
+          Only the named fan-out chunk transaction may persist this class, after locking the exact intent claim,
+          checking the immutable trigger and inherited lineage, and matching every origin/execution coordinate.
+          Event, origin, committed ordinal outcome, receiver obligations and cursor advance are atomic. Generic
+          publication cannot authorize this event class. Durable readback validates the unique committed ordinal
+          owner against the immutable event origin and capsule. Fixed-revision admission validates that same
+          semantic relation against its captured intent and outcome, not current live state. Public event readback
+          exposes inherited_fan_out_origin separately from source_event_id. Neither capture nor readback copies
+          the trigger, invents a root or grants selected deferred-work authority under #642.
     join:
       field: join
       type: object
@@ -3753,7 +3818,10 @@ handler_specification:
           until a durable contributor-lifecycle/cancellation owner is promoted.
         on_complete: >-
           Required non-empty outcome using only existing data_accumulation, emit, and advances_to fields. Expressions may
-          read declared entity.* and typed join.* only.
+          read declared entity.*, typed join.*, and the five defined loop.* members only.
+          loop.* uses the join's captured generation and owning activation cap, never the current replacement
+          attempt. Authors use loop.revision_id explicitly; no join.revision_id alias, implicit payload injection,
+          or inference from equal business fields is supported. A non-loop join has no loop context.
         timeout: >-
           Required `{after: <positive literal or policy-scalar duration>, ...outcome}`. Bare joins are invalid. The outcome
           supports the same fields and expression roots as on_complete.
@@ -3988,7 +4056,15 @@ handler_specification:
             product-specific path segments.
           operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
             contract must declare the output fields it wants persisted; status is committed or failed, failure records the
-            canonical platform.failure/v1 envelope when present, and current_ref updates only after git commit/ref verification succeeds.
+            nonempty canonical platform.failure/v1 envelope for failure and the empty JSON object {} for no failure, never null.
+            Every successful fresh commit, same-tree request, provider-history reconstruction, and failure-to-success recovery
+            explicitly clears any old failure to {}. This entity-state convention does not add a failure field to success events.
+            Distinct mapped output fields must admit their receiving entity values through the canonical named-type and
+            entity-state admission owners before provider side effects. Provider refs are opaque text; current_ref and a
+            named file_manifest.ref must admit unrestricted text, rather than a sampled hash, enum, equality, or refinement
+            that could reject the provider's eventual value. The failure field admits unrestricted JSON objects; prepared
+            manifest values and both status outcomes are checked before provider access. current_ref updates only after
+            git commit/ref verification succeeds.
             Provider history must record every accepted request_id and content/tree identity durably enough to reject historical
             request-id conflicts after intervening commits, including accepted same-tree/no-op requests. If git history contains
             the accepted request but entity output persistence is missing or stale, retry reconstructs and persists the
@@ -4223,7 +4299,7 @@ handler_specification:
           flow_instance: Current flow-instance path for the entity context.
           gates: Read-only map of platform gate booleans; dot access is supported for simple gate names and bracket access is used for gate names containing separators.
           unsupported_fields: '_entity.entity_id, _entity.entity_type, _entity.workflow_name, _entity.workflow_version, _entity.run_id, _entity.fields, _entity.accumulator, _entity.entered_state_at, _entity.revision, _entity.created_at, _entity.updated_at, and _entity.name are not exposed. revision, created_at, and updated_at must not remain readable through undeclared entity.* platform fallback.'
-        write_model: Read-only. Handler writes and entity tools may not target _entity. Emit payload construction may read _entity; select_entity/select_or_create_entity keys may not use _entity as a source-authority bypass.
+        write_model: Read-only. Handler writes and entity tools may not target _entity. Emit payload construction may read _entity; these values cannot authorize another receiver.
       accumulated:
         resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
           representing one admitted event payload in the current open/windowed stream bucket. Available to supported
@@ -4292,7 +4368,7 @@ handler_specification:
           supported_top_level_fields: 'event.id, event.type, event.trigger_event_type, event.source_agent, event.task_id, event.source, event.target, event.target_set, event.source_event_id, event.emitted_at, event.current_state, event.run_id, and event.scope.'
           route_identity_fields: 'event.source.entity_id, event.source.flow_instance, event.source.flow_id, event.target.entity_id, event.target.flow_instance, and event.target.flow_id are supported route identity reads. event.target_set is a list of route identities; it is not a selector and is not a top-level receiver projection.'
           unsupported_fields: 'Top-level event.entity_id and event.flow_instance are unsupported legacy receiver-context projection shorthands. Use _entity.id / _entity.flow_instance for current receiver context, event.source.* for emitter route identity, event.target.* for singular receiver route identity, and event.target_set for fan-out recipient route identities.'
-          source_authority: 'select_entity and select_or_create_entity keys may not use event.*, _entity.*, or payload-owned envelope fields as a source-authority bypass.'
+          source_authority: Event, _entity, and payload fields cannot override admitted receiving-instance ownership.
       policy:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
           (or root policy.yaml if not overridden at flow level), excluding typed policy sections such
@@ -4605,8 +4681,8 @@ engine:
       - lowered parent connect route plan
       - typed same-flow consumer topology
       - structural ParentRoute for child-to-parent pin outputs
-      - receiver-side select_entity/select_or_create_entity late binding for external or mixed-provenance no-target events
-      - external ingress source fallback only after receiver-owned acquisition
+      - exact input/composition receiver resolution for external and mixed-provenance ingress
+      ownership: Source identity is context only. No handler or ingress fallback may replace the composition-selected receiver.
       fail_closed: A pin-declared production output that has no canonical typed consumer, lowered parent connect,
         structural ParentRoute, eligible static child delivery-entity route, or accepted external boundary is invalid.
       no_silent_broadcast_fallback: Missing, malformed, ambiguous, or unreachable routes fail with a typed reason; producer broadcast is retired.
@@ -4700,17 +4776,20 @@ engine:
       v2_non_blockers:
       - entity-field unique indexes for boot-provable match cardinality
       - dedicated route-inspection CLI
-    select_entity_coexistence:
-      canonical: External webhook ingress, events declared with swarm.source beginning with external, and mixed-provenance no-target events.
-      non_canonical: In-topology parent-connect pin routing. Receivers should declare scalar instance/source resolution rather
-        than depend on select_entity to repair broadcast or connected delivery to the right entity.
-      receiver_context_order:
-      - prepublication_declared_key_acquisition_for_admitted_no_target_input
-      - exact_admitted_delivery_target
-      - explicit_entityless_receiver_absence
-      boot_verify: Redundant normal in-topology select_entity/select_or_create_entity is hard invalidity. Stateful
-        static/default-static handlers using receiver-side acquisition fail
-        closed because static multi-row ownership is retired.
+    receiver_ownership:
+      canonical: The flow declares one scalar instance key. Input resolution and compiled composition select or create
+        the receiving instance before handler execution, including external and mixed-provenance ingress.
+      state: The exact admitted receiver has existing_entity, materializing_entity, or entityless_receiver ownership.
+        Handler requirements determine whether state is needed and whether canonical initialization is permitted; they
+        never select another receiver. Initialization preserves existing state and uses only canonical instance/run identity.
+      availability: Exact receiver state and its optional lifecycle companion are projected together by the selected-store
+        owner. A missing companion permits state-only ownership; an existing draining or terminated companion does not.
+        Declared terminal state or inactive lifecycle evidence rejects admission and execution without publication or
+        receiver mutation. Contradictory duplicate evidence cannot be discarded by descriptor deduplication. An unavailable
+        exact receiver is not an absent receiver and cannot be recreated or replaced by a business-key match.
+      forbidden: Handler-side receiver election, business-field searches, source-entity fallback, and alternate receiver IDs.
+        Retired select_entity and select_or_create_entity fields fail strict loading on presence, including null or empty values.
+      teaching: Declare the receiver key with flow instance and select resolution at the input/composition boundary.
     auth_boundary:
       v1_rule: Existing emit authorization plus pin topology are the v1 authorization boundary.
       no_separate_acl: No separate per-target ACL layer exists in v1.
@@ -5999,7 +6078,7 @@ engine:
         method: run.fork
         selected_capability: RunForkAvailability plus RunFork
         postgres_support: supported through the backend-neutral selected-contract run-fork owner and private PostgreSQL transaction adapters
-        sqlite_support: supported for disk-loaded same-bundle local/dev runtimes through the same backend-neutral selected-contract run-fork owner and private SQLite transaction adapters
+        sqlite_support: supported through the same artifact-backed selected-contract run-fork owner as PostgreSQL, including exact changed-target preparation independent of loaded normal runtimes
         semantic_owner: internal/runtime/runforkexecution plus the closed internal/store/selected RunFork capability
         boundary: >
           Both selected backends expose the same planning, historical readback, materialization, source-freeze,
@@ -7535,6 +7614,9 @@ engine:
         while evaluating fan_out.emit.fields for one item.
       join: Available only while evaluating join complete_when and selected on_complete/timeout outcomes. The typed fields
         are expected, completed, missing, results, and timed_out; join is read-only and never persisted as entity state.
+      loop: Only id, activation_id, revision_id, attempt, and max_attempts are authored members. Join on_complete/timeout
+        reads the captured generation through its owning activation, including after restart or supported fork remapping;
+        it never borrows the current replacement attempt. loop is unavailable in join complete_when.
       accumulated: Available to supported per-arrival filter/reduce/count/compute/rules processing after stream admission
     ambient_time: >
       CEL guard/rule/filter/on_complete conditions must not call ambient time functions such as `now()` or
@@ -8148,8 +8230,6 @@ engine:
       trigger: A handler uses on_complete as a map instead of an ordered list. Or a rules mapping is structurally ambiguous
         between one singleton rule and keyed rule rows. Or a handler uses both on_complete and rules on the same handler. Or
         uses both accumulate and handler-level on_complete. Or uses both create_entity and accumulate on the same handler.
-        Or combines more than one entity acquisition mode on the same handler (create_entity, select_entity,
-        select_or_create_entity).
       when: boot-only
     - id: single_node_per_event
       severity: error
@@ -8304,20 +8384,6 @@ engine:
         accepted real external boundary. A structured output pin with sink:harness is validation-only and is rejected by
         production admission before this check can authorize runtime construction. Authored emit.target and emit.broadcast
         fail strict loading on presence and never reach this verifier.
-      when: boot-only
-    - id: redundant_in_topology_select_entity
-      severity: hard_invalidity
-      scope: per-handler
-      trigger: A handler declares select_entity or select_or_create_entity for an event whose only producers are in-topology
-        connected/pin-routed producers that set event.target through parent connect or structural routing. The receiver-side
-        acquisition is invalid normal composition authority and must be replaced with receiver
-        scalar instance/source/resolution plus parent connect routing unless the event is external or mixed-provenance.
-      when: boot-only
-    - id: missing_external_select_entity
-      severity: error
-      scope: per-handler
-      trigger: A stateful handler consumes an external/no-target event and declares no select_entity or select_or_create_entity,
-        so it would run against event.source instead of a receiving-flow-owned entity.
       when: boot-only
     - id: semantic_drift_dead_event_schema
       severity: warning
@@ -11620,25 +11686,13 @@ flow_model:
         status: retired_unsupported
         implementation_tracker: '#1554'
         rule: >
-          Stateful static/default-static authored flows MUST NOT create, select,
-          or own multiple runtime entity rows through `create_entity`,
-          `select_entity`, or `select_or_create_entity`. Static multi-row
+          Stateful static/default-static authored flows MUST NOT create or own
+          multiple runtime entity rows through `create_entity`. Handler receiver
+          selection fields are retired in every flow mode. Static multi-row
           ownership is retired. Authors must model the state as one primary
           entity with contained state, a `mode: template` flow instance, a
           `mode: singleton` flow with exact contained-state demand, or a child flow. Existing historical
-          rows are not silently rewritten; actual persisted-row migration
-          requires a separately gated migration.
-      select_entity:
-        status: retained_escape_hatch_pending_child
-        implementation_tracker: '#1547'
-        rule: >
-          `select_entity` and `select_or_create_entity` remain acquisition
-          primitives only for separately owned non-static/runtime surfaces.
-          They are not an escape hatch for authored static multi-row ownership.
-          Normal in-topology composition should route to the receiving flow
-          instance through parent `connect` and instance keys instead; normal
-          in-topology receiver acquisition fails boot verification rather than
-          remaining a warning.
+          rows are unsupported; this retirement provides no persisted-row migration.
       producer_emit_routing:
         status: retired_unsupported
         implementation_tracker: '#2086'
@@ -11976,11 +12030,11 @@ flow_model:
       - '3. Parent connect / route-plan authority supplies the target flow-instance context, not source-state ownership.
         Supported ordinary primary acquisition remains receiver-owned; retired static multi-row acquisition is not a repair path.'
       - '4. Handler writes and transitions remain same-flow owned under the supported receiver ownership model.'
-      enforcement: 'Input pin events into a stateful static flow (mode: static) MUST NOT declare create_entity,
-        select_entity, or select_or_create_entity as static multi-row ownership. Boot verification fails closed with
-        migration diagnostics. Exemptions: (1) stateless flows (initial_state: null) — no entity state machine. (2)
-        Template flows (mode: template) — entity creation happens via create_flow_instance, not create_entity,
-        select_entity, or select_or_create_entity.'
+      enforcement: 'Input pin events into a stateful static flow (mode: static) MUST NOT use create_entity as
+        static multi-row ownership. Boot verification fails closed with canonical authoring diagnostics. Handler
+        receiver-selection fields are rejected during strict loading in every flow mode, including stateless and
+        template flows. Composition selects the receiving instance; canonical activation or permitted handler
+        initialization supplies that instance''s own state, never an independently elected entity.'
     cross_flow_writes:
       description: 'Cross-flow entity writes are prohibited by the platform.'
       rule: 'save_entity_field checks that the target entity''s stored flow_instance resolves to the same
@@ -13139,11 +13193,14 @@ platform_tables:
       Runtime source tables remain authoritative for execution outcomes. This journal MUST NOT reinterpret those outcomes.
     transaction_contract:
       - A story-bearing outer transaction MUST lock author_activity_order singleton_id=1 before any domain lock or domain database action.
+      - Agent lifecycle mutations, including retained selected-fork grant authorization and deferred termination, acquire that story lock before locking the run or selected execution. Authorization still precedes every domain mutation in the same transaction; it cannot invert the story/run order or be moved outside the transaction.
+      - Generation-authority mutation fencing reuses this existing selected-store ordering coordinate. Pooled delivery claims, retained lifecycle mutations, grant proof and transition, explicit retirement, bulk takeover/authority repair, and retained reset cleanup acquire it before authority-head, run, execution/binding, lifecycle-cell or grant-fact locks. Selected grant foreign-key acquisitions occur while this fence is held. Grant facts are append-only; mutation authorization reads the actual current head after fence acquisition, not a historical head selected before waiting. The fence lasts through commit or rollback. Claim-wins blocks retirement until that mutation ends; retirement-wins admits no new attempt or claim version. Cancelled waiters and failed mutations change neither grant nor domain state. This ordering does not allocate author occurrences or change previously accepted provider-tail settlement rights. No new registry, per-process mutex permission, or once-latest-row lock substitutes for the shared transaction fence.
       - Nested registered producers MUST join the exact outer transaction and draft batch. A registered producer reached through a raw transaction without the story context MUST fail closed.
       - Source transitions, story rows, and counter advancement MUST commit or roll back atomically.
       - Sequence ranges MUST be assigned only while the singleton is locked. BIGSERIAL, allocation-order cursors, timestamps, UUID order, post-commit appends, and fallback readers are forbidden.
       - Replayed source identities MUST return the existing identical occurrence or fail on conflict. ON CONFLICT DO NOTHING MUST NOT hide a conflicting story registration.
       - Mutable source helpers MUST report whether the authoritative source transition changed. A semantic no-op or duplicate receipt MUST NOT draft, append, or rewrite author activity; only a real source transition may produce an occurrence.
+      - Activity Start/Claim, Complete and MarkUncertain MUST use the actual insert/update disposition for story eligibility after mandatory validation. Duplicate starts and terminal no-ops return existing authoritative evidence without drafting, including fork-copied terminal attempts with no local started occurrence. Story deduplication is not proof of a source transition.
       - No domain mutation may occur after story finalization.
     read_contract:
       cursor: author_activity_occurrences.sequence
@@ -13193,6 +13250,11 @@ platform_tables:
         Every descriptor carries event_type, authored|different disposition, and optional author_summary_field from the
         resolved semantic source. Identical same-key registration is reference-safe; conflicts fail closed. Names-only,
         process-global, last-writer-wins, fallback, and current-bundle classifiers are forbidden.
+        Compiled arrival and fanout-delivery joins contribute platform.join_complete; a declared join timeout additionally
+        contributes platform.join_timeout. These internal occurrence descriptors have different disposition and no authored
+        summary, deduplicate exactly across declarations, and reject conflicting authored classification. No join descriptor
+        is installed without compiled demand. Normal and selected catalog preparation use this same projection; registration
+        supplies neither execution authority nor permission to run selected deferred work.
       event_descriptor_lifecycle: >-
         Static descriptors register before a bundle runtime starts or recovery can mutate and remain leased until that
         exact runtime/bundle context is quiescent. Boot registers an exact incoming scope before activation; bundle deletion
@@ -13507,7 +13569,7 @@ platform_tables:
       ddl: |
         CREATE TABLE events (
             insertion_sequence          BIGSERIAL PRIMARY KEY,
-            event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'replay', 'selected_fork_replay', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
+            event_class                 TEXT NOT NULL CHECK (event_class IN ('root_ingress', 'operator_injected', 'child', 'replay', 'selected_fork_replay', 'inherited_fan_out', 'runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             event_id                    UUID NOT NULL UNIQUE,
             run_id                      UUID REFERENCES runs(run_id),
             event_name                  TEXT NOT NULL CHECK (event_name = TRIM(event_name) AND NULLIF(event_name, '') IS NOT NULL),
@@ -13535,13 +13597,15 @@ platform_tables:
             target_set                  JSONB NOT NULL,
             route_settlement            JSONB NOT NULL,
             operator_reference_event_id UUID,
+            inherited_fan_out_origin    JSONB,
             handler_node                TEXT,
             idempotency_key             TEXT,
             CHECK ((scope = 'entity' AND entity_id IS NOT NULL) OR (scope = 'flow' AND entity_id IS NULL AND NULLIF(TRIM(COALESCE(flow_instance, '')), '') IS NOT NULL) OR (scope = 'global' AND entity_id IS NULL AND NULLIF(TRIM(COALESCE(flow_instance, '')), '') IS NULL)),
-            CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class IN ('root_ingress', 'operator_injected', 'selected_fork_replay') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND (source_event_id IS NULL OR run_id IS NOT NULL))),
-            CHECK (event_class NOT IN ('root_ingress', 'operator_injected', 'selected_fork_replay') OR run_id IS NOT NULL),
+            CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class IN ('root_ingress', 'operator_injected', 'selected_fork_replay', 'inherited_fan_out') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND (source_event_id IS NULL OR run_id IS NOT NULL))),
+            CHECK (event_class NOT IN ('root_ingress', 'operator_injected', 'selected_fork_replay', 'inherited_fan_out') OR run_id IS NOT NULL),
+            CHECK ((event_class = 'inherited_fan_out' AND inherited_fan_out_origin IS NOT NULL AND produced_by_type = 'node') OR (event_class <> 'inherited_fan_out' AND inherited_fan_out_origin IS NULL)),
             CHECK ((event_class = 'operator_injected') OR operator_reference_event_id IS NULL),
-            CHECK ((event_class IN ('root_ingress', 'operator_injected') AND produced_by_type = 'external') OR (event_class = 'child' AND produced_by_type IN ('node', 'agent', 'platform')) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND produced_by_type = 'platform') OR event_class IN ('replay', 'selected_fork_replay')),
+            CHECK ((event_class IN ('root_ingress', 'operator_injected') AND produced_by_type = 'external') OR (event_class = 'child' AND produced_by_type IN ('node', 'agent', 'platform')) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND produced_by_type = 'platform') OR event_class IN ('replay', 'selected_fork_replay', 'inherited_fan_out')),
             CHECK ((event_name IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class = 'diagnostic_direct') OR (event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive') AND event_class <> 'diagnostic_direct')),
             CHECK (event_name <> 'platform.runtime_log' OR produced_by = 'runtime'),
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),
@@ -13635,7 +13699,9 @@ platform_tables:
         revision. Unchanged facts MUST NOT be copied into later revisions. This table is not a general temporal database and has no trigger,
         migration, compatibility, or arbitrary-history API. The events family stores payload_base64 derived
         from events.payload_bytes so historical revision hydration reconstructs the exact admitted payload
-        bytes; the derived events.payload JSON projection is not revision or replay evidence.
+        bytes; the derived events.payload JSON projection is not revision or replay evidence. It also retains
+        operator_reference_event_id as operator provenance, distinct from causal source_event_id, so fixed
+        starting-input evidence and strict live loading can compare the complete original publication.
       ddl: |
         CREATE TABLE run_fork_fact_revisions (
             run_id    UUID NOT NULL,
@@ -14075,7 +14141,7 @@ platform_tables:
             lifecycle_bundle_hash TEXT NOT NULL CHECK (lifecycle_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             lifecycle_runtime_instance_id UUID NOT NULL,
             lifecycle_runtime_generation BIGINT NOT NULL CHECK (lifecycle_runtime_generation > 0),
-            topology_authority_kind     TEXT NOT NULL CHECK (topology_authority_kind IN ('static_declaration_plan', 'flow_readiness_plan')),
+            topology_authority_kind     TEXT NOT NULL CHECK (topology_authority_kind IN ('static_declaration_plan', 'flow_readiness_plan', 'selected_fork_declaration_plan')),
             topology_admission          JSONB NOT NULL,
             execution_lifetime          TEXT NOT NULL CHECK (execution_lifetime = 'durable_managed'),
             status                      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'terminated', 'failed')),
@@ -14496,6 +14562,9 @@ platform_tables:
         exist for a fork. Exact non-mutating admission and container/actor/config fingerprints are
         validated transactionally before issuance. Immutable completion evidence keeps this row and
         its retained runs parent readable after mutable fork projections are discarded.
+        The immutable selected declaration plan and its canonical fingerprint own static target
+        topology without consulting the live source-set head. An explicit empty plan represents
+        a target with no static agents; missing or corrupt plans never imply an empty census.
       ddl: |
         CREATE TABLE run_fork_selected_contract_runtime_executions (
             execution_id                   UUID PRIMARY KEY,
@@ -14509,6 +14578,10 @@ platform_tables:
             container_plan_fingerprint     TEXT NOT NULL,
             actor_census_fingerprint       TEXT NOT NULL,
             effective_config_fingerprint   TEXT NOT NULL,
+            declaration_plan_fingerprint   TEXT NOT NULL CHECK (declaration_plan_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            declaration_plan               JSONB NOT NULL,
+            preparation_fingerprint        TEXT NOT NULL CHECK (preparation_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            preparation_binding            JSONB NOT NULL,
             state                          TEXT NOT NULL CHECK (state IN ('prepared', 'running', 'quiesced', 'failed', 'closed')),
             execution_owner                TEXT,
             lease_expires_at               TIMESTAMPTZ,
@@ -14676,6 +14749,7 @@ platform_tables:
             delivery_context JSONB NOT NULL,
             delivery_payload_projection JSONB NOT NULL,
             connect_execution_claim JSONB NOT NULL,
+            receiver_materialization_plan JSONB NOT NULL DEFAULT 'null'::jsonb,
             execution_authority_kind TEXT NOT NULL CHECK (execution_authority_kind IN ('normal_runtime', 'selected_contract_fork')),
             authority_bundle_hash TEXT NOT NULL CHECK (authority_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             execution_authority_id TEXT NOT NULL CHECK (NULLIF(TRIM(execution_authority_id), '') IS NOT NULL),
@@ -15023,9 +15097,23 @@ platform_tables:
       description: >-
         Append-only state transitions for exact revocable runtime-generation grants issued
         by the retained process capability. A grant binds one runtime instance, generation,
-        immutable source artifact hash, and complete source-set revision. Copied evidence is not
-        authority and every readiness/execution/lifecycle admission re-proves the retained
-        selected-store session.
+        immutable source artifact hash, and exactly one authority variant. Ordinary grants bind
+        a complete source-set revision. Selected-fork grants instead bind the exact durable
+        selected binding, fork run, runtime execution generation, execution owner, fence and
+        admission/container/actor/configuration fingerprints. They do not consume the live
+        source-set head. Copied evidence is not authority: issuance and every selected-grant
+        transition/use verify a claimed running selected execution against its immutable binding and target
+        run coordinate in the selected store. Retirement records terminal grant evidence even
+        when the selected execution has already ended; it never authorizes successor work.
+        Every readiness/execution/lifecycle admission also re-proves the retained process session.
+        Run admission consumes a closed owned/foreign result from that grant and the exact
+        durable run binding. A selected binding reserves its child at materialization commit,
+        before execution issuance: ordinary grants cannot discover, adopt or mutate it even
+        when the bundle hash and readiness plan match. Foreign rows are excluded from ordinary
+        readiness scans; direct and queued reconciliation rechecks ownership before acting.
+        Missing, malformed, retired or fenced authority is an error, not ordinary ownership.
+        Shared agent lifecycle adapters repeat this classification inside their mutation
+        transaction, including registration, takeover, rebind and terminal transitions.
       ddl: |
         CREATE TABLE runtime_generation_grants (
             fact_id               UUID PRIMARY KEY,
@@ -15037,22 +15125,28 @@ platform_tables:
             bundle_hash           TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             runtime_instance_id   UUID NOT NULL,
             runtime_generation    BIGINT NOT NULL CHECK (runtime_generation > 0),
-            source_set_revision   TEXT NOT NULL,
+            source_set_revision   TEXT,
+            selected_binding_id   UUID REFERENCES run_fork_selected_contract_bindings(binding_id),
+            selected_fork_run_id   UUID REFERENCES runs(run_id),
+            selected_execution_id  UUID,
             snapshot              JSONB NOT NULL,
             created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (grant_id, state_version),
+            UNIQUE (selected_execution_id, state_version),
+            CHECK ((source_set_revision IS NOT NULL AND source_set_revision <> '' AND selected_binding_id IS NULL AND selected_fork_run_id IS NULL AND selected_execution_id IS NULL) OR (source_set_revision IS NULL AND selected_binding_id IS NOT NULL AND selected_fork_run_id IS NOT NULL AND selected_execution_id IS NOT NULL)),
+            FOREIGN KEY (selected_execution_id, selected_fork_run_id, runtime_generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation),
             INDEX idx_runtime_generation_grant_head (grant_id, state_version),
             INDEX idx_runtime_generation_grant_runtime (runtime_instance_id, runtime_generation)
         );
     managed_agent_capability_surfaces:
-      description: 'Canonical selected-store owner for the exact managed-agent capability surface used by one provider turn or one startup probe. The immutable planned maximum combines one closed typed actor owner, contract definitions, toolcapabilities decisions, provider policy, and exact transport bindings. Normal pre-admission startup probes carry the exact runless declaration plan; provider turns and selected-contract-fork startup probes carry the exact concrete live actor identity. The two actor variants are mutually exclusive. actor_id is only an indexed projection of that typed owner retained in the integrity-checked surface; it is never capability authority by itself. Typed delivery evidence may only confirm or narrow the plan; effective visible/callable facts are mechanically derived and persisted in surface. surface_id is deterministic for one exact authority and plan, while integrity_hash covers the complete planned/observed/effective value. Provider turns and startup probes are disjoint authority variants. Missing, mismatched, dual, or reused authority is invalid; flat tool-name arrays are not an alternate persistence owner.'
+      description: 'Canonical selected-store owner for the exact managed-agent capability surface used by one provider turn or one startup probe. The immutable planned maximum combines one closed typed actor owner, contract definitions, toolcapabilities decisions, provider policy, and exact transport bindings. Normal and selected-fork pre-admission startup probes carry the exact runless declaration plan; provider turns carry the exact concrete live actor identity. Selected-fork preparation additionally binds the exact process, target, admitted plan, configuration, catalog and prospective actor plan without an execution run or generation. The two actor variants are mutually exclusive. actor_id is only an indexed projection of that typed owner retained in the integrity-checked surface; it is never capability authority by itself. Typed delivery evidence may only confirm or narrow the plan; effective visible/callable facts are mechanically derived and persisted in surface. surface_id is deterministic for one exact authority and plan, while integrity_hash covers the complete planned/observed/effective value. Provider turns and startup probes are disjoint authority variants. Missing, mismatched, dual, or reused authority is invalid; flat tool-name arrays are not an alternate persistence owner.'
       ddl: |
         CREATE TABLE managed_agent_capability_surfaces (
             surface_id               UUID PRIMARY KEY,
             integrity_hash           TEXT NOT NULL UNIQUE,
             authority_kind          TEXT NOT NULL CHECK (authority_kind IN ('provider_turn', 'startup_probe')),
             authority_id            UUID NOT NULL,
-            execution_kind          TEXT NOT NULL CHECK (execution_kind IN ('normal_agent', 'selected_contract_fork')),
+            execution_kind          TEXT NOT NULL CHECK (execution_kind IN ('normal_agent', 'selected_contract_fork', 'selected_fork_preparation')),
             execution_authority_id   TEXT NOT NULL,
             run_id                   UUID REFERENCES runs(run_id),
             actor_id                 TEXT NOT NULL,
@@ -15061,6 +15155,8 @@ platform_tables:
             surface                  JSONB NOT NULL,
             created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (authority_kind, authority_id),
+            CHECK (execution_kind <> 'selected_fork_preparation' OR (authority_kind = 'startup_probe' AND run_id IS NULL)),
+            CHECK (execution_kind <> 'selected_contract_fork' OR authority_kind = 'provider_turn'),
             INDEX idx_managed_capability_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_managed_capability_actor (actor_id, created_at),
             INDEX idx_managed_capability_execution (execution_kind, execution_authority_id, created_at)
@@ -16554,7 +16650,7 @@ run_model:
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
-    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
+    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -16574,9 +16670,11 @@ run_model:
       rows start a new fork-local revision sequence at revision=1; source entity_state.revision at the selected event revision is not
       copied because revision is a current-row commit counter, not append-only historical state in entity_mutations.
       Materialization MUST consume runtime.run_fork.materialized_entity_snapshot_metadata for every reconstructed
-      entity before writing fork-local entity_state. That owner may use event flow evidence present in the fixed revision,
-      or source entity_state creation metadata present in that revision, for flow_instance. Entity_type
-      MUST come from source entity_state creation metadata present in that revision; reconstructed
+      entity before writing fork-local entity_state. The fixed revision entity_metadata record is the sole authority
+      for flow_instance and entity_type. Event flow context is not entity ownership and MUST NOT override
+      metadata or fill a missing metadata owner. Metadata and reconstructed entity collections MUST reject duplicate
+      identities before indexing, including identical duplicates; neither ordering nor first/last-record selection
+      may choose an owner. Reconstructed
       fields.entity_type is projection state and MUST NOT authorize materialization, though a conflicting reconstructed
       value may fail closed. The owner MUST NOT read source current_state, gates, fields, accumulator, revision, or updated_at
       as fork-point projection truth. If flow_instance/entity_type cannot be proven for a reconstructed entity,
@@ -16590,7 +16688,7 @@ run_model:
       requires a fork run with status=paused, fork lineage, fork-local entity_state rows, and a revalidated
       execution_ready=true planner result at the original selected event revision. Activation atomically transitions the
       fork run to status=running and the source run to status=forked through store.run_fork.source_freeze. A running or
-      paused source requires explicit confirm_source_freeze=true; a completed or otherwise terminal source refuses before
+      paused source requires explicit allow_source_freeze=true; a completed or otherwise terminal source refuses before
       confirmation or mutation. It may create fork-local event and delivery
       rows only after runtime.run_fork.historical_replay_execution consumes a concrete
       runtime.run_fork.historical_replay_execution_admission that marks event_deliveries as executable fork work for
@@ -16621,6 +16719,12 @@ run_model:
         state history, decision/effect/directive evidence, and fork facts as immutable history. It does not dead-letter,
         settle, delete, migrate, copy, reopen, or reinterpret those rows as source execution. Only an actual live
         lease, claim, reservation, or in-progress authority blocks the freeze; historical rows do not.
+      terminal_effect_selection: >
+        The shared terminal lifecycle mutation owner makes one closed effect decision before mutation. Failed and
+        cancelled transitions terminalize deliveries; successful completion and the named fork-source transition do not.
+        Unsupported states fail closed and never inherit cancellation effects. This distinction does not suppress
+        the specified source-freeze decision/draft/held-continuation/route-obligation supersession, lifecycle evidence,
+        or atomic child activation. The delivery adapter does not reinterpret a run_forked reason as an exception.
       execution_admission: >
         Every independently mutable run-scoped claimant uses internal/store/runlifecycle.RequireActive in its existing
         transaction. RequireActive locks an existing running or paused row and never creates or reopens a run. Executable
@@ -16640,6 +16744,14 @@ run_model:
       repository, backend switch, ambient transaction detection, compatibility path, or backend-owned semantic
       state machine is forbidden.
     source_and_fork_projection_identity: >
+      Historical event revisions retain exact payload bytes and the complete persisted schema binding:
+      bundle hash, flow ID, event key, schema digest and schema class. Revision capture, snapshot restoration
+      and strict event-record reconstruction must transfer that evidence without current-catalog lookup,
+      inferred defaults or old-store repair. Missing or malformed binding evidence cannot authorize readback.
+      When an admitted source-to-child projection changes declared lineage fields, replay binds the projected
+      child payload to the exact original persisted schema binding through canonical payload admission. Applying
+      the source payload admission must not overwrite the projected child bytes. Undeclared business fields,
+      exact numeric values, and the original source event remain unchanged.
       Historical source lookup identity and fork-local projection identity are separate mandatory facts. Source
       entity, flow-instance, decision-card, and proposed-effect rows are selected only by their persisted source
       coordinates. Copied fork authority is then re-keyed explicitly to the projected fork entity and flow instance,
@@ -16648,6 +16760,38 @@ run_model:
       {source_run_id, source_run_id} and fork coordinates are {fork_run_id, fork_run_id}; one coordinate MUST NOT be
       reused for both lookup and projection. Both stores must prove that copied root stage-gate and proposed-effect
       authority remains executable through the canonical decision/effect operations.
+      A non-root entity retains its fixed-revision flow and type. Selected recipient flow, event flow, and activity
+      payload are not permission to reassign that entity. Persistent source-event preparation and the runtime container
+      consume one idempotent producer-coordinate projection; root projection is the only source-to-child entity-owner
+      substitution. Activity execution coordinates must agree with admitted producer authority, and arbitrary business
+      payload fields retain their values, including numeric values and ordinary fields named source_run_id,
+      source_event_id, parent_event_id, or loop_generation. Only declared generation revision fields and typed activity
+      execution/lineage fields authorize reminting. Producer-state presence is established by the bound fixed-revision
+      snapshot, not by a root routing coordinate or a later child row. An ordinary producer without state needs no
+      generation lookup; a producer with state requires the exact projected child state, including a valid empty
+      generation set. Missing or corrupt projected state remains an error, and state-dependent activity requires
+      fixed-revision producer ownership.
+      An ordinary event admitted without RoutingSource and with an empty envelope Source retains that absence through
+      fixed-revision preparation and execution. Its exact persisted event/run and selected admission remain mandatory;
+      absence grants no producer, receiver, entity, or loop authority. Contradictory envelope or execution claims fail
+      closed. Source-dependent activity and fan-out still require their exact typed source evidence.
+    selected_contract_receiver_preparation: >
+      Snapshot restoration and receiver acquisition are independent decisions. Node, agent, and activity preparation
+      consume fixed-revision entity metadata and canonical selected-source ownership, entity contract, and handler
+      requirements. A producer entity is never paired with a different recipient flow. A receiving handler uses its own
+      existing entity, materializes its own canonical entity, or executes entityless when its execution semantics permit
+      that. Flow membership alone proves neither entity type nor lifecycle readiness. Every retained frontier event
+      association and its execution mode remains explicit; duplicate or conflicting projections cannot elect an owner.
+      A child companion and its readiness are fresh work admitted through the canonical selected declaration and
+      materialization owners, not a copy of historical flow status, readiness, configuration, or execution authority.
+      Runtime preparation and persistence consume one complete admitted receiver relation, bound to the fixed snapshot,
+      selected declaration, full frontier event/mode relation, and resolved agent configuration. Caller-supplied subsets,
+      substituted configuration, and independently supplied agent expectations cannot authorize materialization or reuse.
+      Configuration requiring inputs that the admitted evidence cannot prove fails closed, without current-source or
+      default inference. Reusing an existing child validates its exact entity owner, companion status, configuration,
+      readiness, and agent identity; it never revives or repairs a contradictory aggregate. These rules introduce no new
+      historical family and do not expand staged node/activity or dynamic-fork execution support. Validation failures
+      before commit leave no partial child state; failures after activation use existing claim settlement and cleanup.
     mutation_locking: >
       PostgreSQL fork materialization, selected-contract runtime issuance, source-event preparation, and activation use
       READ COMMITTED transactions plus the canonical source/fork lifecycle row locks, owner-specific binding locks,
@@ -16686,6 +16830,13 @@ run_model:
         one run shares one revision; exact no-change emits no revision; rollback publishes neither domain facts nor
         revision facts. Multi-run finalization locks parent runs in deterministic run-ID order. No revision lock spans
         external work. Retained-run deletion emits present=false for every removed fact in the same transaction.
+        The event_deliveries projection captures every coordinate of the canonical DeliveryRoute: recipient class and
+        identity, agent identity, target ownership, delivery context, payload projection, and connect_execution_claim.
+        Stored connect execution evidence is part of route identity and is captured in the same revision as the delivery;
+        it is not a live worker claim token. Historical projection excludes live worker tokens and execution capabilities.
+        Fact keys are constructed by the same closed family identity owner used for historical admission, with unchanged
+        key bytes. Fan-out intent, outcome and barrier keys use their exact typed coordinates and outcome ordinal;
+        readers do not parse or infer a new composite-key grammar.
       read_contract: >-
         PostgreSQL and SQLite private adapters validate and decode the same thirteen-family historical projection.
         PlanRunFork exposes the same selected-store consumer on both backends: it resolves the event UUID to its first revision
@@ -16697,12 +16848,35 @@ run_model:
         they MUST NOT recover it from an event name, current route state, receiver flow_instance, or a synthetic delivery.
         Missing, ambiguous, lineage-invalid, partially deleted, or unrevisioned facts fail closed; old stores are unsupported
         and must be recreated.
+        Historical delivery hydration uses the existing closed route and connect-claim codecs and requires the complete
+        reconstructed route identity to equal the captured route hash. A non-connect route has empty connect evidence;
+        missing or contradictory evidence for a connected route cannot be repaired from current delivery or topology rows.
+        Planning and stamped frontier/history recipient consumers retain that validated evidence. Historical evidence never
+        grants a live delivery lease or permits copying a source worker capability into a new fork-local delivery.
+        Every surviving present fact retains its ledger run, family, key and revision context until typed admission.
+        Admission requires the selected run, a known family, the canonical key matching the body's primary identity,
+        and positive ordered first/fact revisions no later than R. Embedded owning run IDs in deliveries, committed
+        replay scopes and timers must match the ledger run; a delivery's nested agent identity must obey the same
+        owning-run invariant as a live delivery. Timer fork lineage and fan-out source lineage are not owning-run fields.
+        Explicit/default event cursors and activation event-point readers consume this same contextual admission before
+        exposing the selected event or reaching downstream event preparation, materialization or activation writes.
+        Readers fold all facts at or before R before filtering absence and decoding surviving present payloads. They
+        do not decode discarded payloads, resurrect tombstoned facts from current rows, or reject lawful later
+        reappearance. Existing family-specific membership and lineage owners remain authoritative; contextual identity
+        does not introduce global foreign-key requirements or authenticate coherently rewritten historical evidence.
       route_projection: >-
         Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
         projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
         Generic materialization and activation preserve flow_route_history_unproven. Selected execution may discharge
         unknown_unversioned only with matching selected binding, frontier, static/dynamic topology, and recipient proof;
         activation revalidates the persisted selected route recovery and never queries current routing_rules.
+      completed_arrival_join_history_scope: >-
+        Completed ordinary arrival-join history does not establish generic fork execution readiness merely because
+        its timers are cancelled and its outcomes are complete. When the fixed-revision planner reports
+        timer_history_unproven and flow_route_history_unproven, materialization preserves both blockers and refuses
+        without source or child mutation. Future admission of this inert history is tracked under #642, separately
+        from selected pending timer, join, and fan-out execution. This scope does not narrow already-supported
+        ordinary fan-out child/fork-of-fork completion or permit deriving authority from status or root-shaped path text.
       distinct_current_evidence: >-
         activity_attempts are post-frontier selected-execution evidence, not a historical family. Source
         preparation reads the immutable selected request event and current terminal attempt in one source/fork
@@ -16710,6 +16884,15 @@ run_model:
         or nonterminal evidence fails closed without changing PlanRunFork membership or readiness. Fresh
         source-advancement validation is likewise an activation safety owner and is not answered from the historical
         snapshot.
+        Shared fork current-row readers decode PostgreSQL native timestamps and SQLite timestamp text through the same
+        timestamp-value decoder, preserving exact UTC instants and stored precision. Terminal activity evidence requires
+        valid nonzero started_at, completed_at and updated_at values; decoding does not relax recorded-result reuse or
+        approved-effect policy. Fork copying writes all three activity timestamps as UTC RFC3339Nano values accepted by
+        the ordinary journal reader without compatibility parsing or precision loss.
+        Exact repeated fan-out materialization requires valid nonzero outcome created_at values
+        and SQL NULL lease_expires_at and last_served_at. Any non-NULL claim/service time remains a conflict, including
+        empty or zero representations; malformed timestamp values fail closed. No timestamp is replaced with a default,
+        used to select historical membership, or discarded to admit advanced child state.
       retention: >-
         The thirteen authoritative source families remain available while a live dependent fork requires them. A named
         operation that retains the run while deleting current governed facts MUST retain prior revision authority and
@@ -17186,7 +17369,7 @@ run_model:
       source event UUID to that event''s first persisted commit-ordered run revision. Occurrence and lifecycle
       timestamps remain diagnostics and are never a fallback selector or historical membership predicate.'
     semantics:
-      1_reconstruct_state: 'Resolve the source event UUID to revision R, load the twelve-family projection at
+      1_reconstruct_state: 'Resolve the source event UUID to revision R, load the thirteen-family projection at
         revision <= R in one repeatable-read snapshot, and forward-apply revisioned entity_mutations in deterministic
         revision/fact order. A reconstructed entity is materializable only after
         runtime.run_fork.materialized_entity_snapshot_metadata authorizes flow_instance/entity_type metadata present
@@ -17241,13 +17424,16 @@ run_model:
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
         runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
-        declarations, timed-join declarations, connect-time resolution through the exhaustive six-mode matrix
+        declarations, timed-join and fan-out delivery-barrier declarations, connect-time resolution through the exhaustive six-mode matrix
         (`create` and `select-or-create` can create; `select`, `fan-in`, `fan-out`, and `reply` cannot), and authored
         create_flow_instance actions as
         unsupported while the ephemeral selected-fork container has no
         long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
         delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
-        carried through selected execution admission and every container construction. No rejected path may create
+        carried through selected execution admission and every container construction. Exact fan-out barrier historical
+        materialization is separately admitted by the fan_out fork contract; copying that family does not authorize
+        selected dispatch of pending schedules. The selected execution gate remains in force before selected mutations.
+        No rejected path may create
         executable event, delivery, workflow, join, generic schedule, timer, dynamic readiness, agent, materialized route,
         lineage, or runtime-execution state. Agent
         scheduling remains fail-closed without a selected scheduler; boot/global schedules are not executed by this
@@ -17281,12 +17467,37 @@ run_model:
       3g_selected_contract_recipient_planning: 'For selected-contract mutating fork execution, fork-local recipient
         planning is a separate owner beyond route topology. The selected execution model, admission, publish path, and
         EventBus.Publish recipient guard consume runtime.run_fork.selected_contract_recipient_planning before selected
-        fork recipient derivation. The owner plans recipients from selected binding, frontier evidence, route admission,
+        fork publication. The owner plans recipients from selected binding, frontier evidence, route admission,
         and route topology evidence only; source deliveries, source route rows, source recipients, source receipts,
         source dead letters, and post-fork source outcomes are not executable fork truth or suppressors. This owner is
         still non-mutating: it does not persist route rows, write deliveries, run handlers, or own receipts, dead
         letters, idempotency, emitted follow-ups, timers, sessions, turns, source-advanced policy, contract swap, or
         UI/API execution state.'
+      3g0_selected_contract_recipient_authority: 'Historical source delivery evidence, selected declaration
+        evidence, and effective fork publication routes are distinct facts. Historical delivery routes retain their
+        complete source-run identity, target ownership, payload projection, reply context and connect execution claim;
+        their presence does not replace selected-source recipient derivation. core/forkrecipient owns selected
+        recipient equality, ordering, deduplication, fingerprints and strict private wire decoding. Selected evidence
+        carries the exact recipient, route scope, complete runless agent Plan when applicable, exact handler-local
+        event and node when applicable, and either local authority or the compiled connect plan and receiver-pin
+        association. The compiled connect evaluator supplies this association before flattened recipient projection.
+        Diagnostic provenance labels are not recipient identity, including when evidence is nested in a topology,
+        frontier or planning aggregate. Other aggregate admission metadata remains exact. Stored byte-integrity
+        hashes may include diagnostic bytes, but agreement with regenerated execution evidence uses the semantic
+        recipient relation rather than equality of those hashes. Agent Plan remains runless; executable agent
+        Identity is composed with the admitted child run, never copied from historical source-run identity.
+        Binding a root declaration to its concrete child route consumes the selected source''s admitted root execution
+        coordinate and admitted source-event membership, independently of entity state, and affects only an execution
+        copy of selected evidence. Missing correspondence cannot
+        authorize a path rewrite; source or sibling runs cannot satisfy that child binding. This relation does not
+        acquire receiver state or transfer a producer entity to a receiving flow.
+        EventBus supplies actual authority from persistent delivery intents, retaining handler and plan evidence
+        alongside complete delivery routes. Final selected-to-actual agreement occurs after default delivery context
+        projection and before publication, while subsequent event readmission and aggregate validation remain required.
+        Missing or contradictory authority fails closed; normalization cannot discard a malformed persistent intent
+        before validation. Complete canonical recipient evidence is retained by topology, readiness, materialization,
+        persistence and recovery consumers. Manager recovery validates and exposes persisted evidence; it does not
+        provide a separate diagnostic-recipient publication guard or enable a new restart execution surface.'
       3g1_selected_contract_fork_local_agent_runtime_materializer_executor: 'For selected-contract mutating fork
         execution, planned selected agent recipients may execute only through
         runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor after recipient
@@ -17486,6 +17697,13 @@ run_model:
       Every row carries exactly one closed domain (`lifecycle_state`, `authored_field`, `bookkeeping`, `gate`, or
       `accumulator`) plus an uninterpreted path. lifecycle_state alone requires an empty path; every other domain requires
       a nonempty path. The runtime enforces this — there is no code path that mutates entity_state without logging the mutation.'
+    reconstruction_path_meaning: >
+      The closed mutation domain determines path meaning at the shared reconstruction owner. lifecycle_state
+      applies its scalar value at the empty path. authored_field applies a genuine nested authored-field path.
+      accumulator, gate and bookkeeping apply the exact producer-owned top-level map key, including embedded dots;
+      they never interpret that key as a nested path or infer its meaning from spelling. Replacement and null-valued
+      removal use that same domain law. Run-fork and conversation-fork reconstruction consume this owner in chronological
+      mutation order for the exact source run and revision; neither installs its own key parser or compatibility behavior.
     drift_detection: 'swarm verify --run <run_id> reconstructs entity state from the mutation log and compares
       it to current entity_state rows for that same run_id. Any mismatch indicates a write that bypassed the mutation log. This is a
       correctness check, not a normal operation — run it when debugging unexpected state.'
@@ -17724,6 +17942,11 @@ multi_bundle_persistence:
         - '#2376'
         - '#2322'
       rule: USTAR, coordinates, receipts, and catalog behavior begin after the logical source artifact.
+      fork_journey_proof: |
+        Fork ownership and public execution/readback consume an already canonically admitted exact source
+        artifact without requiring the target to be loaded. Private test artifact admission proves only
+        that fork-consumer boundary, never public publication. The complete user-facing publish-changed-workflow
+        then fork journey remains pending this publication work; no retired register command is restored.
   canonical_owner: platform-spec.yaml#filesystem_source_model
 platform_events:
   description: Events emitted by the platform engine itself. These are NOT product events — they are operational signals from
@@ -20070,37 +20293,6 @@ static_analyzer:
         silence missing producer, missing consumer, or dead-schema diagnostics.
       no_runtime_reconstruction: Accepted verify-time facts must not require EventBus/RouteTable or workflow-node materialization
         to reconstruct missing connect topology.
-  slice_3b_select_entity_pin_coexistence:
-    id: select_entity_pin_coexistence
-    domain: semantic_drift
-    authority: hard_invalidity
-    severity: error
-    canonical_owner: internal/runtime/bootverify
-    supported_surface: cmd/swarm verify
-    spec_basis:
-    - engine.cross_flow_routing.select_entity_coexistence
-    - handler_specification.handler_fields.select_entity
-    - handler_specification.handler_fields.select_or_create_entity
-    scope:
-      description: Classify receiver-side entity acquisition on pin-routed events so select_entity remains a fallback for
-        external or mixed provenance, not a second in-topology routing owner.
-      applies_to:
-      - select_entity handlers
-      - select_or_create_entity handlers
-      excludes:
-      - in-tree contract migration edits
-      - runtime target resolution
-    verdicts:
-      redundant_in_topology:
-        severity: error
-        rule: select_entity/select_or_create_entity on an event whose only producers are normal in-topology connected/pin-routed
-          producers is hard invalidity; use receiver scalar instance/source/resolution plus parent connect routing instead.
-      external_or_mixed_provenance:
-        severity: ok
-        rule: External or mixed-provenance events may use receiver-side acquisition as late binding when event.target is absent.
-      missing_external_binding:
-        severity: error
-        rule: A stateful external/no-target handler with no acquisition mechanism is invalid because it would run against source fallback.
   slice_4_state_machine_reachability:
     id: semantic_drift_unreachable_state
     domain: semantic_drift
@@ -20139,12 +20331,6 @@ static_analyzer:
     source_state_derivation:
       create_entity_handlers:
         rule: create_entity handlers source from initial_state only.
-      select_entity_handlers:
-        rule: select_entity handlers source from all non-terminal declared states because they operate on an existing
-          receiving-flow-owned entity selected at runtime.
-      select_or_create_entity_handlers:
-        rule: select_or_create_entity handlers source from initial_state for the zero-match creation path and from all
-          non-terminal declared states for the one-match selection path. Multiple matches remain hard-invalid at runtime.
       non_create_entity_handlers:
         rule: non-create_entity handlers source from all non-terminal declared states.
       terminal_states:
@@ -26248,20 +26434,23 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     run_fork:
-      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented_public_cli_consumer
-      blocker_state: 'Implemented by #1023 over /v1/rpc run.fork after #989 promoted the API/runtime/spec owner; DB-loaded same-bundle source loading is supported by #1024 and boot-pinned Option A cross-bundle target selection is supported by #976.'
+      blocker_state: 'Public /v1/rpc run.fork uses exact artifact-backed, process-owned preparation and execution for same-bundle and changed-target forks. The target need not be boot-pinned or loaded as a normal runtime.'
       owner: multi_bundle_persistence.cli_surface.run_fork
       api_owner: /v1/rpc run.fork
       behavior: >
         Public run-fork CLI. `swarm run fork` is the public command (CLI v2.2); top-level `swarm fork` is a retired spelling that fails closed. The bundle selector flag is
         `--bundle-hash`; draft `--bundle` is retired. `--at-event` is an explicit fork-event selector only.
-        A currently running or paused source requires `--confirm-source-freeze`; this authorizes the operation to
-        permanently freeze an unadvanced source, while the selected source-advanced branch-divergence path preserves
-        the source as an independently live branch. An interactive TTY may obtain the same explicit conditional
-        authorization after warning that the operation may freeze the source. Non-TTY callers must pass the flag.
+        A currently running or paused source requires `--allow-source-freeze`; this authorizes the operation to
+        permanently freeze a source that has not advanced beyond the fork point. A frozen source cannot resume.
+        The selected source-advanced branch-divergence path preserves the source as an independently live branch.
+        Help text, the interactive warning, and the non-TTY teaching error state both outcomes and the alternative:
+        withhold permission (decline the default-No prompt) to cancel without starting a fork.
+        An interactive TTY may obtain the same explicit conditional authorization. Non-TTY callers must pass the flag.
+        The old --confirm-source-freeze and confirm_source_freeze spellings are rejected, never aliased.
         Terminal sources fail closed without a confirmation ceremony. The result reports the actual source outcome
         through required source_frozen and source_run_status fields.
         The CLI validates source_run_id and fork_event_id as currently UUID-shaped runtime IDs before calling the
@@ -26270,8 +26459,9 @@ cli_specification:
         api_runtime_cli_owner: '#989'
         cli_inventory_gate: '#1023'
         same_bundle_db_loaded_source: '#1024'
-        boot_pinned_cross_bundle_target_selection: '#976'
+        independent_selected_target_preparation: '#2277'
       rejected_legacy_flags:
+        - --confirm-source-freeze
         - --dry-run
         - --materialize-only
         - --activate
@@ -26280,7 +26470,7 @@ cli_specification:
       - no `swarm control run fork` command shape is promoted
       - no draft `--bundle` flag is promoted
       - no direct DB/store/runtime/fork harness access from CLI
-      - cross-bundle targets select already loaded/boot-pinned RuntimeContextManager BundleContexts; valid but unloaded/unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR
+      - cross-bundle targets select exact retained source artifacts under process-owned selected preparation, independent of loaded normal runtimes; missing artifacts fail with BUNDLE_UNAVAILABLE and corrupt or mismatched artifact bytes fail with BUNDLE_DATA_INTEGRITY_ERROR
       - DB-loaded same-bundle source loading is exercised through /v1/rpc run.fork, not a direct CLI runtime/store helper
       - missing API token source, invalid args, and legacy harness flags make zero API calls
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, IDEMPOTENCY_CONFLICT, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
@@ -26849,7 +27039,7 @@ cli_specification:
         group: run_operate
         inherits_contract: cli_specification.command_catalog.trace
       run_fork:
-        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]
+        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.run_fork
         supersession_scope: >
@@ -32463,6 +32653,21 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           current_status:
             $ref: '#/components/schemas/RunStatus'
+      SELECTED_FORK_CONTROL_UNSUPPORTED:
+        type: object
+        additionalProperties: false
+        required: [operation, run_id, binding_id, required_capability]
+        properties:
+          operation:
+            type: string
+            enum: [run.pause, run.continue, agent.restart, agent.send_directive, agent.replay, event.replay, event.publish, mailbox.decide, mailbox.defer, mailbox.begin_input, mailbox.cancel_input]
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          binding_id:
+            $ref: '#/components/schemas/OpaqueId'
+          required_capability:
+            type: string
+            enum: [selected_fork_deferred_execution]
       RUN_ALREADY_PAUSED:
         type: object
         additionalProperties: false
@@ -32987,7 +33192,7 @@ api_specification:
         \ leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity\
         \ is the only authority that materializes the canonical receiving-flow entity identity. Caller-supplied payload.entity_id on an event whose selected\
         \ handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence.\
-        \ select_entity/select_or_create_entity use their declared payload-key bindings only; payload.entity_id is not target\
+        \ Composition owns the receiver key and resolution; payload.entity_id is not target\
         \ or stateful-context authority.\n"
       scope:
         required:
@@ -33050,6 +33255,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/EventPublishResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - BUNDLE_MISMATCH
       - BUNDLE_SCOPE_REQUIRED
       - BUNDLE_UNAVAILABLE
@@ -33202,6 +33408,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/EventReplayResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - EVENT_NOT_FOUND
       - EVENT_REPLAY_NO_DELIVERY_HISTORY
       - EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL
@@ -33294,7 +33501,25 @@ api_specification:
       - DATA_INTEGRITY_ERROR
     run.fork:
       tier: should_have
-      description: "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. Before mutation, the method resolves the source run's canonical `runs.bundle_hash`, loads the immutable `source_artifacts` row for that hash, and verifies its exact logical blob against the hash. A missing artifact fails closed with BUNDLE_UNAVAILABLE; malformed bytes or a hash mismatch fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from nullable identity, compatibility aliases, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-artifact selected_contracts fork may proceed. The runtime projection is reconstructed only from the admitted immutable source artifact and must verify the resulting canonical bundle_hash before execution. Fork-created runs are stamped with that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A and the exact immutable source artifact for that hash. The method persists selected-contract ownership as mode=bundle_hash with the target hash, recovers routes against that same identity, executes against the target BundleContext runtime projection, and stamps fork-created runs with the target canonical bundle_hash. A target hash that is not loaded by this process or lacks its immutable source artifact fails closed with BUNDLE_UNAVAILABLE; malformed or hash-mismatched target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, ambient CLI bundle selection, or ambient filesystem source discovery. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n"
+      description: >-
+        Public selected-contract run fork mutation. Before domain mutation, resolve the source run's canonical
+        runs.bundle_hash and verify its immutable source artifact. Missing or invalid authority fails closed;
+        nullable identities, compatibility aliases, loaded-runtime modules and ambient filesystem discovery
+        cannot supply it.
+
+        If bundle_hash is omitted or equals the source hash, use selected_contracts against that exact artifact.
+        A different hash selects the exact retained target artifact and persists mode=bundle_hash. The selected
+        execution owner reconstructs the effective source and its non-executable preparation independently of
+        RuntimeContextManager. A target need not be loaded by this process; missing target bytes fail with
+        BUNDLE_UNAVAILABLE and corrupt or mismatched bytes with BUNDLE_DATA_INTEGRITY_ERROR.
+
+        Preparation fixes source, frontier, declaration correspondence, provider configuration and catalog before
+        domain mutation. Only exact post-materialization binding may issue selected execution authority.
+        Process-owned work retains preparation and selected execution through activation and failure disposition.
+        A same-hash loaded runtime is not authority and cannot supply configuration, module, grants or lifetime.
+        This does not perform Dynamic Load or make the target available for ordinary ingress. Normal runtime
+        admission and deferred-work replay refusals remain unchanged. The swarm run fork CLI consumes this
+        method and cannot call runtime/store helpers directly.
       scope:
         required:
         - write:runs
@@ -33312,12 +33537,12 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: bundle_hash
         required: false
-        description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects an already loaded/boot-pinned RuntimeContextManager BundleContext under #976; valid but unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
+        description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects the exact retained target artifact for independent process-owned selected preparation. Loaded normal runtime membership is irrelevant; missing target artifacts fail with BUNDLE_UNAVAILABLE and corrupt or mismatched artifact bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."
         schema:
           $ref: '#/components/schemas/BundleHash'
-      - name: confirm_source_freeze
+      - name: allow_source_freeze
         required: false
-        description: Must be true before forking a running or paused source. It authorizes the operation to permanently freeze an unadvanced source; source advancement may instead select branch divergence and preserve the source. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation.
+        description: Must be true before forking a running or paused source. It permits permanently freezing a source that has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Withhold permission to cancel without starting a fork. The mutation rechecks source activity and this authorization in the source-freeze transaction, and the result reports the actual source_frozen and source_run_status outcome. Terminal sources refuse without requiring confirmation. The retired confirm_source_freeze parameter is rejected, not aliased.
         schema:
           type: boolean
           default: false
@@ -33453,6 +33678,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OkResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - RUN_NOT_FOUND
       - RUN_ALREADY_TERMINAL
       - RUN_ALREADY_PAUSED
@@ -33479,6 +33705,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OkResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - RUN_NOT_FOUND
       - RUN_NOT_PAUSED
       - IDEMPOTENCY_CONFLICT
@@ -34026,6 +34253,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/DecisionCardMutationResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
       - MAILBOX_STALE_CARD
@@ -34062,6 +34290,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/DecisionCardMutationResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
       - INVALID_DEFER_UNTIL
@@ -34078,7 +34307,7 @@ api_specification:
       - {name: delivery_receipt_id, required: false, schema: {type: string}}
       - {name: idempotency_key, required: false, schema: {type: string, minLength: 1}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/DecisionCardInputResult'}}
-      errors: [MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
+      errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
     mailbox.cancel_input:
       tier: must_have
       description: Cancel the caller's still-active durable input draft. Foreign, stale, expired, replaced, or consumed drafts fail closed.
@@ -34089,7 +34318,7 @@ api_specification:
       - {name: input_draft_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
       - {name: idempotency_key, required: false, schema: {type: string, minLength: 1}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/DecisionCardInputResult'}}
-      errors: [MAILBOX_NOT_FOUND, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, IDEMPOTENCY_CONFLICT]
+      errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, IDEMPOTENCY_CONFLICT]
     mailbox.acknowledge:
       tier: must_have
       description: Acknowledge a notice. Decision cards reject this operation with a teaching error.
@@ -34600,6 +34829,7 @@ api_specification:
               type: string
               const: platform.agent_directive
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - AGENT_NOT_FOUND
       - AGENT_NOT_RUNNING
       - RUN_NOT_FOUND
@@ -34640,6 +34870,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OkResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - AGENT_NOT_FOUND
       - IDEMPOTENCY_CONFLICT
     agent.replay:
@@ -34689,6 +34920,7 @@ api_specification:
         schema:
           $ref: '#/components/schemas/AgentReplayResult'
       errors:
+      - SELECTED_FORK_CONTROL_UNSUPPORTED
       - EVENT_NOT_FOUND
       - EVENT_REPLAY_NO_DELIVERY_HISTORY
       - EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL
@@ -35452,8 +35684,9 @@ api_specification:
       source_replacement: >
         The retired Builder package and its project reload/source-replacement implementation do not exist. A process epoch
         loads exactly one generation for each boot-selected source; changing files on disk does not mutate that generation.
-        Existing runs retain immutable bundle authority. Changed-bundle continuation uses run.fork against an already loaded
-        target bundle. Any future reload product requires a new lifecycle owner and specification.
+        Existing runs retain immutable bundle authority. Changed-bundle continuation uses run.fork against an exact
+        retained target artifact under independent selected-fork preparation and execution ownership, not a loaded
+        normal runtime. Any future reload product requires a new lifecycle owner and specification.
     operator_api_disposition:
       transport: "REST at /api/* is retired as an operator-facing compatibility surface. It MUST NOT remain reachable in\
         \ production; consumers use /v1/rpc or /v1/ws."
@@ -35575,6 +35808,8 @@ process_local_work_lifetime_authority:
   admission_and_settlement:
     begin: Every enqueue, spawn, callback registration, channel send, or buffer escape acquires its opaque occurrence lease before the work becomes reachable. Admission after a fence or retirement fails closed. The same gate admits a fixed standing class only for generation-long machinery such as a Manager execution loop, retry loop, child occurrence, or reserved transition executor; standing classification is typed at the owner API and never inferred from a free-string label.
     context: The lease supplies the cancellation context and exact occurrence authority consumed by nested producers. Admission detaches caller cancellation before accepted work escapes; queued callbacks receive and execute on the lease context, so request completion cannot cancel accepted work while occurrence retirement always does. Work accepted before fencing continues under that exact lease and must not reacquire occurrence admission from inside its queued or spawned execution. Metadata snapshots and raw lookup APIs never expose an executable Runtime pointer.
+    selected_process_context: Only the process root constructs selected-fork occurrences; a loaded runtime has no selected-fork child constructor. A process-owned selected fork retains the exact process identity through direct work, standing work, Manager composition and route descendants. Each owner projects its own process into accepted lease contexts; a missing or foreign ambient process never supplies this authority. Retirement or replacement of an unrelated loaded runtime cannot cancel this selected occurrence, and retiring the selected occurrence cannot fence a loaded successor. Process retirement cancels all accepted selected work and cannot issue its exact store-release join receipt until selected descendants and preparation disposition have joined.
+    selected_operation_lifetime: Direct and admitted staged selected execution reserve process ownership before materialization or readiness binding. Caller cancellation remains authoritative before commit; committed work uses the admitted process context. The exact selected execution_id/run_id/generation occurrence is bound once and retained through publication, quiescence, activation, post-commit candidate handoff, durable execution closure and synchronous failure disposition. Publish return does not retire that occurrence. The orchestration lease is standing so transient quiescence never waits for its own caller. Candidate reservation, sink registration and commit/rollback settlement retain their existing admission rules; no caller may strip occurrence authority or use unowned context to escape a retired runtime. The activation owner reports committed activation and source disposition even when post-commit candidate submission fails; direct and staged callers propagate that failure and close execution authority without attempting materialized-only discard of the activated fork. Failure cleanup retains process ownership and propagates every cleanup/join failure; store release cannot precede successful joining. A control context that must outlive the operation receives an explicit ownership transfer before the operation lease is released, never an indefinitely retained operation lease or detached cleanup. Process retirement still cancels execution and rejects new admission; unrelated runtime replacement does not.
     done: Every accepted lease settles exactly once after execution, error, cancellation, or exact durable handoff. Duplicate settlement is invalid and cannot decrement another occurrence.
     wait: Wait is event-driven and joins accepted work without counter polling, sleeps, or stable-tick heuristics. Quiescence waits for every finite lease admitted by the occurrence while allowing its typed standing machinery to remain live; retirement cancels and joins both finite and standing leases before releasing the parent occurrence. Both views consume the same gate and settlement records, never parallel counters. Scheduler ownership retains only active or currently draining tasks; completed one-shot history is removed at completion and cannot accumulate as a second lifetime ledger.
   queue_carriers:
@@ -35585,8 +35820,33 @@ process_local_work_lifetime_authority:
     reset: EventBus reset retires and joins retained carriers and claims before clearing owner maps or counters. A snapshotted sender either completes admission before retirement drains it or observes the retired handle and admits nothing. Clearing memory never manufactures quiescence.
   durable_handoff:
     rule: Local publication ownership may end before execution only after the private selected-store adapter commits and returns the exact event and exact delivery route obligations. The publication transfers each returned delivery identity to one carrier or the one normal runtime-generation continuation coordinator before release.
-    delivery_continuation: The exact opaque continuation capability is attached to the EventDelivery before enqueue. One scoped carrier guard retains the exact EventDelivery or raw continuation across every Manager and Pipeline exit and resolves the capability exactly once through one atomic typed operation. The only successful resolutions are returned to the same coordinator, consumed into a fenced execution attempt, or terminal-fenced because terminal settlement won the race. Terminal claim outcomes return rather than consume the carrier, then release the exact durable continuation. Resolution errors remain visible and fence the owning generation; carriers never poll, sleep, retry the capability, or infer success. Retry settlement returns a fresh retry-scheduled snapshot to that coordinator before attempt completion. A current agent delivery that authors its own flow-terminal event retains its exact lifecycle generation while the route is fenced and the accepted carrier finishes; the loop finalizer publishes terminal lifecycle authority only after that carrier settles. Duplicate resolution, cross-authority transfer, or resolution after coordinator retirement fails closed.
-    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A fatal scan or dispatch result atomically retires the coordinator, rejects every later handoff/acquire/retain admission, closes runtime admission, and cancels the serving generation; a runtime cannot remain ready after losing its only continuation owner. A materializing node cannot defer behind topology created only by its own execution. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
+    delivery_continuation: The exact opaque continuation capability is attached to the EventDelivery before enqueue. One scoped carrier guard retains the exact EventDelivery or raw continuation across every Manager and Pipeline exit and resolves the capability exactly once through one atomic typed operation. The only successful resolutions are returned to the same coordinator, consumed into a fenced execution attempt, or terminal-fenced because terminal settlement won the race. Terminal claim outcomes fence the exact continuation before returning rather than consuming the carrier, so direct dispatch reports terminal evidence rather than a fabricated transfer or deferral. Resolution errors remain visible and fence the owning generation; carriers never poll, sleep, retry the capability, or infer success. Retry settlement returns a fresh retry-scheduled snapshot to that coordinator before attempt completion. A current agent delivery that authors its own flow-terminal event retains its exact lifecycle generation while the route is fenced and the accepted carrier finishes; the loop finalizer publishes terminal lifecycle authority only after that carrier settles. Duplicate resolution and cross-authority transfer fail closed. Coordinator retirement rejects new carriers and attempt admission, but an already accepted exact carrier must still return to its predecessor or resolve an existing terminal fence before process-local joins can finish; that cleanup cannot acquire, wake or mutate a successor.
+    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, already held by another proven exact owner, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A fatal scan or dispatch result atomically retires the coordinator, rejects every later handoff/acquire/retain admission, closes runtime admission, and cancels the serving generation; a runtime cannot remain ready after losing its only continuation owner. A materializing node cannot defer behind topology created only by its own execution. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
+    acquisition: >
+      The existing normal-generation coordinator owns one atomic election for each exact delivery.
+      Its closed result is an acquired opaque capability, another proven carrier/attempt owner,
+      or an explicit terminal fence. Missing evidence and unknown or foreign ownership are errors;
+      absence never proves completion. Store observation is not transfer authority. A delayed
+      committed handoff or retry notification preserves a current carrier, attempt or terminal
+      fence rather than replacing it. Reclaim uses the exact attempt incarnation observed before
+      the store read, so an earlier scan cannot steal a later return/reacquire cycle. Terminal
+      evidence remains with the owning generation and prevents late observations from reviving work.
+      Publication and recovery carry one stack-scoped election through receiver admission, direct
+      node interception and queue handoff. Synchronous Pipeline interception borrows that exact
+      guard; it does not reacquire a capability already held by its caller. Queue handoff attaches
+      the elected capability to its EventDelivery, while every pre-handoff exit returns it exactly
+      once. A lawful loser performs no interceptor, enqueue or business execution, is not counted
+      as delivered, and does not produce a false missing-channel or startup-failure result. The
+      selected-fork transfer owner remains bounded to its execution; it gains no normal coordinator.
+      An unqueued stack return, including failed enqueue, settles the exact capability without
+      signaling its own retry. It remains deferred to the named route/subscription/carrier-capacity
+      or selected-store delivery lifecycle owner. A queued carrier's return or attempt admission
+      still signals the same coordinator. Only the selected-store observation supplies due time;
+      direct node deferral cannot invent a timer or pretend another carrier will return.
+      An event-level interceptor disposition alone never proves delivery settlement. Direct
+      dispatch reports the exact guard's actual attempt transfer or terminal fence, including
+      a handler that committed its dead letter before reporting an event-level failure. An
+      unresolved or returned carrier cannot turn that event disposition into delivery success.
     boundary: The durable handoff proof itself carries no eligibility, retry, claim, outcome, settlement, liveness, or replay semantics. Those remain governed by the delivery lifecycle owner and are rechecked at every selected-store boundary.
     failure: Missing, forged, wrong-event, wrong-route, wrong-authority, or unreadable proof fails closed and leaves local ownership unsettled. The exact retained owner remains reachable until a typed transfer or terminal settlement succeeds.
   standing_lifecycle:
@@ -36031,13 +36291,23 @@ agent_topology_authority:
       RestoreSourceSet repairs the retained process head before runtime publication and is not a live
       reload primitive.
   admission:
-    variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
+    variants: [StaticDeclarationPlan, SelectedForkDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-
       Every lifecycle construction carries exactly one sealed topology variant and one
       orthogonal execution lifetime. Static admission binds the global source-set revision
-      and exact bundle source coordinate. Flow readiness binds the exact keyed readiness
+      and exact bundle source coordinate. Selected declaration admission binds the fork run,
+      target bundle and immutable selected declaration/configuration census fingerprint recorded
+      by the selected runtime execution owner. It cannot be converted into a live source-set
+      plan. Flow readiness binds the exact keyed readiness
       plan. Ephemeral execution is nonpersistable. No zero variant, free-string authority,
       inferred owner, HiredBy interpretation, or flat declaration fallback exists.
+    selected_declarations: >-
+      The selected execution owner records the canonical typed declaration census, including an
+      explicit empty census, in its issuance transaction. The execution coordinate and every
+      selected grant bind its fingerprint. Issuance, claim and lifecycle admission reject changed
+      fingerprints; decoding rejects an invalid census instead of normalizing or repairing it.
+      A selected declaration mutation requires exact run, target, declaration identity and
+      effective configuration revision membership. It never queries the live source-set head.
   process_capability:
     owner: one retained selected-store session acquired only by process composition
     acquisition: >-
@@ -36066,7 +36336,9 @@ agent_topology_authority:
       PIDs, descriptors, endpoints, hostnames, heartbeats, timestamps, and elapsed time never authorize takeover.
       SQLite aliases, construction/backend identity mismatch, replaced file identity, and unsupported or unprovable filesystems fail closed without mutation.
     grants: >-
-      Exact revocable grants bind one runtime instance/generation, bundle source coordinate,
+      Normal startup and source-set refresh require the LiveGenerationGrant interface; SourceSetPlan
+      is not part of the common execution grant and is implemented only by the live grant owner.
+      Exact revocable live grants bind one runtime instance/generation, bundle source coordinate,
       and source-set revision. Readiness, grant-state changes, execution admission, and every
       durable lifecycle mutation re-prove the retained session and that the grant's source-set
       revision is still the complete current head. Retained-session failure retires the process
@@ -36098,6 +36370,20 @@ agent_topology_authority:
       each survivor's topology and process binding together under the lifecycle coordinator only after every durable
       rebind commits; a later commit failure leaves every process-local survivor projection unchanged. Reconciliation
       is deterministic, idempotent, and resumable after partial progress; no predecessor-bound cell may be hydrated or selected.
+    selected_run_ownership: >-
+      The durable selected-contract binding reserves its child run at materialization commit,
+      before execution issuance or discovery. A same-hash normal grant does not own that child.
+      Manager discovery, startup takeover, source-set rebind, readiness callbacks and durable
+      registration/adoption consume the selected-store run ownership classification through
+      their current generation grant. Queued readiness work rechecks after admission and before
+      topology mutation; an earlier observation is not retained permission. Missing or corrupt
+      run evidence, retired grants, changed selected execution fences and expired execution
+      ownership fail closed. The lifecycle transaction independently checks run ownership before
+      writing, so discovery filtering cannot be bypassed with a direct lifecycle request.
+      Complete-source-set retirement remains a distinct terminal operation: source_set_retire
+      or terminal process_takeover may settle a removed ordinary static declaration across
+      bundle coordinates only with the current plan's absence proof. This never admits execution
+      and never applies to a selected-bound child, even when its historical topology was static.
     monitor: >-
       One process-work-owned monitor proves only the exact retained backend capability. Probe serialization is shared
       with canonical operations, so waiting behind an in-flight operation is neutral and the bounded backend deadline
@@ -36327,17 +36613,17 @@ agent_lifecycle_authority:
       Startup and joined shutdown retain diagnostic-error attribution without reversing committed lifecycle work.
   destructive_cleanup_quiescence:
     runtime_nuke: Apply-mode runtime.nuke withdraws the complete affected context set and fences every runtime and standing occurrence before waiting for any predecessor to drain. It awaits successful shutdown of every relevant loaded runtime context before session cleanup, including when admitted source artifacts are retained. Idempotent response replay does not repeat runtime shutdown.
-    reset_reconstruction: The existing process lifecycle supervisor owns reset reconstruction and final shutdown; RuntimeContextManager owns complete-set withdrawal, staged installation, and publication. When include_source_artifacts is false, retain the identical admitted source set and allocate fresh runtime occurrences, generation grants, source projections, and workspace lifecycles. Rebind all execution handlers, fork consumers, MCP, standing and channel publication, monitoring, and final-close records before reopening admission. Original directories are not reread, and already retired runtime or workspace lifecycles cannot be reopened. Reconstruction failure leaves the entire set unavailable rather than publishing a partial set.
-    reset_execution_convergence: Runtime.PrepareStart uses the ordinary startup interpreter through subscription readiness, integrity checks, provider preflight, and topology preparation without admitting managed execution or starting delivery recovery and autonomous producers. Every reset candidate must prepare successfully before complete-set publication. Publication exposes metadata for consumer refresh but does not release execution; RuntimeContextManager fences bundle, run, channel, standing-service, and standing-recovery acquisition until the supervisor releases the exact complete published set after consumer convergence. Prepared execution release is single-use and rejects cancellation or retirement. API and MCP dispatch remain fenced until execution startup completes.
+    reset_reconstruction: The existing process lifecycle supervisor owns reset reconstruction and final shutdown; RuntimeContextManager owns complete-set withdrawal, staged installation, and publication. When include_source_artifacts is false, retain the identical admitted source set and allocate fresh runtime occurrences, generation grants, source projections, and workspace lifecycles. Rebind all execution handlers, fork consumers, MCP, standing and channel publication, monitoring, and final-close records before reopening admission. Original directories are not reread, and already retired runtime or workspace lifecycles cannot be reopened. Reconstruction failure leaves the entire set unavailable rather than publishing a partial set. The same transition fences the selected-fork predecessor before any join. After successful predecessor join, the selected-store RunFork construction boundary creates one fresh selected execution owner for the exact retained-source reset operation and still-current process capability, shared by every bundle consumer. The supervisor owns that candidate before binding or reconciliation; immutable predecessor family copies cannot forward to it.
+    reset_execution_convergence: Runtime.PrepareStart uses the ordinary startup interpreter through subscription readiness, integrity checks, provider preflight, and topology preparation without admitting managed execution or starting delivery recovery and autonomous producers. Every reset candidate must prepare successfully before complete-set publication. Publication exposes metadata for consumer refresh but does not release execution; RuntimeContextManager fences bundle, run, channel, standing-service, and standing-recovery acquisition until the supervisor releases the exact complete published set after consumer convergence. Prepared execution release is single-use and rejects cancellation or retirement. API and MCP dispatch remain fenced until execution startup completes. Selected process binding and non-executable reconciliation must converge before the same handler publication. Executor, selected controls and stop, activation, recovery, API/MCP consumers and final shutdown all retain the exact selected successor; rebuilding handlers over a retired owner is invalid.
     reset_startup_mcp_transport: The execution fence does not prohibit the current prepared generation grant's MCP capability preflight. The existing MCP gateway authenticates and resolves the registered typed startup probe authority; the runtime matches the exact grant, state version, process owner, and generation and admits the request under its own Runtime.WorkOccurrence. Startup requests are joined before grant retirement. Request method, probe-shaped payload, or bearer authentication alone cannot exempt application execution. Unknown, expired, unregistered, foreign, settled, admitted, or retired startup authority cannot use this pre-execution path. Ordinary MCP execution remains subject to RuntimeContextManager acquisition and complete-set convergence. The existing unsupported multi-context Claude CLI posture is unchanged.
-    reset_resource_lifetimes: Runtime and standing work must join before workspace ReleaseSourceProjection or caller projection release. A request that selected a generation-specific handler or gateway retains that exact runtime occurrence through handler settlement. The process-owned reset request never holds the runtime lease it must drain. The already-booted control API remains available for state readback and outcome replay while executable readiness and public ingress are withdrawn.
+    reset_resource_lifetimes: Runtime and standing work must join before workspace ReleaseSourceProjection or caller projection release. A request that selected a generation-specific handler or gateway retains that exact runtime occurrence through handler settlement. The process-owned reset request never holds the runtime lease it must drain. The already-booted control API remains available for state readback and outcome replay while executable readiness and public ingress are withdrawn. Final selected retirement is owned by the supervisor's current-generation accounting, including failed candidates whose join is unproven; it cannot capture only the boot predecessor. Cancellation or join timeout retains candidate ownership and forbids resource/store release.
     reset_historical_lookup: Under the operation lease and retained possession, the reset owner looks up the exact operation identity before reading current source topology or process-local projection inventory. Recorded responses and request conflicts cannot depend on the availability of later projections. Only a genuinely new admission captures current projection disposal identities; admission still checks keyed identity and snapshots source topology atomically.
-    reset_startup_continuation: Under retained process authority and before source loading or ingestion, the existing reset coordinator resumes only uncommitted effects from the exact pending receipt. Its owned continuation retains reset serialization through process-local startup convergence; closing or cancelling an interrupted startup does not complete the receipt. Reconstruction selects only the recorded retained source set, validates identical admitted artifacts, and uses complete-set prepared startup. A source-clearing reset reconstructs no runtime and exposes only unloaded control-plane behavior and outcome replay. Only successful reconstruction and exact execution-authority convergence complete the durable operation before readiness. Historical completed outcomes never reenter startup reconstruction or destructive effects.
+    reset_startup_continuation: Under retained process authority and before source loading or ingestion, the existing reset coordinator resumes only uncommitted effects from the exact pending receipt. Its owned continuation retains reset serialization through process-local startup convergence; closing or cancelling an interrupted startup does not complete the receipt. Reconstruction selects only the recorded retained source set, validates identical admitted artifacts, and uses complete-set prepared startup. A source-clearing reset reconstructs no runtime and exposes only unloaded control-plane behavior and outcome replay. Only successful reconstruction and exact execution-authority convergence complete the durable operation before readiness. Historical completed outcomes never reenter startup reconstruction or destructive effects. Empty or source-clearing reconstruction does not bind or reconcile an executable selected owner. A retained same-process successor is freshly composed, never an adopted predecessor inventory.
     reset_container_identity: Reset inventory, durable plans, and serialized outcomes retain the immutable Docker object ID together with the complete canonical container identity, including admitted bundle hash, source projection, and data projection. The ID is recorded before cleanup and external effects. Settlement inspects and stops only that recorded object ID; it never resolves a durable target by its reusable name, even when a replacement has identical labels. Missing recorded objects are settled without affecting a successor. Missing IDs fail closed rather than falling back to name lookup. Settlement also compares the exact planned source/projection identity. A lost acknowledgment is reconciled against that exact object; a still-running, foreign, or uninspectable target remains a failure. Retired entity containers are not reset targets.
     reset_projection_identity: Reset admission records exact source projection cleanup coordinates from the existing sourceartifact owner before any predecessor is withdrawn. Each disposable projection has an immutable ownership marker outside its mounted admitted-source tree. Crash recovery inventories only managed-container scopes belonging to those recorded source/projection identities, never all containers sharing a bundle hash. After exact container settlement and before source reconstruction, sourceartifact removes only the recorded projection directory whose marker still matches; missing directories are settled, changed or symlinked ownership fails closed, and successor projections remain untouched. Disposal identities survive released handles but cannot reopen source access. Content-addressed shared data projections are not disposable runtime source projections; their exact identities remain attached to container settlement.
     reset_projection_settlement: Live release and crash cleanup use the same sourceartifact disposal owner. Recursive source deletion retains the ownership marker through every retryable failure. Marker removal occurs only after the source tree is absent; the final empty envelope is removed non-recursively. An interrupted final unlink may leave an empty envelope, which is settled without inferring source ownership or recursively deleting unmarked contents. Unknown envelope entries, nonempty unmarked roots, and changed directory identities fail closed.
     reset_projection_resource_disposal: Projection disposal is broader than the reset-eligible container stop catalog. After predecessor work joins, both live release and startup recovery use the existing Docker workspace owner to enumerate all runtime-owned objects with the exact admitted bundle and projection identity, including scaffold, system, agent, flow, stopped and partially created objects. Every selected object is inspected and removed by immutable Docker ID before source files are removed. Unresolved removal retains the source tree and fence; acknowledgment uncertainty is reconciled by exact-ID inspection. Foreign projections, successor projections and durable workspace volumes are never disposal targets.
-    reset_reconstruction_allocations: Before creating a reconstruction projection directory or any container, the existing reset operation journal durably appends its exact planned sourceartifact cleanup identity and managed-workspace disposition. Allocation intents are append-only evidence separate from the immutable admitted request and committed effect receipts. Both live reconstruction and startup continuation consume this same owner. An interrupted continuation settles all recorded abandoned allocations before allocating another successor, including after repeated recovery crashes. Final convergence reads the advanced journal revision and cannot erase allocation evidence. Same-process converged retries do not destroy their current successor.
+    reset_reconstruction_allocations: Before creating a reconstruction projection directory or any container, the existing reset operation journal durably appends its exact planned sourceartifact cleanup identity and managed-workspace disposition. Allocation intents are append-only evidence separate from the immutable admitted request and committed effect receipts. Both live reconstruction and startup continuation consume this same owner. An interrupted continuation settles all recorded abandoned allocations before allocating another successor, including after repeated recovery crashes. Final convergence reads the advanced journal revision and cannot erase allocation evidence. Same-process converged retries do not destroy their current successor. Selected candidate replacement uses this same serialized reset operation, not another journal or retry registry. A failed candidate must be fenced and joined before replacement; a converged operation replay preserves the exact normal and selected successors.
     reset_cleanup_attempt_clock: RequestedAt remains immutable admission evidence. Every uncommitted cleanup attempt evaluates directive expiry and other current-time authority gates using the current attempt time, including same-key continuation and startup recovery. No retry may waive an unexpired authority gate or rewrite a committed cleanup receipt.
     reset_empty_topology: Successfully recovered source-clearing reset leaves a valid zero-context source set, not an incomplete constructor. New keyed or unkeyed resets with either source-retention mode must complete over that empty set without synthesizing runtimes or restoring source. Exact outcome replay and conflicting-key rejection remain authoritative, and a successful empty reset releases its active operation slot.
     other_ordering: Manager ResetAll runs only after lifecycle shutdown; fork discard runs only after the fork-local runtime has shut down. Selected-store compatibility migration and backfill paths do not exist.
@@ -36367,7 +36653,7 @@ agent_lifecycle_authority:
 managed_agent_capability_surface:
   owner: one typed managed-agent capability surface persisted in managed_agent_capability_surfaces and carried by exact authority through every live consumer
   scope:
-    execution_contexts: [normal_agent, selected_contract_fork]
+    execution_contexts: [normal_agent, selected_contract_fork, selected_fork_preparation]
     authority_variants: [startup_probe, provider_turn]
     rule: The surface is the sole aggregate owner of planned delivery bindings, observed delivery evidence, and mechanically derived effective visibility/callability for managed agents. Candidate definitions, toolcapabilities decisions, provider policy, and MCP discovery remain upstream owners of their own facts and cannot become parallel aggregate owners.
     candidate_definition_owner:
@@ -36382,8 +36668,8 @@ managed_agent_capability_surface:
       selected_contract_fork: Exact current selected-contract execution ID, fork run ID, generation, actor-census fingerprint, canonical bundle_hash, and settled startup-probe surface identities issued from the selected-fork authority established by llm_completion_execution_authority.
     rule: The variants form a closed discriminated union. Missing, stale, terminal, cross-context, cross-run, cross-execution, cross-generation, actor/config-mismatched, or bundle-mismatched admission fails before gateway construction, provider work, agent loops, tool dispatch, relay dispatch, or event publication.
   surface_identity:
-    planned_inputs: [typed_concrete_actor_identity, runtime_mode, provider, transport, provider_contract_identity, exact_execution_authority, candidate_definition_identity, toolcapabilities_decision, exact_delivery_bindings]
-    rule: surface_id is deterministic for one immutable plan and exact startup-probe or provider-turn authority. actor_id is derived from the typed concrete actor identity and cannot authorize or identify a sibling by itself. integrity_hash covers the complete planned, observed, mismatch, and effective value. Provider-turn and startup-probe authorities are disjoint and non-reusable.
+    planned_inputs: [typed_actor_owner, runtime_mode, provider, transport, provider_contract_identity, exact_execution_or_preparation_authority, candidate_definition_identity, toolcapabilities_decision, exact_delivery_bindings]
+    rule: surface_id is deterministic for one immutable plan and exact startup-probe or provider-turn authority. actor_id is derived from the typed actor plan or concrete identity and cannot authorize or identify a sibling by itself. integrity_hash covers the complete planned, observed, mismatch, and effective value. Provider-turn and startup-probe authorities are disjoint and non-reusable.
     bindings:
       api_definition: Exact canonical tool name and definition/schema identity delivered in the live provider request.
       provider_builtin: Exact provider-native name enabled and observed for the turn.
@@ -36401,9 +36687,29 @@ managed_agent_capability_surface:
       list supplies affirmative zero-native evidence. Tool calls, planned names and canonical display lists do not.
   startup_preflight:
     owner: one provider-contract-aware managed preflight implementation that produces startup_probe surfaces and persists both successful and failed operation/evidence facts
-    actor_owner: Normal cold-start and prepared-handoff probes consume the exact declaration-owned runless agent plan before execution admission. Selected-contract-fork probes consume the exact concrete fork-run actor identity because the fork run is already admitted. A startup surface cannot carry both forms, fabricate a run, infer a run from context, or reuse a provider-turn identity.
+    actor_owner: Normal cold-start and prepared-handoff probes consume the exact declaration-owned runless agent plan before execution admission. Selected-fork preparation probes consume the exact prospective declaration-owned runless agent plan before fork domain materialization. A startup surface cannot carry a live actor, fabricate a run, infer a run from context, or reuse a provider-turn identity. Concrete selected actors are bound later through the admitted plan and actual materialization, not by relabeling a probe receipt.
     candidate_census: Already-live manager configurations remain distinct by exact concrete actor identity, including run_id, through workspace and provider preflight. Only pre-admission blueprints deduplicate by declaration-owned runless agent plan. Projecting a live candidate into a normal startup surface cannot merge sibling runs or suppress validation of differing resolved configurations.
-    selected_fork_census: Selected-fork startup probes only the already-materialized concrete actors of its admitted fork run. Runless declaration blueprints are not selected-fork execution authority; a concrete actor from another run fails admission before provider resolution.
+    selected_fork_census: The fixed admitted readiness projection owns the complete prepared actor census, comprising every selected static declaration and the exact concrete template actor plans established by that projection. Immediate recipients determine initial dispatch only, not provider preparation. Identical static declaration/required-flow references denote one actor only when their complete configuration and derived prompt agree. Unknown future template instances and unrelated live/source actors are excluded. Every census actor requires configuration and provider/catalog probes before fork-domain mutation even when not an initial recipient; there is no reachability heuristic or late provider expansion. Preparation creates no entity, initial delivery or provider business turn. These plans are not selected-fork execution authority. Missing, crossed, same-name sibling, or live actor identities fail before provider resolution. Binding consumes this exact census and actual materialized fork-run actor identities; it cannot reconstruct correspondence from names.
+    selected_fork_preparation_authority:
+      process_admission: The selected owner must be explicitly bound to one process and complete startup reconciliation before admitting preparation or staged activation. Unbound, unreconciled, retired and foreign-process calls fail closed; ambient process presence alone never supplies this admission. Preparation and staged activation must prove the bound process capability current and require any supplied capability to identify that exact authority, generation, acquisition, owner, boot, runtime instance and backend. A successor capability cannot revive a stale selected owner, even when the same in-memory process barrier is supplied.
+      execution_kind: selected_fork_preparation
+      workspace_preparation: Before a required provider probe, the already-registered process-owned preparation initializes its exact rebound selected workspace through EnsurePrereqs followed by EnsureSystemWorkspaces. This is non-executable infrastructure acquisition, not fork materialization or provider business execution. Non-probing catalogs do not acquire Docker prerequisites, and non-Docker lifecycles retain their existing contract. Disposal ownership precedes partial scaffold/system construction. Cancellation and retirement stop further construction/probing and join accepted workspace operations. The source runtime's workspace lifecycle and containers are never initialized or retired by this preparation. Successful preparation transfers the same projection through binding, execution and retained controls. Failed workspace release propagates its cleanup evidence and retains the projection, selected context and process possession in the existing owner until an explicit cleanup/retirement retry succeeds; a failed attempt does not permit process join or store release. No detached cleanup, additional retry registry, shared durable-backing deletion or fake private provider-state lease is permitted.
+      coordinates: [preparation_id, process_authority_id, process_owner_id, process_boot_id, bundle_hash, source_fingerprint, admitted_plan_fingerprint, configuration_fingerprint, catalog_fingerprint, actor_plan_fingerprint]
+      rule: This closed startup_probe variant authorizes only the managed preflight protocol and authenticated diagnostic persistence. execution_authority_id identifies the preparation, not an executable generation. Run, session, turn, normal startup owner and startup generation coordinates are forbidden. The process owner proves current possession at probe admission and again at binding; evidence-shape validation alone is not possession. Every coordinate participates in exact surface identity and integrity. Failed or cancelled preparation retains truthful probe diagnostics but performs no fork/source domain mutation.
+      effect_persistence: The external-effects owner admits this variant only for the registered provider startup-probe adapter and the exact matching capability surface, without an agent frame, completion origin, run lineage, usage target, budget scopes or any executable authority variant. The effect operation startup_authority_id projects the process authority ID and its fence_generation projects the actual process authority generation; neither is a fabricated runtime grant. Both stores consume the startup owner's strict process-head and lineage decoder and recheck that active process at authorization and launch. Prepared diagnostics do not create runs, agents, selected executions or generation grants. A released or superseded process cannot launch an authorized but unlaunched probe.
+      protocol_consumption: The shared managed preflight protocol accepts an explicitly prepared prospective census without constructing a Manager. It validates every runless actor plan and configuration projection, one common preparation target, exact process possession and duplicate-plan exclusion before provider resolution. Same-name plans with different declaration owners remain distinct. Possession is reproved before each probe and before returning successful preparation receipts. Provider and MCP evidence must advance the original immutable surface; replacing its plan or authority is rejected even when the replacement is independently well formed. Normal-runtime preflight retains its existing source and live-candidate admission guards.
+      frozen_catalog: The preparation owner constructs one opaque non-executable provider catalog from the complete prospective actor census. Its fingerprint includes exact declaration-owned actor plans, admitted configuration revisions, resolved configuration and backend selection, assembled provider prompts, delivered tool descriptions and schemas, and capability decisions. Actor enumeration order does not change identity. Mutable caller configuration, schema or capability maps cannot change the frozen plan. Preflight consumes the frozen resolutions and tools, rejects changed or missing actors/configuration/catalog coordinates before provider dispatch, and verifies MCP evidence against that same plan rather than resolving a replacement catalog during probing.
+      catalog_snapshot_lifetime: When tool enumeration acquires a scoped presentation lease, definitions and capabilities are copied under that exact lease and the preparation owner releases it on success or snapshot failure before resolving the next actor. The frozen catalog retains data, never the lease or its context authority. Selected preflight consumes those frozen values without reacquiring a live presentation owner. Normal preflight retains its scoped lease until its provider and MCP protocol completes.
+      probe_gateway_lifetime: A probe gateway acquires process work before listener construction. Construction failure settles that exact work. Successful construction transfers it to the synchronous gateway cleanup owner, which shuts down and joins all accepted HTTP handlers and the serving loop before settlement; Serve returning alone is not completion. Cleanup is terminal and idempotent. The preparation cancellation bridge is stopped or joined before its enclosing process lease is released. Neither probe gateway nor cancellation bridge requires a live runtime generation or selected execution occurrence.
+      provider_construction: Preparation constructs provider protocol/catalog clients without completion controllers, event publishers, conversations, or managed/live session services. These dependencies are rejected, not inherited from a loaded runtime. Normal provider construction continues to require its completion authority. The readiness owner retains immutable derived prompts beside its sealed runtime projection, keyed by the exact runless plan; it neither persists rendered prompts in configuration JSON nor reconstructs them through a later Manager.
+      source_consumption: Direct and admitted staged orchestration retain the loaded selected artifact and its projection through binding, execution, activation and failure disposition. Execution admission verifies the durable binding against that same loaded value; it cannot reload another artifact or release the preparation owner's projection. Materialization evidence is detached from mutable consumer copies. Closed, consumed, cancelled or incomplete preparation cannot expose a new materialization request. Both selected and original-source acquisition transfer their exact cleanup handles to the already-admitted preparation before loaded-evidence validation or original-carriage compilation can fail, including a loader result carrying both a resource and an error. Original carriage used by non-selected staged activation consumes this same acquisition/disposition owner without acquiring selected execution authority. Invalid loaded evidence cannot discard a release handle on its error return.
+      resource_settlement: The existing preparation/context owner retains the exact original-source projection, selected-source projection, workspace projection and catalog lease through disposition and any retained-control handoff. Retirement first joins selected execution, then releases workspace, catalog and source resources before finishing process possession. Each successful resource release settles once; an error or panic leaves that resource and all not-yet-settled resources attached to the same owner for an explicit cleanup/retirement retry. Cleanup errors are propagated and panics remain visible, but neither means the resource settled. No cleanup-complete entry removal or successful process/store join is allowed until every release succeeds. A failed release fences further use without retiring source/selected siblings; successful retry removes the exact remaining resources without reopening execution. No detached cleanup, retry registry or generic cleanup framework is introduced.
+      retained_context_lifetime: After successful execution closure and activation of an active fork, the selected execution owner explicitly transfers its exact bound context and retained projection resources from synchronous orchestration to process-owned controls. Request completion settles the orchestration lease, not the selected occurrence or retained process ownership. Terminal or failed operations release their own resources after settlement. The selected owner registers preparation before loading and publishes materialization and its exact binding under the same admission boundary consumed by stop and retirement. Reset and process shutdown retire this owner, reject further preparation, cancel accepted operations, join their disposition and retained contexts, and only then permit process join and store release. A retired owner is terminal; fresh process composition, or fresh same-process composition under the retained-source reset supervisor after exact predecessor join, must construct a new owner rather than reopening it or adopting old tokens. The selected-store RunFork boundary owns reset-successor construction, and the process supervisor retains all unjoined candidate responsibility through convergence and final store release.
+      selected_stop_commit: The named selected-fork stop operation consumes an exact durable binding and current process possession. Both selected stores reprove those facts in the terminal transaction, serialize against execution claim through the run lock, reject unsettled running execution, and consume the existing run-lifecycle terminalization owner. A prepared but unclaimed execution is terminally closed with cancellation evidence and a new fence in the same transaction, so a late claim cannot execute it. An admitted stop use remains process-owned while selected execution settles and joins; that stop owns terminal disposition, and execution failure cleanup must not separately discard its fork. A conflicting binding, stale process or failed terminal mutation changes no run, delivery, control or author-activity state. Terminal repeats retain the existing run-control refusal. This operation grants no ordinary ingress, historical replay, deferred execution or loaded-runtime authority.
+      startup_reconciliation: Before public readiness or selected preparation/control admission, both fresh process composition and a staged same-process reset successor inspect every selected binding through their exact selected owner. Reset reconciliation completes before the supervisor publishes the normal and selected consumer set; it cannot reuse the retired predecessor's reconciliation flag. The named per-binding transaction checks current process possession, exact target/run/binding, strict persisted preparation and fingerprint, and recorded predecessor ancestry; a different UUID or expired wall-clock lease is not proof of abandonment. Interrupted predecessor execution is fenced, its existing effect attempts are settled by the effect owner, its active run is failed through the run-lifecycle owner, and its execution is closed atomically. Unlaunched effects become terminal failures; launched or response-observed effects remain outcome-uncertain. Recovery never redispatches a turn, adopts an old grant, or calls a normal Manager. Normal effect sweeps cannot settle selected execution. Cancellation, invalid evidence and any failed mutation roll back the entire per-binding transaction. Completed terminal recovery repeats preserve its failure, fence and outcome evidence. Successful quiesced/closed execution permits only non-executable control/read reconstruction; a never-executed staged binding still requires the existing fresh staged admission and preserves all historical non-agent and deferred-work refusals. Missing artifacts, conflicting preparation or unregistered current-process execution fail boot closed. Recovery does not reconstruct lost API responses, which remain a separate completion contract.
+      materialization: Before any fork-domain write, the named selected-store transaction rechecks current process possession and generation, original successful probe surfaces, the effective selected source fingerprint, fixed admitted plan including its historical event certificate, and the complete selected actor/configuration census from sealed readiness. An explicitly empty census is valid only when that projection contains no static or admitted concrete template actor, not merely when the initial frontier has no agent recipient. Caller-authored empty evidence cannot skip an admitted actor. Runtime materialization and the sealed validator consume the same canonical census while preserving initial dispatch independently.
+      binding: A successful receipt remains preparation evidence. Binding is single-consumption and verifies unchanged process, exact selected source and fixed admitted plan, configuration, catalog and prospective actor plan against actual materialized actor identities, configurations and prompts. The existing selected runtime execution row persists the immutable typed preparation binding and its canonical fingerprint; no second registry or durable configuration-secret copy exists. Missing or mismatched evidence fails closed; a receipt cannot be promoted into a provider-turn authority or silently reissued for another target.
+      grant_consumption: Execution issuance, claiming and selected generation authority consume the exact preparation fingerprint. Grant issuance and every later authority use re-read the original integrity-checked surfaces and compare their preparation, process, prospective actor, source, plan, configuration and catalog coordinates. Probe settlement accepts exactly the declared sorted receipt IDs, without trimming, deduplication or inference. A missing, narrowed, corrupt or crossed receipt cannot retain executable authority. Selected execution authority is never accepted as startup-probe authority, including by fresh-store DDL. Old stores and receipt relabeling are unsupported.
     startup_authority: >
       Every cold-start and prepared-handoff state change compare-and-sets the exact persisted lease head. transition_ordinal is
       strictly consecutive across the lease even when handoff-local state_version restarts; rollback persists rolled_back plus
@@ -36415,7 +36721,7 @@ managed_agent_capability_surface:
       discarded committed handoffs, and best-effort finalization fail closed on PostgreSQL and SQLite.
     normal_cold_start: Settle every actor probe under the exact startup authority, persist the resulting surface identities, admit execution, and only then replay recoverable agent work or start managed-agent loops. System nodes may hydrate, subscribe, and queue work before admission, but cannot authorize provider turns or execute managed-agent deliveries until admission.
     normal_replacement: Probe candidate actors under prepared handoff authority before commit; execute only after commit/admission. Probe failure rolls back without exposing candidate execution.
-    selected_contract_fork: Consume the exact current selected-fork completion authority and derive the selected managed-execution admission; settle provider/MCP preflight before gateway use, agent-loop start, or fork-event publication.
+    selected_contract_fork: Settle provider/MCP preparation probes before fork domain materialization or source freezing. Bind their exact immutable preparation receipts to the actual selected fork and its execution grant, then derive managed-execution admission before execution gateway use, agent-loop start, or fork-event publication. A probe-only gateway cannot execute business tools or register provider-turn authority.
     claude_cli_selection: Every cold, recovery, prepared-replacement, and selected-contract Claude startup process receives positive --tools selection derived from the exact callable provider_builtin bindings plus the closed transport-control set. --allowedTools separately admits those builtins, exact MCP bindings, and controls. Missing or incompatible positive-selector support fails closed without static-catalog fallback, discovery/relaunch, or negative-complement retry.
     failure: Missing provider evidence, MCP tools/list or required startup tools/call failure, delivery mismatch, persistence failure, or authority loss fails closed with retained typed evidence and zero managed execution under that admission.
       Missing or invalid CLI inventory also fails when the planned native set is empty; valid-empty inventory is not missing.
@@ -36434,7 +36740,7 @@ managed_agent_capability_surface:
     executor_relay: Tool executor, local runtime, and relay paths consume the exact provider-turn surface and managed-execution admission. They cannot recompute a broader set from actor declarations, names, prompts, or provider defaults.
     managed_effects: Every normal-agent, selected-contract-fork, or startup-probe managed effect attempt other than the separately owned forkchat sandbox persists its exact capability_surface_id. Normal-agent admission requires exact equality among lifecycle identity, usage-target identity, and capability-surface identity. The logical operation persists the authority-independent capability_plan_fingerprint, so an eligible retry may bind a new preallocated turn surface but cannot widen or otherwise replace the callable plan. For a normal provider delivery continuation, this fingerprint excludes only the process-generation execution authority and stateless session UUID; it retains exact actor, run, turn ordinal, provider contract, tool definitions, bindings, and effective callability. Selected-fork surfaces retain their exact execution coordinates. Forkchat attempts carry neither value.
   persistence:
-    rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same integrity-checked surface with exactly one typed actor owner; normal pre-admission startup surfaces carry a runless agent plan, while provider-turn and selected-contract-fork startup surfaces carry a typed concrete live identity. actor_id columns are derived index projections only. Settlement and recovery independently compare provider-turn surface identity with the exact usage-target and turn identities. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
+    rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same integrity-checked surface with exactly one typed actor owner; normal and selected-fork pre-admission startup surfaces carry a runless agent plan, while provider-turn surfaces carry a typed concrete live identity. Selected-fork preparation rows have startup_probe authority and NULL run_id; preparation evidence cannot be stored as provider-turn authority. actor_id columns are derived index projections only. Settlement and recovery independently compare provider-turn surface identity with the exact usage-target and turn identities. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
     migration: Any non-current selected-store shape fails closed before runtime access. Empty or populated legacy tables are not upgraded, migrated, adopted, or interpreted as capability evidence.
   proof:
     required: [API adapter delivery parity, Claude CLI positive-selection startup and first/resumed-turn evidence, Claude CLI zero/each/all native-family selection, Claude CLI incompatible-selector denial, Claude CLI unknown-builtin mismatch, MCP tools/list and tools/call authorization, executor and relay denial, normal startup ordering, recovery and replacement handoff ordering, selected-fork preflight and first/resumed-turn ordering, selected-fork non-completion effect binding, PostgreSQL and SQLite typed persistence parity, public forkchat exact-policy selection and source-native non-interference, deterministic release-binary lifecycle, opt-in installed-Claude selector conformance, opt-in paid public-binary agentic lifecycle]
@@ -36447,7 +36753,7 @@ managed_external_effect_authority:
   context_authority:
     managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, and typed logical-operation identity. Normal agents additionally require an exactly matching lifecycle token, usage target, and exactly one live typed origin, either the event-delivery claim with exact delivery ID, run, route identity, claim token/version, agent subscriber class, and subscriber identity, or the executing directive operation with exact operation and execution-owner identity. The two variants are mutually exclusive and neither may be inferred from event, run, latest-row, or context coincidence. Selected-contract-fork agents require the exact selected execution authority and actor usage target and cannot carry a normal origin. Same-slug sibling identity is a mismatch. Missing, ambiguous, or mismatched context fails closed before authorization.
     eventbus_handoff: Managed-effect context authority installed after EventBus transfer is receiver-owned. Normal authority derives from the acting lifecycle token; selected-contract authority is the exact typed selected owner. Publisher context ancestry cannot establish, replace, or shadow either authority.
-    startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, startup authority, and selected-store controller. Normal pre-admission probing carries the exact runless agent plan; selected-contract-fork probing carries the exact fork-run actor identity. Startup authority cannot authorize a provider turn or be reused after execution admission.
+    startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, matching normal startup or selected-fork preparation authority, and selected-store controller. Pre-admission probing carries the exact runless agent plan. Selected-fork preparation additionally requires current process possession and the fixed target/plan/configuration/catalog evidence; it carries no fork-run or executable generation. Its effect mode is the admitted actor configuration mode checked against the selected process controller's immutable execution posture before issuing probe authority; preparation cannot mint live authority or bypass mock_only. Startup authority cannot authorize a provider turn or be reused after execution admission.
     serve_registration: >
       Channel-backed provider callback apply requires one closed serve-registration authority containing the current
       startup authority identity/state version and one process-local registration intent identity. The selected-store

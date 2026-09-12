@@ -1,4 +1,4 @@
-package runforkadmission
+package runforkadmission_test
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -83,9 +84,9 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		}
 	}
 
-	source := testContractFrontierTemplateConnectSource()
-	selection := SelectedContractSelection(source)
-	frontier, err := AdmitContractFrontier(ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
+	source := runforkadmission.ContractFrontierTemplateConnectSourceForTest()
+	selection := runforkadmission.SelectedContractSelection(source)
+	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		t.Fatalf("frontier = %#v, want producer/inst-1 source routed independently of consumer/inst-9 receiver context", frontier.FrontierEvents)
 	}
 
-	history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
+	history, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{
 		Plan: plan, Source: source, ContractSelection: selection, FrontierAdmission: frontier,
 	})
 	if err != nil {
@@ -133,7 +134,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventName:        "producer/inst-1/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true,
-			source:           testContractFrontierTemplateConnectSource,
+			source:           runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
@@ -141,7 +142,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			name:        "latest template fork point without delivery",
 			eventName:   "producer/inst-1/scan.requested",
 			sourceRoute: events.RouteIdentity{FlowID: " producer ", FlowInstance: " /producer/inst-1/ ", EntityID: " 11111111-1111-4111-8111-111111111111 "},
-			source:      testContractFrontierTemplateConnectSource,
+			source:      runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistory: []string{consumerNode}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
@@ -150,7 +151,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventName:        "producer/inst-1/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true, deliveryStatus: "completed",
-			source:      testContractFrontierTemplateConnectSource,
+			source:      runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistory: []string{consumerNode}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
@@ -159,7 +160,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventName:        "producer/inst-1/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true, deliveryStatus: "pending",
-			source:       testContractFrontierTemplateConnectSource,
+			source:       runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantFrontier: []string{consumerNode}, wantDynamic: []string{"producer/inst-1"},
 			wantFrontierCodes: []string{runfork.RunForkBlockerContractFrontierExecutionUnsupported},
 			wantHistoryCodes:  []string{nonMutating, flowHistory}, wantRouteFacts: true,
@@ -169,7 +170,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventName:        "producer/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true,
-			source:           func() semanticview.Source { return testContractFrontierConnectSource("static") },
+			source:           func() semanticview.Source { return runforkadmission.ContractFrontierConnectSourceForTest("static") },
 			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1,
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
@@ -179,7 +180,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			sourceRoute:      events.RouteIdentity{EntityID: "33333333-3333-4333-8333-333333333333"},
 			routingSource:    eventtest.RootRoutingSource("33333333-3333-4333-8333-333333333333"),
 			explicitSelector: true,
-			source:           func() semanticview.Source { return testContractFrontierRootConnectSource(t) },
+			source:           func() semanticview.Source { return runforkadmission.ContractFrontierRootConnectSourceForTest(t) },
 			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1,
 			wantHistoryCodes: []string{nonMutating},
 		},
@@ -187,7 +188,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			name:              "template source without route fails closed",
 			eventName:         "producer/inst-1/scan.requested",
 			explicitSelector:  true,
-			source:            testContractFrontierTemplateConnectSource,
+			source:            runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistoryEvents: 1,
 			wantHistoryCodes:  []string{nonMutating},
 		},
@@ -196,7 +197,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventName:         "producer/inst-1/scan.requested",
 			sourceRoute:       events.RouteIdentity{FlowID: "foreign", FlowInstance: "foreign/inst-9", EntityID: "22222222-2222-4222-8222-222222222222"},
 			explicitSelector:  true,
-			source:            testContractFrontierTemplateConnectSource,
+			source:            runforkadmission.ContractFrontierTemplateConnectSourceForTest,
 			wantHistoryEvents: 1,
 			wantHistoryCodes:  []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
@@ -256,8 +257,8 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			}
 
 			source := tc.source()
-			selection := SelectedContractSelection(source)
-			frontier, err := AdmitContractFrontier(ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
+			selection := runforkadmission.SelectedContractSelection(source)
+			frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source, ContractSelection: selection})
 			if err != nil {
 				t.Fatalf("AdmitContractFrontier: %v", err)
 			}
@@ -268,7 +269,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				t.Fatalf("frontier blocker codes = %v, want %v", got, tc.wantFrontierCodes)
 			}
 
-			history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{Plan: plan, Source: source, ContractSelection: selection, FrontierAdmission: frontier})
+			history, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: source, ContractSelection: selection, FrontierAdmission: frontier})
 			if err != nil {
 				t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
 			}

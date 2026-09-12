@@ -27,18 +27,18 @@ func newPipelineTestContinuationOwner() *pipelineTestContinuationOwner {
 	return &pipelineTestContinuationOwner{held: make(map[string]bool)}
 }
 
-func (o *pipelineTestContinuationOwner) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (o *pipelineTestContinuationOwner) Acquire(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	deliveryID = strings.TrimSpace(deliveryID)
 	if deliveryID == "" {
-		return nil, fmt.Errorf("pipeline test delivery id is required")
+		return worklifetime.DeliveryAcquisition{}, fmt.Errorf("pipeline test delivery id is required")
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if held, exists := o.held[deliveryID]; exists && !held {
-		return nil, fmt.Errorf("pipeline test delivery %s is already carrier-owned", deliveryID)
+		return worklifetime.AlreadyOwnedDelivery(deliveryID), nil
 	}
 	o.held[deliveryID] = false
-	return &pipelineTestContinuation{owner: o, deliveryID: deliveryID}, nil
+	return worklifetime.AcquiredDelivery(&pipelineTestContinuation{owner: o, deliveryID: deliveryID}), nil
 }
 
 func (o *pipelineTestContinuationOwner) Retain(snapshot runtimedelivery.Snapshot) error {
@@ -79,7 +79,7 @@ func (c *pipelineTestContinuation) Resolve(_ context.Context, intent worklifetim
 		return 0, fmt.Errorf("pipeline test delivery continuation is already settled")
 	}
 	c.owner.mu.Lock()
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent == worklifetime.DeliveryContinuationReturn || intent == worklifetime.DeliveryContinuationReturnUnqueued {
 		c.owner.held[c.deliveryID] = true
 	} else if intent == worklifetime.DeliveryContinuationConsume {
 		c.owner.held[c.deliveryID] = false
@@ -89,7 +89,7 @@ func (c *pipelineTestContinuation) Resolve(_ context.Context, intent worklifetim
 	}
 	c.owner.mu.Unlock()
 	c.settled = true
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent == worklifetime.DeliveryContinuationReturn || intent == worklifetime.DeliveryContinuationReturnUnqueued {
 		return worklifetime.DeliveryContinuationReturned, nil
 	}
 	return worklifetime.DeliveryContinuationConsumed, nil

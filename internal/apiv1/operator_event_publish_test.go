@@ -1179,7 +1179,7 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, runID, "bootstrap-node", "")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContextForSource(ctx, mustAPITestSourceArtifactFact(bundleHash)), pg, runID, "bootstrap-node", "")
 	runtimebustest.SubscribeForRun(t, bus, runID, "bootstrap-node", events.EventType("bootstrap.requested"))
 	defer runtimebustest.Unsubscribe(bus, "bootstrap-node")
 
@@ -1249,7 +1249,7 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, runID, "root-orchestrator", "")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContextForSource(ctx, mustAPITestSourceArtifactFact(bundleHash)), pg, runID, "root-orchestrator", "")
 	ch := runtimebustest.SubscribeForRun(t, bus, runID, "root-orchestrator", events.EventType("review.requested"))
 	defer runtimebustest.Unsubscribe(bus, "root-orchestrator")
 
@@ -1480,7 +1480,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 		t.Fatalf("initial event.publish error = %#v", initial.Error)
 	}
 	runID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
-	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContext(ctx), pg, runID, "bootstrap-node", "")
+	seedActiveAPIV1RuntimeBusAgentForRun(t, testAuthorActivityContextForSource(ctx, mustAPITestSourceArtifactFact(bundleHash)), pg, runID, "bootstrap-node", "")
 	runtimebustest.SubscribeForRun(t, bus, runID, "bootstrap-node", events.EventType("bootstrap.requested"))
 	defer runtimebustest.Unsubscribe(bus, "bootstrap-node")
 

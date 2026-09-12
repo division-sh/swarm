@@ -12,11 +12,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -34,12 +37,68 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						t.Fatal(err)
 					}
 					ctx := testAuthorActivityContext()
+					identity := mustTestAgentIdentityForRun(fixture.forkRun, "diagnostic-fork-worker", "global")
+					transition := diagnosticTestTransition(t, identity, runtimemanager.LifecycleDiagnosticOrigin{}, executionmode.Live)
+					plan, err := identity.Plan()
+					if err != nil {
+						t.Fatal(err)
+					}
+					revision, err := runtimemanager.AgentConfigPlanRevision(transition.Agent.Config, plan)
+					if err != nil {
+						t.Fatal(err)
+					}
+					hash := fixture.request.DeclarationPlan.BundleHash
+					fixture.request.DeclarationPlan, err = agenttopology.NewSelectedDeclarationPlan(hash, []agenttopology.DesiredAgent{{
+						Identity: plan, ConfigRevision: revision, Source: agenttopology.SourceCoordinate{BundleHash: hash},
+					}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					fixture.request.Preparation.DeclarationPlanFingerprint = fixture.request.DeclarationPlan.Revision
+					fixture.request.Preparation.Actors = []runfork.SelectedForkPreparedActor{{Plan: plan, ConfigurationRevision: revision, Backend: selection.BackendAnthropic, Mode: executionmode.Live}}
+					fixture.request.ContainerPlanFingerprint = "sha256:" + strings.Repeat("1", 64)
+					fixture.request.ActorCensusFingerprint = "sha256:" + strings.Repeat("2", 64)
+					fixture.request.EffectiveConfigFingerprint = "sha256:" + strings.Repeat("3", 64)
 					issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 					if err != nil {
 						t.Fatal(err)
 					}
 					authority, err := selected.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "diagnostic-proof", time.Minute)
 					if err != nil {
+						t.Fatal(err)
+					}
+					binding, err := selected.(interface {
+						RequireRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, error)
+					}).RequireRunForkSelectedContractBinding(ctx, fixture.forkRun)
+					if err != nil {
+						t.Fatal(err)
+					}
+					process, err := fixture.process.Evidence()
+					if err != nil {
+						t.Fatal(err)
+					}
+					grant, err := fixture.process.IssueSelectedForkGenerationGrant(ctx, startupownership.SelectedForkGrantRequest{
+						RuntimeInstanceID: process.RuntimeInstanceID, BundleHash: hash,
+						Binding: startupownership.SelectedForkGrantBinding{
+							BindingID: binding.BindingID, ForkRunID: fixture.forkRun, ExecutionID: issued.ExecutionID,
+							ExecutionGeneration: issued.Generation, FenceGeneration: authority.FenceGeneration, ExecutionOwner: authority.ExecutionOwner,
+							AdmissionFingerprint: issued.AdmissionFingerprint, ContainerPlanFingerprint: issued.ContainerPlanFingerprint,
+							ActorCensusFingerprint: issued.ActorCensusFingerprint, EffectiveConfigFingerprint: issued.EffectiveConfigFingerprint,
+							DeclarationPlanFingerprint: issued.DeclarationPlanFingerprint, PreparationFingerprint: issued.PreparationFingerprint,
+						},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := grant.Retire(context.Background()); err != nil {
+							t.Error(err)
+						}
+					})
+					if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := grant.AdmitExecution(ctx); err != nil {
 						t.Fatal(err)
 					}
 					projector := selected.(diagnosticProjectionTestStore)
@@ -62,7 +121,16 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						}
 						origin.Causality, origin.ParentEventID = runtimemanager.LifecycleDiagnosticAcceptedEvent, parent
 					}
-					item := enqueueDiagnosticTestIdentity(t, projector, mustTestAgentIdentityForRun(fixture.forkRun, "diagnostic-fork-worker", "global"), origin, executionmode.Live)
+					transition.DiagnosticOrigin, transition.ConfigRevision = origin, revision
+					transition.Topology, err = agenttopology.SelectedDeclarationAdmission(fixture.forkRun, fixture.request.DeclarationPlan)
+					if err != nil {
+						t.Fatal(err)
+					}
+					transition.Agent.Topology = transition.Topology
+					if _, err := grant.CommitAgentLifecycleTransition(ctx, transition); err != nil {
+						t.Fatal(err)
+					}
+					item := diagnosticTestOperation(t, projector, transition.OperationID)
 					if err := selected.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 						t.Fatal(err)
 					}

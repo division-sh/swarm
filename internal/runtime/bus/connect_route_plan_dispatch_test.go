@@ -1394,6 +1394,10 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 	if want.Target.Route().EntityID == rootTarget.EntityID {
 		t.Fatal("test identities must distinguish root causal/current owner from singleton receiver owner")
 	}
+	want.Initialization, err = events.AdmitNodeReceiverInitialization(evt, want.Target, testFlowNode(t, "consumer", "consumer-node"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
 	if err != nil {
@@ -2398,6 +2402,10 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	if got := store.events[evt.ID()].TargetRoute().Normalized(); got != want.Target.Route().Normalized() {
 		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target)
 	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want created instance route %#v", store.routes[evt.ID()], want)
 	}
@@ -2412,6 +2420,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	}
 	reused := want
 	reused.Target = events.MustExistingEntityTarget(want.Target.Route())
+	reused.Initialization = events.ReceiverInitialization{}
 	if !deliveryRoutesContain(store.routes[retry.ID()], reused) || len(store.routes[retry.ID()]) != 1 {
 		t.Fatalf("retry delivery routes = %#v, want existing instance route %#v", store.routes[retry.ID()], reused)
 	}
@@ -2657,6 +2666,10 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 	}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": minted}),
 	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want create-resolution route %#v", store.routes[eventID], want)
 	}
@@ -2769,6 +2782,10 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 		EntityID:     activation.Instance.EntityID,
 	}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": eventID}),
+	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want event_id create-resolution route %#v", store.routes[eventID], want)
@@ -3066,7 +3083,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
 	}
 	requireNoConnectRoutePlanBusEvent(t, hostileReplacement, "replacement topology must not capture historical replay")
-	if routes := store.routes[eventID]; len(routes) != 1 || routes[0] != committedRoute {
+	if routes := store.routes[eventID]; len(routes) != 1 || !reflect.DeepEqual(routes[0], committedRoute) {
 		t.Fatalf("persisted route changed across replacement-topology restart: %#v, want unchanged %#v", routes, committedRoute)
 	}
 }
@@ -3265,6 +3282,10 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		EntityID:     activation.Instance.EntityID,
 	}),
 	}
+	createdWant.Initialization, err = events.AdmitFlowReceiverInitialization(missing, createdWant.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !deliveryRoutesContain(store.routes[missingID], createdWant) || len(store.routes[missingID]) != 1 {
 		t.Fatalf("missing persisted routes = %#v, want created route %#v", store.routes[missingID], createdWant)
 	}
@@ -3280,6 +3301,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	}
 	reusedWant := createdWant
 	reusedWant.Target = events.MustExistingEntityTarget(createdWant.Target.Route())
+	reusedWant.Initialization = events.ReceiverInitialization{}
 	if !deliveryRoutesContain(store.routes[retryID], reusedWant) || len(store.routes[retryID]) != 1 {
 		t.Fatalf("retry persisted routes = %#v, want existing reused route %#v", store.routes[retryID], reusedWant)
 	}
@@ -3600,6 +3622,11 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 2 {
 		t.Fatalf("preflight = failure:%q routes:%#v, want node plus pending agent route", preflight.TargetFailure, preflight.DeliveryRoutes)
 	}
+	for _, route := range preflight.DeliveryRoutes {
+		if !route.Initialization.FlowLifecycle() || !route.Materialization.Empty() {
+			t.Fatalf("activation-created receiver gained a node dependency: %+v", route)
+		}
+	}
 	if slices.Contains(preflight.Recipients, identity.AgentID()) {
 		t.Fatalf("live recipients = %#v, created agent must remain pending until its lifecycle route is published", preflight.Recipients)
 	}
@@ -3799,6 +3826,10 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
 	}),
+	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want renamed-key created route %#v", store.routes[evt.ID()], want)

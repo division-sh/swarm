@@ -268,10 +268,7 @@ var bootCheckRegistry = []Check{
 	{ID: "composition_connect_validation", Severity: "error", Run: checkCompositionConnectValidation},
 	{ID: "input_pin_wiring", Severity: SeverityHardInvalidity, Run: checkInputPinWiring},
 	{ID: "pin_target_resolution", Severity: "error", Run: checkPinTargetResolution},
-	{ID: "redundant_in_topology_select_entity", Severity: SeverityHardInvalidity, Run: checkRedundantInTopologySelectEntity},
-	{ID: "missing_external_select_entity", Severity: "error", Run: checkMissingExternalSelectEntity},
 	{ID: "cross_flow_pin_ambiguity_validation", Severity: "error", Run: checkCrossFlowPinAmbiguityValidation},
-	{ID: "select_entity_validation", Severity: "error", Run: checkSelectEntityValidation},
 	{ID: "flow_boundary_create_entity_validation", Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
 	{ID: "flow_data_access_validation", Severity: "error", Run: checkFlowDataAccessValidation},
 }

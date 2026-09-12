@@ -54,6 +54,16 @@ func ValidateEventContract(event Event) error {
 	if event.ParentEventID() != "" && event.RunID() == "" {
 		return fmt.Errorf("event class %q with causal parent requires run_id", class)
 	}
+	if origin, ok := event.InheritedFanOutOrigin(); class == EventAdmissionInheritedFanOut {
+		if !ok || origin.RunID() != event.RunID() || event.ParentEventID() != "" {
+			return fmt.Errorf("inherited fan-out event requires exact origin and no ordinary causal parent")
+		}
+		if err := origin.Validate(); err != nil {
+			return err
+		}
+	} else if ok {
+		return fmt.Errorf("inherited fan-out origin is invalid for event class %q", class)
+	}
 	return nil
 }
 
@@ -114,6 +124,10 @@ func validateEventIdentityContract(class EventAdmissionClass, eventType EventTyp
 		if producer.Type() != EventProducerExternal {
 			return fmt.Errorf("event class %q requires external producer; got %q", class, producer.Type())
 		}
+	case EventAdmissionInheritedFanOut:
+		if producer.Type() != EventProducerNode {
+			return fmt.Errorf("inherited fan-out event requires its node producer")
+		}
 	case EventAdmissionChild:
 		switch producer.Type() {
 		case EventProducerNode, EventProducerAgent, EventProducerPlatform:
@@ -142,6 +156,9 @@ func ValidateGenericPublishEvent(event Event) error {
 	}
 	if event.AdmissionClass() == EventAdmissionSelectedForkReplay {
 		return fmt.Errorf("selected-fork replay requires its named persistence operation")
+	}
+	if event.AdmissionClass() == EventAdmissionInheritedFanOut {
+		return fmt.Errorf("inherited fan-out event requires its named chunk transaction")
 	}
 	return nil
 }
@@ -253,6 +270,12 @@ func BindManagerOutputIdentity(event Event, eventID string) (Event, error) {
 			return Event{}, fmt.Errorf("manager selected-fork output is missing typed lineage")
 		}
 		return NewSelectedForkReplayEvent(SelectedForkReplayEventInput{Facts: facts, Lineage: lineage})
+	case EventAdmissionInheritedFanOut:
+		origin, ok := event.InheritedFanOutOrigin()
+		if !ok {
+			return Event{}, fmt.Errorf("inherited fan-out output lacks origin")
+		}
+		return NewInheritedFanOutEvent(InheritedFanOutEventInput{Facts: facts, Origin: origin})
 	case EventAdmissionRuntimeControl:
 		return restoreRuntimeEvent(EventAdmissionRuntimeControl, facts, event.RunID(), event.ParentEventID())
 	case EventAdmissionRuntimeDiagnostic:
@@ -331,6 +354,7 @@ func IntegrityProjection(event Event) (any, error) {
 			SourceEventID    string `json:"source_event_id"`
 			AuthorityStamp   string `json:"authority_stamp"`
 		} `json:"selected_fork,omitempty"`
+		InheritedFanOut *InheritedFanOutOrigin `json:"inherited_fan_out,omitempty"`
 	}{
 		Class: event.AdmissionClass(), ID: event.ID(), Type: event.Type(), ProducerType: event.ProducerType(),
 		ProducerID: event.SourceAgent(), TaskID: event.TaskID(), PayloadBase64: base64.StdEncoding.EncodeToString(event.Payload()), ChainDepth: event.ChainDepth(),
@@ -338,6 +362,9 @@ func IntegrityProjection(event Event) (any, error) {
 	}
 	if !event.CreatedAt().IsZero() {
 		projection.CreatedAt = event.CreatedAt().Format("2006-01-02T15:04:05.999999Z07:00")
+	}
+	if origin, ok := event.InheritedFanOutOrigin(); ok {
+		projection.InheritedFanOut = &origin
 	}
 	projection.Envelope.EntityID = strings.TrimSpace(envelope.EntityID)
 	projection.Envelope.FlowInstance = strings.Trim(strings.TrimSpace(envelope.FlowInstance), "/")

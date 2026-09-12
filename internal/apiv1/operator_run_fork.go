@@ -10,14 +10,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
-	swruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/google/uuid"
 )
 
@@ -36,17 +33,13 @@ type RunForkExecutor interface {
 	ExecuteRunFork(context.Context, RunForkExecutionRequest) (RunForkExecutionResult, error)
 }
 
-type RunForkExecutorSelector interface {
-	SelectRunForkExecutor(*swruntime.BundleContext, *swruntime.Runtime) (RunForkExecutor, error)
-}
-
 type RunForkExecutionRequest struct {
-	SourceRunID         string
-	ForkEventID         string
-	BundleHash          string
-	ConfirmSourceFreeze bool
-	DataPinOverrides    []durabledata.ExplicitPin
-	ContractSelection   runfork.RunForkContractSelection
+	SourceRunID       string
+	ForkEventID       string
+	BundleHash        string
+	AllowSourceFreeze bool
+	DataPinOverrides  []durabledata.ExplicitPin
+	ContractSelection runfork.RunForkContractSelection
 }
 
 type RunForkExecutionResult struct {
@@ -67,51 +60,22 @@ type SelectedContractRunForkExecutionFunc func(context.Context, runtimerunforkex
 type SelectedContractRunForkExecutor struct {
 	ExecuteSelectedContractRunFork SelectedContractRunForkExecutionFunc
 	SourceLoader                   runtimerunforkexecution.SelectedContractSourceLoader
-	ContractSelection              runfork.RunForkContractSelection
 	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
-	EffectiveSourceIdentity        scenarioexecution.EffectiveSourceIdentity
-}
-
-func (e SelectedContractRunForkExecutor) SelectRunForkExecutor(contextDef *swruntime.BundleContext, selectedRuntime *swruntime.Runtime) (RunForkExecutor, error) {
-	if contextDef == nil || selectedRuntime == nil {
-		return nil, fmt.Errorf("selected run fork runtime context is required")
-	}
-	e.AgentRuntime.Config = selectedRuntime.Config
-	e.AgentRuntime.Workspace = selectedRuntime.Workspace
-	e.AgentRuntime.Credentials = selectedRuntime.Credentials
-	e.EffectiveSourceIdentity = contextDef.EffectiveSourceIdentity
-	e.ContractSelection = runtimerunforkadmission.SelectedContractSelection(contextDef.Source)
-	loader, err := runtimerunforkexecution.NewAdmittedSelectedContractSourceLoader(
-		e.ContractSelection,
-		selectedRuntime.Options.WorkflowModule,
-		contextDef.SourceArtifactFact,
-		contextDef.EffectiveSourceIdentity,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("bind selected run fork to admitted runtime source: %w", err)
-	}
-	e.SourceLoader = loader
-	return e, nil
 }
 
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
 	if e.ExecuteSelectedContractRunFork == nil {
 		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract executor")
 	}
-	selection := req.ContractSelection
-	if strings.TrimSpace(selection.Mode) == "" {
-		selection = e.ContractSelection
-	}
 	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
-		SourceRunID:             strings.TrimSpace(req.SourceRunID),
-		At:                      strings.TrimSpace(req.ForkEventID),
-		ExpectedBundleHash:      strings.TrimSpace(req.BundleHash),
-		ConfirmSourceFreeze:     req.ConfirmSourceFreeze,
-		DataPinOverrides:        req.DataPinOverrides,
-		SourceLoader:            e.SourceLoader,
-		ContractSelection:       selection,
-		AgentRuntime:            e.AgentRuntime,
-		EffectiveSourceIdentity: e.EffectiveSourceIdentity,
+		SourceRunID:        strings.TrimSpace(req.SourceRunID),
+		At:                 strings.TrimSpace(req.ForkEventID),
+		ExpectedBundleHash: strings.TrimSpace(req.BundleHash),
+		AllowSourceFreeze:  req.AllowSourceFreeze,
+		DataPinOverrides:   req.DataPinOverrides,
+		SourceLoader:       e.SourceLoader,
+		ContractSelection:  req.ContractSelection,
+		AgentRuntime:       e.AgentRuntime,
 	})
 	if err != nil {
 		return RunForkExecutionResult{}, err
@@ -169,10 +133,10 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 	if !availability.Available() {
 		return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
 	}
-	if activeRunStatus(availability.Status) && !params.ConfirmSourceFreeze {
+	if activeRunStatus(availability.Status) && !params.AllowSourceFreeze {
 		return nil, NewInvalidParamsError(map[string]any{
-			"field":  "confirm_source_freeze",
-			"reason": "must be true when forking a running or paused source because the operation may permanently freeze it unless source advancement selects branch divergence",
+			"field":  "allow_source_freeze",
+			"reason": "must be true to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started",
 		})
 	}
 	sourceBundleHash := strings.TrimSpace(availability.BundleHash)
@@ -186,32 +150,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 			"reason":        "source run has no canonical bundle_hash",
 		})
 	}
-	executor := opts.Executor
-	selectedCtx := ctx
-	var contractSelection runfork.RunForkContractSelection
-	if runtimeContextManager(opts.RuntimeContexts) != nil {
-		var contextErr error
-		var selected selectedRuntimeContext
-		selectedCtx, selected, contextErr = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, targetBundleHash, params.SourceRunID)
-		if contextErr != nil {
-			return nil, contextErr
-		}
-		if opts.Selector == nil {
-			return nil, fmt.Errorf("run fork executor selector is required for loaded runtime contexts")
-		}
-		executor, contextErr = opts.Selector.SelectRunForkExecutor(selected.BundleContext, selected.Runtime)
-		if contextErr != nil {
-			return nil, contextErr
-		}
-	} else if targetBundleHash != sourceBundleHash {
-		return nil, NewApplicationError(BundleUnavailableCode, false, map[string]any{
-			"source_run_id":      availability.RunID,
-			"source_bundle_hash": sourceBundleHash,
-			"bundle_hash":        targetBundleHash,
-			"cause":              "runtime_context_not_loaded",
-			"supported_selector": "same source bundle_hash in disk/serial mode, or loaded target BundleContext in DB-loaded RuntimeContextManager mode",
-		})
-	}
+	contractSelection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	if targetBundleHash != sourceBundleHash {
 		contractSelection = runfork.RunForkContractSelection{
 			Mode:       runfork.RunForkContractSelectionModeBundleHash,
@@ -220,7 +159,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 	}
 	params.BundleHash = targetBundleHash
 
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(selectedCtx, apiidempotency.Request{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: params.IdempotencyKey,
@@ -229,13 +168,13 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		TTL:            runForkIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
-		result, err := executor.ExecuteRunFork(ctx, RunForkExecutionRequest{
-			SourceRunID:         params.SourceRunID,
-			ForkEventID:         params.ForkEventID,
-			BundleHash:          params.BundleHash,
-			ConfirmSourceFreeze: params.ConfirmSourceFreeze,
-			DataPinOverrides:    params.DataPinOverrides,
-			ContractSelection:   contractSelection,
+		result, err := opts.Executor.ExecuteRunFork(ctx, RunForkExecutionRequest{
+			SourceRunID:       params.SourceRunID,
+			ForkEventID:       params.ForkEventID,
+			BundleHash:        params.BundleHash,
+			AllowSourceFreeze: params.AllowSourceFreeze,
+			DataPinOverrides:  params.DataPinOverrides,
+			ContractSelection: contractSelection,
 		})
 		if err != nil {
 			return apiidempotency.Completion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
@@ -283,12 +222,12 @@ func validateRunForkExecutionResult(result RunForkExecutionResult) error {
 }
 
 type runForkParams struct {
-	SourceRunID         string
-	ForkEventID         string
-	BundleHash          string
-	ConfirmSourceFreeze bool
-	DataPinOverrides    []durabledata.ExplicitPin
-	IdempotencyKey      string
+	SourceRunID       string
+	ForkEventID       string
+	BundleHash        string
+	AllowSourceFreeze bool
+	DataPinOverrides  []durabledata.ExplicitPin
+	IdempotencyKey    string
 }
 
 func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
@@ -309,7 +248,7 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 			return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "bundle_hash", "reason": "must be bundle-v2:sha256:<64 lowercase hex>"})
 		}
 	}
-	confirmSourceFreeze, err := optionalBoolParam(params, "confirm_source_freeze", false)
+	allowSourceFreeze, err := optionalBoolParam(params, "allow_source_freeze", false)
 	if err != nil {
 		return runForkParams{}, err
 	}
@@ -322,12 +261,12 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 		return runForkParams{}, err
 	}
 	return runForkParams{
-		SourceRunID:         sourceRunID,
-		ForkEventID:         forkEventID,
-		BundleHash:          bundleHash,
-		ConfirmSourceFreeze: confirmSourceFreeze,
-		DataPinOverrides:    dataPinOverrides,
-		IdempotencyKey:      idempotencyKey,
+		SourceRunID:       sourceRunID,
+		ForkEventID:       forkEventID,
+		BundleHash:        bundleHash,
+		AllowSourceFreeze: allowSourceFreeze,
+		DataPinOverrides:  dataPinOverrides,
+		IdempotencyKey:    idempotencyKey,
 	}, nil
 }
 
@@ -437,8 +376,8 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	switch {
 	case errors.Is(err, runfork.ErrRunForkSourceFreezeConfirmationRequired):
 		return NewInvalidParamsError(map[string]any{
-			"field":  "confirm_source_freeze",
-			"reason": "must be true when the selected fork freezes a running or paused source",
+			"field":  "allow_source_freeze",
+			"reason": "must be true to allow permanently freezing a source that has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Withhold permission to decline source freeze",
 		})
 	case errors.Is(err, runtimerunlifecycle.ErrRunNotActive):
 		details := map[string]any{"run_id": strings.TrimSpace(sourceRunID)}

@@ -1,8 +1,6 @@
 package pipeline
 
 import (
-	"context"
-	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,9 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -369,61 +364,56 @@ func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *tes
 	}
 }
 
-func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.T) {
+func TestClassifyDeliveryTargetOwnershipPreservesCompositionInstanceMatrix(t *testing.T) {
 	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
-		eventtest.UUID("declared-key-target"), events.EventType("review/work.keyed"),
-		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
+		eventtest.UUID("composition-target"), events.EventType("review/work.keyed"),
+		"", "", mustJSON(map[string]any{"account_id": "unrelated-business-key"}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
 	)
-	instance := WorkflowInstance{
-		EntityID: eventtest.UUID("declared-key-existing"), WorkflowName: "review", InstanceID: "one",
-		StorageRef: "review/one", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
-		EntityType: "review_entity",
-	}
-	tests := []struct {
-		name      string
-		nodeID    string
-		reader    deliveryTargetWorkflowReader
-		wantKind  string
-		wantRoute string
-		wantError string
+	identity := deriveFlowInstanceIdentity(source, "review", "one")
+	exact := events.RouteIdentity{FlowID: "review", FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
+	sibling := events.RouteIdentity{FlowID: "review", FlowInstance: "review/two", EntityID: eventtest.UUID("composition-sibling")}
+	for _, tc := range []struct {
+		name, node, kind, failure string
+		candidates                []DeliveryTargetOwnerCandidate
 	}{
-		{name: "select zero", nodeID: "key-selector", reader: deliveryTargetWorkflowReader{}, wantError: "select_entity_no_match"},
-		{name: "select one ignores supplied path", nodeID: "key-selector", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance}}, wantKind: "existing_entity", wantRoute: "review/one"},
-		{name: "select many", nodeID: "key-selector", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance, withDeliveryTargetInstanceIdentity(instance, "two", eventtest.UUID("declared-key-second"))}}, wantError: "select_entity_ambiguous"},
-		{name: "select or create zero", nodeID: "key-upserter", reader: deliveryTargetWorkflowReader{}, wantKind: "materializing_entity"},
-		{name: "select or create one", nodeID: "key-upserter", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance}}, wantKind: "existing_entity", wantRoute: "review/one"},
-		{name: "select or create many", nodeID: "key-upserter", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance, withDeliveryTargetInstanceIdentity(instance, "two", eventtest.UUID("declared-key-second"))}}, wantError: "select_or_create_entity_ambiguous"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			node := pipelineNode(t, "review", test.nodeID)
+		{name: "required absent", node: "key-selector", failure: "owner is missing"},
+		{name: "terminal exact cannot be reinitialized", node: "key-upserter", failure: "owner is unavailable", candidates: []DeliveryTargetOwnerCandidate{{Route: exact, Availability: NewDeliveryTargetAvailability("done", "active", false)}}},
+		{name: "draining exact cannot be reinitialized", node: "key-upserter", failure: "owner is unavailable", candidates: []DeliveryTargetOwnerCandidate{{Route: exact, Availability: NewDeliveryTargetAvailability("active", "draining", false)}}},
+		{name: "terminated exact cannot be reinitialized", node: "key-upserter", failure: "owner is unavailable", candidates: []DeliveryTargetOwnerCandidate{{Route: exact, Availability: NewDeliveryTargetAvailability("active", "active", true)}}},
+		{name: "active duplicate cannot hide terminal evidence", node: "key-selector", failure: "owner is unavailable", candidates: []DeliveryTargetOwnerCandidate{{Route: exact}, {Route: exact, Availability: NewDeliveryTargetAvailability("done", "active", false)}}},
+		{name: "terminal sibling cannot veto active receiver", node: "key-selector", kind: "existing_entity", candidates: []DeliveryTargetOwnerCandidate{{Route: sibling, Availability: NewDeliveryTargetAvailability("done", "terminated", true)}, {Route: exact}}},
+		{name: "required exact", node: "key-selector", kind: "existing_entity", candidates: []DeliveryTargetOwnerCandidate{{Route: exact}}},
+		{name: "required only sibling", node: "key-selector", failure: "owner is missing", candidates: []DeliveryTargetOwnerCandidate{{Route: sibling}}},
+		{name: "required exact and sibling", node: "key-selector", kind: "existing_entity", candidates: []DeliveryTargetOwnerCandidate{{Route: sibling}, {Route: exact}}},
+		{name: "initialize absent", node: "key-upserter", kind: "materializing_entity"},
+		{name: "initialize existing", node: "key-upserter", kind: "existing_entity", candidates: []DeliveryTargetOwnerCandidate{{Route: exact}}},
+		{name: "initialize despite sibling", node: "key-upserter", kind: "materializing_entity", candidates: []DeliveryTargetOwnerCandidate{{Route: sibling}}},
+		{name: "initialize exact and sibling", node: "key-upserter", kind: "existing_entity", candidates: []DeliveryTargetOwnerCandidate{{Route: exact}, {Route: sibling}}},
+		{name: "contradictory exact owners", node: "key-upserter", failure: "ambiguous", candidates: []DeliveryTargetOwnerCandidate{{Route: exact}, {Route: events.RouteIdentity{FlowID: "review", FlowInstance: exact.FlowInstance, EntityID: eventtest.UUID("contradictory-owner")}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := pipelineNode(t, "review", tc.node)
 			handler, err := AdmitDeliveryTargetHandler(source, node)
 			if err != nil {
 				t.Fatal(err)
 			}
 			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
-				Context: context.Background(), Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
-				Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/hostile-preselection"},
-				Handler:   handler.ForEvent("work.keyed"), WorkflowInstances: test.reader,
+				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
+				Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: identity.InstancePath},
+				Handler:   handler.ForEvent("work.keyed"), Candidates: tc.candidates,
 			})
-			if test.wantError != "" {
-				if err == nil || !strings.Contains(err.Error(), test.wantError) {
-					t.Fatalf("classification error = %v, want %q", err, test.wantError)
+			if tc.failure != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.failure) {
+					t.Fatalf("error=%v, want %q", err, tc.failure)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if owner.Code() != test.wantKind {
-				t.Fatalf("owner kind = %s, want %s", owner.Code(), test.wantKind)
-			}
-			if test.wantRoute != "" && owner.Route().FlowInstance != test.wantRoute {
-				t.Fatalf("owner route = %#v, want %s", owner.Route(), test.wantRoute)
-			}
-			if owner.Route().FlowInstance == "review/hostile-preselection" {
-				t.Fatalf("declared-key acquisition retained supplied preselection: %#v", owner.Route())
+			if owner.Code() != tc.kind || owner.Route() != exact {
+				t.Fatalf("owner=%s %#v, want %s %#v", owner.Code(), owner.Route(), tc.kind, exact)
 			}
 		})
 	}
@@ -432,13 +422,9 @@ func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.
 func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDeclaredKeyAcquisition(t *testing.T) {
 	source := deliveryTargetOwnershipSource(t)
 	exact := events.RouteIdentity{
-		FlowID: "review", FlowInstance: "review/exact", EntityID: eventtest.UUID("declared-key-explicit-target"),
+		FlowID: "review", FlowInstance: "review/exact", EntityID: deriveFlowInstanceIdentity(source, "review", "exact").EntityID,
 	}.Normalized()
-	competing := WorkflowInstance{
-		EntityID: eventtest.UUID("declared-key-competing-owner"), WorkflowName: "review", InstanceID: "competing",
-		StorageRef: "review/competing", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
-		EntityType: "review_entity",
-	}
+	competing := events.RouteIdentity{FlowID: "review", FlowInstance: "review/competing", EntityID: eventtest.UUID("declared-key-competing-owner")}
 	for _, nodeID := range []string{"key-selector", "key-upserter"} {
 		t.Run(nodeID, func(t *testing.T) {
 			node := pipelineNode(t, "review", nodeID)
@@ -452,10 +438,9 @@ func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDe
 				events.EnvelopeForTargetRoute(events.EventEnvelope{}, exact), time.Time{},
 			)
 			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
-				Context: context.Background(), Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
+				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: exact, Handler: handler.ForEvent("work.keyed"),
-				Candidates:        []DeliveryTargetOwnerCandidate{{Route: exact}},
-				WorkflowInstances: deliveryTargetWorkflowReader{selected: []WorkflowInstance{competing}},
+				Candidates: []DeliveryTargetOwnerCandidate{{Route: exact}, {Route: competing}},
 			})
 			if err != nil {
 				t.Fatalf("classify targeted %s: %v", nodeID, err)
@@ -469,13 +454,6 @@ func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDe
 
 func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerBeforeDeclaredKeyAcquisition(t *testing.T) {
 	bundle := workflowJoinLifecycleBundle(t)
-	node := bundle.Nodes["join-node"]
-	handler := node.EventHandlers["item.completed"]
-	handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
-		Field: "portfolio_id", Ref: "payload.portfolio_id", RefPath: paths.Parse("payload.portfolio_id"),
-	}}}
-	node.EventHandlers["item.completed"] = handler
-	bundle.Nodes["join-node"] = node
 
 	plan := bundle.Semantics.Joins[0]
 	plan.Node = mustPipelineNode("", "join-node")
@@ -505,7 +483,7 @@ func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerB
 		t.Fatalf("resolved declaration-bound join handler %s/%s is not executable for %s: admission=%#v", resolvedHandler.FlowID(), resolvedHandler.NodeID(), evt.Type(), semanticview.ClassifyExecutableNodeSubscription(source, resolvedHandler.Node(), "item.completed"))
 	}
 	owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
-		Context: context.Background(), Source: source, Event: evt,
+		Source: source, Event: evt,
 		Recipient: events.MustNodeDeliveryRecipient(plan.Node), Blueprint: target,
 		Handler:    targetHandler.ForEvent(events.EventType(handle.EventType())),
 		Candidates: []DeliveryTargetOwnerCandidate{{Route: target}},
@@ -516,111 +494,6 @@ func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerB
 	if !owner.ExistingEntity() || owner.Route() != target {
 		t.Fatalf("join occurrence owner = %s %#v, want exact declaration owner %#v", owner.Code(), owner.Route(), target)
 	}
-}
-
-func TestClassifyDeliveryTargetOwnershipSelectOrCreateAcceptsExactSameKeyAppearanceAndRejectsConflict(t *testing.T) {
-	source := deliveryTargetOwnershipSource(t)
-	evt := eventtest.RunCreatingRootIngress(
-		eventtest.UUID("declared-key-race"), events.EventType("review/work.keyed"),
-		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{},
-	)
-	instanceID, err := selectOrCreateEntityInstanceID(source, "review", map[string]any{"account_id": "account-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity := deriveFlowInstanceIdentity(source, "review", instanceID)
-	matching := WorkflowInstance{
-		EntityID: identity.EntityID, WorkflowName: "review", InstanceID: identity.InstanceID, StorageRef: identity.InstancePath,
-		Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
-		EntityType: "review_entity",
-	}
-	node := pipelineNode(t, "review", "key-upserter")
-	handler, err := AdmitDeliveryTargetHandler(source, node)
-	if err != nil {
-		t.Fatal(err)
-	}
-	classify := func(reader deliveryTargetWorkflowReader) (events.DeliveryTargetOwnership, error) {
-		return ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
-			Context: context.Background(), Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
-			Handler: handler.ForEvent("work.keyed"), WorkflowInstances: reader,
-		})
-	}
-	owner, err := classify(deliveryTargetWorkflowReader{loaded: map[string]WorkflowInstance{identity.InstancePath: matching}})
-	if err != nil {
-		t.Fatalf("same-key exact appearance: %v", err)
-	}
-	if !owner.ExistingEntity() || owner.Route().FlowInstance != identity.InstancePath {
-		t.Fatalf("owner = %#v, want exact appearing row", owner)
-	}
-	conflicting := matching
-	conflicting.Fields = map[string]any{"account_id": "other"}
-	if _, err := classify(deliveryTargetWorkflowReader{loaded: map[string]WorkflowInstance{identity.InstancePath: conflicting}}); err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
-		t.Fatalf("conflicting exact appearance error = %v", err)
-	}
-}
-
-type deliveryTargetWorkflowReader struct {
-	selected       []WorkflowInstance
-	loaded         map[string]WorkflowInstance
-	selectedStates []WorkflowEntityStatePersistenceRecord
-	loadedStates   map[string]WorkflowEntityStatePersistenceRecord
-}
-
-func (r deliveryTargetWorkflowReader) LoadWorkflowInstance(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error) {
-	instance, ok := r.loaded[identity.Route.InstancePath]
-	return instance, ok, nil
-}
-
-func (r deliveryTargetWorkflowReader) ListWorkflowInstances(context.Context, string) ([]WorkflowInstance, error) {
-	return append([]WorkflowInstance(nil), r.selected...), nil
-}
-
-func (r deliveryTargetWorkflowReader) LoadWorkflowEntityState(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance, _ runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
-	if record, ok := r.loadedStates[identity.Route.InstancePath]; ok {
-		return record, true, nil
-	}
-	instance, ok := r.loaded[identity.Route.InstancePath]
-	if !ok {
-		return WorkflowEntityStatePersistenceRecord{}, false, nil
-	}
-	return deliveryTargetStateRecord(instance), true, nil
-}
-
-func (r deliveryTargetWorkflowReader) SelectActiveWorkflowEntityStates(context.Context, string, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error) {
-	if r.selectedStates != nil {
-		return append([]WorkflowEntityStatePersistenceRecord(nil), r.selectedStates...), nil
-	}
-	records := make([]WorkflowEntityStatePersistenceRecord, 0, len(r.selected))
-	for _, instance := range r.selected {
-		records = append(records, deliveryTargetStateRecord(instance))
-	}
-	return records, nil
-}
-
-func (r deliveryTargetWorkflowReader) SelectActiveWorkflowInstances(context.Context, string, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error) {
-	return append([]WorkflowInstance(nil), r.selected...), nil
-}
-
-func deliveryTargetStateRecord(instance WorkflowInstance) WorkflowEntityStatePersistenceRecord {
-	marshal := func(value any) json.RawMessage {
-		raw, _ := json.Marshal(value)
-		return raw
-	}
-	return WorkflowEntityStatePersistenceRecord{
-		EntityID: instance.EntityID, FlowInstance: instance.StorageRef,
-		EntityType: instance.EntityType,
-		Slug:       instance.Slug, Name: instance.Name, CurrentState: instance.CurrentState, Revision: instance.Revision,
-		EnteredStageAt: instance.EnteredStageAt, Gates: marshal(instance.Gates), Fields: marshal(instance.Fields),
-		Bookkeeping: marshal(instance.Bookkeeping), Accumulator: marshal(instance.StateBuckets),
-		CreatedAt: instance.CreatedAt, UpdatedAt: instance.UpdatedAt,
-	}
-}
-
-func withDeliveryTargetInstanceIdentity(instance WorkflowInstance, instanceID, entityID string) WorkflowInstance {
-	instance.InstanceID = instanceID
-	instance.StorageRef = "review/" + instanceID
-	instance.EntityID = entityID
-	return instance
 }
 
 func TestValidateStampedDeliveryTargetOwnershipRejectsWrongAcquisitionFutureID(t *testing.T) {
@@ -801,13 +674,13 @@ func TestHandlerExecutionEntityRequirementOwnsDurableBehaviorCapabilities(t *tes
 		{name: "unrooted clear persists entity field mutation", handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}},
 		}, want: DeliveryTargetExistingEntityRequired},
-		{name: "explicit creation is acquisition independent from execution", handler: runtimecontracts.SystemNodeEventHandler{
+		{name: "explicit creation initializes the selected receiver", handler: runtimecontracts.SystemNodeEventHandler{
 			CreateEntity: true,
-		}, want: DeliveryTargetEntityOptional},
-		{name: "creation preserves platform entity identity dependency", handler: runtimecontracts.SystemNodeEventHandler{
+		}, want: DeliveryTargetEntityMaterializing},
+		{name: "creation initializes the selected platform entity dependency", handler: runtimecontracts.SystemNodeEventHandler{
 			CreateEntity: true,
 			Guard:        &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
-		}, want: DeliveryTargetExistingEntityRequired},
+		}, want: DeliveryTargetEntityMaterializing},
 		{name: "payload-only fanout is entityless safe", handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", Emit: runtimecontracts.EmitSpec{Event: "work.item", From: "payload"}},
 		}, want: DeliveryTargetEntityOptional},
@@ -920,7 +793,7 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"},
+			Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"},
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{
 				{Event: "work.created", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeCreate}},
 				{Event: "work.selected", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeSelect}},
@@ -936,14 +809,14 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 			"entity-reader": deliveryTargetOwnershipNode("entity-reader", runtimecontracts.SystemNodeEventHandler{
 				Condition: "entity.status == 'ready'",
 			}),
-			"pin-creator":  deliveryTargetOwnershipEventNode("pin-creator", "work.created", runtimecontracts.SystemNodeEventHandler{}),
-			"pin-selector": deliveryTargetOwnershipEventNode("pin-selector", "work.selected", runtimecontracts.SystemNodeEventHandler{}),
-			"pin-upserter": deliveryTargetOwnershipEventNode("pin-upserter", "work.upserted", runtimecontracts.SystemNodeEventHandler{}),
+			"pin-creator":  deliveryTargetOwnershipEventNode("pin-creator", "work.created", runtimecontracts.SystemNodeEventHandler{CreateEntity: true}),
+			"pin-selector": deliveryTargetOwnershipEventNode("pin-selector", "work.selected", runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}),
+			"pin-upserter": deliveryTargetOwnershipEventNode("pin-upserter", "work.upserted", runtimecontracts.SystemNodeEventHandler{CreateEntity: true}),
 			"key-selector": deliveryTargetOwnershipEventNode("key-selector", "work.keyed", runtimecontracts.SystemNodeEventHandler{
-				SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: paths.Parse("payload.account_id")}}},
+				Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
 			}),
 			"key-upserter": deliveryTargetOwnershipEventNode("key-upserter", "work.keyed", runtimecontracts.SystemNodeEventHandler{
-				SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: paths.Parse("payload.account_id")}}},
+				CreateEntity: true,
 			}),
 		},
 	}

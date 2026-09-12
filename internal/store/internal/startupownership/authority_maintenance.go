@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/google/uuid"
 )
@@ -360,6 +361,9 @@ func authorityMatchesRecord(authority runtimestartupownership.Authority, record 
 }
 
 func repairAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupownership.AuthorityRepairRequest, backend string, sqlite bool) (runtimestartupownership.AuthorityRepairResult, error) {
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return runtimestartupownership.AuthorityRepairResult{}, err
+	}
 	requestHash, err := canonicaljson.Hash(req)
 	if err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err

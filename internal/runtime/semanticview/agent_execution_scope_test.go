@@ -1,6 +1,7 @@
 package semanticview
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,6 +33,14 @@ func TestResolveAgentExecutionSemanticScopeUsesFilesystemFlowOwnerForEveryMode(t
 			flow, ok := scope.OwningFlow()
 			if !ok || flow.ID != test.flowPath || scope.ContractSource().FlowPath != test.flowPath || scope.Declaration().OwnerURI != declaration.OwnerURI || scope.Identity() != actor.Identity {
 				t.Fatalf("scope = %#v flow = %#v ok=%v", scope, flow, ok)
+			}
+			plan, err := actor.Identity.Plan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			planned, err := ResolveAgentPlanExecutionSemanticScope(source, actor.Identity.RunID, plan)
+			if err != nil || !reflect.DeepEqual(planned, scope) {
+				t.Fatalf("plan/actor scope disagreement: %+v %v", planned, err)
 			}
 		})
 	}
@@ -91,6 +100,15 @@ func TestResolveAgentExecutionSemanticScopeRejectsIdentityAndRouteContradictions
 			_, err := ResolveAgentExecutionSemanticScope(source, test.mutate(valid))
 			if err == nil || !strings.Contains(err.Error(), test.contains) {
 				t.Fatalf("error = %v, want %q", err, test.contains)
+			}
+			// An explicit config FlowID is not part of a runless plan. Every
+			// identity/route contradiction must also fail for the plan carrier.
+			if test.name != "wrong flow" {
+				actor := test.mutate(valid)
+				plan := agentidentity.Plan{Name: actor.Identity.Name, Route: actor.Identity.Route}
+				if _, err := ResolveAgentPlanExecutionSemanticScope(source, actor.Identity.RunID, plan); err == nil {
+					t.Fatal("contradictory agent plan acquired semantic scope")
+				}
 			}
 		})
 	}

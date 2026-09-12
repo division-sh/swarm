@@ -53,7 +53,11 @@ func TestPreparedTerminalCompletionSurvivesRetirementBeforeCommit(t *testing.T) 
 					}
 					companion = owner
 				case "selected_fork":
-					owner, err := root.NewSelectedFork(ctx, worklifetime.SelectedForkIdentity{ExecutionID: "terminal-test", RunID: flowActivationTestRunID, Generation: 1})
+					fixture, exists := managerTestWorkFixtures.Load(t)
+					if !exists {
+						t.Fatal("manager fixture has no process owner")
+					}
+					owner, err := fixture.(*managerTestWorkFixture).process.NewSelectedFork(ctx, worklifetime.SelectedForkIdentity{ExecutionID: "terminal-test", RunID: flowActivationTestRunID, Generation: 1})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -236,6 +240,10 @@ func TestTerminalCompletionRouteFailureStillJoinsEveryFinalizer(t *testing.T) {
 
 func (p *terminalSetPersistenceProbe) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
 	return lifecycleProbeProcessBinding(), nil
+}
+
+func (p *terminalSetPersistenceProbe) InspectRunExecutionOwnership(ctx context.Context, runID string) (RunExecutionOwnership, error) {
+	return inspectRunExecutionOwnership(ctx, p.AgentLifecyclePersistence, runID)
 }
 
 func (p *terminalSetPersistenceProbe) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {

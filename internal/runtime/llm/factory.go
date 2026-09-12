@@ -86,6 +86,19 @@ func (f RuntimeFactory) prepareMock() (RuntimeFactory, error) {
 	return f, nil
 }
 
+func (f RuntimeFactory) prepareProbe() (RuntimeFactory, error) {
+	if f.Cfg == nil {
+		return RuntimeFactory{}, fmt.Errorf("prepared provider config is required")
+	}
+	if _, err := f.Cfg.LLMBackendProfile(); err != nil {
+		return RuntimeFactory{}, err
+	}
+	if f.CompletionController != nil || f.Events != nil || f.Sessions != nil || f.LiveSessions != nil || f.Conversations != nil {
+		return RuntimeFactory{}, fmt.Errorf("prepared provider cannot retain business execution or session services")
+	}
+	return f, nil
+}
+
 func (f RuntimeFactory) buildProfile(profile llmselection.Profile) (Runtime, error) {
 	profile, err := llmselection.ResolveActiveBackend(profile.ID)
 	if err != nil {

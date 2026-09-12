@@ -39,7 +39,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"run", "fork", sourceRunID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--bundle-hash", bundleHash,
 		"--at-event", forkEventID,
 		"--idempotency-key", "idem-fork-1",
@@ -48,11 +48,11 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertForkRequest(t, captured, map[string]any{
-		"source_run_id":         sourceRunID,
-		"confirm_source_freeze": true,
-		"bundle_hash":           bundleHash,
-		"fork_event_id":         forkEventID,
-		"idempotency_key":       "idem-fork-1",
+		"source_run_id":       sourceRunID,
+		"allow_source_freeze": true,
+		"bundle_hash":         bundleHash,
+		"fork_event_id":       forkEventID,
+		"idempotency_key":     "idem-fork-1",
 	})
 	for _, want := range []string{"Fork created", "source_run_id=" + sourceRunID, "source_status=forked source_frozen=true", "fork_run_id=33333333-3333-3333-3333-333333333333", "bundle_hash=" + bundleHash, "owner=run.fork.selected_contracts.v1"} {
 		if !strings.Contains(stdout.String(), want) {
@@ -81,11 +81,11 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--confirm-source-freeze", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--allow-source-freeze", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID, "confirm_source_freeze": true})
+	assertForkRequest(t, captured, map[string]any{"source_run_id": sourceRunID, "allow_source_freeze": true})
 	var decoded map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
@@ -125,6 +125,8 @@ func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
 		{name: "blank at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", ""}, wantStderr: "--at-event must be non-empty"},
 		{name: "blank idempotency", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--idempotency-key", ""}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "legacy dry run flag", args: []string{"run", "fork", "run-1", "--dry-run"}, wantStderr: "unknown flag"},
+		{name: "retired source freeze flag", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--confirm-source-freeze"}, wantStderr: "unknown flag"},
+		{name: "mixed source freeze flags", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--allow-source-freeze", "--confirm-source-freeze"}, wantStderr: "unknown flag"},
 		{name: "legacy materialize flag", args: []string{"run", "fork", "run-1", "--materialize-only"}, wantStderr: "unknown flag"},
 		{name: "legacy activate flag", args: []string{"run", "fork", "run-1", "--activate"}, wantStderr: "unknown flag"},
 		{name: "legacy contracts flag", args: []string{"run", "fork", "run-1", "--contracts", "."}, wantStderr: "unknown flag"},
@@ -251,7 +253,7 @@ func TestForkCommandFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--confirm-source-freeze"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--allow-source-freeze"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}
@@ -278,11 +280,13 @@ func TestForkCommandConfirmsOnlyActiveSourceFreeze(t *testing.T) {
 		wantConfirmed bool
 		wantStderr    string
 	}{
-		{name: "active non tty requires flag", status: "running", args: []string{"run", "fork", sourceRunID}, wantCode: CLIExitValidation, wantCalls: 1, wantStderr: "pass --confirm-source-freeze"},
+		{name: "active non tty requires flag", status: "running", args: []string{"run", "fork", sourceRunID}, wantCode: CLIExitValidation, wantCalls: 1, wantStderr: "pass --allow-source-freeze"},
 		{name: "active tty refusal aborts", status: "paused", args: []string{"run", "fork", sourceRunID}, input: "n\n", stdinTerminal: true, wantCode: CLIExitValidation, wantCalls: 1, wantStderr: "run fork was not started"},
-		{name: "active tty confirmation proceeds", status: "running", args: []string{"run", "fork", sourceRunID}, input: "yes\n", stdinTerminal: true, wantCalls: 2, wantConfirmed: true, wantStderr: "may permanently freeze"},
+		{name: "active tty confirmation proceeds", status: "running", args: []string{"run", "fork", sourceRunID}, input: "yes\n", stdinTerminal: true, wantCalls: 2, wantConfirmed: true, wantStderr: "will be permanently frozen"},
+		{name: "active tty default no", status: "running", args: []string{"run", "fork", sourceRunID}, input: "\n", stdinTerminal: true, wantCode: CLIExitValidation, wantCalls: 1, wantStderr: "run fork was not started"},
+		{name: "active tty eof declines", status: "paused", args: []string{"run", "fork", sourceRunID}, stdinTerminal: true, wantCode: CLIExitValidation, wantCalls: 1, wantStderr: "run fork was not started"},
 		{name: "terminal source needs no ceremony", status: "completed", args: []string{"run", "fork", sourceRunID}, wantCalls: 2},
-		{name: "explicit flag bypasses preflight", status: "running", args: []string{"run", "fork", sourceRunID, "--confirm-source-freeze"}, wantCalls: 1, wantConfirmed: true},
+		{name: "explicit flag bypasses preflight", status: "running", args: []string{"run", "fork", sourceRunID, "--allow-source-freeze"}, wantCalls: 1, wantConfirmed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls []jsonRPCRequest
@@ -317,13 +321,43 @@ func TestForkCommandConfirmsOnlyActiveSourceFreeze(t *testing.T) {
 			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
 			}
+			if tc.wantStderr != "" && tc.status != "completed" {
+				for _, want := range []string{"beyond the fork point", "frozen source cannot resume", "advanced source stays independently live"} {
+					if !strings.Contains(stderr.String(), want) {
+						t.Fatalf("consent transcript omitted %q: %s", want, stderr.String())
+					}
+				}
+				if tc.stdinTerminal && !strings.Contains(stderr.String(), "[y/N] (No cancels without starting a fork)") {
+					t.Fatalf("consent transcript omitted the default-No alternative: %s", stderr.String())
+				}
+			}
 			if tc.wantCalls > 0 && calls[len(calls)-1].Method == runForkMethod {
-				confirmed, _ := calls[len(calls)-1].Params["confirm_source_freeze"].(bool)
+				confirmed, _ := calls[len(calls)-1].Params["allow_source_freeze"].(bool)
 				if confirmed != tc.wantConfirmed {
-					t.Fatalf("confirm_source_freeze = %v, want %v", confirmed, tc.wantConfirmed)
+					t.Fatalf("allow_source_freeze = %v, want %v", confirmed, tc.wantConfirmed)
 				}
 			}
 		})
+	}
+}
+
+func TestForkCommandHelpExplainsSourceFreezeConsent(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	if code != 0 {
+		t.Fatalf("help exit=%d stderr=%s", code, stderr.String())
+	}
+	help := strings.Join(strings.Fields(stdout.String()), " ")
+	for _, want := range []string{
+		"--allow-source-freeze", "Allow permanent source freeze", "beyond the fork point",
+		"a frozen source cannot resume", "An advanced source stays independently live", "Omit and decline the prompt to cancel",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help omitted %q: %s", want, help)
+		}
+	}
+	if strings.Contains(help, "--confirm-source-freeze") {
+		t.Fatalf("help advertises retired consent flag: %s", help)
 	}
 }
 

@@ -123,6 +123,10 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		EntityID:     activation.Instance.EntityID,
 	}),
 	}
+	want.Initialization, err = events.AdmitFlowReceiverInitialization(evt, want.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !deliveryRoutesContain(persistedRoutes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want lifecycle-created template route %#v", persistedRoutes, want)
 	}

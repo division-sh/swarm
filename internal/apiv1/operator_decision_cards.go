@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -273,6 +274,11 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	card, err := opts.Cards.GetDecisionCard(ctx, cardID)
 	if err != nil && !errors.Is(err, decisioncard.ErrNotFound) {
 		return nil, decisionCardAPIError(cardID, err)
+	}
+	if err == nil {
+		if err := requireNormalRunControl(ctx, opts.SelectedForkControls, card.RunID, runfork.SelectedControl(req.Method)); err != nil {
+			return nil, err
+		}
 	}
 	authority := opts.Authority
 	bundleSource := opts.SourceArtifact

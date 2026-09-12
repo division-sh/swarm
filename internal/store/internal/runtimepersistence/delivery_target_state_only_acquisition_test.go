@@ -16,581 +16,198 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores(t *testing.T) {
+func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-			newBusForSource := func(t *testing.T, source semanticview.Source, flowID, nodeID string) *runtimebus.EventBus {
-				t.Helper()
-				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(flowID, nodeID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
-				if err != nil {
-					t.Fatal(err)
-				}
-				bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
-					ContractBundle: source,
-					RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
-						return []runtimebus.DeliveryRouteBlueprint{{
-							Recipient: events.MustNodeDeliveryRecipient(node),
-							Target:    events.RouteIdentity{FlowID: flowID, FlowInstance: flowID + "/hostile-preselection"},
-							Handler:   handler.ForEvent("test.node_emitted"),
-						}}, nil
-					},
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				return bus
+			childRunID := uuid.NewString()
+			requireRunningRunForTest(t, ctx, selected, childRunID, time.Now().UTC())
+			instance := "freeze/instance"
+			entityID := runtimepipeline.FlowInstanceEntityID(instance)
+			seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "source")
+			before, err := selected.ListSelectedRunTargetOwners(ctx, runID)
+			if err != nil || len(before) != 1 || before[0].EntityID != entityID || before[0].FlowInstance != instance {
+				t.Fatalf("canonical owners before freeze = %#v, %v", before, err)
 			}
-			newBus := func(t *testing.T, flowID, nodeID string) *runtimebus.EventBus {
-				t.Helper()
-				return newBusForSource(t, stateOnlyAcquisitionSource(t, flowID), flowID, nodeID)
+			snapshot, disposition, err := selected.ForkRunSource(ctx, runtimerunlifecycle.ForkSourceRequest{
+				RunID: runID, ContinuedAsRunID: childRunID, EndedAt: time.Now().UTC(),
+			})
+			if err != nil || disposition != runtimerunlifecycle.MutationApplied || snapshot.State != runtimerunlifecycle.StateForked {
+				t.Fatalf("freeze = %#v, %v, %v", snapshot, disposition, err)
 			}
-			newEvent := func(accountID string) events.Event {
-				payload, err := json.Marshal(map[string]any{"account_id": accountID})
-				if err != nil {
-					t.Fatal(err)
-				}
-				return eventtest.ExistingRunRootIngress(
-					uuid.NewString(), "test.node_emitted", "", "", payload,
-					0, runID, events.EventEnvelope{}, time.Now().UTC(),
-				)
+			after, err := selected.ListSelectedRunTargetOwners(ctx, runID)
+			if err != nil || len(after) != 0 {
+				t.Fatalf("canonical owners after freeze = %#v, %v", after, err)
 			}
+			exact, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.Route{ScopeKey: "freeze", InstanceID: "instance", InstancePath: instance})
+			if err != nil {
+				t.Fatal(err)
+			}
+			record, found, err := selected.LoadWorkflowEntityState(ctx, exact, runtimeidentity.NormalizeEntityID(entityID))
+			if err != nil || !found || record.EntityID != entityID || record.CurrentState != "active" {
+				t.Fatalf("historical state must remain readable = %#v, found=%t, %v", record, found, err)
+			}
+		})
+	}
+}
 
-			t.Run("targeted declared-key handlers preserve exact owner", func(t *testing.T) {
-				flowID := "targeted-" + uuid.NewString()
-				exact := events.RouteIdentity{FlowID: flowID, FlowInstance: flowID, EntityID: uuid.NewString()}.Normalized()
-				competing := events.RouteIdentity{FlowID: flowID, FlowInstance: flowID + "/competing", EntityID: uuid.NewString()}.Normalized()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, exact.EntityID, exact.FlowInstance, "active", "exact-owner-key")
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, competing.EntityID, competing.FlowInstance, "active", "payload-key")
-
-				source := stateOnlyAcquisitionSource(t, flowID)
-				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(flowID, "selector")
-				if err != nil {
-					t.Fatal(err)
-				}
-				handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
-				if err != nil {
-					t.Fatal(err)
-				}
-				bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
-					ContractBundle: source,
-					RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
-						return []runtimebus.DeliveryRouteBlueprint{{
-							Recipient: events.MustNodeDeliveryRecipient(node), Target: exact,
-							Handler: handler.ForEvent("test.node_emitted"),
-						}}, nil
-					},
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				payload, err := json.Marshal(map[string]any{"account_id": "payload-key"})
-				if err != nil {
-					t.Fatal(err)
-				}
-				evt := eventtest.ExistingRunRootIngress(
-					uuid.NewString(), "test.node_emitted", "", "", payload, 0, runID,
-					events.EnvelopeForTargetRoute(events.EventEnvelope{}, exact), time.Now().UTC(),
-				)
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish targeted declared-key handlers: %v", err)
-				}
-				persisted, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
-				if err != nil || !found {
-					t.Fatalf("load targeted event: found=%t err=%v", found, err)
-				}
-				want := events.MustExistingEntityTarget(exact)
-				seenRecipients := map[string]bool{}
-				for _, route := range persisted.DeliveryRoutes {
-					if route.Target != want {
-						t.Fatalf("targeted route = %#v, want exact owner %#v and never competing owner %#v", route, want, competing)
+func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *testing.T) {
+	scopes := []struct {
+		name, flow, instance, other string
+		source                      func(*testing.T) semanticview.Source
+	}{
+		{"singleton", "owner", "owner", "owner/child/instance", func(t *testing.T) semanticview.Source { return stateOnlyAcquisitionSource(t, "owner") }},
+		{"static", "owner", "owner", "owner/other", func(t *testing.T) semanticview.Source {
+			return stateOnlyAcquisitionSourceWithMode(t, "owner", runtimecontracts.FlowModeStatic)
+		}},
+		{"template", "owner", "owner/instance", "owner/other", func(t *testing.T) semanticview.Source {
+			return stateOnlyAcquisitionSourceWithMode(t, "owner", runtimecontracts.FlowModeTemplate)
+		}},
+		{"parent-singleton-child-template", "parent", "parent", "parent/child/instance", func(t *testing.T) semanticview.Source {
+			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeSingleton, "child", runtimecontracts.FlowModeTemplate)
+		}},
+		{"parent-template-child-singleton", "parent", "parent/instance", "parent/child", func(t *testing.T) semanticview.Source {
+			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeSingleton)
+		}},
+		{"nested-template", "child", "parent/child/instance", "parent/instance", func(t *testing.T) semanticview.Source {
+			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeTemplate)
+		}},
+		{"sibling-prefix", "owner", "owner/instance", "owner-other/instance", func(t *testing.T) semanticview.Source {
+			return stateOnlySiblingAcquisitionSource(t, "owner", runtimecontracts.FlowModeTemplate, "owner-other", runtimecontracts.FlowModeTemplate)
+		}},
+		{"deep-template", "grandchild", "parent/child/grandchild/instance", "parent/instance", func(t *testing.T) semanticview.Source {
+			return stateOnlyDeepAcquisitionSource(t, "parent", "child", "grandchild")
+		}},
+		{"root", ".", "", "child", func(t *testing.T) semanticview.Source {
+			return stateOnlyRootAcquisitionSource(t, "different-authored-name")
+		}},
+	}
+	cases := []struct {
+		name, node, state, lifecycle, failure              string
+		initialize, duplicateOwner, wrongOwner, appearance bool
+	}{
+		{name: "existing", node: "selector", state: "active"},
+		{name: "missing-with-business-key-sibling", node: "selector", failure: "owner is missing"},
+		{name: "initialize-with-business-key-sibling", node: "upserter", initialize: true},
+		{name: "initializer-reuses-state", node: "upserter", state: "active"},
+		{name: "exact-state-appears-before-commit", node: "upserter", initialize: true, appearance: true},
+		{name: "wrong-canonical-owner", node: "upserter", state: "active", wrongOwner: true, failure: "disagrees with canonical handler identity"},
+		{name: "duplicate-exact-owners", node: "selector", state: "active", duplicateOwner: true, failure: "ambiguous"},
+		{name: "terminal-state", node: "selector", state: "done", failure: "owner is unavailable"},
+		{name: "draining-companion", node: "selector", state: "active", lifecycle: "draining", failure: "owner is unavailable"},
+		{name: "terminated-companion", node: "selector", state: "active", lifecycle: "terminated", failure: "owner is unavailable"},
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, scope := range scopes {
+			for _, tc := range cases {
+				t.Run(backend+"/"+scope.name+"/"+tc.name, func(t *testing.T) {
+					selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
+					source := scope.source(t)
+					instance := scope.instance
+					entityID := runtimepipeline.FlowInstanceEntityID(instance)
+					if scope.flow == "." {
+						instance = runID
+						entityID = runID
 					}
-					seenRecipients[route.Recipient.LocalID()] = true
-				}
-				for _, nodeID := range []string{"selector", "upserter"} {
-					if !seenRecipients[nodeID] {
-						t.Fatalf("targeted routes = %#v, missing %s declared-key consumer", persisted.DeliveryRoutes, nodeID)
+					otherEntity := uuid.NewString()
+					seedStateOnlyAcquisitionEntity(t, backend, db, runID, otherEntity, scope.other, "active", "same-business-key")
+					if tc.state != "" {
+						id := entityID
+						if tc.wrongOwner {
+							id = uuid.NewString()
+						}
+						seedStateOnlyAcquisitionEntity(t, backend, db, runID, id, instance, tc.state, "different-business-key")
 					}
-				}
-
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID+"/later", "active", "payload-key")
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("duplicate targeted publish replanned: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 2)
-			})
-
-			t.Run("select chooses state-only owner", func(t *testing.T) {
-				flowID := "select-" + uuid.NewString()
-				accountID := "state-only-select-" + uuid.NewString()
-				entityID := uuid.NewString()
-				instancePath := flowID
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), "unrelated-"+uuid.NewString(), "active", accountID)
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instancePath, "active", accountID)
-				evt := newEvent(accountID)
-				bus := newBus(t, flowID, "selector")
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil {
-					t.Fatalf("plan state-only select: %v", err)
-				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: instancePath, EntityID: entityID})
-				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
-					t.Fatalf("state-only select routes = %#v, want %#v", plan.DeliveryRoutes, want)
-				}
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish state-only select: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-			})
-
-			t.Run("select excludes nested child template owner", func(t *testing.T) {
-				parentID := "parent-singleton-" + uuid.NewString()
-				childID := "child-template-" + uuid.NewString()
-				accountID := "nested-template-key-" + uuid.NewString()
-				childPath := parentID + "/" + childID + "/instance"
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), childPath, "active", accountID)
-				evt := newEvent(accountID)
-				source := stateOnlyNestedAcquisitionSource(t, parentID, runtimecontracts.FlowModeSingleton, childID, runtimecontracts.FlowModeTemplate)
-				if err := newBusForSource(t, source, parentID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
-					t.Fatalf("nested child template selection error = %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
-			})
-
-			t.Run("select or create ignores nested child and materializes parent", func(t *testing.T) {
-				parentID := "parent-upsert-" + uuid.NewString()
-				childID := "child-upsert-" + uuid.NewString()
-				accountID := "nested-upsert-key-" + uuid.NewString()
-				childPath := parentID + "/" + childID + "/instance"
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), childPath, "active", accountID)
-				evt := newEvent(accountID)
-				source := stateOnlyNestedAcquisitionSource(t, parentID, runtimecontracts.FlowModeSingleton, childID, runtimecontracts.FlowModeTemplate)
-				bus := newBusForSource(t, source, parentID, "upserter")
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil {
-					t.Fatalf("plan parent select-or-create: %v", err)
-				}
-				if len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Target.MaterializingEntity() || plan.DeliveryRoutes[0].Target.Route().FlowInstance != parentID {
-					t.Fatalf("parent select-or-create routes = %#v, want materializing parent %q and never child %q", plan.DeliveryRoutes, parentID, childPath)
-				}
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish parent select-or-create: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
-			})
-
-			t.Run("select excludes nested child singleton from parent template", func(t *testing.T) {
-				parentID := "parent-template-" + uuid.NewString()
-				childID := "child-singleton-" + uuid.NewString()
-				accountID := "nested-singleton-key-" + uuid.NewString()
-				childPath := parentID + "/" + childID
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), childPath, "active", accountID)
-				evt := newEvent(accountID)
-				source := stateOnlyNestedAcquisitionSource(t, parentID, runtimecontracts.FlowModeTemplate, childID, runtimecontracts.FlowModeSingleton)
-				if err := newBusForSource(t, source, parentID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
-					t.Fatalf("nested child singleton selection error = %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
-			})
-
-			t.Run("select preserves direct parent template owner beside nested child", func(t *testing.T) {
-				parentID := "parent-template-valid-" + uuid.NewString()
-				childID := "child-template-competing-" + uuid.NewString()
-				accountID := "parent-template-key-" + uuid.NewString()
-				parentEntityID := uuid.NewString()
-				parentPath := parentID + "/instance"
-				childPath := parentID + "/" + childID + "/instance"
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), childPath, "active", accountID)
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, parentEntityID, parentPath, "active", accountID)
-				evt := newEvent(accountID)
-				source := stateOnlyNestedAcquisitionSource(t, parentID, runtimecontracts.FlowModeTemplate, childID, runtimecontracts.FlowModeTemplate)
-				bus := newBusForSource(t, source, parentID, "selector")
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil {
-					t.Fatalf("plan parent template owner: %v", err)
-				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: parentID, FlowInstance: parentPath, EntityID: parentEntityID})
-				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
-					t.Fatalf("parent template routes = %#v, want %#v and never child %q", plan.DeliveryRoutes, want, childPath)
-				}
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish parent template owner: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
-			})
-
-			t.Run("actual nested child template selects its own state", func(t *testing.T) {
-				parentID := "actual-child-parent-" + uuid.NewString()
-				childID := "actual-child-" + uuid.NewString()
-				accountID := "actual-child-key-" + uuid.NewString()
-				entityID := uuid.NewString()
-				childPath := parentID + "/" + childID + "/instance"
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, childPath, "active", accountID)
-				evt := newEvent(accountID)
-				source := stateOnlyNestedAcquisitionSource(t, parentID, runtimecontracts.FlowModeSingleton, childID, runtimecontracts.FlowModeTemplate)
-				bus := newBusForSource(t, source, childID, "selector")
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish actual nested child owner: %v", err)
-				}
-				persisted, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
-				if err != nil || !found {
-					t.Fatalf("load actual child event: found=%t err=%v", found, err)
-				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: childID, FlowInstance: childPath, EntityID: entityID})
-				if len(persisted.DeliveryRoutes) != 1 || persisted.DeliveryRoutes[0].Target != want {
-					t.Fatalf("actual child routes = %#v, want %#v", persisted.DeliveryRoutes, want)
-				}
-			})
-
-			t.Run("stamped parent target preserves contradiction for application rejection", func(t *testing.T) {
-				parentID := "stamped-parent-" + uuid.NewString()
-				childID := "stamped-child-" + uuid.NewString()
-				accountID := "stamped-child-key-" + uuid.NewString()
-				entityID := uuid.NewString()
-				childPath := parentID + "/" + childID + "/instance"
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, childPath, "active", accountID)
-				source := stateOnlyNestedAcquisitionSource(t, parentID, runtimecontracts.FlowModeSingleton, childID, runtimecontracts.FlowModeTemplate)
-				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(parentID, "selector")
-				if err != nil {
-					t.Fatal(err)
-				}
-				handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
-				if err != nil {
-					t.Fatal(err)
-				}
-				hostile := events.RouteIdentity{FlowID: parentID, FlowInstance: childPath, EntityID: entityID}.Normalized()
-				bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
-					ContractBundle: source,
-					RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
-						return []runtimebus.DeliveryRouteBlueprint{{
-							Recipient: events.MustNodeDeliveryRecipient(node), Target: hostile,
-							Handler: handler.ForEvent("test.node_emitted"),
-						}}, nil
-					},
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				payload, err := json.Marshal(map[string]any{"account_id": accountID})
-				if err != nil {
-					t.Fatal(err)
-				}
-				evt := eventtest.ExistingRunRootIngress(
-					uuid.NewString(), "test.node_emitted", "", "", payload, 0, runID,
-					events.EnvelopeForTargetRoute(events.EventEnvelope{}, hostile), time.Now().UTC(),
-				)
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("persist immutable stamped parent/child contradiction: %v", err)
-				}
-				persisted, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
-				if err != nil || !found {
-					t.Fatalf("load stamped parent/child contradiction: found=%t err=%v", found, err)
-				}
-				want := events.MustExistingEntityTarget(hostile)
-				if len(persisted.DeliveryRoutes) != 1 || persisted.DeliveryRoutes[0].Target != want {
-					t.Fatalf("stamped contradiction target = %#v, want immutable %#v", persisted.DeliveryRoutes, want)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, childPath, 0)
-			})
-
-			t.Run("sibling prefix flow never enters parent cardinality", func(t *testing.T) {
-				parentID := "sibling-prefix-" + uuid.NewString()
-				siblingID := parentID + "-other"
-				accountID := "sibling-prefix-key-" + uuid.NewString()
-				siblingPath := siblingID + "/instance"
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), siblingPath, "active", accountID)
-				evt := newEvent(accountID)
-				source := stateOnlySiblingAcquisitionSource(t, parentID, runtimecontracts.FlowModeTemplate, siblingID, runtimecontracts.FlowModeTemplate)
-				if err := newBusForSource(t, source, parentID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
-					t.Fatalf("sibling-prefix selection error = %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-			})
-
-			t.Run("arbitrary-depth child selects its own state", func(t *testing.T) {
-				parentID := "deep-parent-" + uuid.NewString()
-				childID := "deep-child-" + uuid.NewString()
-				grandchildID := "deep-grandchild-" + uuid.NewString()
-				accountID := "deep-key-" + uuid.NewString()
-				entityID := uuid.NewString()
-				grandchildPath := parentID + "/" + childID + "/" + grandchildID + "/instance"
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, grandchildPath, "active", accountID)
-				source := stateOnlyDeepAcquisitionSource(t, parentID, childID, grandchildID)
-
-				parentEvent := newEvent(accountID)
-				if err := newBusForSource(t, source, parentID, "selector").Publish(ctx, parentEvent); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
-					t.Fatalf("deep descendant selected by parent: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, parentEvent.ID(), 0, 0)
-
-				childEvent := newEvent(accountID)
-				if err := newBusForSource(t, source, grandchildID, "selector").Publish(ctx, childEvent); err != nil {
-					t.Fatalf("publish actual arbitrary-depth child owner: %v", err)
-				}
-				persisted, found, err := selected.LoadPreparedPublishEvent(ctx, childEvent.ID())
-				if err != nil || !found {
-					t.Fatalf("load arbitrary-depth child event: found=%t err=%v", found, err)
-				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: grandchildID, FlowInstance: grandchildPath, EntityID: entityID})
-				if len(persisted.DeliveryRoutes) != 1 || persisted.DeliveryRoutes[0].Target != want {
-					t.Fatalf("arbitrary-depth child routes = %#v, want %#v", persisted.DeliveryRoutes, want)
-				}
-			})
-
-			t.Run("static flow preserves exact state owner", func(t *testing.T) {
-				for _, ownerCase := range []struct {
-					name   string
-					source func(string) semanticview.Source
-				}{
-					{name: "static", source: func(flowID string) semanticview.Source {
-						return stateOnlyAcquisitionSourceWithMode(t, flowID, runtimecontracts.FlowModeStatic)
-					}},
-				} {
-					t.Run(ownerCase.name, func(t *testing.T) {
-						flowID := ownerCase.name + "-owner-" + uuid.NewString()
-						accountID := ownerCase.name + "-key-" + uuid.NewString()
-						entityID := uuid.NewString()
-						seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, flowID, "active", accountID)
-						evt := newEvent(accountID)
-						if err := newBusForSource(t, ownerCase.source(flowID), flowID, "selector").Publish(ctx, evt); err != nil {
-							t.Fatalf("publish %s exact owner: %v", ownerCase.name, err)
+					if tc.duplicateOwner {
+						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instance, "active", "same-business-key")
+					}
+					if tc.lifecycle != "" {
+						seedStateOnlyAcquisitionLifecycle(t, backend, db, runID, instance, tc.lifecycle)
+					}
+					node, err := runtimeidentity.AdmitExecutableNodeDeclaration(scope.flow, tc.node)
+					if err != nil {
+						t.Fatal(err)
+					}
+					handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
+					if err != nil {
+						t.Fatal(err)
+					}
+					newBus := func() *runtimebus.EventBus {
+						bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
+							ContractBundle: source,
+							RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
+								return []runtimebus.DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance}, Handler: handler.ForEvent("test.node_emitted")}}, nil
+							},
+						})
+						if err != nil {
+							t.Fatal(err)
 						}
-						persisted, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
-						if err != nil || !found {
-							t.Fatalf("load %s exact owner: found=%t err=%v", ownerCase.name, found, err)
-						}
-						want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: flowID, EntityID: entityID})
-						if len(persisted.DeliveryRoutes) != 1 || persisted.DeliveryRoutes[0].Target != want {
-							t.Fatalf("%s routes = %#v, want %#v", ownerCase.name, persisted.DeliveryRoutes, want)
-						}
-					})
-				}
-			})
-
-			t.Run("root flow admits authored mode and explicit run identity", func(t *testing.T) {
-				workflowName := "root-bundle-" + uuid.NewString()
-				rootFlowID := "."
-				owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, runID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				otherRunID := uuid.NewString()
-				if owner.ScopeKey() != runID {
-					t.Fatalf("root owner query scope = %q, want exact run %q", owner.ScopeKey(), runID)
-				}
-				if !owner.Owns(runID) || owner.Owns(rootFlowID) || owner.Owns("child") || owner.Owns(otherRunID) {
-					t.Fatalf("root owner route classification: run=%t authored=%t child=%t other_run=%t", owner.Owns(runID), owner.Owns(rootFlowID), owner.Owns("child"), owner.Owns(otherRunID))
-				}
-			})
-
-			t.Run("root select reaches exact run state when authored id differs", func(t *testing.T) {
-				workflowName := "root-select-bundle-" + uuid.NewString()
-				rootFlowID := "."
-				accountID := "root-select-key-" + uuid.NewString()
-				entityID := uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), "child", "active", accountID)
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), rootFlowID, "active", accountID)
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, runID, "active", accountID)
-				evt := newEvent(accountID)
-				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, "selector")
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil {
-					t.Fatalf("plan run-root select: %v", err)
-				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: rootFlowID, FlowInstance: runID, EntityID: entityID})
-				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
-					t.Fatalf("run-root select routes = %#v, want %#v", plan.DeliveryRoutes, want)
-				}
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish run-root select: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-			})
-
-			t.Run("root select rejects authored scope without exact run owner", func(t *testing.T) {
-				workflowName := "root-select-authored-only-bundle-" + uuid.NewString()
-				rootFlowID := "."
-				accountID := "root-select-authored-only-key-" + uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), rootFlowID, "active", accountID)
-				evt := newEvent(accountID)
-				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, "selector")
-				if err := bus.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
-					t.Fatalf("root authored-only selection error = %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-			})
-
-			t.Run("root select or create materializes exact run route when authored id differs", func(t *testing.T) {
-				workflowName := "root-upsert-bundle-" + uuid.NewString()
-				rootFlowID := "."
-				accountID := "root-upsert-key-" + uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), "child", "active", accountID)
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), rootFlowID, "active", accountID)
-				evt := newEvent(accountID)
-				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, "upserter")
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil {
-					t.Fatalf("plan run-root select-or-create: %v", err)
-				}
-				want := events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: rootFlowID, FlowInstance: runID, EntityID: runID})
-				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
-					t.Fatalf("run-root select-or-create routes = %#v, want %#v", plan.DeliveryRoutes, want)
-				}
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish run-root select-or-create: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-			})
-
-			t.Run("root select or create preserves exact run owner over authored scope", func(t *testing.T) {
-				workflowName := "root-upsert-existing-bundle-" + uuid.NewString()
-				rootFlowID := "."
-				accountID := "root-upsert-existing-key-" + uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), rootFlowID, "active", accountID)
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, runID, runID, "active", accountID)
-				evt := newEvent(accountID)
-				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(t, workflowName), rootFlowID, "upserter")
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil {
-					t.Fatalf("plan existing run-root select-or-create: %v", err)
-				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: rootFlowID, FlowInstance: runID, EntityID: runID})
-				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
-					t.Fatalf("existing run-root select-or-create routes = %#v, want %#v", plan.DeliveryRoutes, want)
-				}
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish existing run-root select-or-create: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-			})
-
-			t.Run("select or create chooses established state-only owner", func(t *testing.T) {
-				flowID := "upsert-existing-" + uuid.NewString()
-				accountID := "state-only-existing-" + uuid.NewString()
-				entityID := uuid.NewString()
-				instancePath := flowID
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instancePath, "active", accountID)
-				evt := newEvent(accountID)
-				bus := newBus(t, flowID, "upserter")
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish select-or-create state-only match: %v", err)
-				}
-				persisted, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
-				if err != nil || !found {
-					t.Fatalf("load state-only selected event: found=%t err=%v", found, err)
-				}
-				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: instancePath, EntityID: entityID})
-				if len(persisted.DeliveryRoutes) != 1 || persisted.DeliveryRoutes[0].Target != want {
-					t.Fatalf("persisted target = %#v, want established state-only owner %#v", persisted.DeliveryRoutes, want)
-				}
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("duplicate state-only selected publish: %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-			})
-
-			t.Run("select or create converges on exact state-only appearance", func(t *testing.T) {
-				flowID := "upsert-race-" + uuid.NewString()
-				accountID := "state-only-race-" + uuid.NewString()
-				evt := newEvent(accountID)
-				bus := newBus(t, flowID, "upserter")
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil || len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Target.MaterializingEntity() {
-					t.Fatalf("initial select-or-create plan = %#v err=%v, want materializing target", plan.DeliveryRoutes, err)
-				}
-				target := plan.DeliveryRoutes[0].Target.Route()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, target.EntityID, target.FlowInstance, "active", accountID)
-				if err := bus.Publish(ctx, evt); err != nil {
-					t.Fatalf("publish after exact state-only appearance: %v", err)
-				}
-				persisted, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
-				if err != nil {
-					t.Fatalf("load prepared event: %v", err)
-				}
-				if !found {
-					t.Fatal("published event was not found")
-				}
-				if len(persisted.DeliveryRoutes) != 1 || !persisted.DeliveryRoutes[0].Target.ExistingEntity() || persisted.DeliveryRoutes[0].Target.Route() != target {
-					t.Fatalf("persisted target = %#v, want exact existing state-only target %#v", persisted.DeliveryRoutes, target)
-				}
-			})
-
-			t.Run("conflicting exact state-only appearance fails before persistence", func(t *testing.T) {
-				flowID := "upsert-conflict-" + uuid.NewString()
-				accountID := "state-only-conflict-" + uuid.NewString()
-				evt := newEvent(accountID)
-				bus := newBus(t, flowID, "upserter")
-				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-				if err != nil || len(plan.DeliveryRoutes) != 1 {
-					t.Fatalf("plan deterministic target: routes=%#v err=%v", plan.DeliveryRoutes, err)
-				}
-				target := plan.DeliveryRoutes[0].Target.Route()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, target.EntityID, target.FlowInstance, "active", "wrong-key")
-				if err := bus.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
-					t.Fatalf("conflicting state-only appearance error = %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-			})
-
-			t.Run("ambiguous state-only matches fail before persistence", func(t *testing.T) {
-				flowID := "ambiguous-" + uuid.NewString()
-				accountID := "state-only-ambiguous-" + uuid.NewString()
-				for index := 0; index < 2; index++ {
-					seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
-				}
-				evt := newEvent(accountID)
-				if err := newBus(t, flowID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_ambiguous") {
-					t.Fatalf("ambiguous state-only select error = %v", err)
-				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-			})
-
-			t.Run("terminal state and non-active lifecycle are excluded", func(t *testing.T) {
-				for _, excluded := range []struct {
-					name           string
-					state          string
-					lifecycleState string
-				}{
-					{name: "terminal-state", state: "done"},
-					{name: "draining-lifecycle", state: "active", lifecycleState: "draining"},
-					{name: "terminated-lifecycle", state: "active", lifecycleState: "terminated"},
-				} {
-					t.Run(excluded.name, func(t *testing.T) {
-						flowID := excluded.name + "-" + uuid.NewString()
-						accountID := excluded.name + "-" + uuid.NewString()
-						instancePath := flowID
-						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instancePath, excluded.state, accountID)
-						if excluded.lifecycleState != "" {
-							seedStateOnlyAcquisitionLifecycle(t, backend, db, runID, instancePath, excluded.lifecycleState)
-						}
-						evt := newEvent(accountID)
-						if err := newBus(t, flowID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
-							t.Fatalf("excluded state-only owner error = %v", err)
+						return bus
+					}
+					bus := newBus()
+					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted", "", "", []byte(`{"account_id":"same-business-key"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+					if tc.failure != "" {
+						err := bus.Publish(ctx, evt)
+						if err == nil || !strings.Contains(err.Error(), tc.failure) {
+							t.Fatalf("Publish=%v, want %q", err, tc.failure)
 						}
 						assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-					})
-				}
-			})
-		})
+						return
+					}
+					plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
+					if err != nil || len(plan.DeliveryRoutes) != 1 {
+						t.Fatalf("plan=%#v err=%v", plan, err)
+					}
+					wantRoute := events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance, EntityID: entityID}.Normalized()
+					if plan.DeliveryRoutes[0].Target.Route() != wantRoute || plan.DeliveryRoutes[0].Target.MaterializingEntity() != tc.initialize {
+						t.Fatalf("wrong owner: %#v want %#v initialize=%t", plan.DeliveryRoutes, wantRoute, tc.initialize)
+					}
+					if tc.appearance {
+						seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "different-business-key")
+					}
+					if err := bus.Publish(ctx, evt); err != nil {
+						t.Fatal(err)
+					}
+					prepared, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
+					if err != nil || !found || len(prepared.DeliveryRoutes) != 1 {
+						t.Fatalf("load=%t %v %#v", found, err, prepared)
+					}
+					target := prepared.DeliveryRoutes[0].Target
+					if target.Route() != wantRoute || target.MaterializingEntity() != (tc.initialize && !tc.appearance) {
+						t.Fatalf("persisted target=%#v", target)
+					}
+					// Late rows and a reconstructed publisher cannot re-elect an accepted receiver.
+					seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), scope.other+"/later", "active", "same-business-key")
+					if err := newBus().Publish(ctx, evt); err != nil {
+						t.Fatalf("duplicate after reconstruction: %v", err)
+					}
+					again, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
+					if err != nil || !found || len(again.DeliveryRoutes) != 1 || again.DeliveryRoutes[0].Target != target {
+						t.Fatalf("duplicate rewrote receiver: %#v %t %v", again, found, err)
+					}
+					assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
+					assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, instance, 0)
+					var siblingFields string
+					if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, otherEntity).Scan(&siblingFields); err != nil {
+						t.Fatal(err)
+					}
+					if !strings.Contains(siblingFields, "same-business-key") {
+						t.Fatalf("sibling mutated: %s", siblingFields)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -629,6 +246,7 @@ func TestWorkflowEntityStateSelectionOwnerUsesExactAuthoredScope(t *testing.T) {
 
 type stateOnlyAcquisitionStore interface {
 	storeTestDurableEventBusStore
+	runtimepipeline.WorkflowEntityStatePersistenceReader
 }
 
 func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcquisitionStore, *sql.DB, context.Context, string) {
@@ -652,7 +270,6 @@ func stateOnlyAcquisitionSource(t *testing.T, flowID string) semanticview.Source
 }
 
 func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) semanticview.Source {
-	binding := []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id")}}
 	flow := runtimecontracts.FlowContractView{
 		Path: flowID, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -663,11 +280,11 @@ func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) seman
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"selector": {
 				SubscribesTo:  []string{"test.node_emitted"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: binding}}},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
 			},
 			"upserter": {
 				SubscribesTo:  []string{"test.node_emitted"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}}},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {CreateEntity: true}},
 			},
 		},
 	}
@@ -688,7 +305,6 @@ func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) seman
 }
 
 func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childID, childMode string) semanticview.Source {
-	binding := []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id")}}
 	flow := func(id, path, mode string) runtimecontracts.FlowContractView {
 		return runtimecontracts.FlowContractView{
 			Path: path, Paths: runtimecontracts.FlowContractPaths{FlowPath: id},
@@ -700,11 +316,11 @@ func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childI
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"selector": {
 					SubscribesTo:  []string{"test.node_emitted"},
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: binding}}},
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
 				},
 				"upserter": {
 					SubscribesTo:  []string{"test.node_emitted"},
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}}},
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {CreateEntity: true}},
 				},
 			},
 		}
@@ -736,7 +352,6 @@ func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childI
 }
 
 func stateOnlyAcquisitionFlow(flowID, path, mode string) runtimecontracts.FlowContractView {
-	binding := []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id")}}
 	return runtimecontracts.FlowContractView{
 		Path: path, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -747,11 +362,11 @@ func stateOnlyAcquisitionFlow(flowID, path, mode string) runtimecontracts.FlowCo
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"selector": {
 				SubscribesTo:  []string{"test.node_emitted"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: binding}}},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
 			},
 			"upserter": {
 				SubscribesTo:  []string{"test.node_emitted"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}}},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {CreateEntity: true}},
 			},
 		},
 	}
@@ -846,7 +461,7 @@ func admitStateOnlyAcquisitionEntityContracts(t *testing.T, base *runtimecontrac
 		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), "review_item: {}\n")
 	}
 
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-only-acquisition\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-only-acquisition\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "entities.yaml"), "review_item: {}\n")
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {

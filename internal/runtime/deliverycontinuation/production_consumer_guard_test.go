@@ -28,8 +28,10 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 		"scanFailureRetryDelay",
 		"dispatchRetryDelay",
 		"isTopologyBlocked",
+		"coordinatorOwns",
 	}
 	scanConsumers := map[string]int{}
+	unqueuedCompletionConsumers := map[string]int{}
 	pipelineSettlementConsumers := map[string]int{}
 	err := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -115,6 +117,9 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 				if name == "ScanDeliveryContinuations" {
 					scanConsumers[filepath.ToSlash(rel)]++
 				}
+				if name == "CompleteUnqueued" {
+					unqueuedCompletionConsumers[filepath.ToSlash(rel)]++
+				}
 				return true
 			})
 		case ".yaml", ".json":
@@ -136,6 +141,9 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(unqueuedCompletionConsumers) != 1 || unqueuedCompletionConsumers["internal/runtime/bus/eventbus_routing.go"] != 10 {
+		t.Fatalf("unqueued completion must remain in the two pre-send owners: %#v", unqueuedCompletionConsumers)
 	}
 	want := map[string]int{
 		"internal/runtime/deliverycontinuation/coordinator.go":                      1,

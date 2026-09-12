@@ -125,10 +125,22 @@ func ClassifyCurrentDeliveryTarget(route events.DeliveryRoute, present bool) Cur
 		return CurrentDeliveryTarget{}
 	}
 	route = route.Normalized()
-	if _, err := route.Identity(); err != nil || route.Target.EntitylessReceiver() {
+	if _, err := route.Identity(); err != nil {
 		return CurrentDeliveryTarget{state: targetEvidenceInvalid}
 	}
-	target := route.Target.Route().Normalized()
+	return ClassifyExecutionReceiverTarget(route.Target, true)
+}
+
+// ClassifyExecutionReceiverTarget consumes only receiver ownership, including
+// the frozen projection of an already admitted durable fan-out handler.
+func ClassifyExecutionReceiverTarget(owner events.DeliveryTargetOwnership, present bool) CurrentDeliveryTarget {
+	if !present {
+		return CurrentDeliveryTarget{}
+	}
+	if owner.Validate() != nil || owner.EntitylessReceiver() {
+		return CurrentDeliveryTarget{state: targetEvidenceInvalid}
+	}
+	target := owner.Route().Normalized()
 	if target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" {
 		return CurrentDeliveryTarget{state: targetEvidenceInvalid}
 	}

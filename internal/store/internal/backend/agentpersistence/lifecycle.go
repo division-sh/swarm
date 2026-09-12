@@ -35,86 +35,49 @@ func (s *AgentPostgresOwner) LoadAgentLifecycleState(
 	ctx context.Context,
 	identity runtimeagentidentity.Identity,
 ) (runtimemanager.AgentLifecycleState, bool, error) {
-	fields, err := IdentityFields(identity)
-	if err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, err
-	}
-	var state runtimemanager.AgentLifecycleState
-	var generation int64
-	var topologyRaw []byte
-	err = s.backend.QueryRowContext(ctx, `
-			SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
-			       lifecycle_config_revision, lifecycle_run_mode,
-			       lifecycle_process_authority_id::text, lifecycle_process_owner_id,
-			       lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
-			       lifecycle_bundle_hash,
-			       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation,
-			       topology_admission
-		FROM agents
-		WHERE run_id = $1::uuid AND agent_id = $2 AND agent_name_owner = $3 AND agent_name_source = $4
-		  AND agent_route_presence = $5 AND flow_scope_key = $6
-		  AND flow_instance_id = $7 AND flow_instance = $8
-	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(
-		&state.AgentID,
-		&state.RuntimeEpoch,
-		&generation,
-		&state.Phase,
-		&state.ConfigRevision,
-		&state.RunMode,
-		&state.ProcessBinding.ProcessAuthorityID,
-		&state.ProcessBinding.ProcessOwnerID,
-		&state.ProcessBinding.ProcessBootID,
-		&state.ProcessBinding.GenerationGrantID,
-		&state.ProcessBinding.BundleHash,
-		&state.ProcessBinding.RuntimeInstanceID,
-		&state.ProcessBinding.RuntimeGeneration,
-		&topologyRaw,
-	)
-	if err == sql.ErrNoRows {
-		return runtimemanager.AgentLifecycleState{}, false, nil
-	}
-	if err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, err
-	}
-	state.Identity = identity.Normalize()
-	state.Generation = uint64(generation)
-	if err := json.Unmarshal(topologyRaw, &state.Topology); err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, fmt.Errorf("decode agent topology admission: %w", err)
-	}
-	if err := state.Topology.Validate(); err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, err
-	}
-	if err := state.ProcessBinding.Validate(); err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, err
-	}
-	return state, true, nil
+	state, _, found, err := loadAgentLifecycleState(ctx, s.backend, identity, false, false)
+	return state, found, err
 }
 
 func (s *AgentSQLiteOwner) LoadAgentLifecycleState(
 	ctx context.Context,
 	identity runtimeagentidentity.Identity,
 ) (runtimemanager.AgentLifecycleState, bool, error) {
+	state, _, found, err := loadAgentLifecycleState(ctx, s.backend, identity, true, false)
+	return state, found, err
+}
+
+// loadAgentLifecycleState is shared by runtime lifecycle readback and durable
+// receiver admission. Neither consumer reconstructs a descriptor from names.
+func loadAgentLifecycleState(ctx context.Context, q rowQueryer, identity runtimeagentidentity.Identity, sqlite, lock bool) (runtimemanager.AgentLifecycleState, string, bool, error) {
 	fields, err := IdentityFields(identity)
 	if err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, err
+		return runtimemanager.AgentLifecycleState{}, "", false, err
 	}
 	var state runtimemanager.AgentLifecycleState
 	var generation int64
 	var topologyRaw []byte
-	err = s.backend.QueryRowContext(ctx, `
+	var entityID sql.NullString
+	query := `
 			SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
 			       lifecycle_config_revision, lifecycle_run_mode,
-			       lifecycle_process_authority_id, lifecycle_process_owner_id,
-			       lifecycle_process_boot_id, lifecycle_generation_grant_id,
+			       lifecycle_process_authority_id::text, lifecycle_process_owner_id,
+			       lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
 			       lifecycle_bundle_hash,
-			       lifecycle_runtime_instance_id, lifecycle_runtime_generation,
-			       topology_admission
+			       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation,
+			       topology_admission, entity_id
 		FROM agents
-		WHERE run_id = ? AND agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
-		  AND agent_route_presence = ? AND flow_scope_key = ?
-		  AND flow_instance_id = ? AND flow_instance = ?
-	`, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		WHERE run_id = $1::uuid AND agent_id = $2 AND agent_name_owner = $3 AND agent_name_source = $4
+		  AND agent_route_presence = $5 AND flow_scope_key = $6
+		  AND flow_instance_id = $7 AND flow_instance = $8
+	`
+	if sqlite {
+		query = strings.ReplaceAll(query, "::text", "")
+		query = strings.ReplaceAll(query, "::uuid", "")
+	} else if lock {
+		query += " FOR UPDATE"
+	}
+	err = q.QueryRowContext(ctx, query, fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(
 		&state.AgentID,
 		&state.RuntimeEpoch,
@@ -130,25 +93,26 @@ func (s *AgentSQLiteOwner) LoadAgentLifecycleState(
 		&state.ProcessBinding.RuntimeInstanceID,
 		&state.ProcessBinding.RuntimeGeneration,
 		&topologyRaw,
+		&entityID,
 	)
 	if err == sql.ErrNoRows {
-		return runtimemanager.AgentLifecycleState{}, false, nil
+		return runtimemanager.AgentLifecycleState{}, "", false, nil
 	}
 	if err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, err
+		return runtimemanager.AgentLifecycleState{}, "", false, err
 	}
 	state.Identity = identity.Normalize()
 	state.Generation = uint64(generation)
 	if err := json.Unmarshal(topologyRaw, &state.Topology); err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, fmt.Errorf("decode agent topology admission: %w", err)
+		return runtimemanager.AgentLifecycleState{}, "", false, fmt.Errorf("decode agent topology admission: %w", err)
 	}
 	if err := state.Topology.Validate(); err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, err
+		return runtimemanager.AgentLifecycleState{}, "", false, err
 	}
 	if err := state.ProcessBinding.Validate(); err != nil {
-		return runtimemanager.AgentLifecycleState{}, false, err
+		return runtimemanager.AgentLifecycleState{}, "", false, err
 	}
-	return state, true, nil
+	return state, entityID.String, true, nil
 }
 
 func (s *AgentPostgresOwner) ListDurableAgentLifecycleStates(ctx context.Context) ([]runtimemanager.AgentLifecycleState, error) {
@@ -255,7 +219,7 @@ func scanDurableAgentLifecycleStates(rows *sql.Rows) ([]runtimemanager.AgentLife
 			return nil, errors.New("durable lifecycle census returned a non-durable cell")
 		}
 		switch state.Topology.Authority.Kind {
-		case runtimeagenttopology.AuthorityStaticDeclarationPlan, runtimeagenttopology.AuthorityFlowReadinessPlan:
+		case runtimeagenttopology.AuthorityStaticDeclarationPlan, runtimeagenttopology.AuthorityFlowReadinessPlan, runtimeagenttopology.AuthoritySelectedForkDeclarationPlan:
 		default:
 			return nil, fmt.Errorf("durable lifecycle census returned unsupported authority %q", state.Topology.Authority.Kind)
 		}
@@ -378,6 +342,9 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
+	if err := AuthorizeGenerationMutationTx(ctx, tx, req, false); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	effects := privaterunforkrevision.NewEffects()
 	result, err := commitPostgresAgentLifecycleTransitionTx(ctx, tx, story, effects, req, s.providerDrains, s.diagnosticEvents, s.diagnosticOrigins)
 	if err != nil {
@@ -405,6 +372,9 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	}
 	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectSQLite)
 	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if err := AuthorizeGenerationMutationTx(ctx, tx, req, true); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	effects := privaterunforkrevision.NewEffects()

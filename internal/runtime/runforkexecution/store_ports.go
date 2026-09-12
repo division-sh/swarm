@@ -19,15 +19,21 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // SelectedContractForkLifecycle owns planning, materialization, activation,
 // binding, and cleanup for one selected-contract fork.
 type SelectedContractForkLifecycle interface {
+	ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+	RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
+	StopSelectedFork(context.Context, runcontrol.SelectedStopRequest) (runcontrol.State, error)
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-	MaterializeRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionMaterializeRequest) (runfork.RunForkMaterialization, error)
+	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	DiscardMaterializedSelectedContractExecutionFork(context.Context, string) error
 	ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 	LoadRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, bool, error)
@@ -52,7 +58,7 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 type SelectedContractReplayPersistence interface {
 	EnsureRunForkNoPostForkCommittedReplayScopeMarkers(context.Context, string, string) error
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, []runfork.RunForkSelectedContractWorkflowState) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 
@@ -64,6 +70,7 @@ type SelectedContractExecutionOwner struct {
 }
 
 type selectedContractExecutionPorts struct {
+	contexts                *selectedForkContexts
 	workflow                runtimepipeline.WorkflowPersistence
 	fork                    SelectedContractForkLifecycle
 	runtimeExecution        SelectedContractRuntimeExecutionLifecycle
@@ -146,6 +153,7 @@ func NewSelectedContractExecutionOwner(
 		return SelectedContractExecutionOwner{}, errors.New("selected-contract execution requires valid workflow persistence")
 	}
 	return SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{
+		contexts: new(selectedForkContexts),
 		workflow: workflow, fork: fork, runtimeExecution: runtimeExecution, replay: replay,
 		events: events, busDurable: busDurable, pipelineObligations: pipelineObligations,
 		manager: manager, managerRoles: managerRoles, effects: effects, completion: completion,

@@ -397,8 +397,6 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return artifactRepoOutputFieldOptions
 	case "artifact_repo.limits":
 		return artifactRepoLimitsFieldOptions
-	case "select_entity", "select_or_create_entity":
-		return entitySelectionFieldOptions
 	case "agent":
 		return agentRegistryEntryFieldOptions
 	case "connector_packs":
