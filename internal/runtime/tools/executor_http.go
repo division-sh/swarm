@@ -157,8 +157,7 @@ func (e *Executor) resolveManagedCredentialForActor(ctx context.Context, actor m
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	flowID := emitActorFlowID(source, actor, "")
-	storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
+	storeKey, mapped := semanticview.CredentialStoreKeyForActor(source, actor.ID, key)
 	if mapped && storeKey == "" {
 		return nil, fmt.Errorf("managed credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
 	}
@@ -306,9 +305,8 @@ func (e *Executor) execMCPTool(ctx context.Context, actor models.AgentConfig, to
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	flowID := emitActorFlowID(source, actor, "")
 	return e.mcpClient.CallWithCredentialKeyResolver(ctx, tool.Name(), input, func(key string) (string, error) {
-		storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
+		storeKey, mapped := semanticview.CredentialStoreKeyForActor(source, actor.ID, key)
 		if mapped && storeKey == "" {
 			return "", fmt.Errorf("credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
 		}
@@ -320,9 +318,8 @@ func (e *Executor) resolveToolCredentialsForActor(ctx context.Context, actor mod
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	flowID := emitActorFlowID(source, actor, "")
 	return e.resolveToolCredentialsWithMapper(ctx, keys, func(key string) (string, error) {
-		storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
+		storeKey, mapped := semanticview.CredentialStoreKeyForActor(source, actor.ID, key)
 		if mapped && storeKey == "" {
 			return "", fmt.Errorf("credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
 		}

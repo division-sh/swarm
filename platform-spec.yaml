@@ -5136,6 +5136,14 @@ engine:
         instance config, and the plan's exact trigger lineage. It never republishes stale event type/schema/payload facts and
         never invents lineage for a newly introduced auto-emit. Conflicting duplicates do not auto-emit. This bootstraps the
         flow without requiring an external trigger.
+      auto_emit_revision_boundary: >
+        Only the explicitly admitted source-revision transaction may replace the complete un-emitted creation plan.
+        It constructs the declaration, schema, source, validated payload and final business publication identity before
+        deterministic event ID, preserving the original trigger lineage. Replacement is fenced by the exact observed
+        readiness plan and old/new source coordinates. Ordinary hydration, retry, outbox and dispatch validate and consume
+        the committed plan without adopting ambient source changes. Publication and revision serialize through the existing
+        run/instance owner: an already committed occurrence remains immutable, or the new pending plan wins; mixed facts
+        and publication of both versions are forbidden. Removing auto-emit removes only the pending occurrence.
     addressing:
       static_flows: '{flow_id}/{local_name} — one level, no instance segment'
       template_instances: '{template_id}/{instance_id}/{local_name} — extra segment for instance'
@@ -6362,6 +6370,10 @@ engine:
             execution target supports the required native command and file capabilities.
           - For non-strict fallback runtimes, web_search native_tools are admitted only when policy.web_search_provider resolves
             to a supported provider and every provider-required credential resolves to a non-empty deployment credential.
+          - Web-search policy selection consumes the actor's exact declaration scope or independently admitted explicit
+            flow_id configuration. FlowPath prefix matching and unique-role lookup MUST NOT reconstruct that scope.
+            Policy configuration never grants native_tools permission or authored declaration capabilities. Credential
+            keys remain unchanged deployment keys; credential lookup does not require declaration inference.
           - Static boot, recovery, and selected-contract materialization must fail closed before the affected agent's first
             turn when provider-native support or the required fallback owner proof is missing. Retired dynamic mutation
             surfaces never reach this admission point.
@@ -17891,7 +17903,11 @@ agent_identity_model:
       ownership_derivation: >
         Declaration ownership is established only by the immutable filesystem FlowNode containing the declaration.
         Directory ancestry outside the admitted FlowNode trie, declaration counts, and leaf-name equality are never
-        ownership evidence.
+        ownership evidence. Actor-to-declaration lookup consumes the exact scoped effective public name or the
+        validated declared name and owner URI; a missing or unknown untyped actor ID MUST NOT borrow a declaration
+        from its role, even when exactly one role matches. Role spelling, normalization and candidate ordering are
+        never selection authority. A valid typed declared name remains usable when the redundant actor ID is absent.
+        Optional declaration lookup failure does not revoke independently admitted runtime actor configuration.
       owner_grouped_consumption: >
         EventBus route templates and static routes, inferred required-agent facts, explicit required-agent fulfillment,
         and generated authoring projections consume the complete canonical declaration set grouped by exact OwnerFlowID.

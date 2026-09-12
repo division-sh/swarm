@@ -501,6 +501,7 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 	first := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "alpha-agent",
+		FlowID:        "alpha",
 		FlowPath:      "alpha/instance-1",
 		NativeTools:   models.NativeToolConfig{WebSearch: true},
 	})
@@ -510,6 +511,7 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 	second := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "beta-agent",
+		FlowID:        "beta",
 		FlowPath:      "beta/instance-1",
 		NativeTools:   models.NativeToolConfig{WebSearch: true},
 	})

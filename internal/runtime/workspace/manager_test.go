@@ -708,7 +708,7 @@ func (s workspaceDataProjectionStub) Materialize(_ context.Context, actor models
 	}, nil
 }
 
-func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) {
+func TestResolveWorkspace_UsesExactDeclarationWithoutRoleInference(t *testing.T) {
 	const owner = "test://workspace/ops/worker"
 	sourceProjection, _ := testRuntimeSourceProjection(t)
 	manager := NewDockerManager()
@@ -783,6 +783,16 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 	wantContainer := manager.processScopedPrefix() + "flow-ops-instance-1-agent-" + fingerprint
 	if target == nil || target.Container != wantContainer {
 		t.Fatalf("target = %#v, want %s", target, wantContainer)
+	}
+	for _, id := range []string{"unknown", "", "worker"} {
+		unknown := models.AgentConfig{ID: id, Role: "worker", FlowID: "ops", FlowPath: "ops/instance-1"}
+		if class, err := workspaceClassForSource(source, unknown); err != nil || class != "" {
+			t.Errorf("unknown/retired actor %q borrowed workspace class %q: %v", id, class, err)
+		}
+		unknown.WorkspaceClass = "shared_flow"
+		if class, err := workspaceClassForSource(source, unknown); err != nil || class != "shared_flow" {
+			t.Errorf("independent workspace class was lost: %q, %v", class, err)
+		}
 	}
 }
 

@@ -165,6 +165,17 @@ func TestExecutionToolsForActorUsesScopedDeclarationWithLiteralPublicName(t *tes
 	if !ok || entry.Description() != "beta scoped tool" {
 		t.Fatalf("runtime scoped tool = %#v ok %v", entry, ok)
 	}
+	for _, id := range []string{"unknown", "", "local-worker"} {
+		entries, err := executionToolsForActor(source, models.AgentConfig{
+			ID: id, Role: "public-worker", FlowID: "beta", Tools: []string{"shared-tool"},
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if entry, ok := entries["shared-tool"]; ok {
+			t.Errorf("unknown/retired actor %q borrowed scoped tool: %#v", id, entry)
+		}
+	}
 	findings := RequiredMCPToolAvailabilityFindings(source, nil)
 	if len(findings) != 2 || findings[0].AgentID != "alpha-worker" || findings[1].AgentID != "public-worker" {
 		t.Fatalf("scoped required MCP findings = %#v", findings)

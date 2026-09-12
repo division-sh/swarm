@@ -178,6 +178,50 @@ func TestExecutorReadFlowDataRejectsRoleModeImpersonation(t *testing.T) {
 	}
 }
 
+func TestExecutorReadFlowDataRejectsUniqueRoleWithCorrectScope(t *testing.T) {
+	for _, kind := range []string{"static", "resource"} {
+		t.Run(kind, func(t *testing.T) {
+			source, _ := loadFlowDataToolSource(t)
+			exact := flowDataActor()
+			var input map[string]any
+			if kind == "resource" {
+				source, _ = loadResourceDataToolSource(t)
+				exact = flowDataActorWithIdentity(t, source, "resource-reader")
+				refs := flowdata.AllowedResourceData(source, exact)
+				if len(refs) != 1 {
+					t.Fatalf("exact declaration resource access = %#v", refs)
+				}
+				input = map[string]any{"kind": "resource_rows", "declaration": refs[0]}
+			} else {
+				input = flowDataToolInput(t, source, exact, "exclusions.yaml")
+			}
+			declaration, ok := semanticview.ResolveAgentDeclaration(source, exact)
+			if !ok {
+				t.Fatal("exact actor declaration missing")
+			}
+			plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
+			for _, id := range []string{"unknown", ""} {
+				actor := models.AgentConfig{ID: id, Role: plan.EffectiveRole(declaration.Entry), FlowID: exact.FlowID, FlowPath: exact.FlowPath}
+				if got := flowdata.AllowedStaticData(source, actor); len(got) != 0 {
+					t.Errorf("unknown %q borrowed static access: %#v", id, got)
+				}
+				if got := flowdata.AllowedResourceData(source, actor); len(got) != 0 {
+					t.Errorf("unknown %q borrowed resource access: %#v", id, got)
+				}
+				if containsToolName(toolDefinitionNames(exec.ToolDefinitionsForActor(actor)), "read_flow_data") {
+					t.Errorf("unknown %q received read_flow_data", id)
+				}
+				_, err := exec.Execute(flowDataToolContext(actor), "read_flow_data", input)
+				requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
+			}
+		})
+	}
+}
+
 func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 	source, root := loadFlowDataToolSource(t)
 	actor := flowDataActor()

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
@@ -36,15 +35,6 @@ func CredentialStoreKeyForActor(source Source, actorID, key string) (string, boo
 	return CredentialStoreKeyForActorFlow(source, actorID, "", key)
 }
 
-func CredentialStoreKeyForActorFlow(source Source, actorID, flowPath, key string) (string, bool) {
-	flowPath = strings.TrimSpace(flowPath)
-	if flowPath != "" {
-		return CredentialStoreKeyForFlow(source, flowPath, key)
-	}
-	if source != nil {
-		if projection, ok := ResolveAgentContractProjection(source, models.AgentConfig{ID: strings.TrimSpace(actorID)}); ok {
-			return CredentialStoreKeyForFlow(source, projection.OwnerFlowID, key)
-		}
-	}
+func CredentialStoreKeyForActorFlow(_ Source, _, _, key string) (string, bool) {
 	return strings.TrimSpace(key), false
 }

@@ -3,6 +3,7 @@ package semanticview_test
 import (
 	"go/ast"
 	"go/types"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -81,6 +82,19 @@ func hostileLegacyContractLookup(bundle *runtimecontracts.WorkflowContractBundle
 	bundle.ScopedAgentContractSource(runtimecontracts.ContractItemSource{FlowPath: "hostile"}, actorID)
 }
 	`)}
+	resolverPath := filepath.Join(root, "internal", "runtime", "semanticview", "agents.go")
+	resolver, err := os.ReadFile(resolverPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlay[resolverPath] = append(resolver, []byte(`
+
+type hostileActorAlias = models.AgentConfig
+
+func hostileRoleInferenceInExistingOwner(arbitrary *hostileActorAlias) string {
+	return arbitrary.Role
+}
+`)...)
 	toolsPath := filepath.Join(root, "internal", "runtime", "tools", "agent_source_guard_hostile.go")
 	overlay[toolsPath] = []byte(`package tools
 
@@ -123,6 +137,7 @@ func hostileRequiredAgentRawMap(arbitrary semanticview.FlowScope) []string {
 		"unclassified_agent_map_range":      false,
 		"legacy_agent_contract_lookup":      false,
 		"unapproved_agent_source_admission": false,
+		"actor_role_declaration_inference":  false,
 	}
 	for _, finding := range findings {
 		if _, ok := want[finding.Kind]; ok && strings.Contains(finding.Enclosing, "hostile") {
@@ -198,6 +213,7 @@ func collectAgentNameOwnershipFindings(path string, file *ast.File, info *types.
 			continue
 		}
 		enclosing := agentNameGuardFunctionName(function)
+		definition, _ := info.Defs[function.Name].(*types.Func)
 		ast.Inspect(function.Body, func(node ast.Node) bool {
 			if statement, ok := node.(*ast.RangeStmt); ok && agentNameGuardIsAgentMapRange(statement, info) && !agentNameGuardAgentMapRangeAllowed(path, enclosing) {
 				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "unclassified_agent_map_range"})
@@ -208,6 +224,9 @@ func collectAgentNameOwnershipFindings(path string, file *ast.File, info *types.
 			selector, ok := node.(*ast.SelectorExpr)
 			if !ok {
 				return true
+			}
+			if definition != nil && definition.Pkg() != nil && definition.Pkg().Path() == "github.com/division-sh/swarm/internal/runtime/semanticview" && agentNameGuardReadsActorRole(selector, info) {
+				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "actor_role_declaration_inference"})
 			}
 			if agentNameGuardIsRawID(selector, info) && !agentNameGuardRawIDAllowed(path, enclosing) {
 				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "raw_agent_registry_id"})
@@ -222,6 +241,19 @@ func collectAgentNameOwnershipFindings(path string, file *ast.File, info *types.
 		})
 	}
 	return findings
+}
+
+func agentNameGuardReadsActorRole(selector *ast.SelectorExpr, info *types.Info) bool {
+	if selector.Sel.Name != "Role" {
+		return false
+	}
+	typ := types.Unalias(info.TypeOf(selector.X))
+	if pointer, ok := typ.(*types.Pointer); ok {
+		typ = types.Unalias(pointer.Elem())
+	}
+	named, ok := typ.(*types.Named)
+	return ok && named.Obj().Pkg() != nil && named.Obj().Name() == "AgentConfig" &&
+		named.Obj().Pkg().Path() == "github.com/division-sh/swarm/internal/runtime/core/actors"
 }
 
 func agentNameGuardIsLegacyContractLookup(selector *ast.SelectorExpr, info *types.Info) bool {

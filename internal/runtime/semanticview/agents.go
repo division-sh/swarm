@@ -38,53 +38,7 @@ func ResolveAgentDeclaration(source Source, cfg models.AgentConfig) (AgentDeclar
 	if name != (agentidentity.Name{}) {
 		return AgentDeclaration{}, false
 	}
-	if declaration, ok := resolveAgentDeclarationByID(source, flowID, agentID); ok {
-		return declaration, true
-	}
-	if agentID != "" && retiredLocalAgentAlias(source, flowID, agentID) {
-		return AgentDeclaration{}, false
-	}
-
-	role := canonicalLookupValue(cfg.Role)
-	if role == "" {
-		return AgentDeclaration{}, false
-	}
-	var matched AgentDeclaration
-	for _, declaration := range AgentDeclarations(source) {
-		plan, err := ScopedAgentNamePlan(source, declaration)
-		if err != nil || canonicalLookupValue(plan.EffectiveRole(declaration.Entry)) != role {
-			continue
-		}
-		if !agentDeclarationMatchesFlow(declaration, flowID) {
-			continue
-		}
-		if strings.TrimSpace(matched.LocalID) != "" {
-			return AgentDeclaration{}, false
-		}
-		matched = declaration
-	}
-	if strings.TrimSpace(matched.LocalID) == "" {
-		return AgentDeclaration{}, false
-	}
-	return matched, true
-}
-
-func retiredLocalAgentAlias(source Source, flowID, candidate string) bool {
-	flowID = strings.TrimSpace(flowID)
-	candidate = strings.TrimSpace(candidate)
-	for _, declaration := range AgentDeclarations(source) {
-		if strings.TrimSpace(declaration.LocalID) != candidate {
-			continue
-		}
-		if flowID != "" && strings.TrimSpace(declaration.OwnerFlowID) != flowID {
-			continue
-		}
-		plan, err := ScopedAgentNamePlan(source, declaration)
-		if err == nil && plan.AgentID != candidate {
-			return true
-		}
-	}
-	return false
+	return resolveAgentDeclarationByID(source, flowID, agentID)
 }
 
 func AgentDeclarationOwner(source Source, flowID, logicalID string) (string, bool) {
@@ -202,10 +156,4 @@ func agentDeclarationMatchesFlow(declaration AgentDeclaration, flowID string) bo
 		return true
 	}
 	return strings.TrimSpace(declaration.OwnerFlowID) == flowID
-}
-
-func canonicalLookupValue(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, "_", "-")
-	return value
 }
