@@ -21,6 +21,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -405,6 +406,33 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		}
 		_, err := exec.Execute(ctx, name, map[string]any{})
 		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
+	}
+}
+
+func TestRoleScopedEntityToolsRejectUnknownDeclarationWithMatchingRole(t *testing.T) {
+	exact := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	bundle := loadRoleScopedEntityToolBundle(t, exact, true)
+	source := semanticview.Wrap(bundle)
+	_, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, exact, bundle, false)
+	contract, ok := entityruntime.ResolveForActor(source, exact)
+	if !ok || contract.EntityType != "validation_case" {
+		t.Fatalf("exact declaration contract = %#v, %v", contract, ok)
+	}
+	if _, ok := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(exact))["save_validation_case_business_brief"]; !ok {
+		t.Fatal("exact actor lost authored writable field")
+	}
+	for _, id := range []string{"unknown", ""} {
+		actor := models.AgentConfig{ID: id, Role: exact.Role, FlowID: contract.FlowID, FlowPath: contract.FlowID}
+		if got, ok := entityruntime.ResolveForActor(source, actor); ok {
+			t.Errorf("unknown actor %q borrowed entity contract: %#v", id, got)
+		}
+		if _, ok := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))["save_validation_case_business_brief"]; ok {
+			t.Errorf("unknown actor %q borrowed generated write tool", id)
+		}
+		caps := exec.ToolCapabilitiesForActor(actor, []string{"save_validation_case_business_brief"}, nil)
+		if cap, ok := caps.Capability("save_validation_case_business_brief"); !ok || cap.Callable || cap.Visible {
+			t.Errorf("unknown actor %q received write capability: %#v", id, cap)
+		}
 	}
 }
 

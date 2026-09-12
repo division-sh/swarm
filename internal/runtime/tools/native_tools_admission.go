@@ -189,8 +189,7 @@ func workspaceCapabilityDenial(ctx context.Context, actor models.AgentConfig, re
 }
 
 func admitWebSearchFallback(ctx context.Context, actor models.AgentConfig, decision NativeToolAdmissionDecision, opts NativeToolAdmissionOptions) NativeToolAdmissionDecision {
-	flowID := emitActorFlowID(opts.Source, actor, "")
-	cfg, err := resolveWebSearchProviderConfigFromSourceForFlow(opts.Source, flowID)
+	cfg, err := resolveWebSearchProviderConfigForActor(opts.Source, actor)
 	if err != nil {
 		decision.DenialReason = err.Error()
 		return decision
@@ -221,8 +220,7 @@ func validateWebSearchCredential(ctx context.Context, source semanticview.Source
 	if key == "" {
 		return fmt.Errorf("web_search provider %q requires credentials_key", strings.TrimSpace(cfg.Provider))
 	}
-	flowID := emitActorFlowID(source, actor, "")
-	storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
+	storeKey, mapped := semanticview.CredentialStoreKeyForActor(source, actor.ID, key)
 	if mapped && storeKey == "" {
 		return fmt.Errorf("credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
 	}

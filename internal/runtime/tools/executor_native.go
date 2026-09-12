@@ -485,7 +485,23 @@ func (e *Executor) resolveWebSearchProviderConfig(actor models.AgentConfig) (web
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	flowID := emitActorFlowID(source, actor, "")
+	return resolveWebSearchProviderConfigForActor(source, actor)
+}
+
+func resolveWebSearchProviderConfigForActor(source semanticview.Source, actor models.AgentConfig) (webSearchProviderConfig, error) {
+	flowID := strings.TrimSpace(actor.FlowID)
+	if projection, ok := semanticview.ResolveAgentContractProjection(source, actor); ok {
+		flowID = projection.OwnerFlowID
+	} else if flowID == "" && strings.TrimSpace(actor.CanonicalFlowPath()) != "" {
+		return webSearchProviderConfig{}, fmt.Errorf("web_search policy requires an exact declaration or explicit flow_id; flow path is not declaration authority")
+	}
+	// Native capability admission owns permission. An independently configured
+	// runtime actor may select policy by explicit flow, never by a path guess.
+	if flowID != "" && source != nil {
+		if _, ok := source.FlowScopeByID(flowID); !ok {
+			return webSearchProviderConfig{}, fmt.Errorf("web_search policy references unknown flow %q", flowID)
+		}
+	}
 	return resolveWebSearchProviderConfigFromSourceForFlow(source, flowID)
 }
 

@@ -326,28 +326,3 @@ func (e *Executor) emitTargetEvidenceForActor(ctx context.Context, actor models.
 	}
 	return runtimepinrouting.PersistedStructuralParent{}, currentDeliveryOwner, nil
 }
-
-func emitActorFlowID(source semanticview.Source, actor models.AgentConfig, flowInstance string) string {
-	if source == nil {
-		return ""
-	}
-	if projection, ok := semanticview.ResolveAgentContractProjection(source, actor); ok {
-		if flowID := strings.TrimSpace(projection.OwnerFlowID); flowID != "" {
-			return flowID
-		}
-	}
-	actorFlow := strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
-	if actorFlow == "" {
-		actorFlow = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	}
-	for _, scope := range source.FlowScopes() {
-		path := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if path == "" {
-			continue
-		}
-		if actorFlow == path || strings.HasPrefix(actorFlow, path+"/") {
-			return strings.TrimSpace(scope.ID)
-		}
-	}
-	return ""
-}

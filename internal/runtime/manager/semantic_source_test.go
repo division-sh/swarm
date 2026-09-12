@@ -32,9 +32,19 @@ func TestDefaultManagerAgentID_UsesInjectedSemanticSource(t *testing.T) {
 	})
 	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{SemanticSource: source})
 
-	got := am.defaultManagerAgentID(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "worker-1", Role: "worker", FlowID: "ops"})
+	got := am.defaultManagerAgentID(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "worker", Role: "unrelated", FlowID: "ops"})
 	if got != "control-injected" {
 		t.Fatalf("defaultManagerAgentID = %q, want control-injected", got)
+	}
+	for _, id := range []string{"worker-1", ""} {
+		actor := runtimeactors.AgentConfig{ID: id, Role: "worker", FlowID: "ops"}
+		if got := am.defaultManagerAgentID(actor); got != "" {
+			t.Errorf("unknown actor %q borrowed manager %q", id, got)
+		}
+		actor.ManagerFallback = "explicit-manager"
+		if got := am.defaultManagerAgentID(actor); got != "explicit-manager" {
+			t.Errorf("independent explicit configuration lost: %q", got)
+		}
 	}
 }
 

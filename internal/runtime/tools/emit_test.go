@@ -171,15 +171,20 @@ func TestEmitRegistry_KeepsRuntimeSourcesIsolated(t *testing.T) {
 	}
 }
 
-func TestEmitSchemaForEventType_UsesOnlyUniqueScopedLocalMatch(t *testing.T) {
+func TestEmitSchemaForEventType_RequiresExactScopedName(t *testing.T) {
 	scanSchema := EmitSchema{Description: "scan"}
 	reviewSchema := EmitSchema{Description: "review"}
 
 	schema, ok := emitSchemaForEventType(map[string]EmitSchema{
 		"review/scan.requested": scanSchema,
-	}, "review/inst-1/scan.requested")
+	}, "review/scan.requested")
 	if !ok || schema.Description != "scan" {
-		t.Fatalf("unique scoped schema = %#v, %v; want scan,true", schema, ok)
+		t.Fatalf("exact scoped schema = %#v, %v; want scan,true", schema, ok)
+	}
+	for _, name := range []string{"review/inst-1/scan.requested", "scan.requested"} {
+		if _, ok := emitSchemaForEventType(map[string]EmitSchema{"review/scan.requested": scanSchema}, name); ok {
+			t.Errorf("unique schema granted a local/instance alias: %q", name)
+		}
 	}
 
 	_, ok = emitSchemaForEventType(map[string]EmitSchema{
