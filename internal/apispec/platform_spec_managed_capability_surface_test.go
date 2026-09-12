@@ -12,7 +12,7 @@ func TestPlatformSpecManagedCapabilitySurfaceCandidateDefinitionOwner(t *testing
 	owner := mustMappingValue(t, scope, "candidate_definition_owner")
 
 	for key, fragments := range map[string][]string{
-		"emit_definition_owner": {"EmitRegistry.GenerateEmitToolsForActor", "GenerateEmitToolsForRole", "no emit_events"},
+		"emit_definition_owner": {"EmitRegistry.GenerateEmitToolsForActor", "no role/global fallback", "no emit_events", "cannot fall through to generic tools entries"},
 		"live_catalog_owner":    {"Executor.ToolDefinitionsForActorInContext", "ToolDefinitionsForActor", "context-free fallback"},
 		"transport_rule":        {"consume the executor catalog unchanged", "preserve executor order and cardinality", "duplicate canonical definition names fail closed", "MUST NOT merge", "side-channel"},
 	} {

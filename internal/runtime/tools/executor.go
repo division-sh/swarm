@@ -455,7 +455,7 @@ func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName 
 			}
 		}
 	}
-	decision := classifyToolAuthorization(actor, toolName, e.authority, e.emitRegistry)
+	decision := classifyToolAuthorization(actor, toolName, e.emitRegistry)
 	if decision.allowed {
 		return decision
 	}

@@ -1,7 +1,6 @@
 package tools
 
 import (
-	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
@@ -15,13 +14,20 @@ type toolAuthorizationDecision struct {
 	constrained bool
 }
 
-func classifyToolAuthorization(actor models.AgentConfig, toolName string, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) toolAuthorizationDecision {
+func classifyToolAuthorization(actor models.AgentConfig, toolName string, emitRegistry *EmitRegistry) toolAuthorizationDecision {
 	toolName = normalizeNativeToolName(toolName)
 	decision := toolAuthorizationDecision{
 		ownership: toolOwnershipForName(toolName),
 		class:     toolAuthorizationDenied,
 	}
 	if hitlIdentityReferenceError(toolName, "tool authorization") != nil {
+		return decision
+	}
+	if toolidentity.IsEmitToolName(toolName) {
+		if emitRegistry != nil && emitRegistry.IsEmitToolAllowedForActor(actor, toolName) {
+			decision.class = toolAuthorizationEmitAllowed
+			decision.allowed = true
+		}
 		return decision
 	}
 	if IsUniversal(toolName) {
@@ -34,11 +40,6 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string, provid
 		if agentHasPermission(actor, requiredPerm) {
 			decision.allowed = true
 		}
-		return decision
-	}
-	if toolEmitAllowed(actor, toolName, provider, emitRegistry) {
-		decision.class = toolAuthorizationEmitAllowed
-		decision.allowed = true
 		return decision
 	}
 	if _, ok, _ := nativeFallbackExecutionTool(actor, toolName); ok {
@@ -54,13 +55,6 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string, provid
 		return decision
 	}
 	return decision
-}
-
-func toolEmitAllowed(actor models.AgentConfig, toolName string, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) bool {
-	if emitRegistry == nil {
-		emitRegistry = NewEmitRegistry(nil, provider)
-	}
-	return emitRegistry.IsEmitToolAllowedForRole(actor.Role, toolName) || emitRegistry.IsEmitToolAllowedForActor(actor, toolName)
 }
 
 func toolKindPolicy(toolName string) toolcapabilities.ToolKind {

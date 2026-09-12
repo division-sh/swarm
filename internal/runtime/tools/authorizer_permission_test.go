@@ -7,7 +7,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
@@ -181,7 +180,8 @@ func TestValidateAgentPermissions_AcceptsToolDefinedExtensionPermission(t *testi
 }
 
 func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
-	registry := NewEmitRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	registry := NewEmitRegistry(wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{"coordinator-1": {ID: "coordinator-1", EmitEvents: []string{"coord.done"}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"coord.done": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -193,7 +193,7 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 		},
 	}), nil)
 	auth := NewToolAuthorizer(nil, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
-		return classifyToolAuthorization(actor, toolName, nil, registry)
+		return classifyToolAuthorization(actor, toolName, registry)
 	})
 	err := auth.Authorize(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -206,24 +206,27 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 }
 
 func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
-	registry := NewEmitRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"discovery/category.assessed": {
-				Payload: runtimecontracts.EventPayloadSpec{
-					Properties: map[string]runtimecontracts.EventFieldSpec{
-						"entity_id": {Type: "string"},
-					},
+	bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{{id: "discovery", mode: runtimecontracts.FlowModeStatic}}, nil)
+	bundle.FlowTree.ByID["discovery"].Events = map[string]runtimecontracts.EventCatalogEntry{
+		"category.assessed": {
+			Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{
+					"entity_id": {Type: "string"},
 				},
 			},
 		},
-	}), nil)
+	}
+	registry := NewEmitRegistry(toolTestSourceWithDeclaredAgent(t, bundle, "market-research-agent", "discovery", "category.assessed"), nil)
 	auth := NewToolAuthorizer(nil, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
-		return classifyToolAuthorization(actor, toolName, nil, registry)
+		return classifyToolAuthorization(actor, toolName, registry)
 	})
 	err := auth.Authorize(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
-		EmitEvents:    []string{"discovery/category.assessed"},
+		Identity:      toolTestAgentIdentity(t, "market-research-agent", "discovery", "discovery"),
+		FlowID:        "discovery",
+		FlowPath:      "discovery",
+		EmitEvents:    []string{"category.assessed"},
 	}, "emit_category_assessed")
 	if err != nil {
 		t.Fatalf("expected scoped configured emit tool to be allowed: %v", err)
@@ -231,7 +234,8 @@ func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
 }
 
 func TestToolAuthorizer_AllowsMCPPrefixedEmitToolAlias(t *testing.T) {
-	registry := NewEmitRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	registry := NewEmitRegistry(wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{"market-research-agent": {ID: "market-research-agent", EmitEvents: []string{"market_research.scan_complete"}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"market_research.scan_complete": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -243,7 +247,7 @@ func TestToolAuthorizer_AllowsMCPPrefixedEmitToolAlias(t *testing.T) {
 		},
 	}), nil)
 	auth := NewToolAuthorizer(nil, func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
-		return classifyToolAuthorization(actor, toolName, nil, registry)
+		return classifyToolAuthorization(actor, toolName, registry)
 	})
 	err := auth.Authorize(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
