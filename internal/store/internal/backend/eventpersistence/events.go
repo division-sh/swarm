@@ -116,6 +116,9 @@ func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, t
 }
 
 func (s *EventPostgresOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	if admitted.Event().AdmissionClass() == events.EventAdmissionInheritedFanOut {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("inherited fan-out origin requires named chunk publication")
+	}
 	return s.appendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
 }
 
@@ -218,7 +221,7 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if duplicate {
-		return runtimebus.EventAppendExactDuplicate, nil
+		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 	}
 	var recordExec eventrecordpostgres.Execer = s.backend
 	if tx != nil {
@@ -257,7 +260,7 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 				return runtimebus.EventAppendOutcomeUnknown, duplicateErr
 			}
 			if duplicate {
-				return runtimebus.EventAppendExactDuplicate, nil
+				return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 			}
 		}
 		return runtimebus.EventAppendOutcomeUnknown, ensureErr
@@ -281,7 +284,7 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 		if !duplicate {
 			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("append event: event_id=%s was not inserted", wantIdentity.EventID)
 		}
-		return runtimebus.EventAppendExactDuplicate, nil
+		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 	}
 	if admitted.RunDisposition() != events.AdmittedRunless {
 		if err := s.RunLifecyclePostgresOwner.SyncCountersTx(ctx, tx, story, wantIdentity.RunID); err != nil {

@@ -190,7 +190,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.effectPostgresOwner = effectOwner
-	deliveryOwner, err := storedelivery.NewDeliveryPostgresOwner(deadLetterOwner, runLifecycle)
+	deliveryOwner, err := storedelivery.NewDeliveryPostgresOwner(deadLetterOwner, runLifecycle, agentOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +241,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	}
 	store.operatorRunPostgres = operatorRun
 	if err := agentOwner.BindDirectiveDependencies(eventOwner, pipelineOwner); err != nil {
+		return nil, err
+	}
+	if err := deliveryOwner.BindReceiverTargetPersistence(pipelineOwner); err != nil {
 		return nil, err
 	}
 	if err := effectOwner.BindProviderDrainDirectives(agentOwner); err != nil {
@@ -442,7 +445,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.effectSQLiteOwner = effectOwner
-	deliveryOwner, err := storedelivery.NewDeliverySQLiteOwner(deadLetterOwner, runLifecycle, store.now)
+	deliveryOwner, err := storedelivery.NewDeliverySQLiteOwner(deadLetterOwner, runLifecycle, agentOwner, store.now)
 	if err != nil {
 		return nil, err
 	}
@@ -493,6 +496,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	}
 	store.operatorRunSQLite = operatorRun
 	if err := agentOwner.BindDirectiveDependencies(eventOwner, pipelineOwner); err != nil {
+		return nil, err
+	}
+	if err := deliveryOwner.BindReceiverTargetPersistence(pipelineOwner); err != nil {
 		return nil, err
 	}
 	if err := effectOwner.BindProviderDrainDirectives(agentOwner); err != nil {

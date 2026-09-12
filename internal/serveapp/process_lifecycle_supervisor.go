@@ -8,10 +8,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
 
 // processLifecycleSupervisor owns only serve-process runtime attachment and
@@ -40,6 +42,9 @@ type processLifecycleSupervisor struct {
 	resetConverged            bool
 	resetStartup              bool
 	resetRecoveredProjections []destructivereset.SourceProjection
+	selected                  *storeselected.RunFork
+	selectedResetPredecessor  *storeselected.RunFork
+	selectedProcess           *worklifetime.Process
 	resetContainerRuntime     interface {
 		destructivereset.ManagedContainerRuntime
 		destructivereset.ManagedContainerInventoryReader
@@ -122,6 +127,7 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	}
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	selectedErr := s.retireSelectedContextsLocked(ctx)
 	settlementErr := s.settlePendingSourceSetTransitionLocked(ctx)
 	if settlementErr != nil {
 		ownershipTerminal := false
@@ -129,7 +135,7 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 			_, ownershipTerminal = s.processCapability.TerminalResult()
 		}
 		if !ownershipTerminal {
-			return settlementErr
+			return errors.Join(selectedErr, settlementErr)
 		}
 	}
 	s.mu.RLock()
@@ -137,7 +143,7 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	bundleHash := s.currentSourceArtifactFact.BundleHash()
 	current := s.currentRT
 	s.mu.RUnlock()
-	var shutdownErr error
+	shutdownErr := selectedErr
 	if len(s.resetRequests) > 0 {
 		s.mu.Lock()
 		s.resetting = true
@@ -160,9 +166,9 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 			shutdownErr = s.releaseResetProjections(ctx)
 		}
 	} else if manager != nil && bundleHash != "" {
-		shutdownErr = manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnavailable, opts).ShutdownErr
+		shutdownErr = errors.Join(shutdownErr, manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnavailable, opts).ShutdownErr)
 	} else if current != nil {
-		shutdownErr = s.stopRuntime(ctx, current, opts)
+		shutdownErr = errors.Join(shutdownErr, s.stopRuntime(ctx, current, opts))
 	}
 	s.mu.Lock()
 	s.currentRT = nil
@@ -172,6 +178,21 @@ func (s *processLifecycleSupervisor) ShutdownProcessWithOptions(ctx context.Cont
 	}
 	s.mu.Unlock()
 	return errors.Join(settlementErr, shutdownErr)
+}
+
+// Final store release consults the supervisor, not a captured family from boot.
+// A failed candidate remains selected here until its join succeeds.
+func (s *processLifecycleSupervisor) RetireSelectedContexts(ctx context.Context) error {
+	s.operationMu.Lock()
+	defer s.operationMu.Unlock()
+	return s.retireSelectedContextsLocked(ctx)
+}
+
+func (s *processLifecycleSupervisor) retireSelectedContextsLocked(ctx context.Context) error {
+	if s.selected == nil {
+		return nil
+	}
+	return s.selected.RetireSelectedContexts(ctx)
 }
 
 func (s *processLifecycleSupervisor) settlePendingSourceSetTransition(ctx context.Context) error {

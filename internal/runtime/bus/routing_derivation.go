@@ -33,6 +33,27 @@ type Subscriber struct {
 
 func (s Subscriber) RouteSourceCode() string { return s.routeSource.code() }
 
+// HandlerForEvent exposes the same admitted handler projection used by live
+// route planning. Callers must not localize the event independently.
+func (s Subscriber) HandlerForEvent(eventType events.EventType) runtimepipeline.DeliveryTargetHandler {
+	return routedSubscriberTargetHandler(s, eventType)
+}
+
+func independentPubsubSubscriber(s Subscriber) bool {
+	return s.routeSource != subscriberRouteSourceConnectRoutePlan
+}
+
+func (rt *RouteTable) ResolveIndependentPubsubForRun(runID, eventType string) []Subscriber {
+	resolved := rt.ResolveForRun(runID, eventType)
+	out := make([]Subscriber, 0, len(resolved))
+	for _, subscriber := range resolved {
+		if independentPubsubSubscriber(subscriber) {
+			out = append(out, subscriber)
+		}
+	}
+	return out
+}
+
 type subscriberRouteSource uint8
 
 const (
@@ -288,6 +309,12 @@ func (rt *RouteTable) EvaluateConnectSource(runID string, sourceEvent runtimepin
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	return rt.connectGraph.EvaluateSourceRecipients(sourceEvent, rt.connectRecipientAdmissionsForRunLocked(runID))
+}
+
+// EvaluateConnectPlan uses the same run-scoped registrations and evaluator as
+// live delivery planning; targets must come from canonical materialization.
+func (rt *RouteTable) EvaluateConnectPlan(runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
+	return rt.evaluateConnectPlan(runID, plan, targets)
 }
 
 func (rt *RouteTable) evaluateConnectPlan(runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {

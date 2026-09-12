@@ -6,6 +6,44 @@ import (
 
 const testRunID = "00000000-0000-0000-0000-000000000001"
 
+func TestExecutionCoordinatesPreserveRootAndScopedIdentity(t *testing.T) {
+	name, err := DeclaredName("worker", "swarm://review/worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := New(testRunID, name, RootRoute())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, runID := range []string{testRunID, "00000000-0000-0000-0000-000000000002"} {
+		current := root
+		current.RunID = runID
+		scope, instance, path, err := current.ExecutionCoordinates()
+		if err != nil || scope != runID || instance != runID || path != runID || current.Route != RootRoute() {
+			t.Fatalf("root coordinates = %q %q %q: %v; identity=%+v", scope, instance, path, err, current)
+		}
+	}
+	route, err := PresentRoute("nested/review", "attempt-1", "nested/review/attempt-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	present, err := New(testRunID, name, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, instance, path, err := present.ExecutionCoordinates()
+	if err != nil || scope != "nested/review" || instance != "attempt-1" || path != "nested/review/attempt-1" || present.Route != route {
+		t.Fatalf("scoped coordinates = %q %q %q: %v", scope, instance, path, err)
+	}
+	corrupt := root
+	corrupt.Route.InstancePath = "nested/review/attempt-1"
+	for _, invalid := range []Identity{{}, {RunID: testRunID, Name: name}, corrupt} {
+		if _, _, _, err := invalid.ExecutionCoordinates(); err == nil {
+			t.Fatalf("accepted invalid coordinates: %+v", invalid)
+		}
+	}
+}
+
 func TestIdentityRequiresExplicitRoutePresence(t *testing.T) {
 	name, err := DeclaredName("reviewer", "swarm://review/reviewer")
 	if err != nil {

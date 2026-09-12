@@ -19,6 +19,22 @@ type AgentExecutionSemanticScope struct {
 	hasFlow     bool
 }
 
+// ResolveAgentPlanExecutionSemanticScope resolves a run-bound plan through the
+// same declaration and route checks as a configured actor, without launching it.
+func ResolveAgentPlanExecutionSemanticScope(source Source, runID string, plan agentidentity.Plan) (AgentExecutionSemanticScope, error) {
+	identity, err := plan.Live(runID)
+	if err != nil {
+		return AgentExecutionSemanticScope{}, err
+	}
+	actor := models.AgentConfig{ID: identity.AgentID(), Identity: identity, FlowPath: identity.FlowInstance()}
+	declaration, ok := ResolveAgentDeclaration(source, actor)
+	if !ok {
+		return AgentExecutionSemanticScope{}, fmt.Errorf("agent plan has no exact declaration for %s", identity.Description())
+	}
+	actor.FlowID = declaration.OwnerFlowID
+	return ResolveAgentExecutionSemanticScope(source, actor)
+}
+
 func ResolveAgentExecutionSemanticScope(source Source, actor models.AgentConfig) (AgentExecutionSemanticScope, error) {
 	if source == nil {
 		return AgentExecutionSemanticScope{}, fmt.Errorf("agent execution semantic scope requires semantic source")

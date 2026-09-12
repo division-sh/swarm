@@ -14,7 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -57,8 +57,9 @@ const (
 )
 
 type RunForkActivateRequest struct {
+	OriginalLoopCarriage              semanticview.OriginalLoopCarriage `json:"-"`
 	ForkRunID                         string
-	ConfirmSourceFreeze               bool
+	AllowSourceFreeze                 bool
 	HistoricalReplayExecutionAdmitter RunForkHistoricalReplayExecutionAdmitter
 }
 
@@ -143,77 +144,11 @@ type RunForkContractFrontierEvent struct {
 	RuntimeEventOwners      []string                           `json:"runtime_event_owners,omitempty"`
 	WorkflowNodeSubscribers []string                           `json:"workflow_node_subscribers,omitempty"`
 	DerivedRecipients       []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
+	// Historical source routes remain evidence, never selected recipient authority.
+	HistoricalDeliveryRoutes []events.DeliveryRoute `json:"historical_delivery_routes,omitempty"`
 }
 
-type RunForkContractFrontierRecipient struct {
-	Recipient   events.DeliveryRecipient `json:"-"`
-	Path        string                   `json:"path,omitempty"`
-	routeSource string
-	AgentPlan   agentidentity.Plan `json:"agent_plan,omitempty"`
-}
-
-func NewRunForkContractFrontierRecipient(recipient events.DeliveryRecipient, path, routeSource string, plan agentidentity.Plan) RunForkContractFrontierRecipient {
-	if recipient.Empty() {
-		return RunForkContractFrontierRecipient{}
-	}
-	return RunForkContractFrontierRecipient{
-		Recipient: recipient, Path: strings.TrimSpace(path), routeSource: strings.TrimSpace(routeSource),
-		AgentPlan: plan.Normalize(),
-	}
-}
-
-func (r RunForkContractFrontierRecipient) RouteSourceCode() string { return r.routeSource }
-
-type runForkContractFrontierRecipientWire struct {
-	SubscriberType string             `json:"subscriber_type"`
-	SubscriberID   string             `json:"subscriber_id"`
-	Path           string             `json:"path,omitempty"`
-	RouteSource    string             `json:"route_source,omitempty"`
-	AgentPlan      agentidentity.Plan `json:"agent_plan,omitempty"`
-}
-
-func (r RunForkContractFrontierRecipient) MarshalJSON() ([]byte, error) {
-	if r.Recipient.Empty() {
-		return nil, fmt.Errorf("run-fork contract frontier recipient is required")
-	}
-	return json.Marshal(runForkContractFrontierRecipientWire{
-		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), Path: strings.TrimSpace(r.Path),
-		RouteSource: r.RouteSourceCode(), AgentPlan: r.AgentPlan.Normalize(),
-	})
-}
-
-func (r *RunForkContractFrontierRecipient) UnmarshalJSON(raw []byte) error {
-	if r == nil {
-		return fmt.Errorf("run-fork contract frontier recipient destination is nil")
-	}
-	var wire runForkContractFrontierRecipientWire
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil {
-		return fmt.Errorf("decode run-fork contract frontier recipient: %w", err)
-	}
-	var (
-		recipient events.DeliveryRecipient
-		err       error
-	)
-	switch strings.TrimSpace(wire.SubscriberType) {
-	case "node":
-		var node runtimeidentity.ExecutableNode
-		node, err = runtimeidentity.ParseExecutableNodeKey(wire.SubscriberID)
-		if err == nil {
-			recipient, err = events.NewNodeDeliveryRecipient(node)
-		}
-	case "agent":
-		recipient, err = events.NewAgentDeliveryRecipient(wire.SubscriberID)
-	default:
-		err = fmt.Errorf("recipient kind is invalid")
-	}
-	if err != nil {
-		return fmt.Errorf("decode run-fork contract frontier recipient: %w", err)
-	}
-	*r = NewRunForkContractFrontierRecipient(recipient, wire.Path, wire.RouteSource, wire.AgentPlan)
-	return nil
-}
+type RunForkContractFrontierRecipient = forkrecipient.Evidence
 
 func RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item RunForkPendingWork) bool {
 	if strings.TrimSpace(item.Classification) != RunForkPendingClassificationDeadLetter {
@@ -249,7 +184,6 @@ type RunForkDeliveryEventReplayResult struct {
 const (
 	RunForkMaterializedEntitySnapshotMetadataOwner = "runtime.run_fork.materialized_entity_snapshot_metadata"
 
-	RunForkMaterializedEntitySnapshotMetadataSourceEvent       = "source_event"
 	RunForkMaterializedEntitySnapshotMetadataSourceEntityState = "source_entity_state"
 )
 
@@ -267,6 +201,7 @@ const (
 )
 
 type RunForkMaterializeRequest struct {
+	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`
 	SourceRunID             string
 	At                      string
 	ContractSelection       *RunForkContractSelection
@@ -331,6 +266,7 @@ type RunForkPlan struct {
 	RouteHistory              RunForkRouteHistoryProjection     `json:"route_history"`
 	historicalRevision        int64
 	historicalEventIDs        []string
+	historicalInputs          map[string]InputPublication
 }
 
 // RunForkFanOutObligation is the exact semantic fan-out progress visible at a
@@ -473,24 +409,26 @@ type RunForkEntityState struct {
 }
 
 type RunForkPendingWork struct {
-	EventID         string               `json:"event_id"`
-	EventName       string               `json:"event_name"`
-	FlowInstance    string               `json:"flow_instance,omitempty"`
-	RoutingSource   events.RoutingSource `json:"routing_source"`
-	DeliveryRoute   events.DeliveryRoute `json:"delivery_route,omitempty"`
-	DeliveryID      string               `json:"delivery_id,omitempty"`
-	SubscriberType  string               `json:"subscriber_type,omitempty"`
-	SubscriberID    string               `json:"subscriber_id,omitempty"`
-	Classification  string               `json:"classification"`
-	Status          string               `json:"status,omitempty"`
-	RetryCount      int                  `json:"retry_count,omitempty"`
-	ReasonCode      string               `json:"reason_code,omitempty"`
-	ActiveSessionID string               `json:"active_session_id,omitempty"`
-	CreatedAt       time.Time            `json:"created_at"`
-	StartedAt       *time.Time           `json:"started_at,omitempty"`
-	DeliveredAt     *time.Time           `json:"delivered_at,omitempty"`
-	ReceiptOutcome  string               `json:"receipt_outcome,omitempty"`
-	ReceiptAt       *time.Time           `json:"receipt_at,omitempty"`
+	TerminalBarrierHistory *TerminalBarrierHistory `json:"terminal_barrier_history,omitempty"`
+	ClaimVersion           int64                   `json:"claim_version,omitempty"`
+	EventID                string                  `json:"event_id"`
+	EventName              string                  `json:"event_name"`
+	FlowInstance           string                  `json:"flow_instance,omitempty"`
+	RoutingSource          events.RoutingSource    `json:"routing_source"`
+	DeliveryRoute          events.DeliveryRoute    `json:"delivery_route,omitempty"`
+	DeliveryID             string                  `json:"delivery_id,omitempty"`
+	SubscriberType         string                  `json:"subscriber_type,omitempty"`
+	SubscriberID           string                  `json:"subscriber_id,omitempty"`
+	Classification         string                  `json:"classification"`
+	Status                 string                  `json:"status,omitempty"`
+	RetryCount             int                     `json:"retry_count,omitempty"`
+	ReasonCode             string                  `json:"reason_code,omitempty"`
+	ActiveSessionID        string                  `json:"active_session_id,omitempty"`
+	CreatedAt              time.Time               `json:"created_at"`
+	StartedAt              *time.Time              `json:"started_at,omitempty"`
+	DeliveredAt            *time.Time              `json:"delivered_at,omitempty"`
+	ReceiptOutcome         string                  `json:"receipt_outcome,omitempty"`
+	ReceiptAt              *time.Time              `json:"receipt_at,omitempty"`
 }
 
 type RunForkUnsupportedBlocker struct {
@@ -624,6 +562,7 @@ type RunForkSelectedContractBindingRequest struct {
 
 type RunForkSelectedContractBinding struct {
 	Owner             string                   `json:"owner"`
+	BindingID         string                   `json:"binding_id"`
 	ForkRunID         string                   `json:"fork_run_id"`
 	SourceRunID       string                   `json:"source_run_id"`
 	ForkEventID       string                   `json:"fork_event_id"`
@@ -816,10 +755,11 @@ type RunForkSelectedContractDynamicTopologyProof struct {
 }
 
 type RunForkSelectedContractRouteEvent struct {
-	SourceEventID     string                             `json:"source_event_id,omitempty"`
-	EventName         string                             `json:"event_name"`
-	DerivedRecipients []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
-	Disposition       string                             `json:"disposition"`
+	SourceEventID            string                             `json:"source_event_id,omitempty"`
+	EventName                string                             `json:"event_name"`
+	DerivedRecipients        []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
+	HistoricalDeliveryRoutes []events.DeliveryRoute             `json:"historical_delivery_routes,omitempty"`
+	Disposition              string                             `json:"disposition"`
 }
 
 type RunForkSelectedContractRecipientPlanning struct {
@@ -991,71 +931,72 @@ type RunForkHistoricalReplayExecutableWork struct {
 	Classification   string `json:"classification"`
 }
 
-func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmission) (int, []string, string) {
-	type routeRecipient struct {
-		SubscriberType string `json:"subscriber_type,omitempty"`
-		SubscriberID   string `json:"subscriber_id,omitempty"`
-		Path           string `json:"path,omitempty"`
-		RouteSource    string `json:"route_source,omitempty"`
-	}
+func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmission) (int, []string, string, error) {
 	type frontierEvent struct {
-		SourceEventID           string           `json:"source_event_id,omitempty"`
-		EventName               string           `json:"event_name,omitempty"`
-		SourceClassifications   []string         `json:"source_classifications,omitempty"`
-		SourceFlowInstances     []string         `json:"source_flow_instances,omitempty"`
-		SourceSubscriberTypes   []string         `json:"source_subscriber_types,omitempty"`
-		SourceSubscriberIDs     []string         `json:"source_subscriber_ids,omitempty"`
-		RuntimeEventOwners      []string         `json:"runtime_event_owners,omitempty"`
-		WorkflowNodeSubscribers []string         `json:"workflow_node_subscribers,omitempty"`
-		DerivedRecipients       []routeRecipient `json:"derived_recipients,omitempty"`
+		SourceEventID             string   `json:"source_event_id,omitempty"`
+		EventName                 string   `json:"event_name,omitempty"`
+		SourceClassifications     []string `json:"source_classifications,omitempty"`
+		SourceFlowInstances       []string `json:"source_flow_instances,omitempty"`
+		SourceSubscriberTypes     []string `json:"source_subscriber_types,omitempty"`
+		SourceSubscriberIDs       []string `json:"source_subscriber_ids,omitempty"`
+		RuntimeEventOwners        []string `json:"runtime_event_owners,omitempty"`
+		WorkflowNodeSubscribers   []string `json:"workflow_node_subscribers,omitempty"`
+		DerivedRecipients         []string `json:"derived_recipients,omitempty"`
+		HistoricalRouteIdentities []string `json:"historical_route_identities,omitempty"`
 	}
 
-	events := make([]frontierEvent, 0, len(frontier.FrontierEvents))
+	encodedEvents := make([]json.RawMessage, 0, len(frontier.FrontierEvents))
 	ids := map[string]struct{}{}
-	for _, event := range frontier.FrontierEvents {
+	for index, event := range frontier.FrontierEvents {
 		sourceEventID := strings.TrimSpace(event.SourceEventID)
 		eventName := strings.TrimSpace(event.EventName)
 		if sourceEventID != "" {
 			ids[sourceEventID] = struct{}{}
 		}
-		recipients := make([]routeRecipient, 0, len(event.DerivedRecipients))
-		for _, recipient := range event.DerivedRecipients {
-			recipients = append(recipients, routeRecipient{
-				SubscriberType: recipient.Recipient.Code(),
-				SubscriberID:   recipient.Recipient.ID(),
-				Path:           strings.TrimSpace(recipient.Path),
-				RouteSource:    recipient.RouteSourceCode(),
-			})
+		selected, err := forkrecipient.CanonicalSet(event.DerivedRecipients)
+		if err != nil {
+			return 0, nil, "", fmt.Errorf("frontier event %d selected recipients: %w", index, err)
 		}
-		sort.Slice(recipients, func(i, j int) bool {
-			if recipients[i].SubscriberType != recipients[j].SubscriberType {
-				return recipients[i].SubscriberType < recipients[j].SubscriberType
+		recipients := make([]string, 0, len(selected))
+		for _, recipient := range selected {
+			fingerprint, err := recipient.Fingerprint()
+			if err != nil {
+				return 0, nil, "", fmt.Errorf("frontier event %d selected recipient fingerprint: %w", index, err)
 			}
-			if recipients[i].SubscriberID != recipients[j].SubscriberID {
-				return recipients[i].SubscriberID < recipients[j].SubscriberID
+			recipients = append(recipients, fingerprint)
+		}
+		if err := events.ValidateDeliveryRoutes(event.HistoricalDeliveryRoutes); err != nil {
+			return 0, nil, "", fmt.Errorf("frontier event %d historical routes: %w", index, err)
+		}
+		historical := make([]string, 0, len(event.HistoricalDeliveryRoutes))
+		for routeIndex, route := range event.HistoricalDeliveryRoutes {
+			identity, err := route.Identity()
+			if err != nil {
+				return 0, nil, "", fmt.Errorf("frontier event %d historical route %d: %w", index, routeIndex, err)
 			}
-			if recipients[i].Path != recipients[j].Path {
-				return recipients[i].Path < recipients[j].Path
-			}
-			return recipients[i].RouteSource < recipients[j].RouteSource
+			historical = append(historical, events.EncodeDeliveryRouteIdentity(identity))
+		}
+		sort.Strings(historical)
+		encoded, err := json.Marshal(frontierEvent{
+			SourceEventID:             sourceEventID,
+			EventName:                 eventName,
+			SourceClassifications:     sortedTrimmedStrings(event.SourceClassifications),
+			SourceFlowInstances:       sortedTrimmedStrings(event.SourceFlowInstances),
+			SourceSubscriberTypes:     sortedTrimmedStrings(event.SourceSubscriberTypes),
+			SourceSubscriberIDs:       sortedTrimmedStrings(event.SourceSubscriberIDs),
+			RuntimeEventOwners:        sortedTrimmedStrings(event.RuntimeEventOwners),
+			WorkflowNodeSubscribers:   sortedTrimmedStrings(event.WorkflowNodeSubscribers),
+			DerivedRecipients:         recipients,
+			HistoricalRouteIdentities: historical,
 		})
-		events = append(events, frontierEvent{
-			SourceEventID:           sourceEventID,
-			EventName:               eventName,
-			SourceClassifications:   sortedTrimmedStrings(event.SourceClassifications),
-			SourceFlowInstances:     sortedTrimmedStrings(event.SourceFlowInstances),
-			SourceSubscriberTypes:   sortedTrimmedStrings(event.SourceSubscriberTypes),
-			SourceSubscriberIDs:     sortedTrimmedStrings(event.SourceSubscriberIDs),
-			RuntimeEventOwners:      sortedTrimmedStrings(event.RuntimeEventOwners),
-			WorkflowNodeSubscribers: sortedTrimmedStrings(event.WorkflowNodeSubscribers),
-			DerivedRecipients:       recipients,
-		})
+		if err != nil {
+			return 0, nil, "", fmt.Errorf("encode frontier event %d: %w", index, err)
+		}
+		encodedEvents = append(encodedEvents, encoded)
 	}
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].SourceEventID != events[j].SourceEventID {
-			return events[i].SourceEventID < events[j].SourceEventID
-		}
-		return events[i].EventName < events[j].EventName
+	// Include the complete event projection in ordering, including tied event IDs.
+	sort.Slice(encodedEvents, func(i, j int) bool {
+		return string(encodedEvents[i]) < string(encodedEvents[j])
 	})
 
 	sourceEventIDs := make([]string, 0, len(ids))
@@ -1064,28 +1005,17 @@ func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmi
 	}
 	sort.Strings(sourceEventIDs)
 
-	payload, _ := json.Marshal(events)
+	payload, err := json.Marshal(encodedEvents)
+	if err != nil {
+		return 0, nil, "", fmt.Errorf("encode frontier evidence: %w", err)
+	}
 	sum := sha256.Sum256(payload)
-	return len(frontier.FrontierEvents), sourceEventIDs, hex.EncodeToString(sum[:])
+	return len(frontier.FrontierEvents), sourceEventIDs, hex.EncodeToString(sum[:]), nil
 }
 
 const (
 	RunForkSelectedContractExecutionLineageOwner = "store.run_fork.selected_contract_execution_lineage"
 )
-
-type RunForkSelectedContractExecutionMaterializeRequest struct {
-	SourceRunID             string
-	At                      string
-	ContractSelection       RunForkContractSelection
-	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
-	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
-	FrontierAdmission       RunForkContractFrontierAdmission
-	RouteTopology           RunForkSelectedContractRouteTopology
-	RecipientPlanning       RunForkSelectedContractRecipientPlanning
-	WorkflowStates          []RunForkSelectedContractWorkflowState
-	DataPinOverrides        []durabledata.ExplicitPin
-	FanOutPlanRefs          []runtimecontracts.FanOutPlanRef
-}
 
 type RunForkSelectedContractWorkflowStateAddressKind string
 
@@ -1095,16 +1025,25 @@ const (
 )
 
 type RunForkSelectedContractWorkflowState struct {
+	// SourceEventID is the canonical first association for diagnostics only.
+	// SourceEvents retains every admitted occurrence and its execution posture.
 	SourceEventID   string
+	SourceEvents    []RunForkSelectedContractWorkflowStateSourceEvent
 	EntityID        string
+	EntityType      string
 	FlowID          string
 	WorkflowVersion string
-	ExecutionMode   executionmode.Mode
+	ExecutionMode   executionmode.Mode // Template readiness generation only; static state has no execution mode.
 	Mode            string
 	AddressKind     RunForkSelectedContractWorkflowStateAddressKind
 	Route           runtimeflowidentity.Route
 	Config          map[string]any
 	Agents          []RunForkSelectedContractAgentExpectation
+}
+
+type RunForkSelectedContractWorkflowStateSourceEvent struct {
+	SourceEventID string
+	ExecutionMode executionmode.Mode
 }
 
 // RunForkSelectedContractAgentExpectation is a runless declaration fact. The
@@ -1124,7 +1063,7 @@ type RunForkSelectedContractAgentTopology struct {
 type RunForkSelectedContractExecutionActivateRequest struct {
 	ExecutionSource       semanticview.Source
 	ForkRunID             string
-	ConfirmSourceFreeze   bool
+	AllowSourceFreeze     bool
 	AllowedSourceEventIDs []string
 	FrontierAdmission     RunForkContractFrontierAdmission
 	RouteTopology         RunForkSelectedContractRouteTopology
@@ -1132,14 +1071,13 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	SourceEventID string               `json:"source_event_id"`
-	EventName     string               `json:"event_name"`
-	ExecutionMode executionmode.Mode   `json:"execution_mode"`
-	EntityID      string               `json:"entity_id,omitempty"`
-	FlowInstance  string               `json:"flow_instance,omitempty"`
-	Scope         string               `json:"scope,omitempty"`
-	RoutingSource events.RoutingSource `json:"routing_source"`
-	Payload       json.RawMessage      `json:"payload,omitempty"`
+	InputPublication InputPublication     `json:"-"`
+	SourceEventID    string               `json:"source_event_id"`
+	EventName        string               `json:"event_name"`
+	ExecutionMode    executionmode.Mode   `json:"execution_mode"`
+	Scope            string               `json:"scope,omitempty"`
+	RoutingSource    events.RoutingSource `json:"routing_source"`
+	Payload          json.RawMessage      `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {
@@ -1304,6 +1242,8 @@ func (e *RunForkSourceFreezeBusyError) Unwrap() error {
 }
 
 type SelectedContractRuntimeExecutionIssueRequest struct {
+	Preparation                SelectedForkPreparationBinding
+	DeclarationPlan            agenttopology.SelectedDeclarationPlan
 	Admission                  RunForkSelectedContractExecutionAdmission
 	ContainerPlanFingerprint   string
 	ActorCensusFingerprint     string
@@ -1313,6 +1253,8 @@ type SelectedContractRuntimeExecutionIssueRequest struct {
 }
 
 type SelectedContractRuntimeExecution struct {
+	PreparationFingerprint          string
+	DeclarationPlanFingerprint      string
 	ExecutionID                     string
 	ForkRunID                       string
 	SourceRunID                     string
@@ -1328,6 +1270,14 @@ type SelectedContractRuntimeExecution struct {
 	LeaseExpiresAt                  time.Time
 	FenceGeneration                 uint64
 	ExecutionMode                   executionmode.Mode
+}
+
+func (e SelectedContractRuntimeExecution) CoordinateFingerprint() (string, error) {
+	return RunForkSelectedContractRuntimeFingerprint(struct {
+		ForkRunID, Admission, Container, Actors, Config, Declarations, Preparation string
+		Generation                                                                 uint64
+	}{e.ForkRunID, e.AdmissionFingerprint, e.ContainerPlanFingerprint, e.ActorCensusFingerprint,
+		e.EffectiveConfigFingerprint, e.DeclarationPlanFingerprint, e.PreparationFingerprint, e.Generation})
 }
 
 func RunForkSelectedContractRuntimeFingerprint(value any) (string, error) {

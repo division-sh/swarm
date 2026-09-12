@@ -64,10 +64,12 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-selected
       - serveapp-standing
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
+      - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
       - store-runtime-full-05
@@ -108,10 +110,12 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-selected
       - serveapp-standing
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
+      - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
       - store-runtime-full-05
@@ -152,10 +156,12 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-selected
       - serveapp-standing
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
+      - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
       - store-runtime-full-05
@@ -196,10 +202,12 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-selected
       - serveapp-standing
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
+      - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
       - store-runtime-full-05
@@ -287,7 +295,7 @@ units:
   catalog-runtime:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
-    run: '^(Test($|[^CS].*|Stage.*|SelectedForkFlowOwnedReadinessBothStoresInitial)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CS].*|Stage.*|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedForkFlowOwnedReadinessBothStoresInitial|SelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|SelectedForkPendingRootAgentInputBothStores)|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -428,7 +436,16 @@ units:
   serveapp-surfaces:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestSe.*$'
+    # Run 34693302523 exceeded the unchanged surface budget. Keep complete
+    # selected/selector journeys in their own disjoint unit, not fewer cases.
+    run: '^TestSe($|[^l].*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-selected:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestSel.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -462,7 +479,17 @@ units:
   store-runtime-full-02:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: ^Test[D-F].*$
+    # Exact RE2 complement of TestForkG within the original D-F partition.
+    run: '^Test([D-E].*|F($|[^o].*|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-fork-generation:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    # Repeated-generation proof cost151.68s in34693302523. Preserve every
+    # generation/backend assertion under the same240s command budget.
+    run: '^TestForkG.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

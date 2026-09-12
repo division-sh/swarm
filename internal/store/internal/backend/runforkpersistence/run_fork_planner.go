@@ -128,6 +128,14 @@ func planRunForkSnapshot(
 		historicalEventIDs = append(historicalEventIDs, strings.TrimSpace(historicalEvent.EventID))
 	}
 	plan = plan.WithHistoricalEvents(snapshot.Revision, historicalEventIDs)
+	inputs, err := historicalInputPublications(snapshot)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	plan, err = plan.WithHistoricalInputPublications(snapshot.Revision, inputs)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 	plan.ForkPoint = runfork.RunForkPoint{
 		Input:          at,
 		EventID:        cursor.EventID,
@@ -164,7 +172,7 @@ func planRunForkSnapshot(
 	}
 	plan.FanOutObligations = fanOutObligations
 	plan.FanOutObligationCount = len(fanOutObligations)
-	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending)
+	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending, fanOutObligations)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}

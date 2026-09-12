@@ -131,6 +131,11 @@ func (e APIEventPublicationEndpoint) admit(source semanticview.Source, evt event
 			return apiEventPublicationAdmission{}, nil, fmt.Errorf("ordinary flow event publication flow %q is not admitted", e.flowID)
 		}
 		flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if e.flowID == "." {
+			// The declared root's execution coordinate is '.', independent of
+			// the artifact's empty filesystem-relative root path.
+			flowPath = "."
+		}
 		proof := semanticview.ResolveFlowEventProof(source, e.flowID, string(e.eventType))
 		if flowPath == "" || !proof.HasSchema || events.EventType(strings.Trim(strings.TrimSpace(proof.Canonical), "/")) != e.eventType {
 			return apiEventPublicationAdmission{}, nil, fmt.Errorf("ordinary flow event publication endpoint %q/%s no longer resolves exactly", e.flowID, e.eventType)

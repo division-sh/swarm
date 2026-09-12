@@ -31,14 +31,25 @@ func TestPlatformSpecManagedCapabilitySurfaceOwnsConcreteActorIdentity(t *testin
 	externalEffects := mustMappingValue(t, root, "managed_external_effect_authority")
 
 	for name, value := range map[string]string{
-		"surface identity": scalarValue(mustMappingValue(t, mustMappingValue(t, surface, "surface_identity"), "rule")),
-		"provider turn":    scalarValue(mustMappingValue(t, mustMappingValue(t, surface, "provider_turn"), "rule")),
-		"persistence":      scalarValue(mustMappingValue(t, mustMappingValue(t, surface, "persistence"), "rule")),
-		"effect context":   scalarValue(mustMappingValue(t, mustMappingValue(t, externalEffects, "context_authority"), "managed_agent")),
-		"operation ID":     scalarValue(mustMappingValue(t, mustMappingValue(t, externalEffects, "logical_operation"), "identity")),
+		"provider turn":  scalarValue(mustMappingValue(t, mustMappingValue(t, surface, "provider_turn"), "rule")),
+		"persistence":    scalarValue(mustMappingValue(t, mustMappingValue(t, surface, "persistence"), "rule")),
+		"effect context": scalarValue(mustMappingValue(t, mustMappingValue(t, externalEffects, "context_authority"), "managed_agent")),
+		"operation ID":   scalarValue(mustMappingValue(t, mustMappingValue(t, externalEffects, "logical_operation"), "identity")),
 	} {
 		if !strings.Contains(value, "typed concrete") {
 			t.Fatalf("%s does not name typed concrete identity authority:\n%s", name, value)
+		}
+	}
+	identity := scalarValue(mustYAMLPath(t, surface, "surface_identity", "rule"))
+	for _, fragment := range []string{"typed actor plan or concrete identity", "exact startup-probe or provider-turn authority", "disjoint and non-reusable"} {
+		if !strings.Contains(identity, fragment) {
+			t.Fatalf("surface identity missing distinct preparation/execution authority %q:\n%s", fragment, identity)
+		}
+	}
+	persistence := scalarValue(mustYAMLPath(t, surface, "persistence", "rule"))
+	for _, fragment := range []string{"runless agent plan", "provider-turn surfaces carry a typed concrete live identity", "startup_probe authority and NULL run_id", "preparation evidence cannot be stored as provider-turn authority"} {
+		if !strings.Contains(persistence, fragment) {
+			t.Fatalf("surface persistence missing preparation/execution boundary %q:\n%s", fragment, persistence)
 		}
 	}
 	operation := scalarValue(mustMappingValue(t, mustMappingValue(t, externalEffects, "logical_operation"), "identity"))

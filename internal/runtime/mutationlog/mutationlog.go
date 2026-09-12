@@ -208,13 +208,24 @@ func ApplyEntityStateProjectionMutation(state *EntityStateProjection, domain Dom
 	case DomainAuthoredField:
 		return applyProjectionMapValue(state.ensureFields(), path, value, "authored_field")
 	case DomainBookkeeping:
-		return applyProjectionMapValue(state.ensureBookkeeping(), path, value, "bookkeeping")
+		applyProjectionAtomicMapValue(state.ensureBookkeeping(), path, value)
 	case DomainGate:
-		return applyProjectionMapValue(state.ensureGates(), path, value, "gate")
+		applyProjectionAtomicMapValue(state.ensureGates(), path, value)
 	case DomainAccumulator:
-		return applyProjectionMapValue(state.ensureAccumulator(), path, value, "accumulator")
+		applyProjectionAtomicMapValue(state.ensureAccumulator(), path, value)
+	default:
+		return ErrInvalidMutationLogWriter(fmt.Sprintf("mutation domain %q is invalid", domain))
 	}
-	return ErrInvalidMutationLogWriter(fmt.Sprintf("mutation domain %q is invalid", domain))
+	return nil
+}
+
+// Non-authored domains carry producer-owned map identities, not field paths.
+func applyProjectionAtomicMapValue(target map[string]any, key string, value any) {
+	if value == nil {
+		delete(target, key)
+	} else {
+		target[key] = value
+	}
 }
 
 func diffMapRecords(entityID string, domain Domain, before, after map[string]any, writerType, writerID, handlerStep string) ([]Record, error) {

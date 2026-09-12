@@ -1,6 +1,7 @@
 package fanoutobligation
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -81,6 +83,25 @@ func (r SourceRef) Validate(persisted bool) error {
 	return nil
 }
 
+// ExecutionReceiver is the receiver context of an already admitted handler,
+// not a publication obligation. Initialization and dependency authority cannot
+// be inherited by persisting this projection.
+type ExecutionReceiver struct {
+	Node   identity.ExecutableNode        `json:"node"`
+	Target events.DeliveryTargetOwnership `json:"target"`
+}
+
+func ProjectExecutionReceiver(route events.DeliveryRoute) (ExecutionReceiver, error) {
+	if _, err := route.Identity(); err != nil {
+		return ExecutionReceiver{}, err
+	}
+	node, ok := route.Recipient.Node()
+	if !ok {
+		return ExecutionReceiver{}, fmt.Errorf("fan-out execution receiver requires a node")
+	}
+	return ExecutionReceiver{Node: node, Target: route.Target}, nil
+}
+
 type Capsule struct {
 	NodeKey          string                    `json:"node_key"`
 	ExecutionFlowID  string                    `json:"execution_flow_id"`
@@ -90,7 +111,7 @@ type Capsule struct {
 	CurrentState     string                    `json:"current_state,omitempty"`
 	ChainDepth       int                       `json:"chain_depth"`
 	ProducerSource   events.RoutingSource      `json:"producer_source"`
-	DeliveryRoute    *events.DeliveryRoute     `json:"delivery_route,omitempty"`
+	Receiver         *ExecutionReceiver        `json:"receiver,omitempty"`
 	Lineage          events.EventLineage       `json:"lineage"`
 	Entity           map[string]any            `json:"entity,omitempty"`
 	PlatformEntity   map[string]any            `json:"platform_entity,omitempty"`
@@ -103,6 +124,30 @@ type Capsule struct {
 	StateGates       map[string]bool           `json:"state_gates,omitempty"`
 }
 
+// Capsule business values are frozen JSON, not floating-point approximations.
+// Owning decoding here gives live, fixed-revision, and fork readers one law.
+func (c *Capsule) UnmarshalJSON(raw []byte) error {
+	type wire Capsule
+	var decoded wire
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*c = Capsule(decoded)
+	return nil
+}
+
+func (c Capsule) Equal(other Capsule) bool {
+	left, err := json.Marshal(c)
+	if err != nil {
+		return false
+	}
+	right, err := json.Marshal(other)
+	return err == nil && bytes.Equal(left, right)
+}
+
 func (c Capsule) Validate() error {
 	if strings.TrimSpace(c.NodeKey) == "" || strings.TrimSpace(c.HandlerEventKey) == "" || strings.TrimSpace(c.Lineage.RunID) == "" || strings.TrimSpace(c.Lineage.ParentEventID) == "" {
 		return errors.New("fan-out capsule requires exact node, handler, run, and parent event identity")
@@ -110,9 +155,14 @@ func (c Capsule) Validate() error {
 	if !c.Route.Valid() || c.ChainDepth < 0 || c.ProducerSource.Empty() {
 		return errors.New("fan-out capsule requires route, producer source, and nonnegative chain depth")
 	}
-	if c.DeliveryRoute != nil {
-		if _, err := c.DeliveryRoute.Identity(); err != nil {
-			return fmt.Errorf("fan-out capsule delivery route: %w", err)
+	if c.Receiver != nil {
+		r := c.Receiver
+		if err := r.Target.Validate(); err != nil {
+			return fmt.Errorf("fan-out capsule receiver: %w", err)
+		}
+		target := r.Target.Route()
+		if !r.Node.Valid() || r.Node.Key() != c.NodeKey || r.Node.FlowPath() != c.ExecutionFlowID || target.FlowID != c.ExecutionFlowID || target.FlowInstance != c.Route.InstancePath || target.EntityID != c.EntityID {
+			return fmt.Errorf("fan-out capsule receiver contradicts its execution owner")
 		}
 	}
 	if !c.Lineage.ExecutionMode.Valid() {
@@ -166,7 +216,9 @@ func (r IntentRequest) Validate() error {
 	if r.Source.Kind == SourceEventPayloadField && strings.TrimSpace(r.Source.EventID) != strings.TrimSpace(r.Capsule.Lineage.ParentEventID) {
 		return errors.New("fan-out payload source must be the exact triggering event")
 	}
-	if r.Source.Kind == SourceEntityField && strings.TrimSpace(r.Source.EntityID) != strings.TrimSpace(r.Capsule.EntityID) {
+	// A same-run capture reads the executing entity. A retained ancestor source
+	// remains immutable; its exact revision and lineage are admitted by the reader.
+	if r.Source.Kind == SourceEntityField && r.Source.RunID == r.Key.RunID && strings.TrimSpace(r.Source.EntityID) != strings.TrimSpace(r.Capsule.EntityID) {
 		return errors.New("fan-out entity source must be the exact selected execution entity")
 	}
 	if r.Cardinality < 0 {

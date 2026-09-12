@@ -30,13 +30,13 @@ func TestDurableHandlerConsumersStayOnDeliveryTargetApplication(t *testing.T) {
 		},
 		{
 			file: filepath.Join(dir, "engine_bridge.go"), function: "executeNodeContractHandler",
-			required:  []string{"deliveryTargetApplicationFromContext", "prepareDeliveryTargetApplication", "application.Event()", "application.State()", "if !exactDelivery && handler.SelectEntity"},
-			forbidden: []string{"prepareStampedSelectOrCreateState"},
+			required:  []string{"deliveryTargetApplicationFromContext", "prepareDeliveryTargetApplication", "application.Event()", "application.State()"},
+			forbidden: []string{"prepareStampedSelectOrCreateState", "handler.SelectEntity", "handler.SelectOrCreateEntity"},
 		},
 		{
 			file: filepath.Join(dir, "node_declarative.go"), function: "ExecuteHandlerSteps",
-			required:  []string{"deliveryTargetApplicationFromContext", "prepareDeliveryTargetApplication", "application.Event()", "application.State()", "if !exactDelivery && handler.SelectEntity"},
-			forbidden: []string{"prepareStampedSelectOrCreateState"},
+			required:  []string{"deliveryTargetApplicationFromContext", "prepareDeliveryTargetApplication", "application.Event()", "application.State()"},
+			forbidden: []string{"prepareStampedSelectOrCreateState", "handler.SelectEntity", "handler.SelectOrCreateEntity"},
 		},
 		{
 			file: filepath.Join(dir, "engine_adapter.go"), function: "CommitEngineMutation",
@@ -88,7 +88,7 @@ func TestDeliveryTargetOwnershipRetiredFallbacksStayAbsent(t *testing.T) {
 		}
 	}
 	classifier := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "ClassifyDeliveryTargetOwnership")
-	for _, required := range []string{"CompileDeliveryTargetCompatibilityPolicy", "acquireDeliveryTargetByDeclaredKey", "matchingDeliveryTargetOwnerCandidates"} {
+	for _, required := range []string{"CompileDeliveryTargetCompatibilityPolicy", "matchingDeliveryTargetOwnerCandidates"} {
 		if !strings.Contains(classifier, required) {
 			t.Errorf("target classifier stopped consuming canonical owner %q", required)
 		}
@@ -132,26 +132,20 @@ func TestRootExecutionIdentityConsumersStayCanonical(t *testing.T) {
 	}
 }
 
-func TestDeclaredKeyAcquisitionConsumesEntityStateAuthority(t *testing.T) {
-	acquisition := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "acquireDeliveryTargetByDeclaredKey")
-	for _, required := range []string{"SelectActiveWorkflowEntityStates", "decodeDeliveryTargetWorkflowEntityState"} {
-		if !strings.Contains(acquisition, required) {
-			t.Errorf("declared-key acquisition stopped consuming state authority %q", required)
+func TestReceiverElectionCannotReturnToHandlerExecution(t *testing.T) {
+	for _, filename := range []string{"delivery_target_ownership.go", "delivery_target_application.go", "node_declarative.go", "engine_bridge.go"} {
+		raw, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, retired := range []string{"acquireDeliveryTargetByDeclaredKey", "acquireSelectOrCreateMaterializingTarget", "selectOrCreateEntityInstanceID", "SelectActiveWorkflowEntityStates", "handler.SelectEntity", "handler.SelectOrCreateEntity"} {
+			if strings.Contains(string(raw), retired) {
+				t.Errorf("%s restored retired receiver election %s", filename, retired)
+			}
 		}
 	}
-	if strings.Contains(acquisition, "SelectActiveWorkflowInstances") {
-		t.Error("declared-key acquisition reintroduced lifecycle-required selection")
-	}
-	classification := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "ClassifyDeliveryTargetOwnership")
-	if !strings.Contains(classification, "!req.Event.HasTargetRoute()") {
-		t.Error("declared-key acquisition stopped requiring explicit target absence")
-	}
-
-	selectOrCreate := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "acquireSelectOrCreateMaterializingTarget")
-	for _, required := range []string{"LoadWorkflowInstance", "LoadWorkflowEntityState", "decodeDeliveryTargetWorkflowEntityState"} {
-		if !strings.Contains(selectOrCreate, required) {
-			t.Errorf("select-or-create exact-target validation stopped consuming %q", required)
-		}
+	if _, err := os.Stat("select_entity.go"); !os.IsNotExist(err) {
+		t.Fatalf("retired selector interpreter exists: %v", err)
 	}
 }
 

@@ -22,7 +22,7 @@ import (
 
 // Keep real grants and persistence; inject only at the selected startup boundary.
 type startupAbortGrant struct {
-	startupownership.GenerationGrant
+	startupownership.LiveGenerationGrant
 	evidenceErr error
 	settleErr   error
 	retireErr   error
@@ -34,7 +34,7 @@ func (g *startupAbortGrant) Evidence() (startupownership.GrantEvidence, error) {
 	if g.evidenceErr != nil {
 		return startupownership.GrantEvidence{}, g.evidenceErr
 	}
-	return g.GenerationGrant.Evidence()
+	return g.LiveGenerationGrant.Evidence()
 }
 
 func (g *startupAbortGrant) MarkProbesSettled(ctx context.Context, ids []string) (startupownership.GrantEvidence, error) {
@@ -44,14 +44,14 @@ func (g *startupAbortGrant) MarkProbesSettled(ctx context.Context, ids []string)
 	if g.settleErr != nil {
 		return startupownership.GrantEvidence{}, g.settleErr
 	}
-	return g.GenerationGrant.MarkProbesSettled(ctx, ids)
+	return g.LiveGenerationGrant.MarkProbesSettled(ctx, ids)
 }
 
 func (g *startupAbortGrant) Retire(ctx context.Context) error {
 	if g.onRetire != nil {
 		g.onRetire()
 	}
-	return errors.Join(g.GenerationGrant.Retire(ctx), g.retireErr)
+	return errors.Join(g.LiveGenerationGrant.Retire(ctx), g.retireErr)
 }
 
 type startupAbortUnreadyNode struct{}
@@ -161,7 +161,7 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 		if err != nil {
 			t.Fatal(err)
 		}
-		grants[i] = &startupAbortGrant{GenerationGrant: grant}
+		grants[i] = &startupAbortGrant{LiveGenerationGrant: grant}
 		if err := candidate.runtime.InstallStartupGrant(grants[i]); err != nil {
 			t.Fatal(err)
 		}

@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -52,11 +53,13 @@ func addTimerRevisionEffects(effects *revisionEffects, runID string) error {
 }
 
 type EventCommitOwner interface {
+	CommitFanOutPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission, *runhandoff.CandidateHandoff) (runtimebus.CommittedPublication, error)
 	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, authoractivity.Mutation, *revisionEffects, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	CommitPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, runtimebus.PublicationCommand, *runhandoff.CandidateHandoff) (runtimebus.CommittedPublication, error)
 }
 
 type eventCommitTxStore interface {
+	commitFanOutPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission, *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error)
 	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, authoractivity.Mutation, *revisionEffects, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	CommitInitialDeliveryObligationsTx(context.Context, *sql.Tx, *revisionEffects, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
@@ -362,6 +365,14 @@ func (s *PipelinePostgresOwner) commitPublicationTx(ctx context.Context, tx *sql
 
 func (s *PipelineSQLiteOwner) commitPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
 	return s.events.CommitPublicationTx(ctx, tx, story, effects, command, handoff)
+}
+
+func (s *PipelinePostgresOwner) commitFanOutPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
+	return s.events.CommitFanOutPublicationTx(ctx, tx, story, effects, command, projection, handoff)
+}
+
+func (s *PipelineSQLiteOwner) commitFanOutPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
+	return s.events.CommitFanOutPublicationTx(ctx, tx, story, effects, command, projection, handoff)
 }
 
 func (s *PipelinePostgresOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, record runtimereplycontext.Record) error {

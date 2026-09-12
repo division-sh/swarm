@@ -89,7 +89,7 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 					return true
 				}
 				found[relative]++
-				if _, allowed := executableDeliverySQLOwners[relative]; !allowed {
+				if _, allowed := executableDeliverySQLOwners[relative]; !allowed && !closedReceiverMaterializationSQL(relative, eventBoundaryEnclosingScope(file, literal.Pos()), raw) {
 					t.Errorf("%s:%d owns executable-delivery SQL outside the closed lifecycle boundary", relative, fset.Position(literal.Pos()).Line)
 				}
 				return true
@@ -98,6 +98,9 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("walk %s: %v", rootName, err)
 		}
+	}
+	if found["internal/store/internal/backend/delivery/receiver_materialization.go"] != 1 {
+		t.Fatal("receiver dependency owner must have exactly one classified delivery-ID lookup")
 	}
 	for path, reason := range executableDeliverySQLOwners {
 		if found[path] == 0 {
@@ -117,6 +120,31 @@ func TestReplayScopesAreNotExecutableDeliveries(t *testing.T) {
 		}
 		if strings.Contains(string(contents), "committed_replay_scopes") {
 			t.Fatalf("%s conflates committed replay scope with executable delivery lifecycle", source)
+		}
+	}
+}
+func closedReceiverMaterializationSQL(path, scope, query string) bool {
+	return path == "internal/store/internal/backend/delivery/receiver_materialization.go" &&
+		scope == "Adapter.publicationRecords" &&
+		strings.Join(strings.Fields(query), " ") == "SELECT delivery_id FROM event_deliveries WHERE event_id=$1 ORDER BY delivery_id"
+}
+
+func TestReceiverMaterializationSQLAllowanceIsExact(t *testing.T) {
+	path := "internal/store/internal/backend/delivery/receiver_materialization.go"
+	scope := "Adapter.publicationRecords"
+	query := "SELECT delivery_id FROM event_deliveries WHERE event_id=$1 ORDER BY delivery_id"
+	if !closedReceiverMaterializationSQL(path, scope, query) {
+		t.Fatal("canonical lookup refused")
+	}
+	for _, tc := range []struct{ path, scope, query string }{
+		{path, "Adapter.other", query},
+		{path, scope, "SELECT * FROM event_deliveries WHERE event_id=$1"},
+		{path, scope, "DELETE FROM event_deliveries WHERE event_id=$1"},
+		{path, scope, "SELECT delivery_id FROM event_deliveries ORDER BY delivery_id"},
+		{"internal/runtime/pipeline/other.go", scope, query},
+	} {
+		if closedReceiverMaterializationSQL(tc.path, tc.scope, tc.query) {
+			t.Fatalf("unowned lookup admitted: %#v", tc)
 		}
 	}
 }

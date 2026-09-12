@@ -77,8 +77,8 @@ func TestCatalogRejectsNestedPhysicalFlowDataDeclarationExactlyOnce(t *testing.T
 }
 
 func TestBootCheckRegistry_HasFlowDataAccessCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 74 {
-		t.Fatalf("bootCheckRegistry count = %d, want 74", got)
+	if got := len(bootCheckRegistry); got != 71 {
+		t.Fatalf("bootCheckRegistry count = %d, want 71", got)
 	}
 }
 

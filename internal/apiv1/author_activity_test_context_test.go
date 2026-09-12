@@ -195,7 +195,6 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			ActiveAgents:          durable,
 			ActiveFlows:           durable,
 			TargetOwners:          durable,
-			WorkflowInstances:     durable,
 			PreparedEvents:        durable,
 			TargetFailureRecorder: durable,
 			RunOrigins:            durable,

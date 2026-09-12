@@ -70,6 +70,13 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			capability: selectedContractDeferredWorkWorkflowJoinTimeout,
 		},
 		{
+			name:       "fan-out barrier declaration requires deferred execution owner",
+			plan:       basePlan,
+			source:     selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery}}),
+			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
+			capability: selectedContractDeferredWorkFanOutBarrier,
+		},
+		{
 			name:       "authored dynamic flow creation",
 			plan:       basePlan,
 			source:     selectedDeferredWorkDynamicFlowActionTestSource(),

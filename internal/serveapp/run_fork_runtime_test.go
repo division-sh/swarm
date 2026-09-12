@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
@@ -620,7 +621,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -670,7 +671,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthorit
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -720,7 +721,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 		"--store", "postgres",
 		"--activate",
 		"--run", materialized.ForkRunID,
-		"--confirm-source-freeze",
+		"--allow-source-freeze",
 		"--json",
 	}, &activateOut)
 	if activateCode != 0 {
@@ -765,7 +766,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	repo := repoRootForTest()
-	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+	sourceRoot := canonicalrouting.CopySelectedRouteRecoveryInput(t)
 	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
 
 	var materializeOut bytes.Buffer

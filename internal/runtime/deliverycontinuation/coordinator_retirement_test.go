@@ -93,7 +93,7 @@ func TestCoordinatorRetireBeforeStartAndDrainAcceptedCarrier(t *testing.T) {
 	if err := c.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := c.Acquire("accepted")
+	carrier, err := acquireCoordinatorTestCapability(c, "accepted")
 	if err != nil {
 		t.Fatal(err)
 	}

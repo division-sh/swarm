@@ -109,7 +109,7 @@ func TestEventBusExactTargetObligationMatrix(t *testing.T) {
 						runtimepipelineobligation.ScopeSubscribed,
 					)
 					if err == nil {
-						err = bus.deliverToRecipientsWithRoutes(ctx, evt, live, routes)
+						_, err = bus.deliverToRecipientsWithRoutes(ctx, evt, live, routes)
 					}
 				default:
 					t.Fatalf("unsupported dispatch mode %q", dispatchMode)

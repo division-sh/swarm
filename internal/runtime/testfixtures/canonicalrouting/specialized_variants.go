@@ -510,9 +510,6 @@ func CopyScenarioSetup(t testing.TB) string {
     gates: [review_ready]
   event_handlers:
     opco.product_review_requested:
-      select_entity:
-        by:
-          product_id: payload.product_id
       data_accumulation:
         source_event: opco.product_review_requested
         writes:

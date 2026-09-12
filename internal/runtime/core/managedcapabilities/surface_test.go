@@ -65,8 +65,8 @@ func TestSurfaceActorOwnerVariantsFailClosed(t *testing.T) {
 	validSelected := base
 	validSelected.ActorIdentity = managedCapabilityTestIdentity("worker")
 	validSelected.Authority = selectedStartup
-	if surface, err := New(validSelected); err != nil || !surface.MatchesActor(validSelected.ActorIdentity) || surface.MatchesActorPlan(managedCapabilityTestPlan(t, "worker")) {
-		t.Fatalf("selected startup actor owner = %#v err=%v", surface, err)
+	if _, err := New(validSelected); err == nil {
+		t.Fatal("post-materialization selected startup was admitted")
 	}
 
 	validTurn := base

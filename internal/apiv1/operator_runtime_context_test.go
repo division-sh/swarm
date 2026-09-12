@@ -29,8 +29,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
@@ -452,7 +452,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 		t.Fatalf("run rows after unloaded bundle = %d, want 0", got)
 	}
 
-	executor := &recordingRunForkExecutor{}
+	executor := &recordingRunForkExecutor{result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -464,20 +464,15 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"confirm_source_freeze":true,"idempotency_key":"fork-unloaded-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-unloaded-context"}}`,
 		runForkTestSourceRunID,
 		runtimeContextTestBundleHashC,
 	))
-	if forkResp.Error == nil {
-		t.Fatal("run.fork unloaded target error = nil")
+	if forkResp.Error != nil {
+		t.Fatalf("run.fork must delegate artifact admission independently of normal runtime state: %#v", forkResp.Error)
 	}
-	forkData := asMap(t, forkResp.Error.Data)
-	forkDetails := asMap(t, forkData["details"])
-	if forkData["code"] != BundleUnavailableCode || forkDetails["cause"] != "runtime_context_not_loaded" {
-		t.Fatalf("run.fork unloaded target error data = %#v", forkData)
-	}
-	if executor.calls != 0 {
-		t.Fatalf("run.fork executor calls = %d, want 0 for unloaded target", executor.calls)
+	if executor.calls != 1 || executor.last.BundleHash != runtimeContextTestBundleHashC || executor.last.ContractSelection != (runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: runtimeContextTestBundleHashC}) {
+		t.Fatalf("artifact owner calls=%d request=%+v", executor.calls, executor.last)
 	}
 }
 
@@ -517,7 +512,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 		t.Fatalf("event rows for deactivated existing run = %d, want 0", got)
 	}
 
-	executor := &recordingRunForkExecutor{}
+	executor := &recordingRunForkExecutor{result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -529,60 +524,38 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"confirm_source_freeze":true,"idempotency_key":"fork-deactivated-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-deactivated-context"}}`,
 		runForkTestSourceRunID,
 		runtimeContextTestBundleHashB,
 	))
-	if forkResp.Error == nil {
-		t.Fatal("run.fork deactivated target error = nil")
+	if forkResp.Error != nil {
+		t.Fatalf("run.fork must delegate artifact admission independently of normal runtime state: %#v", forkResp.Error)
 	}
-	forkData := asMap(t, forkResp.Error.Data)
-	forkDetails := asMap(t, forkData["details"])
-	if forkData["code"] != BundleUnavailableCode || forkDetails["cause"] != swruntime.RuntimeContextCauseUnloaded {
-		t.Fatalf("run.fork deactivated target error data = %#v", forkData)
-	}
-	if executor.calls != 0 {
-		t.Fatalf("run.fork executor calls = %d, want 0 for deactivated target", executor.calls)
+	if executor.calls != 1 || executor.last.BundleHash != runtimeContextTestBundleHashB || executor.last.ContractSelection != (runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: runtimeContextTestBundleHashB}) {
+		t.Fatalf("artifact owner calls=%d request=%+v", executor.calls, executor.last)
 	}
 }
 
-func TestRunForkExecutorForBundleContextRebindsSelectedContractSelection(t *testing.T) {
-	targetBundle := runStartTestBundle("triage.requested")
-	targetBundle.SourceArtifact = runtimeContextTestSourceArtifactB
-	targetBundle.Semantics.Name = "target-review"
-	targetBundle.Semantics.Version = "2.0.0"
-	targetSource := semanticview.Wrap(targetBundle)
+func TestRunForkExecutorPassesExactSelectionToArtifactOwner(t *testing.T) {
+	loader := &runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{}
+	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: runtimeContextTestBundleHashB}
+	sentinel := errors.New("artifact admission refused")
+	calls := 0
 	executor := SelectedContractRunForkExecutor{
-		ContractSelection: runfork.RunForkContractSelection{
-			Mode:       runfork.RunForkContractSelectionModeBundleHash,
-			BundleHash: runStartTestBundleHash,
+		SourceLoader: loader,
+		ExecuteSelectedContractRunFork: func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
+			calls++
+			if req.SourceLoader != loader || req.ContractSelection != selection || req.ExpectedBundleHash != runtimeContextTestBundleHashB || req.SourceRunID != runForkTestSourceRunID {
+				t.Fatalf("selected owner received different authority: %+v", req)
+			}
+			return runtimerunforkexecution.SelectedContractExecutionResult{}, sentinel
 		},
 	}
-
-	module := newRunCompletionSystemNodeModule(t, targetSource)
-	sourceFact := runtimeContextTestSourceFact(runtimeContextTestBundleHashB)
-	effectiveIdentity, err := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("b", 64))
-	if err != nil {
-		t.Fatalf("create target effective source identity: %v", err)
-	}
-	selectedRuntime := &swruntime.Runtime{Options: swruntime.RuntimeOptions{WorkflowModule: module}}
-	rebound, err := executor.SelectRunForkExecutor(&swruntime.BundleContext{
-		Source:             targetSource,
-		SourceArtifactFact: sourceFact, EffectiveSourceIdentity: effectiveIdentity,
-	}, selectedRuntime)
-	if err != nil {
-		t.Fatalf("select run fork executor: %v", err)
-	}
-
-	selected, ok := rebound.(SelectedContractRunForkExecutor)
-	if !ok {
-		t.Fatalf("rebound executor type = %T, want SelectedContractRunForkExecutor", rebound)
-	}
-	if selected.ContractSelection != (runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}) {
-		t.Fatalf("rebound contract selection = %#v", selected.ContractSelection)
+	_, err := executor.ExecuteRunFork(context.Background(), RunForkExecutionRequest{SourceRunID: runForkTestSourceRunID, BundleHash: runtimeContextTestBundleHashB, ContractSelection: selection})
+	if !errors.Is(err, sentinel) || calls != 1 {
+		t.Fatalf("artifact admission calls=%d err=%v", calls, err)
 	}
 }
-
 func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	ingress := &recordingRuntimeIngress{}
@@ -631,7 +604,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"confirm_source_freeze":true,"idempotency_key":"fork-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-context"}}`,
 		runForkTestSourceRunID,
 		runtimeContextTestBundleHashB,
 	))
@@ -642,7 +615,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		t.Fatalf("run.fork executor calls = %d, want 1", executor.calls)
 	}
 	if executor.last.BundleHash != runtimeContextTestBundleHashB ||
-		!executor.last.ConfirmSourceFreeze ||
+		!executor.last.AllowSourceFreeze ||
 		executor.last.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		executor.last.ContractSelection.BundleHash != runtimeContextTestBundleHashB {
 		t.Fatalf("run.fork executor request = %#v", executor.last)
@@ -813,6 +786,7 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
+		LifecycleStore: storetest.AgentLifecycleFixture(t, pg),
 	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {

@@ -743,7 +743,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnl
 	}
 }
 
-func TestManagedProviderPreflightRejectsForeignForkRunBeforeProviderResolution(t *testing.T) {
+func TestManagedProviderPreflightRejectsExecutableForkBeforeProviderResolution(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = llmselection.BackendClaudeCLI
 	manager := newClaudeStartupManager()
@@ -755,7 +755,7 @@ func TestManagedProviderPreflightRejectsForeignForkRunBeforeProviderResolution(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This runtime cannot probe startup. Foreign-run rejection must precede that error.
+	// This runtime cannot probe startup. Executable authority rejection must precede that error.
 	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, llm.NewNoopRuntime(llm.ClaudeCLIProviderContract()))
 	if err != nil {
 		t.Fatal(err)
@@ -766,8 +766,8 @@ func TestManagedProviderPreflightRejectsForeignForkRunBeforeProviderResolution(t
 			ExecutionKind: managedcapabilities.ExecutionSelectedContractFork, RunID: uuid.NewString(),
 		},
 	)
-	if err == nil || !strings.Contains(err.Error(), "agent run does not match execution authority") {
-		t.Fatalf("foreign-run preflight error = %v, want run ownership rejection before provider resolution", err)
+	if err == nil || !strings.Contains(err.Error(), "requires non-executable preparation") {
+		t.Fatalf("executable preflight error = %v, want rejection before provider resolution", err)
 	}
 }
 

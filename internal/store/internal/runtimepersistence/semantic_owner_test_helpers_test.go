@@ -15,6 +15,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
@@ -48,11 +49,7 @@ type persistedEventIdentity = eventrecord.Record
 type runForkActivationLineage = storerunfork.RunForkActivationLineage
 type runForkActivityRequestPayload = storerunfork.RunForkActivityRequestPayload
 type runForkGateActivationBinding = storerunfork.RunForkGateActivationBinding
-type runForkEntityProjection = storerunfork.RunForkEntityProjection
-type runForkRevisionedFact = storerunfork.RunForkRevisionedFact
-type runForkRevisionEvent = storerunfork.RunForkRevisionEvent
-type runForkRevisionDelivery = storerunfork.RunForkRevisionDelivery
-type runForkRevisionSnapshot = storerunfork.RunForkRevisionSnapshot
+type runForkEntityProjection = runfork.EntityProjection
 type runCompletionOwnerSummaries = storerunlifecycle.RunCompletionOwnerSummaries
 type terminalRunMutation = storerunlifecycle.TerminalRunMutation
 type standaloneRuntimePlatformRunRecord = storerunlifecycle.StandaloneRuntimePlatformRunRecord
@@ -61,7 +58,6 @@ type externalEffectStorySource = storeeffect.ExternalEffectStorySource
 type completionRecoveryAttempt = storeeffect.CompletionRecoveryAttempt
 type completionRecoveryAuthorityEvidence = storeeffect.CompletionRecoveryAuthorityEvidence
 
-var projectRunForkReplayEvent = storerunfork.ProjectRunForkReplayEvent
 var insertRunForkReplayDelivery = storerunfork.InsertRunForkReplayDelivery
 var deterministicRunForkMaterializationID = storerunfork.DeterministicRunForkMaterializationID
 var deterministicRunForkReplayEventID = storerunfork.DeterministicRunForkReplayEventID
@@ -84,14 +80,10 @@ var loadSQLiteEventIdentity = storeevent.LoadSQLiteEventIdentity
 var loadPostgresInboundPublicationEvent = storeevent.LoadPostgresInboundPublicationEvent
 var loadSQLiteInboundPublicationEvent = storeevent.LoadSQLiteInboundPublicationEvent
 var loadRunForkReplaySourceEvent = storerunfork.LoadRunForkReplaySourceEvent
-var prepareRunForkSelectedContractSourceEvent = storerunfork.PrepareRunForkSelectedContractSourceEvent
-var forkAttemptGenerationState = storerunfork.ForkAttemptGenerationState
 var forkGateActivationState = storerunfork.ForkGateActivationState
 var projectRunForkEntityOwnership = storerunfork.ProjectRunForkEntityOwnership
 var validateRunForkDeliveryEventReplayWorkAgainstPlan = storerunfork.ValidateRunForkDeliveryEventReplayWorkAgainstPlan
-var loadRunForkPendingWorkFromRevision = storerunfork.LoadRunForkPendingWorkFromRevision
-var loadRunForkSourceFactsFromRevision = storerunfork.LoadRunForkSourceFactsFromRevision
-var appendRunForkRevisionFact = storerunfork.AppendRunForkRevisionFact
+
 var stringSliceSet = storerunfork.StringSliceSet
 var normalizeRunForkSelectedContractBinding = storerunfork.NormalizeRunForkSelectedContractBinding
 var normalizeRunForkSelectedContractRouteRecovery = storerunfork.NormalizeRunForkSelectedContractRouteRecovery

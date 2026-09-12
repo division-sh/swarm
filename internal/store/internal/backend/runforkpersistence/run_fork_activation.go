@@ -151,7 +151,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 		ForkRunID:   lineage.ForkRunID,
 	}
 	if historicalReplayExecution.DeliveryEventReplayReady {
-		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, now)
+		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, req.OriginalLoopCarriage, now)
 		if err != nil {
 			return result, err
 		}
@@ -159,7 +159,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 	if err := bindRunForkFanOutPendingReplays(ctx, tx, effects, lineage.ForkRunID, plan, now); err != nil {
 		return result, err
 	}
-	if err := s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
+	if err := s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, req.AllowSourceFreeze, handoff); err != nil {
 		return result, err
 	}
 	if err := effects.Add(lineage.ForkRunID,
@@ -286,7 +286,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 		effects := privaterunforkrevision.NewEffects()
 		replayResult = runfork.RunForkDeliveryEventReplayResult{Owner: runfork.RunForkDeliveryEventReplayOwner, SourceRunID: lineage.SourceRunID, ForkRunID: lineage.ForkRunID}
 		if historicalReplayExecution.DeliveryEventReplayReady {
-			replayResult, err = applyRunForkDeliveryEventReplay(txctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, now)
+			replayResult, err = applyRunForkDeliveryEventReplay(txctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, req.OriginalLoopCarriage, now)
 			if err != nil {
 				return err
 			}
@@ -294,7 +294,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 		if err := bindRunForkFanOutPendingReplays(txctx, tx, effects, lineage.ForkRunID, plan, now); err != nil {
 			return err
 		}
-		if err := s.applyRunForkSourceFreeze(txctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
+		if err := s.applyRunForkSourceFreeze(txctx, tx, story, effects, lineage, now, req.AllowSourceFreeze, handoff); err != nil {
 			return err
 		}
 		if err := effects.Add(lineage.ForkRunID,
@@ -574,19 +574,11 @@ func lockRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, lineage 
 	if lineage == nil {
 		return fmt.Errorf("fork activation requires lineage")
 	}
-	if err := tx.QueryRowContext(ctx, `
-		SELECT MIN(revision)
-		FROM run_fork_fact_revisions
-		WHERE run_id = $1::uuid
-		  AND family = 'events'
-		  AND fact_key = $2
-		  AND present
-	`, lineage.SourceRunID, lineage.ForkEventID).Scan(&lineage.ForkEventRevision); err != nil {
+	point, err := resolveRunForkRevisionPoint(ctx, tx, lineage.SourceRunID, lineage.ForkEventID)
+	if err != nil {
 		return fmt.Errorf("resolve fork activation event revision: %w", err)
 	}
-	if lineage.ForkEventRevision <= 0 {
-		return fmt.Errorf("fork activation source event is not revisioned; recreate the store and retry")
-	}
+	lineage.ForkEventRevision = point.Revision
 	var currentRevision int64
 	if err := tx.QueryRowContext(ctx, `
 		SELECT last_revision
@@ -609,16 +601,11 @@ func lockSQLiteRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, li
 	if lineage == nil {
 		return fmt.Errorf("fork activation requires lineage")
 	}
-	if err := tx.QueryRowContext(ctx, `
-		SELECT MIN(revision)
-		FROM run_fork_fact_revisions
-		WHERE run_id = $1 AND family = 'events' AND fact_key = $2 AND present
-	`, lineage.SourceRunID, lineage.ForkEventID).Scan(&lineage.ForkEventRevision); err != nil {
+	point, err := resolveRunForkRevisionPoint(ctx, tx, lineage.SourceRunID, lineage.ForkEventID)
+	if err != nil {
 		return fmt.Errorf("resolve sqlite fork activation event revision: %w", err)
 	}
-	if lineage.ForkEventRevision <= 0 {
-		return fmt.Errorf("fork activation source event is not revisioned; recreate the store and retry")
-	}
+	lineage.ForkEventRevision = point.Revision
 	var currentRevision int64
 	if err := tx.QueryRowContext(ctx, `
 		SELECT last_revision FROM run_fork_revision_heads WHERE run_id = $1

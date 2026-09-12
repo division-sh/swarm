@@ -16,18 +16,18 @@ import (
 
 const (
 	runForkMethod       = "run.fork"
-	runForkCommandShape = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]"
+	runForkCommandShape = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]"
 )
 
 type forkCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
 
-	bundleHash          string
-	atEvent             string
-	confirmSourceFreeze bool
-	idempotencyKey      string
-	pins                []string
+	bundleHash        string
+	atEvent           string
+	allowSourceFreeze bool
+	idempotencyKey    string
+	pins              []string
 
 	bundleHashSet     bool
 	atEventSet        bool
@@ -69,7 +69,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&forkOpts.bundleHash, "bundle-hash", "", "Target bundle hash for run.fork selection")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
 	cmd.Flags().StringArrayVar(&forkOpts.pins, "pin", nil, "Exact data version override: name@vN or name@ResourceVersionID (repeatable)")
-	cmd.Flags().BoolVar(&forkOpts.confirmSourceFreeze, "confirm-source-freeze", false, "Authorize permanently freezing an active source unless source advancement preserves it")
+	cmd.Flags().BoolVar(&forkOpts.allowSourceFreeze, "allow-source-freeze", false, "Allow permanent source freeze if it has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Omit and decline the prompt to cancel")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &forkOpts.output)
@@ -119,7 +119,7 @@ func runForkCommand(ctx context.Context, out, errOut io.Writer, opts forkCommand
 		params["bundle_hash"] = bundleHash
 		params["data_pin_overrides"] = overrides
 	}
-	if !opts.confirmSourceFreeze {
+	if !opts.allowSourceFreeze {
 		sourceRunID, _ := params["source_run_id"].(string)
 		run, err := runCommandGet(ctx, client, sourceRunID)
 		if err != nil {
@@ -129,7 +129,7 @@ func runForkCommand(ctx context.Context, out, errOut io.Writer, opts forkCommand
 			if err := requireRunForkSourceFreezeConfirmation(opts.apiOptions, sourceRunID, errOut); err != nil {
 				return err
 			}
-			params["confirm_source_freeze"] = true
+			params["allow_source_freeze"] = true
 		}
 	}
 	var result runForkResult
@@ -152,8 +152,8 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		return nil, err
 	}
 	params := map[string]any{"source_run_id": sourceRunID}
-	if opts.confirmSourceFreeze {
-		params["confirm_source_freeze"] = true
+	if opts.allowSourceFreeze {
+		params["allow_source_freeze"] = true
 	}
 
 	bundleHash, err := optionalNonEmptyFlag("--bundle-hash", opts.bundleHash, opts.bundleHashSet)
@@ -200,10 +200,10 @@ func runForkSourceStatusActive(raw string) bool {
 
 func requireRunForkSourceFreezeConfirmation(opts rootCommandOptions, sourceRunID string, errOut io.Writer) error {
 	if !controlStdinIsTerminal(opts) {
-		return returnCLIValidationError(errOut, fmt.Errorf("run %s is active; pass --confirm-source-freeze for non-TTY invocations", sourceRunID))
+		return returnCLIValidationError(errOut, fmt.Errorf("run %s is active; pass --allow-source-freeze to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started", sourceRunID))
 	}
-	fmt.Fprintf(errOut, "WARNING: this operation may permanently freeze run %s; source advancement instead preserves it as a live branch.\n", sourceRunID)
-	fmt.Fprint(errOut, "Continue? [y/N] ")
+	fmt.Fprintf(errOut, "WARNING: run %s will be permanently frozen if it has not advanced beyond the fork point. A frozen source cannot resume. An advanced source stays independently live.\n", sourceRunID)
+	fmt.Fprint(errOut, "Allow source freeze and create the fork? [y/N] (No cancels without starting a fork) ")
 	input := opts.input
 	if input == nil {
 		input = strings.NewReader("")

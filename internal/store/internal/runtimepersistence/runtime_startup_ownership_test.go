@@ -1053,9 +1053,10 @@ func TestSQLiteProcessCapabilityCoordinateReplacementTerminalizesIdleOwner(t *te
 const sqliteForcedDeathChildMarker = "SWARM_TEST_SQLITE_FORCED_DEATH_CHILD"
 
 type sqliteForcedDeathEvidence struct {
-	Authority runtimestartupownership.Authority     `json:"authority"`
-	Grant     runtimestartupownership.GrantEvidence `json:"grant"`
-	Revision  string                                `json:"revision"`
+	Authority     runtimestartupownership.Authority      `json:"authority"`
+	Grant         runtimestartupownership.GrantEvidence  `json:"grant"`
+	Revision      string                                 `json:"revision"`
+	SelectedGrant *runtimestartupownership.GrantEvidence `json:"selected_grant,omitempty"`
 }
 
 func runSQLiteForcedDeathChild(t *testing.T) bool {
@@ -1096,7 +1097,11 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 		if err != nil {
 			t.Fatalf("admit child generation: %v", err)
 		}
-		raw, err := json.Marshal(sqliteForcedDeathEvidence{Authority: authority, Grant: grantEvidence, Revision: plan.Revision})
+		evidence := sqliteForcedDeathEvidence{Authority: authority, Grant: grantEvidence, Revision: plan.Revision}
+		if os.Getenv("SWARM_TEST_FORCED_DEATH_SELECTED_GRANT") == "1" {
+			evidence.SelectedGrant = selectedGrantForAbandonedProcess(t, selected, selected.backend.ConstructionHandle(), true, capability)
+		}
+		raw, err := json.Marshal(evidence)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1109,6 +1114,10 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 }
 
 func spawnSQLiteForcedDeathPredecessor(t *testing.T, path string) sqliteForcedDeathEvidence {
+	return spawnSQLiteForcedDeathPredecessorWithSelection(t, path, false)
+}
+
+func spawnSQLiteForcedDeathPredecessorWithSelection(t *testing.T, path string, selectedGrant bool) sqliteForcedDeathEvidence {
 	t.Helper()
 	evidencePath := path + ".crash-evidence.json"
 	cmd := exec.Command(os.Args[0], "-test.run=^TestSQLiteProcessCapabilityForcedDeathTakeover$")
@@ -1117,6 +1126,9 @@ func spawnSQLiteForcedDeathPredecessor(t *testing.T, path string) sqliteForcedDe
 		"SWARM_TEST_SQLITE_FORCED_DEATH_PATH="+path,
 		"SWARM_TEST_SQLITE_FORCED_DEATH_EVIDENCE="+evidencePath,
 	)
+	if selectedGrant {
+		cmd.Env = append(cmd.Env, "SWARM_TEST_FORCED_DEATH_SELECTED_GRANT=1")
+	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("forced-death child: %v\n%s", err, output)
 	}
@@ -1470,9 +1482,29 @@ func TestProcessCapabilityTakeoverRollbackParity(t *testing.T) {
 }
 
 func TestProcessCapabilityTakeoverRetiresNewWorkGrantsParity(t *testing.T) {
+	proveProcessCapabilityTakeoverRetiresNewWorkGrants(t, false)
+}
+
+func TestSelectedGrantBulkTakeoverBothStores(t *testing.T) {
+	proveProcessCapabilityTakeoverRetiresNewWorkGrants(t, true)
+}
+
+func proveProcessCapabilityTakeoverRetiresNewWorkGrants(t *testing.T, selectedGrant bool) {
+	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, abandoned := abandonedProcessCapabilityFixture(t, backend)
+			selected, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
+			if selectedGrant && abandoned.SelectedGrant == nil {
+				t.Fatal("abandoned process omitted its selected grant")
+			}
+			proveBulkRetirementWaitsForMutation(t, db, backend, abandoned.Grant, func(ctx context.Context) error {
+				capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("blocked-grant-retirement-successor"))
+				if capability != nil {
+					t.Cleanup(func() { _ = capability.Release(context.Background()) })
+				}
+				return err
+			})
+			assertAbandonedSelectedGrantHead(t, db, abandoned, false)
 			successor, err := selected.AcquireProcessCapability(testAuthorActivityContext(), testStartupAcquireRequest("grant-retirement-successor"))
 			if err != nil {
 				t.Fatalf("acquire successor: %v", err)
@@ -1490,6 +1522,7 @@ func TestProcessCapabilityTakeoverRetiresNewWorkGrantsParity(t *testing.T) {
 			if state != string(runtimestartupownership.GrantRetired) {
 				t.Fatalf("predecessor grant state=%q, want retired", state)
 			}
+			assertAbandonedSelectedGrantHead(t, db, abandoned, true)
 		})
 	}
 }
@@ -1564,11 +1597,15 @@ func loadTakeoverDeliverySnapshot(t *testing.T, ctx context.Context, db *sql.DB,
 }
 
 func abandonedProcessCapabilityFixture(t *testing.T, backend string) (startupAuthorityParityStore, *sql.DB, sqliteForcedDeathEvidence) {
+	return abandonedProcessCapabilityFixtureWithSelection(t, backend, false)
+}
+
+func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string, selectedGrant bool) (startupAuthorityParityStore, *sql.DB, sqliteForcedDeathEvidence) {
 	t.Helper()
 	if backend == "sqlite" {
 		path := filepath.Join(t.TempDir(), "runtime.db")
 		selected := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-		return selected, selected.backend.ConstructionHandle(), spawnSQLiteForcedDeathPredecessor(t, path)
+		return selected, selected.backend.ConstructionHandle(), spawnSQLiteForcedDeathPredecessorWithSelection(t, path, selectedGrant)
 	}
 	_, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
@@ -1578,13 +1615,45 @@ func abandonedProcessCapabilityFixture(t *testing.T, backend string) (startupAut
 	if err != nil {
 		t.Fatalf("read PostgreSQL predecessor authority: %v", err)
 	}
+	evidence := sqliteForcedDeathEvidence{Authority: authority, Grant: grant, Revision: grant.SourceSetRevision}
+	if selectedGrant {
+		evidence.SelectedGrant = selectedGrantForAbandonedProcess(t, selected, db, false, capability)
+	}
 	terminatePostgresRetainedProcessSession(t, ctx, db)
 	select {
 	case <-capability.Done():
 	case <-time.After(4 * time.Second):
 		t.Fatal("terminated PostgreSQL predecessor did not stop")
 	}
-	return selected, db, sqliteForcedDeathEvidence{Authority: authority, Grant: grant, Revision: grant.SourceSetRevision}
+	return selected, db, evidence
+}
+
+func selectedGrantForAbandonedProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process runtimestartupownership.ProcessCapability) *runtimestartupownership.GrantEvidence {
+	t.Helper()
+	fixture := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, process)
+	grant := selectedMutationFenceGrant(t, testAuthorActivityContext(), fixture)
+	evidence, err := grant.Evidence()
+	if err != nil || evidence.SelectedFork == nil {
+		t.Fatalf("prepare abandoned selected grant: %+v err=%v", evidence, err)
+	}
+	return &evidence
+}
+
+func assertAbandonedSelectedGrantHead(t *testing.T, db *sql.DB, abandoned sqliteForcedDeathEvidence, retired bool) {
+	t.Helper()
+	if abandoned.SelectedGrant == nil {
+		return
+	}
+	grant := *abandoned.SelectedGrant
+	wantState, wantVersion := string(grant.State), grant.StateVersion
+	if retired {
+		wantState, wantVersion = string(runtimestartupownership.GrantRetired), wantVersion+1
+	}
+	var state, execution string
+	var version uint64
+	if err := db.QueryRowContext(testAuthorActivityContext(), `SELECT state,state_version,selected_execution_id FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, grant.GrantID).Scan(&state, &version, &execution); err != nil || state != wantState || version != wantVersion || execution != grant.SelectedFork.ExecutionID {
+		t.Fatalf("selected bulk retirement head=%s/%d execution=%s want=%s/%d execution=%s err=%v", state, version, execution, wantState, wantVersion, grant.SelectedFork.ExecutionID, err)
+	}
 }
 
 func TestPostgresProcessCapabilityRejectsAmbiguousPriorOwner(t *testing.T) {
@@ -1689,9 +1758,21 @@ func TestAuthorityRepairParity(t *testing.T) {
 }
 
 func TestAuthorityRepairRetiresEveryCurrentNewWorkGrantParity(t *testing.T) {
+	proveAuthorityRepairRetiresEveryCurrentNewWorkGrant(t, false)
+}
+
+func TestSelectedGrantBulkRepairBothStores(t *testing.T) {
+	proveAuthorityRepairRetiresEveryCurrentNewWorkGrant(t, true)
+}
+
+func proveAuthorityRepairRetiresEveryCurrentNewWorkGrant(t *testing.T, selectedGrant bool) {
+	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, abandoned := abandonedProcessCapabilityFixture(t, backend)
+			selected, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
+			if selectedGrant && abandoned.SelectedGrant == nil {
+				t.Fatal("abandoned process omitted its selected grant")
+			}
 			ctx := testAuthorActivityContext()
 
 			registration, ok := runtimeeffects.RegistrationFor("provider_registration")
@@ -1744,6 +1825,11 @@ func TestAuthorityRepairRetiresEveryCurrentNewWorkGrantParity(t *testing.T) {
 			repairRequest := runtimestartupownership.AuthorityRepairRequest{
 				OperationID: uuid.NewString(), FindingsDigest: inspection.FindingsDigest, Confirmed: true,
 			}
+			proveBulkRetirementWaitsForMutation(t, db, backend, abandoned.Grant, func(ctx context.Context) error {
+				_, err := selected.RepairAuthority(ctx, repairRequest)
+				return err
+			})
+			assertAbandonedSelectedGrantHead(t, db, abandoned, false)
 			placeholder := "?"
 			if backend == "postgres" {
 				placeholder = "$1::uuid"
@@ -1760,6 +1846,7 @@ func TestAuthorityRepairRetiresEveryCurrentNewWorkGrantParity(t *testing.T) {
 			if grantState != string(runtimestartupownership.GrantAdmitted) {
 				t.Fatalf("rolled-back repair left predecessor grant state=%q, want admitted", grantState)
 			}
+			assertAbandonedSelectedGrantHead(t, db, abandoned, false)
 			var repairRows int
 			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_repairs`).Scan(&repairRows); err != nil || repairRows != 0 {
 				t.Fatalf("rolled-back repair journal rows=%d err=%v, want zero", repairRows, err)
@@ -1779,6 +1866,7 @@ func TestAuthorityRepairRetiresEveryCurrentNewWorkGrantParity(t *testing.T) {
 			if grantState != string(runtimestartupownership.GrantRetired) {
 				t.Fatalf("repaired predecessor grant state=%q, want retired", grantState)
 			}
+			assertAbandonedSelectedGrantHead(t, db, abandoned, true)
 			if after := selectedStoreAttemptState(t, ctx, db, preservedAttempt.AttemptID); after != attemptState {
 				t.Fatalf("provider attempt changed across repair: before=%q after=%q", attemptState, after)
 			}

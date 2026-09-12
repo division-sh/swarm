@@ -9,21 +9,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
-
-const fanOutBarrierScheduleOwner = "workflow-runtime"
 
 func foldFanOutIntentTerminalDispositions(
 	ctx context.Context,
@@ -337,33 +336,6 @@ func fanOutBarrierGenerationCurrent(ctx context.Context, tx *sql.Tx, registratio
 	return runtimepipeline.WorkflowLoopGenerationCurrent(fields, stateBuckets, generation, "")
 }
 
-func fanOutBarrierSchedule(registration fanoutbarrier.Registration, summary fanoutbarrier.Summary, selectedNow time.Time) (runtimegenericschedule.AdmissionCommand, error) {
-	payload := registration.Handle.PayloadMetadata()
-	payload["join"] = summary.Context()
-	semanticPayload, err := canonicaljson.FromGo(payload)
-	if err != nil {
-		return runtimegenericschedule.AdmissionCommand{}, err
-	}
-	flowInstance := ""
-	if registration.RoutingSource.Kind() == events.RoutingSourceFlowOwnedControl {
-		flowInstance = registration.RoutingSource.Route().Normalized().FlowInstance
-	}
-	return runtimegenericschedule.AdmissionCommand{
-		ScheduleKey:   registration.Handle.TaskID(),
-		RunID:         registration.IntentKey.RunID,
-		EntityID:      registration.EntityID,
-		FlowInstance:  flowInstance,
-		OwnerKind:     runtimegenericschedule.OwnerSystem,
-		OwnerID:       fanOutBarrierScheduleOwner,
-		EventType:     registration.Handle.EventType(),
-		Payload:       semanticPayload,
-		RoutingSource: registration.RoutingSource,
-		ExecutionMode: registration.ExecutionMode,
-		Due:           runtimegenericschedule.AbsoluteDue(selectedNow),
-		TaskID:        registration.Handle.TaskID(),
-	}, nil
-}
-
 func advanceFanOutDeliveryBarriersTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -402,7 +374,7 @@ func advanceFanOutDeliveryBarriersTx(
 		status := fanoutbarrier.StatusClosedPending
 		scheduleKey := any(nil)
 		scheduleActivationID := any(nil)
-		command, err := fanOutBarrierSchedule(registration, fold.Summary, selectedNow)
+		command, err := runtimegenericschedule.FanOutBarrierAdmission(registration, fold.Summary, selectedNow)
 		if err != nil {
 			return nil, err
 		}
@@ -552,19 +524,8 @@ func cancelSupersededFanOutBarrierScheduleTx(
 	if !found {
 		return fmt.Errorf("superseded fan-out barrier schedule activation %s is missing", barrier.ScheduleActivationID)
 	}
-	expected, err := fanOutBarrierSchedule(barrier.Registration, *barrier.Summary, activation.InitialDueAt)
-	if err != nil {
+	if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(barrier, activation); err != nil {
 		return err
-	}
-	expectedHash, err := expected.ImmutableHash()
-	if err != nil {
-		return err
-	}
-	if activation.ID != strings.TrimSpace(barrier.ScheduleActivationID) ||
-		activation.Command.ScheduleKey != strings.TrimSpace(barrier.ScheduleKey) ||
-		activation.Command.TaskID != barrier.Registration.Handle.TaskID() ||
-		activation.ImmutableHash != expectedHash {
-		return fmt.Errorf("superseded fan-out barrier schedule activation contradicts its exact barrier owner")
 	}
 	cancelled, err := genericSchedules.CancelActivationTx(ctx, tx, effects, runtimegenericschedule.CancelCommand{
 		ActivationID: activation.ID,
@@ -839,9 +800,10 @@ func (s *PipelinePostgresOwner) MaterializeRunForkFanOutBarrierTx(
 	forkRunID string,
 	source fanoutbarrier.Barrier,
 	selectedRef runtimecontracts.FanOutPlanRef,
+	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
-	return materializeRunForkFanOutBarrierTx(ctx, tx, true, effects, s.genericSchedules, forkRunID, source, selectedRef, at)
+	return materializeRunForkFanOutBarrierTx(ctx, tx, true, effects, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
 }
 
 func (s *PipelineSQLiteOwner) MaterializeRunForkFanOutBarrierTx(
@@ -851,9 +813,10 @@ func (s *PipelineSQLiteOwner) MaterializeRunForkFanOutBarrierTx(
 	forkRunID string,
 	source fanoutbarrier.Barrier,
 	selectedRef runtimecontracts.FanOutPlanRef,
+	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
-	return materializeRunForkFanOutBarrierTx(ctx, tx, false, effects, s.genericSchedules, forkRunID, source, selectedRef, at)
+	return materializeRunForkFanOutBarrierTx(ctx, tx, false, effects, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
 }
 
 func materializeRunForkFanOutBarrierTx(
@@ -865,6 +828,7 @@ func materializeRunForkFanOutBarrierTx(
 	forkRunID string,
 	source fanoutbarrier.Barrier,
 	selectedRef runtimecontracts.FanOutPlanRef,
+	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
 	if err := source.Validate(); err != nil {
@@ -874,6 +838,22 @@ func materializeRunForkFanOutBarrierTx(
 		return fmt.Errorf("fork fan-out barrier materialization requires run, time, and revision owner")
 	}
 	sourceJoin, _ := source.Registration.Handle.JoinRef()
+	var childGeneration attemptgeneration.Generation
+	if generation != nil {
+		if generation.Source().Generation() != sourceJoin.Generation() {
+			return fmt.Errorf("fork barrier source generation contradicts admitted correspondence")
+		}
+		projection, err := runfork.ProjectEntityOwnership(source.Registration.IntentKey.RunID, forkRunID, source.Registration.EntityID, source.Registration.Route.InstancePath)
+		if err != nil {
+			return err
+		}
+		if err := generation.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
+			return err
+		}
+		childGeneration = generation.Generation()
+	} else if sourceJoin.Generation() != (attemptgeneration.Generation{}) {
+		return fmt.Errorf("fork barrier requires its admitted child generation")
+	}
 	fanOutDeclaration, identityErr := selectedRef.ElementRef.DeclarationIdentity()
 	if identityErr != nil {
 		return fmt.Errorf("selected fan-out declaration: %w", identityErr)
@@ -886,7 +866,7 @@ func materializeRunForkFanOutBarrierTx(
 	if err != nil {
 		return err
 	}
-	selectedJoin, err = selectedJoin.BindFanOutIntent(source.Registration.IntentKey.TriggeringDeliveryID, sourceJoin.Generation())
+	selectedJoin, err = selectedJoin.BindFanOutIntent(source.Registration.IntentKey.TriggeringDeliveryID, childGeneration)
 	if err != nil {
 		return err
 	}
@@ -895,6 +875,19 @@ func materializeRunForkFanOutBarrierTx(
 		return err
 	}
 	registration := source.Registration
+	entityProjection, err := runfork.ProjectEntityOwnership(source.Registration.IntentKey.RunID, forkRunID, registration.EntityID, registration.Route.InstancePath)
+	if err != nil {
+		return err
+	}
+	registration.Route, err = runfork.ProjectExecutionRoute(source.Registration.IntentKey.RunID, forkRunID, sourceJoin.FlowPath(), registration.Route)
+	if err != nil {
+		return err
+	}
+	registration.RoutingSource, err = runfork.ProjectProducerOwnership(source.Registration.IntentKey.RunID, forkRunID, registration.RoutingSource)
+	if err != nil {
+		return err
+	}
+	registration.EntityID = entityProjection.Fork.EntityID
 	registration.IntentKey.RunID = strings.TrimSpace(forkRunID)
 	registration.IntentKey.ElementRef = selectedRef.ElementRef
 	registration.PlanRef = selectedRef
@@ -920,7 +913,7 @@ func materializeRunForkFanOutBarrierTx(
 		if genericSchedules == nil || source.Summary == nil {
 			return fmt.Errorf("closed fork fan-out barrier requires generic schedule owner and summary")
 		}
-		command, err := fanOutBarrierSchedule(registration, *source.Summary, at)
+		command, err := runtimegenericschedule.FanOutBarrierAdmission(registration, *source.Summary, at)
 		if err != nil {
 			return err
 		}

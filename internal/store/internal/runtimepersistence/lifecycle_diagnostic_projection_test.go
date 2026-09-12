@@ -299,6 +299,15 @@ func enqueueDiagnosticTestAgent(t *testing.T, selected diagnosticProjectionTestS
 
 func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTestStore, identity agentidentity.Identity, origin runtimemanager.LifecycleDiagnosticOrigin, mode executionmode.Mode) diaglog.LifecycleDiagnostic {
 	t.Helper()
+	req := diagnosticTestTransition(t, identity, origin, mode)
+	if _, err := agentfixture.CommitStatic(t, testAuthorActivityContext(), selected, req); err != nil {
+		t.Fatal(err)
+	}
+	return diagnosticTestOperation(t, selected, req.OperationID)
+}
+
+func diagnosticTestTransition(t *testing.T, identity agentidentity.Identity, origin runtimemanager.LifecycleDiagnosticOrigin, mode executionmode.Mode) runtimemanager.AgentLifecycleTransition {
+	t.Helper()
 	slug := identity.AgentID()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	backend := "anthropic"
@@ -312,14 +321,15 @@ func enqueueDiagnosticTestIdentity(t *testing.T, selected diagnosticProjectionTe
 		rec.Config.Mock = mockperformance.Performance{Kind: mockperformance.KindPython, Module: "mocks/worker.py", Source: []byte("def handle(input): return {'text': 'fixture'}\n"), Digest: "sha256:test"}
 	}
 	op := uuid.NewString()
-	_, err := agentfixture.CommitStatic(t, testAuthorActivityContext(), selected, runtimemanager.AgentLifecycleTransition{
+	return runtimemanager.AgentLifecycleTransition{
 		DiagnosticOrigin: origin,
 		OperationID:      op, OperationKind: "spawn", RequestHash: op, Identity: identity, AgentID: slug, Trigger: "spawn", TargetEpoch: 11, TargetGeneration: 1,
 		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "r1", RunMode: runtimemanager.AgentRunModeStopped, Agent: &rec, Now: now,
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
+}
+
+func diagnosticTestOperation(t *testing.T, selected diagnosticProjectionTestStore, op string) diaglog.LifecycleDiagnostic {
+	t.Helper()
 	items, err := selected.ListPendingAgentLifecycleDiagnostics(context.Background(), 100)
 	if err != nil {
 		t.Fatal(err)

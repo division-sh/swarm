@@ -31,6 +31,7 @@ const (
 // sourcePrimitiveOwners is an exact source-derived ledger. Keys include the
 // enclosing function and per-function ordinal so adding, moving, or removing a
 // launch/write primitive makes this test fail until ownership is reclassified.
+// The selected-context Close/Done entries are sync.Once.Do settlement, not HTTP.
 var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                                  ownerRuntimeDependency,
 	"internal/runtime/channelactivation/owner.go:Release:http_do:1":                                                                       ownerRuntimeDependency,
@@ -101,6 +102,8 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/runlifecycle/executor.go:Cancel:http_do:1":                                                                          ownerRuntimeDependency,
 	"internal/runtime/runlifecycle/executor.go:Submit:http_do:1":                                                                          ownerRuntimeDependency,
 	"internal/runtime/runforkexecution/runtime_container.go:Publish:http_do:1":                                                            ownerRuntimeDependency,
+	"internal/runtime/runforkexecution/agent_runtime_materialization.go:Close:http_do:1":                                                  ownerRuntimeDependency,
+	"internal/runtime/runforkexecution/control_lifetime.go:Done:http_do:1":                                                                ownerRuntimeDependency,
 	"internal/runtime/sessions/heartbeat.go:StartLeaseHeartbeatWithErrorHandler:http_do:1":                                                ownerRuntimeDependency,
 	"internal/runtime/shutdown_admission.go:BeginContext:http_do:1":                                                                       ownerRuntimeDependency,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:AddOverlayFile:filesystem_write:1":                                         ownerBuildTest,
@@ -122,6 +125,13 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/testfixtures/canonicalrouting/resolution_variants.go:CopyNestedProducerTemplateSelectResolution:filesystem_write:2": ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/root_connect.go:CopyRootOutputConnect:filesystem_write:1":                             ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/specialized_variants.go:removeInheritedScenarios:filesystem_write:1":                  ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:1":              ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:2":              ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:3":              ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:4":              ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:5":              ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:6":              ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:7":              ownerBuildTest,
 	"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1":                                                               ownerManagedAgent,
 	"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1":                                                              ownerManagedAgent,
 	"internal/runtime/tools/executor_native.go:execNativeHostWriteFile:filesystem_write:1":                                                ownerManagedAgent,

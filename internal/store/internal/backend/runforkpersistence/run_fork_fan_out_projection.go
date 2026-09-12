@@ -21,6 +21,9 @@ func loadRunForkFanOutObligationsFromRevision(snapshot *runForkRevisionSnapshot,
 	if snapshot == nil {
 		return nil, fmt.Errorf("run-fork fan-out projection requires revision snapshot")
 	}
+	if err := admitRunForkInheritedFanOutHistory(snapshot); err != nil {
+		return nil, err
+	}
 	eventsByID := make(map[string]runForkRevisionEvent, len(snapshot.Events))
 	for _, event := range snapshot.Events {
 		eventsByID[strings.TrimSpace(event.EventID)] = event

@@ -58,6 +58,11 @@ const sqliteProviderCompletionRecoveryOwnerPredicate = `(o.authority_kind = 'nor
 const postgresExternalEffectRecoveryAdmissionPredicate = `(` + postgresExternalEffectActiveOwnerPredicate + ` OR (o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL AND ` + postgresProviderCompletionRecoveryOwnerPredicate + `))`
 const sqliteExternalEffectRecoveryAdmissionPredicate = `(` + sqliteExternalEffectActiveOwnerPredicate + ` OR (o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL AND ` + sqliteProviderCompletionRecoveryOwnerPredicate + `))`
 
+// Selected recovery is admitted by exact predecessor possession, not by a
+// normal Manager's startup pass or a wall-clock lease guess.
+const postgresRecoveryCandidatePredicate = `((o.authority_kind='selected_contract_fork' AND o.selected_execution_id::text=$1) OR ($1='' AND o.authority_kind<>'selected_contract_fork' AND ` + postgresExternalEffectRecoveryAdmissionPredicate + `))`
+const sqliteRecoveryCandidatePredicate = `((o.authority_kind='selected_contract_fork' AND o.selected_execution_id=$1) OR ($1='' AND o.authority_kind<>'selected_contract_fork' AND ` + sqliteExternalEffectRecoveryAdmissionPredicate + `))`
+
 func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Context, request runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error) {
 	if err := request.Validate(); err != nil {
 		return runtimeeffects.RecoverySummary{}, err
@@ -65,7 +70,7 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 	var summary runtimeeffects.RecoverySummary
 	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
 		return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-			candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, true)
+			candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, true, "")
 			if err != nil {
 				return err
 			}
@@ -99,7 +104,7 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 	var summary runtimeeffects.RecoverySummary
 	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite reconcile external effect attempts", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-			candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, false)
+			candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, false, "")
 			if err != nil {
 				return err
 			}
@@ -372,6 +377,11 @@ func scanChannelOnboardingEffectOutcomes(rows *sql.Rows) ([]runtimeeffects.Chann
 }
 
 func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	if authority.StartupProbe.Preparation != nil {
+		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+	}
 	var err error
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
@@ -435,6 +445,11 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 }
 
 func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	if authority.StartupProbe.Preparation != nil {
+		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+	}
 	var err error
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
@@ -861,12 +876,12 @@ func (c externalEffectRecoveryCandidate) runID() (string, error) {
 	return authorityRunID, nil
 }
 
-func loadExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool) ([]externalEffectRecoveryCandidate, error) {
-	query := `SELECT CAST(o.operation_id AS TEXT), CAST(a.attempt_id AS TEXT), o.execution_mode, a.execution_mode, o.authority_evidence, COALESCE(json_extract(o.lineage, '$.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.agent_identity.run_id'), ''), COALESCE(o.agent_run_id,''), o.authority_kind, o.effect_kind, (a.usage_target_kind IS NOT NULL), a.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + sqliteExternalEffectRecoveryAdmissionPredicate + ` ORDER BY a.attempt_id`
+func loadExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool, selectedExecutionID string) ([]externalEffectRecoveryCandidate, error) {
+	query := `SELECT CAST(o.operation_id AS TEXT), CAST(a.attempt_id AS TEXT), o.execution_mode, a.execution_mode, o.authority_evidence, COALESCE(json_extract(o.lineage, '$.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.agent_identity.run_id'), ''), COALESCE(o.agent_run_id,''), o.authority_kind, o.effect_kind, (a.usage_target_kind IS NOT NULL), a.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + sqliteRecoveryCandidatePredicate + ` ORDER BY a.attempt_id`
 	if postgres {
-		query = `SELECT o.operation_id::text, a.attempt_id::text, o.execution_mode, a.execution_mode, o.authority_evidence::text, COALESCE(o.lineage->>'run_id', ''), COALESCE(o.authority_evidence #>> '{usage_target,run_id}', ''), COALESCE(o.authority_evidence #>> '{usage_target,agent_identity,run_id}', ''), COALESCE(o.agent_run_id::text,''), o.authority_kind, o.effect_kind, (a.usage_target_kind IS NOT NULL), a.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + postgresExternalEffectRecoveryAdmissionPredicate + ` ORDER BY a.attempt_id FOR UPDATE OF o,a`
+		query = `SELECT o.operation_id::text, a.attempt_id::text, o.execution_mode, a.execution_mode, o.authority_evidence::text, COALESCE(o.lineage->>'run_id', ''), COALESCE(o.authority_evidence #>> '{usage_target,run_id}', ''), COALESCE(o.authority_evidence #>> '{usage_target,agent_identity,run_id}', ''), COALESCE(o.agent_run_id::text,''), o.authority_kind, o.effect_kind, (a.usage_target_kind IS NOT NULL), a.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + postgresRecoveryCandidatePredicate + ` ORDER BY a.attempt_id FOR UPDATE OF o,a`
 	}
-	rows, err := tx.QueryContext(ctx, query)
+	rows, err := tx.QueryContext(ctx, query, selectedExecutionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1448,6 +1463,9 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 		return "", fmt.Errorf("external effect operation requires exact author activity bundle scope")
 	}
 	bundleHash := strings.TrimSpace(scope.BundleHash)
+	if preparation := authority.StartupProbe.Preparation; preparation != nil && bundleHash != preparation.BundleHash {
+		return "", fmt.Errorf("external effect operation bundle scope conflicts with selected preparation")
+	}
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && bundleHash != strings.TrimSpace(authority.ForkChat.BundleHash) {
 		return "", fmt.Errorf("external effect operation bundle scope conflicts with forkchat source bundle")
 	}
@@ -1458,6 +1476,9 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 }
 
 func externalEffectStartupAuthorityID(authority runtimeeffects.Authority) string {
+	if preparation := authority.StartupProbe.Preparation; preparation != nil {
+		return preparation.ProcessAuthorityID
+	}
 	if authority.Kind == runtimeeffects.AuthorityServeRegistration {
 		return authority.ServeRegistration.StartupAuthorityID
 	}
@@ -2128,7 +2149,7 @@ func externalEffectRecoveryFailure(class runtimefailures.Class, code string, now
 
 func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	allowed := externalEffectRecoveryAttemptSet(candidates)
-	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, story, effects, allowed, now)
+	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, story, effects, allowed, now, "")
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -2146,7 +2167,7 @@ func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, ll
 
 func reconcileExternalEffectAttemptsSQLiteTx(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	allowed := externalEffectRecoveryAttemptSet(candidates)
-	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, story, effects, allowed, now)
+	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, story, effects, allowed, now, "")
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}

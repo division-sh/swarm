@@ -89,6 +89,20 @@ type AgentRuntimeSet struct {
 }
 
 func NewAgentRuntimeSet(configuredDefault llmselection.Profile, factory RuntimeFactory, injectedDefault Runtime) (*AgentRuntimeSet, error) {
+	return newAgentRuntimeSet(configuredDefault, factory, injectedDefault, RuntimeFactory.prepare, RuntimeFactory.prepareMock)
+}
+
+// NewPreparedAgentRuntimeSet constructs provider protocol/catalog clients, not
+// completion authority. Ordinary construction retains its completion guard.
+func NewPreparedAgentRuntimeSet(configuredDefault llmselection.Profile, factory RuntimeFactory) (*AgentRuntimeSet, error) {
+	prepared, err := factory.prepareProbe()
+	if err != nil {
+		return nil, err
+	}
+	return newAgentRuntimeSet(configuredDefault, prepared, nil, RuntimeFactory.prepareProbe, RuntimeFactory.prepareProbe)
+}
+
+func newAgentRuntimeSet(configuredDefault llmselection.Profile, factory RuntimeFactory, injectedDefault Runtime, prepareLive, prepareMock func(RuntimeFactory) (RuntimeFactory, error)) (*AgentRuntimeSet, error) {
 	profile, err := llmselection.ResolveLiveBackend(configuredDefault.ID)
 	if err != nil {
 		return nil, err
@@ -97,8 +111,8 @@ func NewAgentRuntimeSet(configuredDefault llmselection.Profile, factory RuntimeF
 	if err != nil {
 		return nil, err
 	}
-	liveBuilder := &runtimeFactoryBuilder{factory: factory, prepare: RuntimeFactory.prepare}
-	mockBuilder := &runtimeFactoryBuilder{factory: factory, prepare: RuntimeFactory.prepareMock}
+	liveBuilder := &runtimeFactoryBuilder{factory: factory, prepare: prepareLive}
+	mockBuilder := &runtimeFactoryBuilder{factory: factory, prepare: prepareMock}
 	defaultSlot := &runtimeSlot{profile: profile, injected: injectedDefault, builder: liveBuilder}
 	mockSlot := &runtimeSlot{profile: mockProfile, builder: mockBuilder}
 	return &AgentRuntimeSet{

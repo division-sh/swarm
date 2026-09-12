@@ -50,17 +50,18 @@ func (r GrantRequest) Validate() error {
 }
 
 type GrantEvidence struct {
-	GrantID            string     `json:"grant_id"`
-	ProcessAuthorityID string     `json:"process_authority_id"`
-	ProcessOwnerID     string     `json:"process_owner_id"`
-	ProcessBootID      string     `json:"process_boot_id"`
-	BundleHash         string     `json:"bundle_hash"`
-	RuntimeInstanceID  string     `json:"runtime_instance_id"`
-	RuntimeGeneration  uint64     `json:"runtime_generation"`
-	SourceSetRevision  string     `json:"source_set_revision"`
-	StateVersion       uint64     `json:"state_version"`
-	State              GrantState `json:"state"`
-	ProbeSurfaceIDs    []string   `json:"probe_surface_ids,omitempty"`
+	GrantID            string                    `json:"grant_id"`
+	ProcessAuthorityID string                    `json:"process_authority_id"`
+	ProcessOwnerID     string                    `json:"process_owner_id"`
+	ProcessBootID      string                    `json:"process_boot_id"`
+	BundleHash         string                    `json:"bundle_hash"`
+	RuntimeInstanceID  string                    `json:"runtime_instance_id"`
+	RuntimeGeneration  uint64                    `json:"runtime_generation"`
+	SourceSetRevision  string                    `json:"source_set_revision"`
+	StateVersion       uint64                    `json:"state_version"`
+	State              GrantState                `json:"state"`
+	ProbeSurfaceIDs    []string                  `json:"probe_surface_ids,omitempty"`
+	SelectedFork       *SelectedForkGrantBinding `json:"selected_fork,omitempty"`
 }
 
 func (e GrantEvidence) Validate() error {
@@ -76,12 +77,22 @@ func (e GrantEvidence) Validate() error {
 	if strings.TrimSpace(e.ProcessOwnerID) == "" || e.StateVersion == 0 {
 		return errors.New("runtime generation grant process evidence is incomplete")
 	}
-	if err := (GrantRequest{
+	request := GrantRequest{
 		BundleHash:        e.BundleHash,
 		RuntimeInstanceID: e.RuntimeInstanceID, RuntimeGeneration: e.RuntimeGeneration,
 		SourceSetRevision: e.SourceSetRevision,
-	}).Validate(); err != nil {
-		return err
+	}
+	if e.SelectedFork == nil {
+		if err := request.Validate(); err != nil {
+			return err
+		}
+	} else {
+		if e.SourceSetRevision != "" || e.RuntimeGeneration != e.SelectedFork.ExecutionGeneration {
+			return errors.New("selected-fork grant cannot carry live source-set authority or a different generation")
+		}
+		if err := (SelectedForkGrantRequest{BundleHash: e.BundleHash, RuntimeInstanceID: e.RuntimeInstanceID, Binding: *e.SelectedFork}).Validate(); err != nil {
+			return err
+		}
 	}
 	switch e.State {
 	case GrantPrepared, GrantProbeSettled, GrantAdmitted, GrantRetired:
@@ -93,9 +104,9 @@ func (e GrantEvidence) Validate() error {
 
 type GenerationGrant interface {
 	runtimemanager.AgentLifecyclePersistence
+	runtimemanager.RunExecutionOwner
 	Evidence() (GrantEvidence, error)
 	ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error)
-	SourceSetPlan(context.Context) (runtimeagenttopology.SourceSetPlan, error)
 	ProveCurrent(context.Context) error
 	MarkProbesSettled(context.Context, []string) (GrantEvidence, error)
 	AdmitExecution(context.Context) (GrantEvidence, error)
@@ -103,11 +114,21 @@ type GenerationGrant interface {
 	Done() <-chan struct{}
 }
 
+// LiveGenerationGrant is the complete-source-set authority used by normal
+// runtime startup and replacement. Selected execution consumes GenerationGrant
+// without acquiring authority to interpret the live source-set head.
+type LiveGenerationGrant interface {
+	GenerationGrant
+	SourceSetPlan(context.Context) (runtimeagenttopology.SourceSetPlan, error)
+}
+
 type ProcessCapability interface {
 	runtimedestructivereset.OperationStore
 	Evidence() (Authority, error)
+	ProveCurrent(context.Context) error
 	CurrentSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error)
-	IssueGenerationGrant(context.Context, GrantRequest) (GenerationGrant, error)
+	IssueGenerationGrant(context.Context, GrantRequest) (LiveGenerationGrant, error)
+	IssueSelectedForkGenerationGrant(context.Context, SelectedForkGrantRequest) (GenerationGrant, error)
 	InstallCompleteSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	RestoreSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error)
@@ -138,6 +159,10 @@ type generationGrant struct {
 	evidence GrantEvidence
 	done     chan struct{}
 	doneOnce sync.Once
+}
+
+type liveGenerationGrant struct {
+	*generationGrant
 }
 
 func NewProcessCapability(session RetainedSession) (ProcessCapability, error) {
@@ -172,6 +197,15 @@ func (p *processCapability) Evidence() (Authority, error) {
 	return p.session.Authority()
 }
 
+func (p *processCapability) ProveCurrent(ctx context.Context) error {
+	if p == nil {
+		return errors.New("process startup/topology capability is missing")
+	}
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	return p.proveCurrent(ctx)
+}
+
 func (p *processCapability) CurrentSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	if p == nil {
 		return runtimeagenttopology.SourceSetPlan{}, false, errors.New("process startup/topology capability is missing")
@@ -188,7 +222,7 @@ func (p *processCapability) CurrentSourceSet(ctx context.Context) (runtimeagentt
 	return plan, exists, err
 }
 
-func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantRequest) (GenerationGrant, error) {
+func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantRequest) (LiveGenerationGrant, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -249,7 +283,7 @@ func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantR
 	default:
 	}
 	p.grants[evidence.GrantID] = g
-	return g, nil
+	return &liveGenerationGrant{generationGrant: g}, nil
 }
 
 func (p *processCapability) InstallCompleteSourceSet(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
@@ -561,7 +595,7 @@ func (g *generationGrant) Evidence() (GrantEvidence, error) {
 	if g.evidence.State == GrantRetired {
 		return GrantEvidence{}, errors.New("runtime generation grant is retired")
 	}
-	return g.evidence, nil
+	return g.evidence.clone(), nil
 }
 
 func (g *generationGrant) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
@@ -581,8 +615,8 @@ func (g *generationGrant) ProcessExecutionBinding() (runtimemanager.ProcessExecu
 	return binding, binding.Validate()
 }
 
-func (g *generationGrant) SourceSetPlan(ctx context.Context) (runtimeagenttopology.SourceSetPlan, error) {
-	if g == nil || g.owner == nil {
+func (g *liveGenerationGrant) SourceSetPlan(ctx context.Context) (runtimeagenttopology.SourceSetPlan, error) {
+	if g == nil || g.generationGrant == nil || g.owner == nil {
 		return runtimeagenttopology.SourceSetPlan{}, errors.New("runtime generation grant is missing its process owner")
 	}
 	g.owner.opMu.Lock()
@@ -628,8 +662,7 @@ func (g *generationGrant) ProveCurrent(ctx context.Context) error {
 	if evidence.State == GrantRetired {
 		return errors.New("runtime generation grant is retired")
 	}
-	_, err := g.requireCurrentSourceSetLocked(ctx, evidence)
-	return err
+	return g.requireExecutionAuthorityLocked(ctx, evidence)
 }
 
 func (g *generationGrant) MarkProbesSettled(ctx context.Context, surfaceIDs []string) (GrantEvidence, error) {
@@ -655,7 +688,7 @@ func (g *generationGrant) transition(ctx context.Context, from, to GrantState, p
 	if evidence.State == GrantRetired {
 		return GrantEvidence{}, errors.New("runtime generation grant is retired")
 	}
-	if _, err := g.requireCurrentSourceSetLocked(ctx, evidence); err != nil {
+	if err := g.requireExecutionAuthorityLocked(ctx, evidence); err != nil {
 		return GrantEvidence{}, err
 	}
 	g.mu.Lock()
@@ -668,7 +701,11 @@ func (g *generationGrant) transition(ctx context.Context, from, to GrantState, p
 	next.State = to
 	next.StateVersion++
 	if to == GrantProbeSettled {
-		next.ProbeSurfaceIDs = normalizeIDs(probeSurfaceIDs)
+		if next.SelectedFork != nil {
+			next.ProbeSurfaceIDs = append([]string(nil), probeSurfaceIDs...)
+		} else {
+			next.ProbeSurfaceIDs = normalizeIDs(probeSurfaceIDs)
+		}
 	}
 	if err := next.Validate(); err != nil {
 		return GrantEvidence{}, err
@@ -678,7 +715,7 @@ func (g *generationGrant) transition(ctx context.Context, from, to GrantState, p
 		return GrantEvidence{}, err
 	}
 	g.evidence = next
-	return next, nil
+	return next.clone(), nil
 }
 
 func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
@@ -711,13 +748,22 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 		RuntimeInstanceID:  evidence.RuntimeInstanceID,
 		RuntimeGeneration:  evidence.RuntimeGeneration,
 	}
-	if _, err := g.requireCurrentSourceSetLocked(ctx, evidence); err != nil {
+	if err := g.requireExecutionAuthorityLocked(ctx, evidence); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if evidence.SelectedFork != nil && req.Identity.RunID != evidence.SelectedFork.ForkRunID {
+		return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("selected-fork grant cannot mutate another run")
 	}
 	if req.Topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
 		static := req.Topology.Authority.Static
 		if static.SourceSetRevision != evidence.SourceSetRevision || static.BundleHash != evidence.BundleHash {
 			return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("static lifecycle topology authority differs from runtime generation grant")
+		}
+	}
+	if req.Topology.Authority.Kind == runtimeagenttopology.AuthoritySelectedForkDeclarationPlan {
+		selected := req.Topology.Authority.Selected
+		if evidence.SelectedFork == nil || selected.RunID != evidence.SelectedFork.ForkRunID || selected.BundleHash != evidence.BundleHash || selected.PlanFingerprint != evidence.SelectedFork.DeclarationPlanFingerprint {
+			return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("selected declaration topology differs from runtime generation grant")
 		}
 	}
 	mutationCtx := runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))

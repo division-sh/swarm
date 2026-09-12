@@ -1,0 +1,5 @@
+{
+  "Replace": {
+    "internal/store/internal/runtimepersistence/run_fork_fan_out_generation_test.go": "internal/store/internal/runtimepersistence/testdata/future_capabilities/fork_selected_fan_out_success_test.go.txt"
+  }
+}

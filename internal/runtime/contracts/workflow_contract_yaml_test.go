@@ -2660,77 +2660,17 @@ emit: scoring.requested
 	}
 }
 
-func TestSystemNodeEventHandlerDecode_PreservesSelectEntity(t *testing.T) {
-	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
-select_entity:
-  by:
-    vertical_id: payload.vertical_id
-emit: treasury.spend_approved
-`), &handler); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if handler.SelectEntity == nil {
-		t.Fatal("expected select_entity to decode")
-	}
-	if got := len(handler.SelectEntity.Bindings); got != 1 {
-		t.Fatalf("len(select_entity bindings) = %d, want 1", got)
-	}
-	binding := handler.SelectEntity.Bindings[0]
-	if binding.Field != "vertical_id" || binding.Ref != "payload.vertical_id" {
-		t.Fatalf("binding = %+v, want vertical_id -> payload.vertical_id", binding)
-	}
-	if binding.RefPath.Root.String() != "payload" {
-		t.Fatalf("binding root = %q, want payload", binding.RefPath.Root.String())
-	}
-}
-
-func TestSystemNodeEventHandlerDecode_RejectsUnknownSelectEntityField(t *testing.T) {
-	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
-select_entity:
-  where:
-    vertical_id: payload.vertical_id
-`), &handler)
-	if err == nil || !strings.Contains(err.Error(), `select_entity field "where" is not supported.`) {
-		t.Fatalf("yaml.Unmarshal error = %v, want typed select_entity field rejection", err)
-	}
-}
-
-func TestSystemNodeEventHandlerDecode_PreservesSelectOrCreateEntity(t *testing.T) {
-	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
-select_or_create_entity:
-  by:
-    repo_id: payload.repo_id
-emit: spec_repo.ready
-`), &handler); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if handler.SelectOrCreateEntity == nil {
-		t.Fatal("expected select_or_create_entity to decode")
-	}
-	if got := len(handler.SelectOrCreateEntity.Bindings); got != 1 {
-		t.Fatalf("len(select_or_create_entity bindings) = %d, want 1", got)
-	}
-	binding := handler.SelectOrCreateEntity.Bindings[0]
-	if binding.Field != "repo_id" || binding.Ref != "payload.repo_id" {
-		t.Fatalf("binding = %+v, want repo_id -> payload.repo_id", binding)
-	}
-	if binding.RefPath.Root.String() != "payload" {
-		t.Fatalf("binding root = %q, want payload", binding.RefPath.Root.String())
-	}
-}
-
-func TestSystemNodeEventHandlerDecode_RejectsUnknownSelectOrCreateEntityField(t *testing.T) {
-	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte(`
-select_or_create_entity:
-  where:
-    repo_id: payload.repo_id
-`), &handler)
-	if err == nil || !strings.Contains(err.Error(), `select_or_create_entity field "where" is not supported.`) {
-		t.Fatalf("yaml.Unmarshal error = %v, want typed select_or_create_entity field rejection", err)
+func TestSystemNodeEventHandlerDecodeRejectsRetiredReceiverSelectors(t *testing.T) {
+	for _, name := range []string{"select_entity", "select_or_create_entity"} {
+		for _, body := range []string{"null", "{}", "true", "{by: {account_id: payload.account_id}}", "{where: {account_id: payload.account_id}}"} {
+			t.Run(name+"/"+body, func(t *testing.T) {
+				var handler SystemNodeEventHandler
+				err := yaml.Unmarshal([]byte(name+": "+body+"\ncreate_entity: true\nemit: receiver.ready\n"), &handler)
+				if err == nil || !strings.Contains(err.Error(), "RETIRED:") || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "composition boundary") {
+					t.Fatalf("retired receiver selector accepted or lacks teaching error: %v", err)
+				}
+			})
+		}
 	}
 }
 

@@ -267,6 +267,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
+		LifecycleStore: storetest.AgentLifecycleFixture(t, pg),
 	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {
@@ -338,6 +339,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
+		LifecycleStore: storetest.AgentLifecycleFixture(t, pg),
 	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {
@@ -383,9 +385,15 @@ func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storete
 	if cfg.Type == "" {
 		cfg.Type = "stub"
 	}
-	storetest.RequireStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok {
+		t.Fatal("API agent materialization requires its exact source artifact")
+	}
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, runtimemanager.PersistedAgent{
 		Config: cfg, Status: "active", HiredBy: "api-test",
-	})
+	}, source); err != nil {
+		t.Fatalf("admit API test agent: %v", err)
+	}
 	persisted, err := selected.LoadAgents(ctx)
 	if err != nil {
 		t.Fatalf("load admitted API test agent: %v", err)

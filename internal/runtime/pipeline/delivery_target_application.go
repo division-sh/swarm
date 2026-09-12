@@ -8,8 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -140,16 +138,6 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	if err != nil {
 		return DeliveryTargetApplication{}, fmt.Errorf("project admitted delivery target onto execution event: %w", err)
 	}
-	_, declarationBoundTarget, err := resolveWorkflowJoinOccurrence(source, executionEvent)
-	if err != nil {
-		return DeliveryTargetApplication{}, fmt.Errorf("resolve declaration-bound delivery target: %w", err)
-	}
-	validateDeclaredKey := func(instance WorkflowInstance) error {
-		if declarationBoundTarget {
-			return nil
-		}
-		return validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance)
-	}
 	application := DeliveryTargetApplication{
 		owner: owner, policy: policy, flowID: flowID, route: route, event: executionEvent,
 		state: WorkflowState{Metadata: map[string]any{}}, presence: WorkflowTargetPersistenceAbsent,
@@ -214,9 +202,6 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		if !owned || unavailable {
 			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target lifecycle descriptor or status conflicts with compiled receiver: flow=%q workflow=%q route=%q state=%q status=%q owned=%t unavailable=%t", flowID, instance.WorkflowName, instance.StorageRef, instance.CurrentState, instance.Status, owned, unavailable)
 		}
-		if err := validateDeclaredKey(instance); err != nil {
-			return DeliveryTargetApplication{}, err
-		}
 		if err := application.applyPersistedInstance(instance, target.Presence); err != nil {
 			return DeliveryTargetApplication{}, err
 		}
@@ -230,9 +215,6 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		}
 		if !workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, instance) {
 			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target state conflicts with compiled receiver: flow=%q workflow=%q route=%q status=%q", flowID, instance.WorkflowName, instance.StorageRef, instance.Status)
-		}
-		if err := validateDeclaredKey(instance); err != nil {
-			return DeliveryTargetApplication{}, err
 		}
 		if err := application.applyPersistedInstance(instance, target.Presence); err != nil {
 			return DeliveryTargetApplication{}, err
@@ -336,28 +318,6 @@ func (pc *PipelineCoordinator) loadCurrentDeliveryTargetState(
 	return current, target.Presence, nil
 }
 
-func validateDeliveryTargetDeclaredKey(source semanticview.Source, flowID, nodeID string, handler SystemNodeEventHandler, evt events.Event, acquisition DeliveryTargetAcquisition, instance WorkflowInstance) error {
-	if !deliveryTargetHandlerUsesDeclaredKey(handler, acquisition) {
-		return nil
-	}
-	var (
-		expected map[string]any
-		err      error
-	)
-	if acquisition == DeliveryTargetAcquisitionSelect {
-		expected, err = selectEntityExpectedValues(handler.SelectEntity, evt)
-	} else {
-		expected, err = selectOrCreateEntityExpectedValues(handler.SelectOrCreateEntity, evt)
-	}
-	if err != nil {
-		return fmt.Errorf("%s_invalid: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	}
-	if !workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, instance) || !selectEntityCandidateMatches(instance, expected) {
-		return fmt.Errorf("%s_conflict: stamped target %q does not satisfy the committed declared key", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(instance.StorageRef))
-	}
-	return nil
-}
-
 func materializingDeliveryTargetState(source semanticview.Source, flowID, entityType string, handler SystemNodeEventHandler, evt events.Event, owner events.DeliveryTargetOwnership, policy DeliveryTargetCompatibilityPolicy) (WorkflowState, error) {
 	route, err := workflowInstanceRouteForExecution(source, flowID, owner.Route().FlowInstance)
 	if err != nil {
@@ -369,20 +329,8 @@ func materializingDeliveryTargetState(source semanticview.Source, flowID, entity
 		Metadata: workflowMaterializeEntityFields(source, flowID, nil),
 		Control:  runtimeStateControlForDeliveryTarget(route, entityType),
 	}
-	if policy.Acquisition == DeliveryTargetAcquisitionCreate {
+	if handler.CreateEntity {
 		state.Metadata = workflowCreateEntityFields(source, flowID)
-	}
-	if policy.Acquisition == DeliveryTargetAcquisitionSelectOrCreate && handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
-		expected, err := selectOrCreateEntityExpectedValues(handler.SelectOrCreateEntity, evt)
-		if err != nil {
-			return WorkflowState{}, err
-		}
-		if state.Metadata == nil {
-			state.Metadata = map[string]any{}
-		}
-		for field, value := range expected {
-			values.Wrap(state.Metadata).SetPath(paths.Parse(field), value)
-		}
 	}
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}

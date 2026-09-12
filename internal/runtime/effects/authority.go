@@ -168,6 +168,7 @@ type StartupProbeAuthority struct {
 	ActorID              string
 	ExecutionKind        string
 	ExecutionAuthorityID string
+	Preparation          *managedcapabilities.PreparedSelectedForkProbeAuthority
 }
 
 type ServeRegistrationAuthority struct {
@@ -239,6 +240,9 @@ func NormalAgentAuthority(token LifecycleToken, executionOwner string, leaseExpi
 }
 
 func (a Authority) Valid() bool {
+	if a.StartupProbe.Preparation != nil && a.Kind != AuthorityStartupProbe {
+		return false
+	}
 	if strings.TrimSpace(a.ID) == "" || strings.TrimSpace(a.ExecutionOwner) == "" || a.LeaseExpiresAt.IsZero() || a.FenceGeneration == 0 || !a.ExecutionMode.Valid() {
 		return false
 	}
@@ -253,8 +257,19 @@ func (a Authority) Valid() bool {
 		return validUUIDs(a.ForkChat.ForkTurnID, a.ForkChat.ForkID, a.ForkChat.SourceRunID, a.ForkChat.RequestOccurrenceID) &&
 			a.ID == strings.TrimSpace(a.ForkChat.ForkTurnID) && nonEmpty(a.ForkChat.BundleHash, a.ForkChat.ActorTokenID, a.ForkChat.RequestHash)
 	case AuthorityStartupProbe:
+		if p := a.StartupProbe.Preparation; p != nil {
+			return p.Validate() == nil && validUUIDs(a.StartupProbe.ProbeID, a.StartupProbe.ExecutionAuthorityID) &&
+				a.ID == a.StartupProbe.ProbeID && a.ExecutionOwner == p.ProcessOwnerID &&
+				a.StartupProbe.ExecutionKind == string(managedcapabilities.ExecutionSelectedForkPreparation) &&
+				a.StartupProbe.StartupAuthorityID == "" && a.StartupProbe.StartupStateVersion == 0 &&
+				nonEmpty(a.StartupProbe.ActorID) && a.Target == (UsageTarget{}) && len(a.BudgetScopes) == 0 &&
+				a.Normal == (LifecycleToken{}) && a.SelectedFork == (SelectedContractForkAuthority{}) &&
+				a.ForkChat == (ConversationForkChatAuthority{}) && a.ServeRegistration == (ServeRegistrationAuthority{}) &&
+				a.ChannelConfirmation == (ChannelConfirmationAuthority{})
+		}
 		return validUUIDs(a.StartupProbe.ProbeID, a.StartupProbe.StartupAuthorityID) &&
 			a.ID == strings.TrimSpace(a.StartupProbe.ProbeID) && a.StartupProbe.StartupStateVersion > 0 &&
+			a.StartupProbe.ExecutionKind != string(managedcapabilities.ExecutionSelectedForkPreparation) &&
 			nonEmpty(a.StartupProbe.ActorID, a.StartupProbe.ExecutionKind, a.StartupProbe.ExecutionAuthorityID)
 	case AuthorityServeRegistration:
 		registration := a.ServeRegistration
@@ -352,6 +367,9 @@ func (a Authority) Evidence() map[string]any {
 		evidence["actor_id"] = a.StartupProbe.ActorID
 		evidence["execution_kind"] = a.StartupProbe.ExecutionKind
 		evidence["execution_authority_id"] = a.StartupProbe.ExecutionAuthorityID
+		if a.StartupProbe.Preparation != nil {
+			evidence["preparation"] = *a.StartupProbe.Preparation
+		}
 	case AuthorityServeRegistration:
 		evidence["intent_id"] = a.ServeRegistration.IntentID
 		evidence["startup_authority_id"] = a.ServeRegistration.StartupAuthorityID
@@ -453,7 +471,7 @@ func WithAuthority(ctx context.Context, authority Authority) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, authorityContextKey{}, authority)
+	return context.WithValue(ctx, authorityContextKey{}, authority.clonePreparation())
 }
 
 func AuthorityFromContext(ctx context.Context) (Authority, bool) {
@@ -461,7 +479,27 @@ func AuthorityFromContext(ctx context.Context) (Authority, bool) {
 		return Authority{}, false
 	}
 	authority, ok := ctx.Value(authorityContextKey{}).(Authority)
-	return authority, ok && authority.Valid()
+	return authority.clonePreparation(), ok && authority.Valid()
+}
+
+func (a Authority) clonePreparation() Authority {
+	if a.StartupProbe.Preparation != nil {
+		preparation := *a.StartupProbe.Preparation
+		a.StartupProbe.Preparation = &preparation
+	}
+	return a
+}
+
+func (a Authority) ValidatePreparedProbeRequest(req AuthorizeRequest) error {
+	registration, registered := RegistrationFor(req.Adapter)
+	if !a.Valid() || a.StartupProbe.Preparation == nil || !registered ||
+		registration.Kind != KindProviderStartupProbe || req.Kind != registration.Kind ||
+		req.Class != registration.Class || req.Transport != registration.Transport ||
+		req.AgentFrame != nil || req.Origin != (CompletionOrigin{}) || req.CapabilitySurface == nil ||
+		!StartupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, a) || req.Lineage["run_id"] != "" {
+		return fmt.Errorf("selected preparation authorizes only its exact startup probe")
+	}
+	return nil
 }
 
 func completionAuthorityFromContext(ctx context.Context) (Authority, bool) {

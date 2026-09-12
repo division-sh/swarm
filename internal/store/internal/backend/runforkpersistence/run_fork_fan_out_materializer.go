@@ -12,15 +12,17 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type runForkFanOutBarrierOwner interface {
-	MaterializeRunForkFanOutBarrierTx(context.Context, *sql.Tx, *runforkrevision.Effects, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, time.Time) error
+	MaterializeRunForkFanOutBarrierTx(context.Context, *sql.Tx, *runforkrevision.Effects, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
 }
 
-func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef) error {
+func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage) error {
 	var intentCount int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, forkRunID).Scan(&intentCount); err != nil {
 		return fmt.Errorf("count materialized fork fan-out intents: %w", err)
@@ -30,6 +32,10 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 	}
 	for _, obligation := range plan.FanOutObligations {
 		sourceIntent := obligation.Intent
+		projectedCapsule, _, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
+		if err != nil {
+			return err
+		}
 		planRef := planRefs[sourceIntent.Request.PlanRef.ElementRef]
 		var (
 			bundleHash, semanticDigest, sourceKind, sourceField, status, blockedReason string
@@ -39,7 +45,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			capsuleRaw                                                                 []byte
 			claimOwner                                                                 sql.NullString
 			claimGeneration                                                            uint64
-			leaseExpires, lastServed                                                   sql.NullTime
+			leaseExpires, lastServed                                                   any
 		)
 		intentQuery := `
 			SELECT bundle_hash, semantic_digest, source_kind,
@@ -65,18 +71,27 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		); err != nil {
 			return fmt.Errorf("load materialized fork fan-out %s: %w", sourceIntent.Request.Key.String(), err)
 		}
+		for _, field := range []struct {
+			name string
+			raw  any
+		}{{"lease_expires_at", leaseExpires}, {"last_served_at", lastServed}} {
+			if _, _, err := sqliteTimeValue(field.raw); err != nil {
+				return fmt.Errorf("decode materialized fork fan-out %s: %w", field.name, err)
+			}
+		}
 		var capsule fanoutobligation.Capsule
 		if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
 			return fmt.Errorf("decode materialized fork fan-out capsule: %w", err)
 		}
 		source := sourceIntent.Source
+		// Only SQL NULL proves untouched claim/service state, not an empty or zero decoded time.
 		if bundleHash != planRef.BundleHash || semanticDigest != planRef.SemanticDigest || sourceKind != string(source.Kind) ||
 			strings.TrimSpace(sourceEvent.String) != strings.TrimSpace(source.EventID) || strings.TrimSpace(sourceRun.String) != strings.TrimSpace(source.RunID) ||
 			strings.TrimSpace(sourceEntity.String) != strings.TrimSpace(source.EntityID) || sourceField != strings.TrimSpace(source.Field) ||
 			strings.TrimSpace(sourceMutation.String) != strings.TrimSpace(source.MutationID) || strings.TrimSpace(resourceFlowPath.String) != strings.TrimSpace(source.Declaration.FlowPath) ||
 			strings.TrimSpace(resourceEvent.String) != strings.TrimSpace(source.Declaration.EventName) || strings.TrimSpace(resourceVersion.String) != strings.TrimSpace(string(source.VersionID)) ||
 			cardinality != sourceIntent.Request.Cardinality || cursor != sourceIntent.Cursor || status != string(sourceIntent.Status) || nextChunk != fanoutobligation.InitialChunkSize ||
-			!reflect.DeepEqual(capsule, sourceIntent.Request.Capsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires.Valid || lastServed.Valid || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
+			!capsule.Equal(projectedCapsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires != nil || lastServed != nil || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
 			return fmt.Errorf("fork materialization %s fan-out intent conflicts with fixed plan", forkRunID)
 		}
 		outcomeQuery := `
@@ -97,10 +112,15 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			var kind string
 			var eventID, sourceEventID, inheritedDisposition sql.NullString
 			var failure []byte
-			var createdAt time.Time
-			if err := rows.Scan(&ordinal, &kind, &eventID, &sourceEventID, &inheritedDisposition, &failure, &createdAt); err != nil {
+			var createdRaw any
+			if err := rows.Scan(&ordinal, &kind, &eventID, &sourceEventID, &inheritedDisposition, &failure, &createdRaw); err != nil {
 				_ = rows.Close()
 				return fmt.Errorf("scan materialized fork fan-out outcome: %w", err)
+			}
+			createdAt, present, err := sqliteTimeValue(createdRaw)
+			if err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("decode materialized fork fan-out outcome created_at: %w", err)
 			}
 			if index >= len(obligation.Outcomes) {
 				_ = rows.Close()
@@ -112,7 +132,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 				wantSourceEventID = strings.TrimSpace(want.EventID)
 			}
 			if ordinal != want.Ordinal || kind != string(want.Kind) || eventID.Valid || strings.TrimSpace(sourceEventID.String) != wantSourceEventID ||
-				strings.TrimSpace(inheritedDisposition.String) != string(want.InheritedDisposition) || !equalOptionalJSON(failure, want.Failure) || createdAt.IsZero() {
+				strings.TrimSpace(inheritedDisposition.String) != string(want.InheritedDisposition) || !equalOptionalJSON(failure, want.Failure) || !present || createdAt.IsZero() {
 				_ = rows.Close()
 				return fmt.Errorf("fork materialization %s fan-out outcome %d conflicts with fixed plan", forkRunID, ordinal)
 			}
@@ -194,6 +214,7 @@ func materializeRunForkFanOutObligations(
 	forkRunID string,
 	plan runfork.RunForkPlan,
 	planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef,
+	original semanticview.OriginalLoopCarriage,
 	now time.Time,
 ) (int, error) {
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
@@ -201,6 +222,11 @@ func materializeRunForkFanOutObligations(
 	}
 	for _, obligation := range plan.FanOutObligations {
 		intent := obligation.Intent
+		capsuleProjection, generation, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
+		if err != nil {
+			return 0, err
+		}
+		intent.Request.Capsule = capsuleProjection
 		planRef, ok := planRefs[intent.Request.PlanRef.ElementRef]
 		if !ok {
 			return 0, fmt.Errorf("fork fan-out plan proof missing for %s", intent.Request.Key.String())
@@ -279,7 +305,7 @@ func materializeRunForkFanOutObligations(
 			if barriers == nil {
 				return 0, fmt.Errorf("fork fan-out barrier requires selected-store pipeline owner")
 			}
-			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, tx, effects, forkRunID, *obligation.Barrier, planRef, now); err != nil {
+			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, tx, effects, forkRunID, *obligation.Barrier, planRef, generation, now); err != nil {
 				return 0, err
 			}
 		}

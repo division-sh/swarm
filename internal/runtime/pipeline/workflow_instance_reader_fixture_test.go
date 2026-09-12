@@ -151,55 +151,6 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 	return record, nil
 }
 
-func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner WorkflowEntityStateSelectionOwner, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil, fmt.Errorf("workflow entity-state selection requires exact run_id")
-	}
-	scopeKey := owner.ScopeKey()
-	selectors = NormalizeWorkflowInstanceFieldSelectors(selectors)
-	if scopeKey == "" || len(selectors) == 0 {
-		return nil, nil
-	}
-	activeStates := runtimerunlifecycle.ActiveStates()
-	query := `SELECT es.entity_id, es.flow_instance, es.entity_type, es.slug, es.name, es.current_state, es.revision, es.entered_state_at, es.gates, es.fields, es.bookkeeping, es.accumulator, es.created_at, es.updated_at
-		FROM entity_state es
-		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
-		WHERE es.run_id = ?
-		  AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = es.run_id AND run.status IN (?, ?))
-		  AND (es.flow_instance = ? OR es.flow_instance LIKE ? OR (? AND es.flow_instance = ?))
-		  AND (fi.instance_path IS NULL OR (LOWER(TRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
-		ORDER BY es.created_at ASC, es.entity_id ASC`
-	args := []any{runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey + "/%", owner.Owns(runID), runID}
-	if r.dialect == workflowStoreDialectPostgres {
-		query = `SELECT es.entity_id::text, es.flow_instance, es.entity_type, es.slug, es.name, es.current_state, es.revision, es.entered_state_at, es.gates, es.fields, es.bookkeeping, es.accumulator, es.created_at, es.updated_at
-			FROM entity_state es
-			LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
-			WHERE es.run_id = $1::uuid
-			  AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = es.run_id AND run.status IN ($2, $3))
-				  AND (es.flow_instance = $4 OR es.flow_instance LIKE $5 OR ($6::boolean AND es.flow_instance = $1::text))
-				  AND (fi.instance_path IS NULL OR (LOWER(BTRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
-			ORDER BY es.created_at ASC, es.entity_id ASC`
-	}
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	records := make([]WorkflowEntityStatePersistenceRecord, 0, 8)
-	for rows.Next() {
-		record, err := scanPipelineTestWorkflowEntityState(rows)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
-}
-
 func (r pipelineTestWorkflowInstanceReader) QueryWorkflowEntityCollection(ctx context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
 	runID := owner.RunID()
 	activeStates := runtimerunlifecycle.ActiveStates()
@@ -240,7 +191,6 @@ func (r pipelineTestWorkflowInstanceReader) QueryWorkflowEntityCollection(ctx co
 	}
 	return FilterWorkflowEntityCollectionRecords(records, owner)
 }
-
 func scanPipelineTestWorkflowEntityState(row interface{ Scan(...any) error }) (WorkflowEntityStatePersistenceRecord, error) {
 	var record WorkflowEntityStatePersistenceRecord
 	var slug, name sql.NullString
@@ -294,61 +244,6 @@ func (r pipelineTestWorkflowInstanceReader) ListWorkflowInstances(ctx context.Co
 	}
 	defer rows.Close()
 	return scanPipelineTestWorkflowInstances(rows, r.dialect)
-}
-
-func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowInstances(ctx context.Context, runID, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil, fmt.Errorf("workflow instance selection requires exact run_id")
-	}
-	activeStates := runtimerunlifecycle.ActiveStates()
-	query := `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN (?, ?))`
-	args := []any{runID, string(activeStates[0]), string(activeStates[1])}
-	if r.dialect == workflowStoreDialectPostgres {
-		query = `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid AND status IN ($2, $3))`
-	}
-	var active bool
-	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&active); err != nil {
-		return nil, err
-	}
-	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
-	selectors = NormalizeWorkflowInstanceFieldSelectors(selectors)
-	if !active || scopeKey == "" || len(selectors) == 0 {
-		return nil, nil
-	}
-	items, err := r.ListWorkflowInstances(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	excluded := make(map[string]struct{})
-	for _, state := range NormalizeWorkflowInstanceExcludedStates(excludedStates) {
-		excluded[state] = struct{}{}
-	}
-	out := make([]WorkflowInstance, 0, len(items))
-	for _, item := range items {
-		path := strings.Trim(strings.TrimSpace(item.StorageRef), "/")
-		if path != scopeKey && !strings.HasPrefix(path, scopeKey+"/") {
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(item.Status), "active") || !item.TerminatedAt.IsZero() {
-			continue
-		}
-		if _, found := excluded[strings.ToLower(strings.TrimSpace(item.CurrentState))]; found {
-			continue
-		}
-		matched := true
-		for _, selector := range selectors {
-			value, found := workflowMetadataValue(item.Fields, selector.Field)
-			if !found || !workflowJSONValuesEqual(value, selector.Value) {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			out = append(out, item)
-		}
-	}
-	return out, nil
 }
 
 const pipelineTestWorkflowInstanceSelectPostgres = `
@@ -457,20 +352,11 @@ func (r *recordingRuntimeMutationRunner) LoadWorkflowTargetPersistence(ctx conte
 	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowTargetPersistence(ctx, identity, entityID)
 }
 
-func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowEntityStates(ctx context.Context, runID string, owner WorkflowEntityStateSelectionOwner, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
-	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.SelectActiveWorkflowEntityStates(ctx, runID, owner, selectors, excludedStates)
-}
-
 func (r *recordingRuntimeMutationRunner) QueryWorkflowEntityCollection(ctx context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
 	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.QueryWorkflowEntityCollection(ctx, owner)
 }
-
 func (r *recordingRuntimeMutationRunner) ListWorkflowInstances(ctx context.Context, runID string) ([]WorkflowInstance, error) {
 	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.ListWorkflowInstances(ctx, runID)
-}
-
-func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowInstances(ctx context.Context, runID, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
-	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.SelectActiveWorkflowInstances(ctx, runID, scopeKey, selectors, excludedStates)
 }
 
 var _ WorkflowInstancePersistenceReader = (*recordingRuntimeMutationRunner)(nil)

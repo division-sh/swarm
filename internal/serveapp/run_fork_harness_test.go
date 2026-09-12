@@ -16,10 +16,12 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -27,8 +29,8 @@ import (
 )
 
 // runForkRuntimeOwnerHarness preserves internal runtime/store fork owner coverage for targeted tests.
-// The public `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]` command consumes /v1/rpc run.fork rather than this harness.
-func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer) int {
+// The public `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--allow-source-freeze] [--idempotency-key <key>]` command consumes /v1/rpc run.fork rather than this harness.
+func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer) (code int) {
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	configPath := fs.String("config", "", "Path to swarm.yaml config")
@@ -41,7 +43,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	dryRun := fs.Bool("dry-run", false, "Plan the fork without mutating runtime state")
 	materializeOnly := fs.Bool("materialize-only", false, "Create fork run and materialize state snapshot without resuming execution")
 	activate := fs.Bool("activate", false, "Activate an already materialized state-only fork")
-	confirmSourceFreeze := fs.Bool("confirm-source-freeze", false, "Confirm that activation may permanently freeze an active source run")
+	allowSourceFreeze := fs.Bool("allow-source-freeze", false, "Confirm that activation may permanently freeze an active source run")
 	asJSON := fs.Bool("json", false, "Emit JSON")
 	if err := fs.Parse(args); err != nil {
 		if out != nil {
@@ -115,7 +117,15 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	defer stores.CloseUnactivated()
+	mayCloseStore := true
+	defer func() {
+		if mayCloseStore {
+			if err := stores.CloseUnactivated(); err != nil {
+				fmt.Fprintf(out, "fork failed: close store: %v\n", err)
+				code = 1
+			}
+		}
+	}()
 	resolvedPlatformSpecPath := cliapp.ResolvePath(repo, *platformSpecPath)
 	if strings.TrimSpace(*platformSpecPath) == defaultPlatformSpecPath {
 		if _, statErr := os.Stat(resolvedPlatformSpecPath); statErr != nil {
@@ -160,12 +170,52 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	sourceLoader := runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Store: stores.SourceArtifactStore(),
 	}
+	var capability startupownership.ProcessCapability
+	if !*dryRun && !*materializeOnly {
+		process := worklifetime.NewProcess()
+		ctx = worklifetime.WithProcess(ctx, process)
+		runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
+		capability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+			OwnerID: "fork-owner-harness", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+		})
+		if err != nil {
+			fmt.Fprintf(out, "fork failed: acquire process ownership: %v\n", err)
+			return 1
+		}
+		mayCloseStore = false
+		defer func() {
+			joinCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			retireErr := runForkOwner.RetireSelectedContexts(joinCtx)
+			process.Retire()
+			_, joinErr := process.Join(joinCtx)
+			if cleanupErr := errors.Join(retireErr, joinErr); cleanupErr != nil {
+				fmt.Fprintf(out, "fork failed: retire process ownership: %v\n", cleanupErr)
+				code = 1
+				return
+			}
+			if err := capability.Release(joinCtx); err != nil {
+				fmt.Fprintf(out, "fork failed: release process ownership: %v\n", err)
+				code = 1
+				return
+			}
+			mayCloseStore = true
+		}()
+		if err := runForkOwner.BindSelectedProcess(ctx, process, capability); err != nil {
+			fmt.Fprintf(out, "fork failed: bind selected process: %v\n", err)
+			return 1
+		}
+		if _, err := runForkOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), posture)); err != nil {
+			fmt.Fprintf(out, "fork failed: reconcile selected process: %v\n", err)
+			return 1
+		}
+	}
 	if *activate {
 		result, err := runForkOwner.Activate(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
-			ForkRunID:           strings.TrimSpace(*runID),
-			ConfirmSourceFreeze: *confirmSourceFreeze,
+			ForkRunID:         strings.TrimSpace(*runID),
+			AllowSourceFreeze: *allowSourceFreeze,
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-				Config: cfg, ExecutionPosture: posture,
+				Config: cfg, ExecutionPosture: posture, ProcessCapability: capability,
 			},
 			SourceLoader: sourceLoader,
 		})
@@ -337,15 +387,8 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		executionCtx, settleExecution, err := runForkSelectedExecutionContext(ctx, selection.BundleHash)
-		if err != nil {
-			if out != nil {
-				fmt.Fprintf(out, "fork failed: create selected execution owner: %v\n", err)
-			}
-			return 1
-		}
 		deps := stores.RuntimeDeps()
-		result, executionErr := runForkOwner.Execute(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
+		result, err := runForkOwner.Execute(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
 			SourceRunID:        strings.TrimSpace(*runID),
 			At:                 strings.TrimSpace(*at),
 			SourceLoader:       sourceLoader,
@@ -353,6 +396,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			ExpectedBundleHash: selection.BundleHash,
 			ContractSelection:  selection,
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
+				ProcessCapability:   capability,
 				Config:              cfg,
 				ExecutionPosture:    posture,
 				EntityStore:         deps.ToolEntityStore,
@@ -366,7 +410,6 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				ProviderCredentials: providerCredentialStore,
 			},
 		})
-		err = errors.Join(executionErr, settleExecution())
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: %v\n", err)
@@ -489,28 +532,6 @@ func runForkRuntimeOwnerContext(ctx context.Context) context.Context {
 	runtimeInstanceID := uuid.NewString()
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
-}
-
-func runForkSelectedExecutionContext(ctx context.Context, bundleHash string) (context.Context, func() error, error) {
-	process := worklifetime.NewProcess()
-	runtimeInstanceID := uuid.NewString()
-	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{
-		RuntimeInstanceID: runtimeInstanceID,
-		BundleHash:        bundleHash,
-	})
-	if err != nil {
-		return ctx, nil, err
-	}
-	ctx = worklifetime.WithRuntimeOccurrence(ctx, owner)
-	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
-	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, bundleHash))
-	settle := func() error {
-		_, retireErr := owner.RetireAndWait(context.Background())
-		process.Retire()
-		_, joinErr := process.Join(context.Background())
-		return errors.Join(retireErr, joinErr)
-	}
-	return ctx, settle, nil
 }
 
 func writeForkContractLoadError(out io.Writer, prefix string, err error) {

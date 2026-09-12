@@ -63,9 +63,7 @@ func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
 }
 
 func (r deliveryRouteResolver) ResolveIndependentPubsub(evt events.Event) deliveryRoutingResult {
-	return r.resolve(evt, func(subscriber Subscriber) bool {
-		return subscriber.routeSource != subscriberRouteSourceConnectRoutePlan
-	})
+	return r.resolve(evt, independentPubsubSubscriber)
 }
 
 func (r deliveryRouteResolver) resolve(evt events.Event, include func(Subscriber) bool) deliveryRoutingResult {
@@ -119,7 +117,6 @@ type deliveryRecipientManifest struct {
 type deliveryRecipientPolicy struct {
 	loadActiveAgentDescriptors  func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
-	workflowInstances           runtimepipeline.WorkflowInstancePersistenceReader
 	semanticSource              semanticview.Source
 	requireTargetOwners         bool
 }
@@ -368,7 +365,13 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	routing := p.routeResolver.ResolveIndependentPubsub(localEvent)
+	include := independentPubsubSubscriber
+	if input, ok := selectedInputValidationFromContext(ctx, evt); ok {
+		include = func(subscriber Subscriber) bool {
+			return independentPubsubSubscriber(subscriber) && input.AllowsSubscriber(subscriber)
+		}
+	}
+	routing := p.routeResolver.resolve(localEvent, include)
 	manifest, err := p.recipientPolicy.Evaluate(ctx, localEvent, routing.Recipients)
 	if err != nil {
 		return RoutePlan{}, err
@@ -627,7 +630,6 @@ func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 		deliveryRecipientPolicy{
 			loadActiveAgentDescriptors:  eb.activeAgentDescriptors,
 			loadActiveTargetDescriptors: eb.activeTargetDescriptors,
-			workflowInstances:           eb.durable.WorkflowInstances,
 			semanticSource:              eb.semanticSource,
 			requireTargetOwners:         !eb.ephemeral,
 		},
@@ -1062,6 +1064,11 @@ func validateRoutedNodeDeliveryAuthority(ctx context.Context, source semanticvie
 			if !selectedByExplicitTarget {
 				continue
 			}
+			if input, ok := selectedInputValidationFromContext(ctx, evt); ok && input.AllowsSubscriber(subscriber) {
+				if _, exists := authorized[key]; exists {
+					continue
+				}
+			}
 			if routedAPIEventPublicationAuthorizesSubscriber(ctx, source, evt, subscriber) {
 				if _, ok := apiAuthorized[key]; ok {
 					continue
@@ -1231,11 +1238,12 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, source se
 }
 
 func routedAPIEventPublicationAuthorizesSubscriber(ctx context.Context, source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
-	if !subscriber.Recipient.IsNode() {
-		return false
-	}
 	admission, ok := apiEventPublicationAdmissionFromContext(ctx)
-	if !ok || admission.eventType != evt.Type() {
+	return ok && admission.authorizesSubscriber(source, evt, subscriber)
+}
+
+func (admission apiEventPublicationAdmission) authorizesSubscriber(source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
+	if !subscriber.Recipient.IsNode() || admission.eventType != evt.Type() {
 		return false
 	}
 	if len(eventDeliveryTargetRoutes(evt)) > 0 && !eventTargetsRoutedSubscriber(source, evt, subscriber) {

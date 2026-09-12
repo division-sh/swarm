@@ -266,7 +266,7 @@ func policySheetBindingReaderExecutesAfter(expr expressionReference, currentRule
 		return expr.RuleIndex > currentRuleIndex
 	}
 	switch expr.HandlerField {
-	case "SelectEntity", "SelectOrCreateEntity", "Loop", "Query", "Guard", "Join", "Accumulate", "Filter", "GroupBy", "Reduce", "Count", "Compute":
+	case "Loop", "Query", "Guard", "Join", "Accumulate", "Filter", "GroupBy", "Reduce", "Count", "Compute":
 		return false
 	}
 	switch expr.Phase {

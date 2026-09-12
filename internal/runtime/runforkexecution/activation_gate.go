@@ -17,6 +17,7 @@ import (
 )
 
 type SelectedContractActivationStore interface {
+	LoadRunForkSourceRunID(context.Context, string) (string, error)
 	LoadRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, bool, error)
 	RequireRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, error)
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
@@ -27,12 +28,12 @@ type SelectedContractActivationStore interface {
 }
 
 type SelectedContractActivationGateRequest struct {
-	ForkRunID           string
-	ConfirmSourceFreeze bool
-	Store               SelectedContractActivationStore
-	ExecutionOwner      SelectedContractExecutionOwner
-	SourceLoader        SelectedContractSourceLoader
-	AgentRuntime        SelectedContractAgentRuntimeOptions
+	ForkRunID         string
+	AllowSourceFreeze bool
+	Store             SelectedContractActivationStore
+	ExecutionOwner    SelectedContractExecutionOwner
+	SourceLoader      SelectedContractSourceLoader
+	AgentRuntime      SelectedContractAgentRuntimeOptions
 }
 
 type SelectedContractActivationGateResult struct {
@@ -47,7 +48,7 @@ type SelectedContractActivationGateResult struct {
 	ForkEvents                         []SelectedContractExecutionForkEvent                   `json:"fork_events,omitempty"`
 }
 
-func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (SelectedContractActivationGateResult, error) {
+func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (out SelectedContractActivationGateResult, finalErr error) {
 	forkRunID := strings.TrimSpace(req.ForkRunID)
 	if forkRunID == "" {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation gate requires fork run_id")
@@ -63,17 +64,37 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected-contract binding for activation gate: %w", err)
 	}
+	if req.SourceLoader == nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation gate requires selected source loader")
+	}
+	operation, err := req.ExecutionOwner.beginPreparation(ctx)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, err
+	}
+	resources := &PreparedSelectedFork{owner: req.ExecutionOwner, operation: operation}
+	defer func() { finalErr = errors.Join(finalErr, req.ExecutionOwner.completePreparation(resources)) }()
+	ctx = operation.PreparationContext()
 	if !ok {
+		sourceRunID, err := req.Store.LoadRunForkSourceRunID(ctx, forkRunID)
+		if err != nil {
+			return SelectedContractActivationGateResult{}, err
+		}
+		original, err := loadOriginalLoopCarriage(ctx, req.SourceLoader, sourceRunID, resources)
+		if err != nil {
+			return SelectedContractActivationGateResult{}, err
+		}
 		activation, err := req.Store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
+			OriginalLoopCarriage:              original,
 			ForkRunID:                         forkRunID,
-			ConfirmSourceFreeze:               req.ConfirmSourceFreeze,
+			AllowSourceFreeze:                 req.AllowSourceFreeze,
 			HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
 		})
 		return SelectedContractActivationGateResult{RunForkActivation: activation}, err
 	}
-	if req.SourceLoader == nil {
-		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation gate requires selected source loader")
+	if err := req.ExecutionOwner.bindStagedPreparation(operation, binding); err != nil {
+		return SelectedContractActivationGateResult{}, err
 	}
+	ctx = operation.PreparationContext()
 	forkBundleIdentity, err := req.Store.LoadRunBundleAvailability(ctx, forkRunID)
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected-contract fork bundle identity: %w", err)
@@ -96,11 +117,15 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		BundleHash:         expectedBundleHash,
 		SourceArtifactFact: expectedSourceFact,
 		Selection:          binding.ContractSelection,
-	})
+	}, &resources.loadedSource)
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected semantic source for activation gate: %w", err)
 	}
-	defer cleanupLoadedSelectedContractSource(loadedSource)
+	original, err := loadOriginalLoopCarriage(ctx, req.SourceLoader, binding.SourceRunID, resources)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, err
+	}
+	resources.originalLoopCarriage = original
 	if err := loadedSource.SourceArtifactFact.Validate(); err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation source loader returned incomplete bundle identity")
 	}
@@ -109,6 +134,8 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, fmt.Errorf("resolve selected-contract activation author activity scope: %w", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
+	operation.preparing = ctx
+	operation.owned = runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(operation.owned, loadedSource.SourceArtifactFact), scope)
 	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("project selected-contract activation descriptors: %w", err)
@@ -117,7 +144,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("register selected-contract activation descriptors: %w", err)
 	}
-	defer lease.Release()
+	resources.descriptorLease = lease
 	plan, err := req.Store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: binding.SourceRunID, At: binding.ForkEventID})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("plan selected-contract activation gate: %w", err)
@@ -170,7 +197,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		SourceRunID:           binding.SourceRunID,
 		SourceArtifactFact:    expectedSourceFact,
 		BindingReader:         req.Store,
-		SourceLoader:          req.SourceLoader,
+		LoadedSource:          loadedSource,
 		FrontierAdmission:     frontier,
 		RouteAdmission:        routeAdmission,
 		RouteTopology:         routeTopology,
@@ -225,6 +252,9 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if !plan.ExecutionReady {
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
+	if err := req.ExecutionOwner.requirePreparationProcess(ctx, req.AgentRuntime.ProcessCapability); err != nil {
+		return result, err
+	}
 	if plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 		executionPorts, err := req.ExecutionOwner.require()
 		if err != nil {
@@ -250,19 +280,38 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
-		agentRuntime, workflowStates, err := prepareSelectedContractWorkflowReadiness(
-			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, plan, sourceEventIDs, req.AgentRuntime,
+		agentRuntime, readiness, err := prepareSelectedContractWorkflowReadiness(
+			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, plan, frontier, sourceEventIDs, req.AgentRuntime,
 		)
 		if err != nil {
 			return result, err
 		}
+		resources.agentRuntime = agentRuntime
+		preparation, err := prepareSelectedFork(ctx, operation, executionPorts, loadedSource, plan, frontier, *model.RecipientPlanning, agentRuntime)
+		if err != nil {
+			return result, err
+		}
+		preparation.loadedSource, preparation.descriptorLease, preparation.agentRuntime = loadedSource, lease, agentRuntime
+		preparation.originalSource = resources.originalSource
+		preparation.owner = req.ExecutionOwner
+		preparation.originalLoopCarriage = original
+		resources = preparation
+		prepared, err := readiness.Projection()
+		if err != nil {
+			return result, err
+		}
+		workflowStates := prepared.States
 		agentRuntime, err = bindRecoveredSelectedContractAgentRuntime(
 			ctx, executionPorts.workflow, forkRunID, loadedSource, workflowStates, agentRuntime,
 		)
 		if err != nil {
 			return result, err
 		}
+		ctx = operation.Context()
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
+			OriginalLoopCarriage:  original,
+			Prepared:              preparation,
+			Operation:             operation,
 			Owner:                 req.ExecutionOwner,
 			Admission:             admission,
 			LoadedSource:          loadedSource,
@@ -271,7 +320,6 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			ForkRunID:             forkRunID,
 			ForkEventID:           plan.ForkPoint.EventID,
 			SourceEvents:          sourceEventIDs,
-			WorkflowStates:        workflowStates,
 			ExecutionOwner:        runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
 			DeferredWorkAdmission: deferredWorkAdmission,
 			AgentRuntime:          agentRuntime,
@@ -279,6 +327,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
+		ctx = operation.Context()
 		containerProof := container.Proof()
 		result.ForkLocalRuntimeContainer = &containerProof
 		published, err := container.Publish(ctx)
@@ -301,7 +350,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 			ExecutionSource:       loadedSource.Source,
 			ForkRunID:             forkRunID,
-			ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
+			AllowSourceFreeze:     req.AllowSourceFreeze,
 			AllowedSourceEventIDs: sourceEventIDs,
 			FrontierAdmission:     frontier,
 			RouteTopology:         routeTopology,
@@ -311,11 +360,18 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			if closeErr := container.Close(ctx); closeErr != nil {
 				err = errors.Join(err, closeErr)
+			} else if !activation.Activated {
+				err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
+			return result, err
 		}
 		if err := container.Close(ctx); err != nil {
 			return result, err
+		}
+		if activation.ForkRunStatus == runfork.RunForkActivatedStatus {
+			if err := req.ExecutionOwner.retainPrepared(resources); err != nil {
+				return result, err
+			}
 		}
 		return result, nil
 	}
@@ -326,9 +382,16 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return result, fmt.Errorf("%s: selected-contract frontier execution remains non-mutating", runfork.RunForkBlockerContractFrontierExecutionUnsupported)
 	}
 
-	activation, err := req.Store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
+	if req.AgentRuntime.ProcessCapability == nil {
+		return result, errors.New("selected-contract activation requires process capability before state-only mutation")
+	}
+	if err := req.AgentRuntime.ProcessCapability.ProveCurrent(ctx); err != nil {
+		return result, fmt.Errorf("prove selected-contract state-only process: %w", err)
+	}
+	activation, err := req.Store.ActivateRunFork(operation.Context(), runfork.RunForkActivateRequest{
+		OriginalLoopCarriage:              original,
 		ForkRunID:                         forkRunID,
-		ConfirmSourceFreeze:               req.ConfirmSourceFreeze,
+		AllowSourceFreeze:                 req.AllowSourceFreeze,
 		HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
 	})
 	result.RunForkActivation = activation

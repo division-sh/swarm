@@ -75,15 +75,6 @@ func TestPolicySheetLookupValueRowsRejectsPreBindingReadersAsConsumers(t *testin
 			},
 		},
 		{
-			name: "entity selection executes before handler",
-			mutate: func(handler *runtimecontracts.SystemNodeEventHandler) {
-				handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
-					Field: "id",
-					Ref:   "computed.template_path",
-				}}}
-			},
-		},
-		{
 			name: "earlier policy compute row",
 			mutate: func(handler *runtimecontracts.SystemNodeEventHandler) {
 				earlier := bootverifyLookupConsumerRule("earlier", "computed.earlier", "computed.template_path")

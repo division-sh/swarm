@@ -328,7 +328,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := eb.PrepareSelectedForkPublish(context.Background(), evt)
+	prepared, err := eb.PrepareSelectedForkPublish(context.Background(), evt, SelectedInputValidation{})
 	if err != nil {
 		t.Fatalf("prepare selected-fork publication: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing
 
 			switch mode {
 			case "direct":
-				err = bus.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"observer"}, []events.DeliveryRoute{route})
+				_, err = bus.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"observer"}, []events.DeliveryRoute{route})
 			case "subscribed_post_commit":
 				dispatchEvent, err = events.ResolveEnvelope(evt, events.EnvelopeForBroadcast(evt.NormalizedEnvelope()))
 				if err != nil {
@@ -504,13 +504,13 @@ func TestCreateSyntheticCarryFailsClosedOnDynamicPayloadCollisionBeforeHandler(t
 	}
 	validator := testRootNode(t, "validator")
 	ch := subscribeInternalDeliveriesForTest(t, eb, validator.Key())
-	evt := eventtest.RunCreatingRootIngress("collision-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"validation_case_id":"producer-value"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("validation.requested"), "", "", json.RawMessage(`{"validation_case_id":"producer-value"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{
 		Recipient:         events.MustNodeDeliveryRecipient(validator),
 		Target:            events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "synthetic-value"}),
 	}
-	err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{validator.Key()}, []events.DeliveryRoute{route})
+	_, err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{validator.Key()}, []events.DeliveryRoute{route})
 	if err == nil || !strings.Contains(err.Error(), "delivery payload projection conflicts with producer field") {
 		t.Fatalf("delivery error = %v, want synthetic carry collision", err)
 	}
@@ -535,7 +535,7 @@ func TestDeliveryRouteProjectionHasOneProductionOwner(t *testing.T) {
 		t.Fatalf("run route interceptor: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, route.Recipient.ID())
-	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{route.Recipient.ID()}, []events.DeliveryRoute{route}); err != nil {
+	if _, err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{route.Recipient.ID()}, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("deliver live route: %v", err)
 	}
 	live := <-ch

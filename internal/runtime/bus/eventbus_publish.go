@@ -861,7 +861,7 @@ func (prepared PreparedPublish) requiresReceiver() bool {
 // without persistence. Its sole consumer is the selected-fork named store
 // operation, which must commit lineage and initial delivery facts before the
 // returned plan may be dispatched.
-func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.Event) (PreparedPublish, error) {
+func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.Event, input SelectedInputValidation) (PreparedPublish, error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return PreparedPublish{}, err
@@ -872,6 +872,13 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	}
 	if evt.AdmissionClass() != events.EventAdmissionSelectedForkReplay {
 		return PreparedPublish{}, fmt.Errorf("selected-fork preparation requires selected_fork_replay event class")
+	}
+	ctx, err = input.bind(ctx, evt, eb.sourceArtifactFact.BundleHash())
+	if err != nil {
+		return PreparedPublish{}, err
+	}
+	if input.Present() && (eb.recipientPlanAdmissionGuard == nil || eb.recipientPlanGuard == nil || eb.recipientPlanMaterializer == nil) {
+		return PreparedPublish{}, fmt.Errorf("selected input requires exact selected execution recipient guards")
 	}
 	if evt.Type() == "" || !isValidEventTypeName(string(evt.Type())) {
 		return PreparedPublish{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
@@ -958,6 +965,20 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 }
 
 func (eb *EventBus) admitPublishEvent(ctx context.Context, evt events.Event) (context.Context, events.AdmittedEvent, error) {
+	if err := events.ValidateGenericPublishEvent(evt); err != nil {
+		return ctx, events.AdmittedEvent{}, err
+	}
+	return eb.admitPublicationEventFacts(ctx, evt)
+}
+
+func (eb *EventBus) admitEnginePublishEvent(ctx context.Context, evt events.Event) (context.Context, events.AdmittedEvent, error) {
+	if evt.AdmissionClass() != events.EventAdmissionInheritedFanOut {
+		return eb.admitPublishEvent(ctx, evt)
+	}
+	return eb.admitPublicationEventFacts(ctx, evt)
+}
+
+func (eb *EventBus) admitPublicationEventFacts(ctx context.Context, evt events.Event) (context.Context, events.AdmittedEvent, error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return ctx, events.AdmittedEvent{}, err
@@ -979,10 +1000,11 @@ func (eb *EventBus) admitPublishEvent(ctx context.Context, evt events.Event) (co
 			return ctx, events.AdmittedEvent{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	ictx, admitted, err := admitEventForPublish(ctx, evt, time.Now())
+	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{Now: time.Now(), RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return ctx, events.AdmittedEvent{}, err
 	}
+	ictx := admittedEventContext(ctx, admitted)
 	evt = admitted.Event()
 	ictx, err = eb.withAuthorActivityEventDescriptor(ictx, evt)
 	if err != nil {
@@ -1324,6 +1346,11 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	defer eb.notifyTestPostCommitDispatchCompleted(workCtx, evt)
 
 	inboundPlan = inboundPlan.Normalized()
+	workCtx, _, closeDispatch, err := eb.beginDeliveryDispatch(workCtx, evt, inboundPlan.DeliveryRoutes())
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, closeDispatch()) }()
 
 	interception, err := eb.runInterceptorsForDeliveryRoutes(workCtx, evt, inboundPlan.DeliveryRoutes())
 	if err != nil {
@@ -1345,14 +1372,21 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 		}
 		recipients := routePlanLiveRecipientIDs(liveRecipients)
 		if len(recipients) > 0 {
-			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverLiveRecipientsWithRoutes(workCtx, evt, liveRecipients, deliveryRoutes); err != nil {
+			dispatch, dispatchErr := eb.dispatchLiveRecipientsWithRoutes(workCtx, evt, liveRecipients, deliveryRoutes)
+			if dispatchErr == nil && !dispatch.complete() {
+				dispatchErr = eb.logAuthoritativeDeliveryIncomplete(workCtx, evt, dispatch.expected, dispatch.delivered, dispatch.missing, dispatch.timedOut, dispatch.cause)
+			}
+			if err := dispatchErr; err != nil {
 				if errors.Is(err, errAuthoritativeDeliveryIncomplete) {
 					return err
 				}
 				return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_delivery_failed", eventBusFailure(err, "deliver_route_plan"))))
 			}
-			eb.logDelivery(ctx, evt, recipients, inboundPlan.ExtraDetail)
+			if len(dispatch.delivered) > 0 {
+				delivered := deliveryTargetKeySubscriberIDs(dispatch.delivered)
+				eb.logQueuedDeliveries(ctx, evt, delivered, "matched_agent_subscription", inboundPlan.ExtraDetail)
+				eb.logDelivery(ctx, evt, delivered, inboundPlan.ExtraDetail)
+			}
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
 			if err := eb.publishDeferred(workCtx, *inboundPlan.CycleEscalation); err != nil {
@@ -1417,6 +1451,24 @@ type deliveryRouteInterception struct {
 }
 
 func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) (deliveryRouteInterception, error) {
+	if scope, ok := deliveryDispatchFromContext(ctx, evt); ok && len(deliveryRoutes) > 0 {
+		acquired := false
+		for _, route := range deliveryRoutes {
+			if route.Recipient.Empty() {
+				continue
+			}
+			e, err := scope.entry(evt, route)
+			if err != nil {
+				return deliveryRouteInterception{}, err
+			}
+			if _, owns := e.acquisition.Acquired(); owns {
+				acquired = true
+			}
+		}
+		if !acquired {
+			return deliveryRouteInterception{EventPassthrough: true, NodePassthrough: true, Outcome: runtimepipelineobligation.Continue()}, nil
+		}
+	}
 	interceptors := eb.interceptorsSnapshot()
 	nodeRoutes := nodeDeliveryRoutes(deliveryRoutes)
 	if len(nodeRoutes) == 0 {
@@ -1589,6 +1641,19 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 		}
 		routeCtx := events.WithDeliveryContext(ctx, route.Context)
 		routeCtx = runtimedelivery.WithRoute(routeCtx, route)
+		if scope, ok := deliveryDispatchFromContext(ctx, evt); ok {
+			e, err := scope.entry(evt, route)
+			if err != nil {
+				return passthrough, nil, runtimepipelineobligation.Continue(), err
+			}
+			if _, acquired := e.acquisition.Acquired(); !acquired {
+				continue
+			}
+			routeCtx, err = worklifetime.WithDirectDeliveryCarrier(routeCtx, e.guard)
+			if err != nil {
+				return passthrough, nil, runtimepipelineobligation.Continue(), err
+			}
+		}
 		for _, it := range interceptors {
 			pass, out, outcome, err := it.InterceptDeliveryRoute(routeCtx, projected, route)
 			if err != nil {
@@ -1770,12 +1835,16 @@ func admitEventForPublish(ctx context.Context, evt events.Event, now time.Time) 
 	if err != nil {
 		return ctx, events.AdmittedEvent{}, err
 	}
+	return admittedEventContext(ctx, admitted), admitted, nil
+}
+
+func admittedEventContext(ctx context.Context, admitted events.AdmittedEvent) context.Context {
 	event := admitted.Event()
 	ctx = events.WithDeliveryContext(ctx, event.DeliveryContext())
 	if runID := strings.TrimSpace(event.RunID()); runID != "" {
 		ctx = runtimecorrelation.WithRunID(ctx, runID)
 	}
-	return ctx, admitted, nil
+	return ctx
 }
 
 func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {
@@ -1832,11 +1901,11 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 	if err := validateRoutedNodeDeliveryAuthority(ctx, eb.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
 		return RoutePlan{}, err
 	}
-	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
-		return RoutePlan{}, err
-	}
 	routePlan := plan.Normalized()
 	routePlan = routePlan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx))
+	if err := eb.authorizePublishRecipientPlan(ctx, evt, routePlan); err != nil {
+		return RoutePlan{}, err
+	}
 	if recordDiagnostic {
 		eb.recordPublishDiagnostic(ctx, evt, routePlan)
 	}
@@ -1886,6 +1955,7 @@ func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt event
 }
 
 func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) PublishRecipientPlan {
+	actuals, actualErr := routePlan.recipientActuals()
 	routePlan = routePlan.Normalized()
 	deliveryRoutes := routePlan.DeliveryRoutes()
 	classification := runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(evt.Type()), evt.RoutingSource())
@@ -1895,6 +1965,9 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) 
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 		DeliveryRoutes:         deliveryRoutes,
 		TargetFailure:          routePlan.TargetFailure.Code(),
+		actualPresent:          true,
+		actuals:                actuals,
+		actualErr:              actualErr,
 		canonicalAuthority: routePlan.CanonicalRouteOwnerMatched() || len(deliveryRoutes) > 0 ||
 			!routePlan.TargetFailure.Empty() || classification.DeliberateNoSubscriber(),
 	}
@@ -2403,6 +2476,14 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
+	if dispatchRecipients {
+		var closeDispatch func() error
+		ctx, _, closeDispatch, err = eb.beginDeliveryDispatch(ctx, evt, deliveryRoutes)
+		if err != nil {
+			return runtimepipelineobligation.Continue(), err
+		}
+		defer func() { err = errors.Join(err, closeDispatch()) }()
+	}
 	eventPassthrough := true
 	nodePassthrough := true
 	deferred := []events.Event(nil)
@@ -2432,8 +2513,10 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 		liveRecipients = deliveryRouteAgentRecipientIDs(deliveryRoutes)
 		internalRecipients = nil
 	}
+	var dispatch liveDeliveryDispatch
 	if dispatchRecipients && eventPassthrough && len(liveRecipients) > 0 {
-		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes); err != nil {
+		dispatch, err = eb.deliverToRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes)
+		if err != nil {
 			return runtimepipelineobligation.Continue(), err
 		}
 	}
@@ -2445,7 +2528,7 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	if !dispatchRecipients {
 		return runtimepipelineobligation.Continue(), nil
 	}
-	if !eventPassthrough || len(liveRecipients) == 0 {
+	if !eventPassthrough || len(dispatch.delivered) == 0 {
 		return runtimepipelineobligation.Continue(), nil
 	}
 	owner := "event_deliveries"
@@ -2455,7 +2538,8 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	eb.logRuntime(ctx, "debug", "Persisted event was delivered to authoritative recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, map[string]any{
 		"direct":                     scope == runtimepipelineobligation.ScopeDirect,
 		"delivery_manifest_owner":    owner,
-		"recipients_count":           len(liveRecipients),
+		"recipients_count":           len(dispatch.delivered),
+		"already_owned_count":        len(dispatch.alreadyOwned),
 		"parent_event_id":            strings.TrimSpace(evt.ParentEventID()),
 		"requested_recipients":       append([]string(nil), liveRecipients...),
 		"requested_recipients_count": len(liveRecipients),

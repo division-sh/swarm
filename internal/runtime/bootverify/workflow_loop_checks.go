@@ -68,15 +68,17 @@ func checkLoopValidation(c *checkerContext) []Finding {
 			if _, ok := states[operation.From]; !ok {
 				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s from references unknown stage %s", owner, operation.HandlerEvent, operation.From)))
 			}
-			if operation.AdvancesTo == "" && operation.Kind != runtimecontracts.LoopOperationAdmit {
-				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s %s requires advances_to", owner, operation.HandlerEvent, operation.Kind)))
-			} else if _, ok := states[operation.AdvancesTo]; !ok {
-				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s advances_to references unknown stage %s", owner, operation.HandlerEvent, operation.AdvancesTo)))
-			}
 			handler, ok := c.source.ExecutableNodeEventHandlers(operation.Node)[operation.HandlerEvent]
 			if !ok {
 				findings = append(findings, loopFinding(location, fmt.Sprintf("lowered operation %s:%s has no handler owner", owner, operation.HandlerEvent)))
 				continue
+			}
+			if operation.AdvancesTo == "" {
+				if operation.Kind != runtimecontracts.LoopOperationAdmit || handler.Join == nil {
+					findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s %s requires advances_to unless admit delegates to join outcomes", owner, operation.HandlerEvent, operation.Kind)))
+				}
+			} else if _, ok := states[operation.AdvancesTo]; !ok {
+				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s advances_to references unknown stage %s", owner, operation.HandlerEvent, operation.AdvancesTo)))
 			}
 			if err := runtimecontracts.ValidateLoopHandlerCombination(handler); err != nil {
 				findings = append(findings, loopFinding(location, fmt.Sprintf("handler %s:%s %v", owner, operation.HandlerEvent, err)))
@@ -192,7 +194,7 @@ func validateLoopEmitCarriage(source semanticview.Source, plan runtimecontracts.
 			continue
 		}
 		value, ok := site.Spec.Fields[plan.RevisionField]
-		if !ok || !loopRevisionExpression(value) {
+		if !ok || !runtimecontracts.CarriesLoopRevision(value) {
 			findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("%s from %s:%s must carry %s from loop.revision_id", site.Source, operation.Node.Key(), operation.HandlerEvent, plan.RevisionField)))
 		}
 	}
@@ -201,7 +203,7 @@ func validateLoopEmitCarriage(source semanticview.Source, plan runtimecontracts.
 			continue
 		}
 		value, ok := action.Mailbox.Payload[plan.RevisionField]
-		if !ok || !loopRevisionExpression(value) {
+		if !ok || !runtimecontracts.CarriesLoopRevision(value) {
 			findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("mailbox_write from %s:%s must carry %s from loop.revision_id in mailbox.payload", operation.Node.Key(), operation.HandlerEvent, plan.RevisionField)))
 		}
 	}
@@ -294,7 +296,7 @@ func validateLoopEscapeEmit(source semanticview.Source, plan runtimecontracts.Wo
 	}
 	if !loopRequiredTextField(resolution, plan.RevisionField) {
 		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s must require text field %s", eventType, plan.RevisionField)))
-	} else if value, ok := spec.Fields[plan.RevisionField]; !ok || !loopRevisionExpression(value) {
+	} else if value, ok := spec.Fields[plan.RevisionField]; !ok || !runtimecontracts.CarriesLoopRevision(value) {
 		findings = append(findings, loopFinding(location, fmt.Sprintf("escape.emit event %s must carry %s from loop.revision_id", eventType, plan.RevisionField)))
 	}
 	return findings
@@ -337,17 +339,6 @@ func validateLoopRecurringTimers(source semanticview.Source, plan runtimecontrac
 		}
 	}
 	return findings
-}
-
-func loopRevisionExpression(value runtimecontracts.ExpressionValue) bool {
-	switch value.Kind {
-	case runtimecontracts.ExpressionKindRef:
-		return strings.TrimSpace(value.Ref) == "loop.revision_id"
-	case runtimecontracts.ExpressionKindCEL:
-		return strings.TrimSpace(value.CEL) == "loop.revision_id"
-	default:
-		return false
-	}
 }
 
 func loopFlowMatches(source semanticview.Source, planFlow, ownerFlow string) bool {

@@ -71,18 +71,11 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 	if runID == "" {
 		return errors.New("committed agent readiness requires event run_id")
 	}
-	blueprints, err := am.resolvedStaticTopologyBlueprints(am.semanticSource)
-	if err != nil {
+	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
 		return err
 	}
-	staticByPlan := make(map[runtimeagentidentity.Plan]staticAgentBlueprint, len(blueprints))
-	for _, blueprint := range blueprints {
-		staticByPlan[blueprint.Identity.Normalize()] = blueprint
-	}
-	admission, err := am.staticTopologyAdmission()
-	if err != nil {
-		return err
-	}
+	var staticByPlan map[runtimeagentidentity.Plan]staticAgentBlueprint
+	var admission runtimeagenttopology.Admission
 	seen := make(map[runtimeagentidentity.Identity]struct{}, len(routes))
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if !route.Recipient.IsAgent() {
@@ -107,6 +100,24 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 				return fmt.Errorf("finalize committed agent %s: %w", identity.Description(), err)
 			}
 			continue
+		}
+		// Existing admitted cells need their execution grant, not permission to
+		// create a new static declaration. In particular, a selected runtime does
+		// not own the normal startup topology merely because it owns such a cell.
+		if staticByPlan == nil {
+			var err error
+			admission, err = am.staticTopologyAdmission()
+			if err != nil {
+				return err
+			}
+			blueprints, err := am.resolvedStaticTopologyBlueprints(am.semanticSource)
+			if err != nil {
+				return err
+			}
+			staticByPlan = make(map[runtimeagentidentity.Plan]staticAgentBlueprint, len(blueprints))
+			for _, blueprint := range blueprints {
+				staticByPlan[blueprint.Identity.Normalize()] = blueprint
+			}
 		}
 		plan, err := identity.Plan()
 		if err != nil {
@@ -198,6 +209,13 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 			continue
 		}
 		if current.LifecyclePhase == AgentLifecycleTerminated {
+			continue
+		}
+		ownership, err := am.inspectRunExecutionOwnership(ctx, identity.RunID)
+		if err != nil {
+			return err
+		}
+		if ownership == RunExecutionForeign {
 			continue
 		}
 		owner := current.Topology.Authority.Static
@@ -529,6 +547,13 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 		state.Identity = identity
 		census[identity] = state
 		if state.ProcessBinding.BundleHash == coordinate.BundleHash {
+			ownership, err := am.inspectRunExecutionOwnership(ctx, identity.RunID)
+			if err != nil {
+				return nil, err
+			}
+			if ownership != RunExecutionOwned {
+				continue
+			}
 			selected[identity] = state
 		}
 	}
@@ -885,6 +910,17 @@ func (am *AgentManager) hydratePersistedAgentExecutions(ctx context.Context) err
 	}
 	for _, rec := range agents {
 		if !rec.Topology.Equal(admission) {
+			continue
+		}
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		ownership, err := am.inspectRunExecutionOwnership(ctx, identity.RunID)
+		if err != nil {
+			return err
+		}
+		if ownership != RunExecutionOwned {
 			continue
 		}
 		if strings.TrimSpace(rec.Config.ID) == "" {

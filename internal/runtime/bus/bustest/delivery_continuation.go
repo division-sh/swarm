@@ -43,25 +43,25 @@ func (o *DeliveryContinuationOwner) AcceptCommitted(proofs []runtimedelivery.Dur
 	return nil
 }
 
-func (o *DeliveryContinuationOwner) Acquire(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+func (o *DeliveryContinuationOwner) Acquire(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
 	deliveryID = strings.TrimSpace(deliveryID)
 	if deliveryID == "" {
-		return nil, errors.New("test delivery id is required")
+		return worklifetime.DeliveryAcquisition{}, errors.New("test delivery id is required")
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	held, exists := o.held[deliveryID]
 	if !exists {
 		if !o.allowUncommitted {
-			return nil, fmt.Errorf("test delivery %s has no committed handoff", deliveryID)
+			return worklifetime.DeliveryAcquisition{}, fmt.Errorf("test delivery %s has no committed handoff", deliveryID)
 		}
 		o.held[deliveryID] = false
 	} else if !held {
-		return nil, fmt.Errorf("test delivery %s is already carrier-owned", deliveryID)
+		return worklifetime.AlreadyOwnedDelivery(deliveryID), nil
 	} else {
 		o.held[deliveryID] = false
 	}
-	return &deliveryContinuation{owner: o, deliveryID: deliveryID}, nil
+	return worklifetime.AcquiredDelivery(&deliveryContinuation{owner: o, deliveryID: deliveryID}), nil
 }
 
 func (o *DeliveryContinuationOwner) Retain(snapshot runtimedelivery.Snapshot) error {
@@ -104,7 +104,7 @@ func (c *deliveryContinuation) Resolve(_ context.Context, intent worklifetime.De
 	if c == nil || c.owner == nil {
 		return 0, errors.New("test delivery continuation is required")
 	}
-	if intent != worklifetime.DeliveryContinuationReturn && intent != worklifetime.DeliveryContinuationConsume {
+	if intent != worklifetime.DeliveryContinuationReturn && intent != worklifetime.DeliveryContinuationReturnUnqueued && intent != worklifetime.DeliveryContinuationConsume {
 		return 0, errors.New("test delivery continuation resolution intent is invalid")
 	}
 	c.mu.Lock()
@@ -113,14 +113,14 @@ func (c *deliveryContinuation) Resolve(_ context.Context, intent worklifetime.De
 		return 0, errors.New("test delivery continuation is already settled")
 	}
 	c.owner.mu.Lock()
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent != worklifetime.DeliveryContinuationConsume {
 		c.owner.held[c.deliveryID] = true
 	} else {
 		delete(c.owner.held, c.deliveryID)
 	}
 	c.owner.mu.Unlock()
 	c.settled = true
-	if intent == worklifetime.DeliveryContinuationReturn {
+	if intent != worklifetime.DeliveryContinuationConsume {
 		return worklifetime.DeliveryContinuationReturned, nil
 	}
 	return worklifetime.DeliveryContinuationConsumed, nil

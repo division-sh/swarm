@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -114,6 +115,9 @@ func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context, 
 		}
 		s.resetRecoveredProjections = append(append([]destructivereset.SourceProjection(nil), operation.Request.SourceProjections...), operation.Allocations...)
 	}
+	if s.resetOperationID != operationID {
+		s.selectedResetPredecessor = s.selected
+	}
 	s.resetOperationID, s.resetConverged = operationID, false
 	s.mu.Lock()
 	s.resetting = true
@@ -121,7 +125,7 @@ func (s *processLifecycleSupervisor) BeginDestructiveReset(ctx context.Context, 
 		s.ready.Store(false)
 	}
 	s.mu.Unlock()
-	if err := s.joinResetContexts(); err != nil {
+	if err := s.joinResetContexts(ctx); err != nil {
 		s.operationMu.Unlock()
 		return nil, err
 	}
@@ -230,11 +234,17 @@ func (r *serveRuntimeReset) Complete(ctx context.Context, retainSources bool) er
 	return nil
 }
 
-func (s *processLifecycleSupervisor) joinResetContexts() error {
+func (s *processLifecycleSupervisor) joinResetContexts(ctx context.Context) error {
 	var result error
+	if s.selected != nil {
+		result = s.selected.FenceSelectedContexts()
+	}
 	for _, retired := range s.runtimeContexts.DeactivateAllWithOptions(runtime.RuntimeContextCauseUnloaded, s.shutdownOptions) {
 		result = errors.Join(result, retired.ShutdownErr)
 	}
+	joinCtx, cancel := context.WithTimeout(ctx, s.shutdownOptions.Grace)
+	defer cancel()
+	result = errors.Join(result, s.retireSelectedContextsLocked(joinCtx))
 	return result
 }
 
@@ -282,7 +292,7 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 		}
 		var joinErr error
 		if staged {
-			joinErr = s.joinResetContexts()
+			joinErr = s.joinResetContexts(ctx)
 		} else {
 			for _, candidate := range candidates {
 				candidate.runtime.CloseAdmission()
@@ -290,6 +300,7 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 			for _, candidate := range candidates {
 				joinErr = errors.Join(joinErr, candidate.runtime.ShutdownWithOptions(s.shutdownOptions))
 			}
+			joinErr = errors.Join(joinErr, s.retireSelectedContextsLocked(ctx))
 		}
 		retErr = errors.Join(retErr, joinErr)
 		if joinErr == nil {
@@ -349,6 +360,21 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 	}
 	s.resetContextsManaged = true
 	staged = true
+	if s.selectedResetPredecessor != nil {
+		candidate, err := s.selectedResetPredecessor.ConstructResetSuccessor(ctx, s.resetOperationID, s.selectedProcess, s.processCapability)
+		if err != nil {
+			return err
+		}
+		// Publish shutdown ownership before any binding or reconciliation can
+		// fail. Public execution remains withdrawn until the whole set starts.
+		s.selected = &candidate
+		if err := candidate.BindSelectedProcess(ctx, s.selectedProcess, s.processCapability); err != nil {
+			return err
+		}
+		if _, err := candidate.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), candidates[0].runtime.ExecutionPosture)); err != nil {
+			return err
+		}
+	}
 	execution, err := s.resetBuildExecution(candidates[0])
 	if err != nil {
 		return err

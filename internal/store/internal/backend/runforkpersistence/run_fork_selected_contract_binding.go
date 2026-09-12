@@ -104,7 +104,7 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req r
 	if err != nil {
 		return runfork.RunForkSelectedContractBinding{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
 			fork_run_id, source_run_id, fork_event_id,
 			mode, bundle_hash, created_at
@@ -113,10 +113,11 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req r
 			$1, $2, $3,
 			$4, NULLIF($5, ''), $6
 		)
+		RETURNING binding_id
 	`, binding.ForkRunID, binding.SourceRunID, binding.ForkEventID,
 		binding.ContractSelection.Mode,
 		binding.ContractSelection.BundleHash,
-		binding.CreatedAt); err != nil {
+		binding.CreatedAt).Scan(&binding.BindingID); err != nil {
 		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("insert selected contract binding: %w", err)
 	}
 	return binding, nil
@@ -130,6 +131,7 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 	var createdAt any
 	err := querier.QueryRowContext(ctx, `
 		SELECT
+			CAST(binding_id AS TEXT),
 			CAST(fork_run_id AS TEXT),
 			CAST(source_run_id AS TEXT),
 			CAST(fork_event_id AS TEXT),
@@ -139,6 +141,7 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 		FROM run_fork_selected_contract_bindings
 		WHERE fork_run_id = $1
 	`, forkRunID).Scan(
+		&binding.BindingID,
 		&binding.ForkRunID,
 		&binding.SourceRunID,
 		&binding.ForkEventID,
