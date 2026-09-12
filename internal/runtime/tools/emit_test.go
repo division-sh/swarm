@@ -151,9 +151,10 @@ func TestEmitRegistry_KeepsRuntimeSourcesIsolated(t *testing.T) {
 
 	registryA := NewEmitRegistry(sourceA, runtimeauthority.NewSourceProvider(sourceA))
 	registryB := NewEmitRegistry(sourceB, runtimeauthority.NewSourceProvider(sourceB))
-	actor := models.AgentConfig{ExecutionMode: "live", ID: "coordinator", Role: "coordinator"}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "coordinator", Role: "coordinator", FlowID: ".", Identity: toolTestRootAgentIdentity(t, "coordinator"), EmitEvents: []string{"scan.requested"}}
 
 	toolsA := registryA.GenerateEmitToolsForActor(actor, nil)
+	actor.EmitEvents = []string{"review.requested"}
 	toolsB := registryB.GenerateEmitToolsForActor(actor, nil)
 	if len(toolsA) != 1 || toolsA[0].Name != "emit_scan_requested" {
 		t.Fatalf("toolsA = %#v, want emit_scan_requested only", toolsA)

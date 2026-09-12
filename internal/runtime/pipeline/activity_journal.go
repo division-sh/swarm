@@ -20,13 +20,19 @@ func (s *workflowInstanceStore) recordedActivityResult(ctx context.Context, inte
 	if s == nil || s.activityResults == nil {
 		return activityRecordedResult{}, false, fmt.Errorf("activity result reader is required")
 	}
-	successID := activityResultEventID(intent, intent.SuccessEvent)
-	failureID := activityResultEventID(intent, intent.FailureEvent)
+	success, err := admitActivityPublication(intent, intent.SuccessEvent)
+	if err != nil {
+		return activityRecordedResult{}, false, err
+	}
+	failure, err := admitActivityPublication(intent, intent.FailureEvent)
+	if err != nil {
+		return activityRecordedResult{}, false, err
+	}
 	return s.activityResults.LoadRecordedActivityResult(ctx, runtimeactivityresult.Query{
 		ActivityID:     intent.ActivityID,
 		RequestEventID: activityRequestEventID(intent),
-		SuccessEventID: successID,
-		FailureEventID: failureID,
+		SuccessEventID: success.eventID,
+		FailureEventID: failure.eventID,
 	})
 }
 

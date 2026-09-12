@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -105,10 +106,11 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 			}
 			execCtx := runtimeengine.ExecutionContext{
 				Request: runtimeengine.ExecutionRequest{
-					EntityID:   identity.NormalizeEntityID(entityID),
-					Node:       pipelineNode(t, "repo-scaffold", "repo-scaffold-node"),
-					Event:      parent,
-					ChainDepth: 4,
+					ExecutionFlowID: identity.NormalizeFlowID("repo-scaffold"),
+					EntityID:        identity.NormalizeEntityID(entityID),
+					Node:            pipelineNode(t, "repo-scaffold", "repo-scaffold-node"),
+					Event:           parent,
+					ChainDepth:      4,
 					State: runtimeengine.StateSnapshot{
 						EntityID:     identity.NormalizeEntityID(entityID),
 						StateCarrier: runtimeengine.NewStateCarrier(stateMetadata, nil, nil),
@@ -131,7 +133,7 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 				t.Fatalf("artifactRepoResultEvent: %v", err)
 			}
 			emitted := intent.Event
-			wantEventType := "repo-scaffold/" + tc.eventType
+			wantEventType := tc.wantFlowPath + "/" + tc.eventType
 			if got := string(emitted.Type()); got != wantEventType {
 				t.Fatalf("event type = %q, want %q", got, wantEventType)
 			}
@@ -169,17 +171,15 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 }
 
 func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
-	templateSource := actionResultRouteSource(t, "template")
-	staticSource := actionResultRouteSource(t, "static")
 	cases := []struct {
 		name          string
-		source        semanticview.Source
+		mode          string
 		eventType     string
 		producerRoute events.RouteIdentity
 		want          string
 	}{
 		{
-			source:    templateSource,
+			mode:      "template",
 			name:      "template instance local success event",
 			eventType: "repo_scaffold.repo_commit_succeeded",
 			producerRoute: events.RouteIdentity{
@@ -187,10 +187,10 @@ func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
 				FlowInstance: "repo-scaffold/inst-1",
 				EntityID:     "ent-repo",
 			},
-			want: "repo-scaffold/repo_scaffold.repo_commit_succeeded",
+			want: "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 		},
 		{
-			source:    staticSource,
+			mode:      "static",
 			name:      "static service local failure event",
 			eventType: "repo_scaffold.repo_commit_failed",
 			producerRoute: events.RouteIdentity{
@@ -201,18 +201,18 @@ func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
 			want: "repo-scaffold/repo_scaffold.repo_commit_failed",
 		},
 		{
-			source:    templateSource,
-			name:      "declaration-scoped event is preserved",
+			mode:      "template",
+			name:      "declaration reference projects exact instance",
 			eventType: "repo-scaffold/repo_scaffold.repo_commit_succeeded",
 			producerRoute: events.RouteIdentity{
 				FlowID:       "repo-scaffold",
 				FlowInstance: "repo-scaffold/inst-1",
 				EntityID:     "ent-repo",
 			},
-			want: "repo-scaffold/repo_scaffold.repo_commit_succeeded",
+			want: "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 		},
 		{
-			source:    staticSource,
+			mode:      "static",
 			name:      "static manual prefix stays service scoped",
 			eventType: "repo-scaffold/repo_scaffold.repo_commit_failed",
 			producerRoute: events.RouteIdentity{
@@ -225,9 +225,9 @@ func TestActionResultEventTypeResolvesAgainstProducerRoute(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := actionResultEventType(tc.source, "repo-scaffold", tc.eventType, tc.producerRoute)
-			if got != tc.want {
-				t.Fatalf("actionResultEventType() = %q, want %q", got, tc.want)
+			got, err := runtimepinrouting.AdmitPublicationIdentity("repo-scaffold", tc.eventType, mustActionResultRoutingSource(t, tc.mode, tc.producerRoute))
+			if err != nil || string(got) != tc.want {
+				t.Fatalf("publication = %q, %v; want %q", got, err, tc.want)
 			}
 		})
 	}

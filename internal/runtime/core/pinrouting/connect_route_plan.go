@@ -795,17 +795,21 @@ func connectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, sourceEvent
 	case events.RoutingSourceExternalIngress:
 		return endpoint.IsExternalIngress() && (event == local || event == resolved)
 	case events.RoutingSourceRoot:
-		return endpoint.IsRoot() && route.FlowID == "" && route.FlowInstance == "" && (event == local || event == resolved)
-	case events.RoutingSourceStaticFlow:
-		if endpoint.IsRoot() || endpoint.IsTemplate() || route.FlowID != endpoint.flowID.value || route.FlowInstance != scope {
+		if !endpoint.IsRoot() || route.FlowID != "" || route.FlowInstance != "" {
 			return false
 		}
-		return event == resolved || event == events.EventType(scope+"/"+string(local))
+	case events.RoutingSourceStaticFlow:
+		if endpoint.IsRoot() {
+			if route.FlowID != "." {
+				return false
+			}
+		} else if endpoint.IsTemplate() || route.FlowID != endpoint.flowID.value || route.FlowInstance != scope {
+			return false
+		}
 	case events.RoutingSourceConcreteTemplateInstance:
 		if endpoint.IsRoot() || !endpoint.IsTemplate() || route.FlowID != endpoint.flowID.value {
 			return false
 		}
-		return event == events.EventType(route.FlowInstance+"/"+string(local))
 	case events.RoutingSourceFlowOwnedControl:
 		return !endpoint.IsRoot() && route.FlowID == endpoint.flowID.value && event == resolved
 	case events.RoutingSourceAbsent, events.RoutingSourcePlatformControl:
@@ -813,6 +817,12 @@ func connectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, sourceEvent
 	default:
 		return false
 	}
+	flowID := endpoint.flowID.value
+	if endpoint.IsRoot() {
+		flowID = "."
+	}
+	expected, err := publicationIdentity(flowID, string(local), sourceEvent.kind, route)
+	return err == nil && event == expected
 }
 
 type ConnectRoutePlanInstanceKey struct {

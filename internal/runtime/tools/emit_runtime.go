@@ -8,6 +8,7 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -42,7 +43,7 @@ func NewEmitRegistry(source semanticview.Source, provider runtimeauthority.Provi
 				if eventType == "" {
 					continue
 				}
-				if _, ok := emitSchemaForEventType(activeSchemas, eventType); ok {
+				if resolution := semanticview.ResolveEventSchema(source, declaration.OwnerFlowID, eventType); resolution.HasSchema {
 					continue
 				}
 				generatedSchemas[eventType] = struct{}{}
@@ -67,7 +68,7 @@ func NewEmitRegistry(source semanticview.Source, provider runtimeauthority.Provi
 				if eventType == "" {
 					continue
 				}
-				if _, ok := emitSchemaForEventType(activeSchemas, eventType); !ok {
+				if resolution := semanticview.ResolveEventSchema(source, declaration.OwnerFlowID, eventType); !resolution.HasSchema {
 					continue
 				}
 				toolToEvent[EmitToolName(eventType)] = eventType
@@ -147,7 +148,7 @@ func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn 
 		sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 		return tools
 	}
-	return r.GenerateEmitToolsForRole(actor.Role, warn)
+	return nil
 }
 
 func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType string) (EmitSchema, bool) {
@@ -155,18 +156,29 @@ func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType s
 	if eventType == "" {
 		return EmitSchema{}, false
 	}
-	flowID := strings.TrimSpace(actor.FlowID)
-	if r.source != nil && flowID != "" {
-		resolution := semanticview.ResolveEventSchema(r.source, flowID, eventType)
-		if !resolution.HasSchema {
-			return EmitSchema{}, false
+	projection, ok := semanticview.ResolveAgentContractProjection(r.source, actor)
+	if !ok {
+		return EmitSchema{}, false
+	}
+	declaration, err := eventidentity.AdmitPublicationDeclaration(projection.OwnerFlowID, eventType)
+	if err != nil {
+		return EmitSchema{}, false
+	}
+	allowed := false
+	for _, configured := range projection.Declaration.Entry.EmitEvents {
+		permitted, err := eventidentity.AdmitPublicationDeclaration(projection.OwnerFlowID, configured)
+		if err == nil && permitted == declaration {
+			allowed = true
 		}
-		return resolution.Schema, true
 	}
-	if schema, ok := emitSchemaForEventType(r.activeSchemas, eventType); ok {
-		return schema, true
+	if !allowed {
+		return EmitSchema{}, false
 	}
-	return EmitSchema{}, false
+	resolution := semanticview.ResolveEventSchema(r.source, projection.OwnerFlowID, declaration.Local())
+	if !resolution.HasSchema || resolution.UnresolvedTypeError() != nil {
+		return EmitSchema{}, false
+	}
+	return resolution.Schema, true
 }
 
 func (r *EmitRegistry) GeneratedEmitSchemasForAgentRoles() []string {
@@ -324,15 +336,7 @@ func (r *EmitRegistry) EventSchemaForActorTool(actor models.AgentConfig, toolNam
 		}
 		return "", EmitSchema{}, false
 	}
-	eventType, ok := r.EventTypeFromToolName(toolName)
-	if !ok {
-		return "", EmitSchema{}, false
-	}
-	schema, ok := emitSchemaForEventType(r.activeSchemas, eventType)
-	if !ok {
-		return "", EmitSchema{}, false
-	}
-	return eventType, closeGeneratedEmitSchema(schema), true
+	return "", EmitSchema{}, false
 }
 
 func (r *EmitRegistry) IsEmitToolAllowedForRole(role, toolName string) bool {
@@ -395,10 +399,7 @@ func emitEventTypesEquivalent(left, right string) bool {
 	if left == "" || right == "" {
 		return false
 	}
-	if left == right {
-		return true
-	}
-	return localEmitEventType(left) == localEmitEventType(right)
+	return left == right
 }
 
 func duplicateEmitToolNames(eventTypes []string) map[string]int {
@@ -418,35 +419,8 @@ func emitSchemaForEventType(activeSchemas map[string]EmitSchema, eventType strin
 	if eventType == "" {
 		return EmitSchema{}, false
 	}
-	if schema, ok := activeSchemas[eventType]; ok {
-		return schema, true
-	}
-	local := localEmitEventType(eventType)
-	if local == "" {
-		return EmitSchema{}, false
-	}
-	if local != eventType {
-		schema, ok := activeSchemas[local]
-		if ok {
-			return schema, true
-		}
-	}
-	var matched EmitSchema
-	matchCount := 0
-	for schemaEventType, schema := range activeSchemas {
-		if localEmitEventType(schemaEventType) != local {
-			continue
-		}
-		matched = schema
-		matchCount++
-		if matchCount > 1 {
-			return EmitSchema{}, false
-		}
-	}
-	if matchCount == 1 {
-		return matched, true
-	}
-	return EmitSchema{}, false
+	schema, ok := activeSchemas[eventType]
+	return schema, ok
 }
 
 func missingProducerEventSchemas(producerRoles func() []string, producerEvents func(string) []string, registry map[string]EmitSchema) []string {

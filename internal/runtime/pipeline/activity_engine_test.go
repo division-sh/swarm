@@ -1961,7 +1961,7 @@ func requireActivityEventFailure(t testing.TB, evt events.Event) runtimefailures
 }
 
 func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
-	routingSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
 		FlowID: "research", FlowInstance: "research/entity-1", EntityID: "entity-1",
 	})
 	if err != nil {

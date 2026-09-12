@@ -73,9 +73,6 @@ func (r contractActionRegistry) IsExecutable(id identity.ActionKey) bool {
 	if !ok {
 		return false
 	}
-	if instruction.Emits != "" {
-		return true
-	}
 	return isSupportedWorkflowHandlerActionID(firstNonEmptyString(instruction.Builtin, instruction.Key.String()))
 }
 func (r contractActionRegistry) ActionIDs() []string { return r.registry.sortedIDs() }

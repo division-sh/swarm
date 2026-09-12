@@ -892,6 +892,16 @@ contract_formats:
         UTC microsecond precision before publication or selected-store persistence so
         the writer can persist the admitted timestamp exactly on both supported stores.
 
+        Declared business emissions MUST project the admitted declaration and exact
+        execution RoutingSource through engine.event_identity.business_publication
+        before constructing an event or any deterministic ID that includes its name.
+        Frozen continuations retain their declaration, schema/site, contract pin,
+        expressions and admitted source evidence. Persisted events and result journals
+        retain final publication facts; retry, hydration and outbox dispatch MUST NOT
+        specialize those facts again against current contracts. Selected-fork emission
+        projects once after its existing child execution remapping, without relabeling
+        historical source evidence.
+
         Event construction and bounded envelope projection MUST preserve a private,
         deep-cloned raw envelope claim until admission. Admission validates that raw
         claim before materializing the normalized admitted envelope; normalization
@@ -4600,14 +4610,17 @@ engine:
     projections:
       local_name: 'The event name as declared in events.yaml and handler keys within a flow.
         No slashes. Examples: vertical.shortlisted, score.dimension_complete.'
-      external_name: 'The flow-qualified event name as seen by other flows and the event bus.
-        Format: {flow_id}/{local_name}. Examples: scoring/vertical.shortlisted, validation/research.completed.'
+      external_name: 'Final business publication spelling: root local_name, static/singleton
+        {flow_scope_key}/{local_name}, or template {exact_source_instance}/{local_name}.
+        Declaration/schema identity remains separate from this runtime spelling.'
       root_name: 'Events emitted at root level (no flow scope). Same as local_name — no prefix.
         Examples: scan.requested, vertical.resumed, system.started.'
-      source_route: 'The emitter route identity on the envelope: source.flow_instance plus source.entity_id.
-        This is lineage and audit identity, not delivery identity.'
-      target_route: 'The resolved delivery route identity on the envelope: target.flow_instance plus target.entity_id.
-        This is receiver context and publish-time narrowing identity.'
+      source_route: 'The route projection of the admitted typed RoutingSource. It supplies exact
+        producer applicability and lineage, never ownership of receiver state. Neither event spelling
+        nor inbound event ownership can manufacture that source authority.'
+      target_route: 'The public singular target projection of admitted per-delivery ownership.
+        Source identity is not a fallback for receiver identity, and a singular projection is not
+        authority for other recipients.'
       target_routes: 'The resolved fan-out delivery route identities on the envelope: target_set[].flow_instance plus
         target_set[].entity_id. This is a concrete topology/runtime route carrier, never an authored selector.'
     resolution_rules:
@@ -4615,9 +4628,9 @@ engine:
         names. Flow-owned agent subscription admission accepts local exact values and may retain an already-normalized exact
         identity only when it resolves to that same flow. Exact subscriptions never cross a flow boundary. Wildcard
         subscriptions are slash-free and flow-local; they never observe another flow.'
-      bus_always_external: 'The event bus stores and routes events using external names. An event
-        emitted by a node in the scoring flow is stored as scoring/vertical.shortlisted in the events
-        table.'
+      bus_always_external: 'The event bus stores the final publication name and exact admitted source.
+        Producers and business applicability matchers consume the same business_publication owner;
+        they MUST NOT accept a second logical spelling for a concrete template publication.'
       handler_lookup_localizes: 'When the runtime delivers an external event to a node, it MUST
         localize the event name before looking up the handler. Localization matches against the target
         node''s declared local interface — input pins, subscribes_to entries, and handler keys. This
@@ -4627,6 +4640,19 @@ engine:
       root_events_are_global: 'Events emitted at root level have no flow prefix. They route directly only to root-local
         consumers. Delivery into a child flow requires root and child pins plus an exact nearest-LCA connect row under
         engine.cross_flow_routing.'
+    business_publication:
+      owner: runtime/core/eventidentity/publication.go
+      source_adapter: runtime/core/pinrouting/publication_identity.go
+      rules:
+      - The pure projection consumes a declaration identity separately from an already admitted execution RoutingSource.
+      - Root business publication is local. An entityless selected-root run route does not introduce a run-ID namespace.
+      - Static and singleton business publication uses the exact declaration scope and local event name.
+      - Template business publication uses the exact admitted source instance and local event name.
+      - A local reference or an admitted same-declaration qualified reference identifies the declaration, not an alternate publication spelling.
+      - Foreign, ambiguous, missing or contradictory declaration/source evidence fails before event or result-journal mutation.
+      - Protocol/control and external/input constructors retain their own exact identities; callers cannot relabel them as business sources.
+      - The projection grants no routing, schema, permission, receiver or protocol authority. Agent schemas and emit permissions require the exact admitted declaration, never a leaf-name or role/global fallback.
+      - Action registry entries do not carry implicit emits. Supported explicit artifact action outcomes use this same business projection.
     canonical_resolver: 'The platform MUST provide a single resolver module used by all subsystems:
       Localize(flowID, eventName) → local name. Externalize(flowID, eventName) → external name.
       Match(pattern, eventName) → bool. ResolveInputAlias(flowID, eventName) → local handler key.
