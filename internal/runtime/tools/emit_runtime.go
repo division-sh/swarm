@@ -114,17 +114,22 @@ func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn 
 }
 
 func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType string) (EmitSchema, bool) {
+	schema, err := r.admitActorEventSchema(actor, eventType)
+	return schema, err == nil
+}
+
+func (r *EmitRegistry) admitActorEventSchema(actor models.AgentConfig, eventType string) (EmitSchema, error) {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
-		return EmitSchema{}, false
+		return EmitSchema{}, fmt.Errorf("emit requires an exact declared event")
 	}
 	projection, ok := semanticview.ResolveAgentContractProjection(r.source, actor)
 	if !ok {
-		return EmitSchema{}, false
+		return EmitSchema{}, fmt.Errorf("agent %s has no exact declaration", actor.ID)
 	}
 	declaration, err := eventidentity.AdmitPublicationDeclaration(projection.OwnerFlowID, eventType)
 	if err != nil {
-		return EmitSchema{}, false
+		return EmitSchema{}, err
 	}
 	allowed := false
 	for _, configured := range projection.Declaration.Entry.EmitEvents {
@@ -134,13 +139,16 @@ func (r *EmitRegistry) schemaForActorEvent(actor models.AgentConfig, eventType s
 		}
 	}
 	if !allowed {
-		return EmitSchema{}, false
+		return EmitSchema{}, fmt.Errorf("agent %s does not declare emit %s", actor.ID, eventType)
 	}
 	resolution := semanticview.ResolveEventSchema(r.source, projection.OwnerFlowID, declaration.Local())
-	if !resolution.HasSchema || resolution.UnresolvedTypeError() != nil {
-		return EmitSchema{}, false
+	if !resolution.HasSchema {
+		return EmitSchema{}, fmt.Errorf("agent %s emit %s has no exact schema in %s", actor.ID, eventType, projection.OwnerFlowID)
 	}
-	return resolution.Schema, true
+	if err := resolution.UnresolvedTypeError(); err != nil {
+		return EmitSchema{}, fmt.Errorf("agent %s emit %s: %w", actor.ID, eventType, err)
+	}
+	return resolution.Schema, nil
 }
 
 func (r *EmitRegistry) GeneratedEmitSchemasForAgentRoles() []string {
@@ -173,27 +181,14 @@ func ValidateGeneratedEmitToolSchemasForSource(source semanticview.Source) []err
 	actors, actorErrs := providerSchemaValidationActors(source)
 	errs = append(errs, actorErrs...)
 	for _, actor := range actors {
-		validatedTools := map[string]struct{}{}
-		for _, tool := range registry.GenerateEmitToolsForActor(actor, nil) {
-			validatedTools[tool.Name] = struct{}{}
-			if err := llm.ValidateProviderToolSchema(tool.Name, tool.Schema); err != nil {
-				errs = append(errs, fmt.Errorf("agent %s: %w", strings.TrimSpace(actor.ID), err))
-			}
-		}
 		for _, eventType := range UniqueNonEmpty(actor.EmitEvents) {
 			toolName := EmitToolName(eventType)
-			if _, ok := validatedTools[toolName]; ok {
+			resolved, err := registry.admitActorEventSchema(actor, eventType)
+			if err != nil {
+				errs = append(errs, err)
 				continue
 			}
-			flowID := strings.TrimSpace(actor.FlowID)
-			if flowID == "" {
-				continue
-			}
-			resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
-			if !resolution.HasSchema {
-				continue
-			}
-			schema := closeGeneratedEmitSchema(resolution.Schema)
+			schema := closeGeneratedEmitSchema(resolved)
 			if err := llm.ValidateProviderToolSchema(toolName, schema.Schema); err != nil {
 				errs = append(errs, fmt.Errorf("agent %s: %w", strings.TrimSpace(actor.ID), err))
 			}

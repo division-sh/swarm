@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -49,17 +50,24 @@ func TestExecutorLocalWildcardPayloadReaderUsesConcreteProducerSchema(t *testing
 	}
 	for _, tc := range []struct {
 		eventType string
+		path      string
 		wantError bool
 	}{
-		{eventType: "worker/task.done"},
-		{eventType: "worker/task.failed"},
-		{eventType: "worker/task.undeclared", wantError: true},
-		{eventType: "sibling/task.done", wantError: true},
-		{eventType: "worker/start", wantError: true},
+		{eventType: "worker/task.done", path: "worker"},
+		{eventType: "worker/task.failed", path: "worker"},
+		{eventType: "worker/one/task.done", path: "worker/one"},
+		{eventType: "worker/parent-one/child/two/task.done", path: "worker/parent-one/child/two"},
+		{eventType: "worker/task.undeclared", path: "worker", wantError: true},
+		{eventType: "sibling/task.done", path: "worker", wantError: true},
+		{eventType: "worker/start", path: "worker", wantError: true},
+		{eventType: "worker/two/task.done", path: "worker/one", wantError: true},
+		{eventType: "task.done", path: "worker/one", wantError: true},
+		{eventType: "worker/one/task.done", wantError: true},
 	} {
 		t.Run(tc.eventType, func(t *testing.T) {
 			_, err := executor.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1", ExecutionFlowID: identity.NormalizeFlowID("worker"), Node: identitytest.FlowNode(t, "worker", "observer"),
+				Route:           flowidentity.RouteForInstancePath(tc.path),
 				HandlerEventKey: "task.*",
 				Event: eventtest.ExistingRunRootIngress("wildcard-proof", events.EventType(tc.eventType), "", "", json.RawMessage(`{"work_id":"work-1"}`), 0,
 					eventtest.UUID("wildcard-proof-run"), events.EventEnvelope{}, time.Time{}),

@@ -21,7 +21,12 @@ func CopyPublicationTextSites(t testing.TB, mode string) string {
 	return copyPublicationSites(t, mode, true)
 }
 
-func copyPublicationSites(t testing.TB, mode string, textValues bool) string {
+func CopyPublicationDirectTextSite(t testing.TB, mode string) string {
+	t.Helper()
+	return copyPublicationSites(t, mode, true, "direct")
+}
+
+func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFamilies ...string) string {
 	t.Helper()
 	if mode != "root" && mode != "static" && mode != "template" {
 		t.Fatalf("unsupported publication topology %q", mode)
@@ -32,6 +37,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool) string {
 		valueType, valueExpr = "text", "string(payload.choice)"
 	}
 	families := []string{"direct", "rules", "specialized", "completion", "success", "fanout", "rulefanout", "completefanout"}
+	if len(selectedFamilies) != 0 {
+		families = selectedFamilies
+	}
 	scope := "source"
 	if mode == "root" {
 		scope = "."

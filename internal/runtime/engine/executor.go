@@ -2240,13 +2240,21 @@ func (e *Executor) executionPayloadType(req ExecutionRequest) *runtimecontracts.
 		flowID = strings.TrimSpace(req.Node.FlowPath())
 	}
 	if strings.Contains(eventType, "*") {
-		concreteEvent := string(req.Event.Type())
-		resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(e.deps.Source, req.Node, concreteEvent)
+		admission := semanticview.ClassifyExecutableNodeSubscription(e.deps.Source, req.Node, eventType)
+		path := req.Route.InstancePath
+		if flowID == semanticview.RootExecutionFlowID(e.deps.Source) {
+			path = ""
+		}
+		localEvent, matched := admission.LocalEventAt(path, string(req.Event.Type()))
+		if !matched {
+			return nil
+		}
+		resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(e.deps.Source, req.Node, localEvent)
 		if !resolved.Matched || resolved.HandlerEventKey != eventType {
 			return nil
 		}
 		// A pattern admits concrete occurrences, but is not itself a schema declaration.
-		eventType = concreteEvent
+		eventType = localEvent
 	}
 	resolution := semanticview.ResolveEventSchema(e.deps.Source, flowID, eventType)
 	if !resolution.HasStructural {

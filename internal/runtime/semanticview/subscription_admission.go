@@ -110,10 +110,36 @@ func (a AuthoredSubscriptionAdmission) RoutePatternsAt(flowPath string) []string
 	if local == "" {
 		return nil
 	}
-	if path := eventidentity.Normalize(flowPath); path != "" {
+	if path := eventidentity.Normalize(flowPath); path != "" && path != "." {
 		return []string{path + "/" + local}
 	}
 	return []string{local}
+}
+
+// LocalEventAt projects an actual match through the same admitted execution
+// pattern. A concrete instance is never inferred from the publication name.
+func (a AuthoredSubscriptionAdmission) LocalEventAt(flowPath, eventType string) (string, bool) {
+	if !eventidentity.IsCanonicalName(eventType) {
+		return "", false
+	}
+	for _, pattern := range a.RoutePatternsAt(flowPath) {
+		if !eventidentity.MatchPattern(pattern, eventType) {
+			continue
+		}
+		local := eventType
+		if path := eventidentity.Normalize(flowPath); path != "" && path != "." {
+			var matched bool
+			local, matched = strings.CutPrefix(eventType, path+"/")
+			if !matched {
+				return "", false
+			}
+		}
+		if local == "" || strings.Contains(local, "/") {
+			return "", false
+		}
+		return local, true
+	}
+	return "", false
 }
 
 func (a AuthoredSubscriptionAdmission) Class() AuthoredSubscriptionAdmissionClass {
@@ -402,7 +428,8 @@ func ResolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 	}
 	for _, candidate := range append(exact, patterns...) {
 		admission := candidate.admission
-		if eventidentity.Normalize(eventType) != eventidentity.Normalize(admission.LocalEvent()) &&
+		_, localMatch := admission.LocalEventAt("", eventType)
+		if !localMatch &&
 			!admission.Matches(eventType) && !admission.MatchesReceiverInput(eventType, flowPath, inputEvents) {
 			continue
 		}

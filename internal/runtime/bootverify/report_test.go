@@ -616,12 +616,13 @@ func TestRun_MapsGeneratedToolSchemaClosureToBootCheck(t *testing.T) {
 				ID:             "agent-1",
 				Role:           "agent",
 				Model:          "regular",
-				Subscriptions:  []string{},
+				Subscriptions:  []string{"start.requested"},
 				EmitEvents:     []string{"ready.event"},
 				ResolvedIntent: bootverifyTestResolvedIntent("agent-1"),
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"start.requested": {},
 			"ready.event": {
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{

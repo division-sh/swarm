@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,7 +26,61 @@ func TestServedPublicationTextSitesBothStores(t *testing.T) {
 	proveServedPublicationSites(t, true)
 }
 
-func proveServedPublicationSites(t *testing.T, textValues bool) {
+func TestServedPublicationDirectTextSiteBothStores(t *testing.T) {
+	proveServedPublicationSites(t, true, "direct")
+}
+
+func TestServedPublicationDirectRestartBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, mode := range []string{"root", "static", "template"} {
+			t.Run(backend+"/"+mode, func(t *testing.T) {
+				opts, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyPublicationDirectTextSite(t, mode))
+				first, rt := start()
+				name := "direct.requested"
+				if mode == "static" {
+					name = "source/" + name
+				}
+				params := map[string]any{"event_name": name, "bundle_hash": rt.BundleHash,
+					"payload": map[string]any{"case_id": "alpha", "choice": 1, "items": []string{}}, "idempotency_key": "publication-restart-seed"}
+				published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+				waitPublicationSiteCompletion(t, rt, published.RunID)
+				want := map[string][]int{"alpha/result.direct": {1}}
+				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+				if code := first.stop(); code != 0 {
+					t.Fatalf("first process stop=%d", code)
+				}
+				setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
+				second, rt := start()
+				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+				duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+				if duplicate.EventID != published.EventID || duplicate.RunID != published.RunID {
+					t.Fatalf("restart changed idempotent ingress: %+v -> %+v", published, duplicate)
+				}
+				waitPublicationSiteCompletion(t, rt, published.RunID)
+				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+				for _, caseID := range []string{"alpha", "beta"} {
+					next := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+						"event_name": name, "run_id": published.RunID, "idempotency_key": "publication-after-restart-" + caseID,
+						"payload": map[string]any{"case_id": caseID, "choice": 2, "items": []string{}},
+					})
+					if next.RunID != published.RunID || next.EventID == published.EventID {
+						t.Fatalf("fresh publication changed run or reused original event: %+v", next)
+					}
+					waitPublicationSiteCompletion(t, rt, published.RunID)
+					want[caseID+"/result.direct"] = append(want[caseID+"/result.direct"], 2)
+					requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+				}
+				if code := second.stop(); code != 0 {
+					t.Fatalf("second process stop=%d", code)
+				}
+				_, rt = start()
+				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+			})
+		}
+	}
+}
+
+func proveServedPublicationSites(t *testing.T, textValues bool, selectedFamilies ...string) {
 	t.Helper()
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		for _, mode := range []string{"root", "static", "template"} {
@@ -34,11 +89,18 @@ func proveServedPublicationSites(t *testing.T, textValues bool) {
 				if textValues {
 					copySource = canonicalrouting.CopyPublicationTextSites
 				}
+				if len(selectedFamilies) != 0 {
+					copySource = canonicalrouting.CopyPublicationDirectTextSite
+				}
 				rt := startLifecycleTemplateRuntime(t, backend, copySource(t, mode))
 				runID := ""
 				want := map[string][]int{}
+				families := []string{"direct", "rules", "specialized", "completion", "success", "fanout", "rulefanout", "completefanout"}
+				if len(selectedFamilies) != 0 {
+					families = selectedFamilies
+				}
 				for _, caseID := range []string{"alpha", "beta"} {
-					for _, family := range []string{"direct", "rules", "specialized", "completion", "success", "fanout", "rulefanout", "completefanout"} {
+					for _, family := range families {
 						choices := []int{1}
 						if family == "rules" || family == "specialized" || family == "completion" {
 							choices = []int{1, 0}
@@ -79,7 +141,7 @@ func proveServedPublicationSites(t *testing.T, textValues bool) {
 							}
 							published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							runID = published.RunID
-							waitForkReceiverSourceCompletion(t, rt, runID)
+							waitPublicationSiteCompletion(t, rt, runID)
 							waitPublicationSiteFanOut(t, rt, runID)
 							key := caseID + "/result." + family
 							want[key] = append(want[key], values...)
@@ -88,7 +150,7 @@ func proveServedPublicationSites(t *testing.T, textValues bool) {
 							if duplicate.EventID != published.EventID || duplicate.RunID != runID {
 								t.Fatalf("duplicate changed ingress: %+v -> %+v", published, duplicate)
 							}
-							waitForkReceiverSourceCompletion(t, rt, runID)
+							waitPublicationSiteCompletion(t, rt, runID)
 							requirePublicationSiteReadback(t, rt, runID, mode, want, textValues)
 						}
 					}
@@ -96,6 +158,31 @@ func proveServedPublicationSites(t *testing.T, textValues bool) {
 			})
 		}
 	}
+}
+
+func waitPublicationSiteCompletion(t *testing.T, rt servedControlProofRuntime, runID string) {
+	t.Helper()
+	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+		var failed, incomplete int
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&failed); err != nil {
+			t.Fatal(err)
+		}
+		if failed != 0 {
+			t.Fatalf("publication delivery failed: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		}
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
+			(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
+			(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&incomplete); err != nil {
+			t.Fatal(err)
+		}
+		if incomplete == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stack := make([]byte, 512*1024)
+	n := runtime.Stack(stack, true)
+	t.Fatalf("publication pipeline did not finish: %s\n%s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID), stack[:n])
 }
 
 func waitPublicationSiteFanOut(t *testing.T, rt servedControlProofRuntime, runID string) {
@@ -116,7 +203,7 @@ func waitPublicationSiteFanOut(t *testing.T, rt servedControlProofRuntime, runID
 			t.Fatalf("fan-out semantic rejection: %s", failure)
 		}
 		if pending == 0 {
-			waitForkReceiverSourceCompletion(t, rt, runID)
+			waitPublicationSiteCompletion(t, rt, runID)
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

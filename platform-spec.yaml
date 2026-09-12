@@ -4632,7 +4632,12 @@ engine:
         local patterns; recovery re-admits them in the exact stored receiver scope to obtain concrete routes.
         Qualified wildcard patterns remain invalid. Consumers do not rebase raw authored strings or infer a
         declaration from an instance path. Candidate lookup retains the actual publication name. Typed target-input
-        and already-routed internal carrier localization do not rename the event or grant producer authority.'
+        and already-routed internal carrier localization do not rename the event or grant producer authority.
+        A matched node wildcard carries its admitted subscription through exact execution-path projection into
+        the handler-local event before ownership classification, payload-schema binding, dispatch and diagnostic projection. Cached and
+        newly resolved routes use the same projection; declaration-local aliases and sibling instance paths
+        cannot supply the missing handler fact. A wildcard is not a schema declaration: payload expressions consume
+        the matched concrete local event schema in the exact receiver scope, preserving exact-handler precedence.'
       handler_lookup_localizes: 'When the runtime delivers an external event to a node, it MUST
         localize the event name before looking up the handler. Localization matches against the target
         node''s declared local interface — input pins, subscribes_to entries, and handler keys. This
@@ -8916,6 +8921,9 @@ tool_model:
     generated_schema_closure: Generated platform-owned emit/entity tool schemas MUST be recursively closed, require every
       declared property, reject undeclared required properties, and declare non-empty enums. Boot verification and workflow
       validation report this through generated_tool_schema_closure and consume the shared runtime tool-schema owner.
+      Every declared emit is checked through the same exact actor/schema admission used by runtime generation. A missing
+      schema or unresolved type is a validation error even when generation omits the unavailable tool; another flow's
+      matching local event cannot supply its schema.
     universal_tools: 'notify_human is included in every agent session without listing in tools. Emit tools
       (emit_{event_name}) are auto-generated from emit_events. Neither notify_human nor emit tools require an explicit
       tools entry. agent_message is unavailable and authored use fails with: not available: agent-to-agent messaging ships

@@ -24,6 +24,11 @@ func ValidateGeneratedToolSchemaClosureForSource(source semanticview.Source) []e
 	actors, errs := providerSchemaValidationActors(source)
 	for _, actor := range actors {
 		errs = append(errs, validateGeneratedRoleScopedEntitySchemasForActor(source, actor)...)
+		for _, eventType := range UniqueNonEmpty(actor.EmitEvents) {
+			if _, err := registry.admitActorEventSchema(actor, eventType); err != nil {
+				errs = append(errs, err)
+			}
+		}
 		for _, tool := range registry.GenerateEmitToolsForActor(actor, nil) {
 			errs = append(errs, validateGeneratedToolDefinitionSchema("agent "+strings.TrimSpace(actor.ID), tool)...)
 		}

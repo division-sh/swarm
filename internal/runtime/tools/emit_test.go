@@ -554,8 +554,12 @@ func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t
 	if len(errs) != 1 {
 		t.Fatalf("errors = %#v, want one provider schema error", errs)
 	}
-	if got := errs[0].Error(); !strings.Contains(got, "unsupported JSON Schema type \"NotDeclared\"") {
-		t.Fatalf("error = %q, want unsupported type", got)
+	if got := errs[0].Error(); !strings.Contains(got, "category.assessed schema contains unresolved contract type(s): NotDeclared") {
+		t.Fatalf("error = %q, want exact declaration's unresolved type", got)
+	}
+	closureErrors := ValidateGeneratedToolSchemaClosureForSource(source)
+	if len(closureErrors) != 1 || closureErrors[0].Error() != errs[0].Error() {
+		t.Fatalf("closure lost canonical schema failure: %v; provider=%v", closureErrors, errs)
 	}
 }
 

@@ -29,6 +29,7 @@ type Subscriber struct {
 	handlerNode    runtimeidentity.ExecutableNode
 	connectHandler runtimepinrouting.ConnectReceiverHandler
 	targetHandler  runtimepipeline.DeliveryTargetHandler
+	subscription   semanticview.AuthoredSubscriptionAdmission
 }
 
 func (s Subscriber) RouteSourceCode() string { return s.routeSource.code() }
@@ -172,6 +173,7 @@ func subscriberRecipient(kind subscriberKind, id string, node runtimeidentity.Ex
 }
 
 type routeResolvedPattern struct {
+	subscription       semanticview.AuthoredSubscriptionAdmission
 	EventPattern       string
 	MatchPattern       string
 	routeSource        subscriberRouteSource
@@ -282,7 +284,7 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 		out = appendUniqueRootInputSubscriber(out, subscriber)
 	}
 	if _, active := rt.eventPath[eventType]; !active {
-		return out
+		return projectSubscriberEvents(out, eventType)
 	}
 	for _, pattern := range rt.patterns {
 		if pattern.RunID != "" && pattern.RunID != runID {
@@ -297,6 +299,24 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 		}
 		subscriber := pattern.Subscriber
 		subscriber.MatchPattern = eventPattern
+		out = appendUniqueSubscriber(out, subscriber)
+	}
+	return projectSubscriberEvents(out, eventType)
+}
+
+func projectSubscriberEvents(subscribers []Subscriber, eventType string) []Subscriber {
+	if len(subscribers) == 0 {
+		return nil
+	}
+	out := make([]Subscriber, 0, len(subscribers))
+	for _, subscriber := range subscribers {
+		if subscriber.Recipient.IsNode() && subscriber.subscription.Admitted() && subscriber.subscription.Pattern() {
+			local, matched := subscriber.subscription.LocalEventAt(subscriber.Path, eventType)
+			if !matched {
+				continue
+			}
+			subscriber.LocalizedEvent = local
+		}
 		out = appendUniqueSubscriber(out, subscriber)
 	}
 	return out
@@ -1208,6 +1228,7 @@ func routePatternIdentity(pattern routePattern) routePatternIdentityKey {
 }
 
 func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPattern) Subscriber {
+	subscriber.subscription = resolved.subscription
 	subscriber.routeSource = resolved.routeSource
 	subscriber.LocalizedEvent = eventidentity.Normalize(resolved.LocalizedEvent)
 	if matchPattern := eventidentity.Normalize(resolved.MatchPattern); matchPattern != "" {
@@ -1447,6 +1468,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberK
 	out := make([]routeResolvedPattern, 0, len(admission.RoutePatterns()))
 	for _, pattern := range admission.RoutePatternsAt(routePath) {
 		out = append(out, routeResolvedPattern{
+			subscription:   admission,
 			EventPattern:   pattern,
 			routeSource:    subscriberRouteSourceSubscription,
 			LocalizedEvent: admission.LocalEvent(),

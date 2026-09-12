@@ -57,6 +57,52 @@ func TestAdmittedSubscriptionExecutionProjection(t *testing.T) {
 	}
 }
 
+func TestAdmittedSubscriptionLocalEventUsesExactExecutionMatch(t *testing.T) {
+	for _, kind := range []AuthoredSubscriptionConsumerKind{AuthoredSubscriptionConsumerNode, AuthoredSubscriptionConsumerAgent, AuthoredSubscriptionConsumerTimer} {
+		for _, path := range []string{"", ".", "left/child", "left/child/one", "left/parent-one/child/instance-one"} {
+			for _, authored := range []string{"task.done", "task.*"} {
+				admission := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+					ConsumerKind: kind, FlowPath: "left/child", Authored: authored,
+					LocalEvents: map[string]struct{}{"task.done": {}},
+				})
+				if kind == AuthoredSubscriptionConsumerTimer && authored == "task.*" {
+					if admission.Admitted() {
+						t.Fatal("timer acquired wildcard subscription authority")
+					}
+					continue
+				}
+				if !admission.Admitted() {
+					t.Fatal(admission.Message())
+				}
+				name := "task.done"
+				if path != "" && path != "." {
+					name = path + "/" + name
+				}
+				before := admission.RoutePatterns()
+				if local, ok := admission.LocalEventAt(path, name); !ok || local != "task.done" {
+					t.Fatalf("%s at %s: local=%q matched=%t", authored, path, local, ok)
+				}
+				for _, hostile := range []string{"foreign/" + name, name + "/task.done", " " + name, name + " ", strings.Replace(name, "task.done", "other.done", 1), strings.Replace(name, "task.done", "task.*", 1)} {
+					if local, ok := admission.LocalEventAt(path, hostile); ok || local != "" {
+						t.Fatalf("%s borrowed receiver at %s: %q", hostile, path, local)
+					}
+				}
+				if path != "" && path != "." {
+					if _, ok := admission.LocalEventAt(path, "task.done"); ok {
+						t.Fatal("local runtime alias acquired instance handler")
+					}
+				}
+				if !reflect.DeepEqual(before, admission.RoutePatterns()) {
+					t.Fatal("handler projection changed subscription authority")
+				}
+			}
+		}
+	}
+	if _, ok := (AuthoredSubscriptionAdmission{}).LocalEventAt("", "task.done"); ok {
+		t.Fatal("zero subscription acquired handler")
+	}
+}
+
 func TestClassifyAuthoredSubscriptionExactAdmissionMatrix(t *testing.T) {
 	tests := []struct {
 		name      string
