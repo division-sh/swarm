@@ -36391,7 +36391,7 @@ agent_topology_authority:
       COMMIT admission the actual acknowledged outcome or uncertainty governs; later cleanup errors do not erase
       acknowledged commit. The retained session owns outstanding SQL until commit/rollback and cleanup join. Retained-session release
       is terminal only after the durable release and backend-possession release both succeed. If release fails,
-      one independent proof under the capability's configured local-fencing budget decides the outcome: exact
+      one independent proof uses the capability's configured monitor deadline as a local-fencing budget: exact
       current possession keeps the same capability live and re-arms its monitor while already committed grant
       retirements remain retired; failed or unprovable possession terminalizes as ownership_unprovable. A release
       error can never publish released. The proof budget starts only after independent proof owns the serialized
