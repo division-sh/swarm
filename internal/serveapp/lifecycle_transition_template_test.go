@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -312,7 +311,7 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 	}
 }
 
-func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
+func TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startLifecycleTemplateRuntime(t, backend, canonicalrouting.CopyLifecycleNestedTemplates(t))
@@ -320,48 +319,34 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "template-pause"})
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.observed", "run_id": runID, "source_event_id": sourceEvent, "payload": map[string]any{"seed": true}, "idempotency_key": "template-frontier"})
-			before := lifecycleStoredSnapshot(t, rt, runID)
+			before := snapshotForkReceiverApplication(t, rt)
 			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "template-fork"}
-			var fork, duplicate apiv1.RunForkExecutionResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-			if fork.ForkRunID == "" || fork.ForkRunID == runID || fork.ForkRunID != duplicate.ForkRunID || fork.ExecutedEventCount != 1 {
-				t.Fatalf("template fork=%#v duplicate=%#v", fork, duplicate)
-			}
-			var children []lifecycleTemplateSibling
-			for _, parent := range siblings {
-				child := parent
-				// Fork remaps durable storage identity; select by the exact logical
-				// template within this fork, not by a guessed remapping algorithm.
-				if err := rt.DB.QueryRow(`SELECT e.entity_id,e.flow_instance FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.instance_path=e.flow_instance WHERE e.run_id=$1 AND f.flow_template=$2 AND e.current_state='review'`, fork.ForkRunID, parent.flow+"/sink").Scan(&child.gateEntity, &child.gateInstance); err != nil {
-					t.Fatal(err)
+			for attempt := 0; attempt < 2; attempt++ {
+				rpcErr := requireServedJSONRPCError(t, rt.Endpoint, "run.fork", params)
+				details, ok := rpcErr.Data["details"].(map[string]any)
+				if rpcErr.Code != -32603 || !ok {
+					t.Fatalf("unexpected template capability RPC refusal: %+v", rpcErr)
 				}
-				child.gate = readLifecycleTemplateGate(t, rt, fork.ForkRunID, child.gateEntity, child.flow+"/sink")
-				if child.gate.CardID == parent.gate.CardID || child.gate.ActivationID == parent.gate.ActivationID || child.gateEntity == parent.gateEntity || child.gateInstance == parent.gateInstance || child.gate.RoutesJSON != parent.gate.RoutesJSON || child.gate.BundleHash != parent.gate.BundleHash {
-					t.Fatalf("fork did not remint ownership while preserving exact frozen source: parent=%#v child=%#v", parent, child)
+				failure := decodeServedFailureEnvelope(t, details["failure"])
+				if string(failure.Class) != "platform.dependency_unavailable" || failure.Detail.Code != "selected_contract_deferred_work_owner_unavailable" || failure.Component != "selected-contract-run-fork" || failure.Operation != "admit-deferred-work-ownership" || !failure.Retryable || failure.Deterministic {
+					t.Fatalf("wrong exact template capability refusal: %+v", failure)
 				}
-				child.decision = lifecycleDecisionParamsForCard(t, rt, child.gate.CardID, "approve")
-				child.decision["idempotency_key"] = child.side + "-fork-decide"
-				t.Logf("TEMPLATE_FORK source_run=%s fork_run=%s side=%s parent_card=%s child_card=%s parent_activation=%s child_activation=%s parent_instance=%s child_instance=%s routes=%s", runID, fork.ForkRunID, child.side, parent.gate.CardID, child.gate.CardID, parent.gate.ActivationID, child.gate.ActivationID, parent.gateInstance, child.gateInstance, child.gate.RoutesJSON)
-				children = append(children, child)
-			}
-			if children[0].gate.CardID == children[1].gate.CardID || children[0].gate.ActivationID == children[1].gate.ActivationID || children[0].gateInstance == children[1].gateInstance {
-				t.Fatal("fork sibling gates aliased")
-			}
-			completeLifecycleTemplateSiblings(t, rt, fork.ForkRunID, children)
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
-			if lifecycleStoredSnapshot(t, rt, runID) != before {
-				t.Fatal("fork sibling verdict changed parent state/history")
-			}
-			for _, parent := range siblings {
-				requireLifecycleEventCount(t, rt, runID, parent.flow+"/sink/work.completed", 0)
-				pending := readLifecycleTemplateGate(t, rt, runID, parent.gateEntity, parent.flow+"/sink")
-				if !reflect.DeepEqual(pending, parent.gate) {
-					t.Fatalf("fork mutated parent frozen gate: before=%#v after=%#v", parent.gate, pending)
+				capabilities, err := json.Marshal(failure.Detail.Attributes["capabilities"])
+				if err != nil || string(capabilities) != `["dynamic_flow_instance_creation"]` {
+					t.Fatalf("wrong exact capability set: %s error=%v", capabilities, err)
 				}
-				params := lifecycleDecisionParamsForCard(t, rt, parent.gate.CardID, "approve")
-				if params["observed_content_hash"] != parent.decision["observed_content_hash"] {
-					t.Fatal("fork changed parent card contents")
+				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+					for table, rows := range after {
+						if !reflect.DeepEqual(before[table], rows) {
+							t.Errorf("refusal changed table %s", table)
+						}
+					}
+					t.Fatalf("template capability refusal attempt %d mutated application rows", attempt)
+				}
+				for _, sibling := range siblings {
+					if got := readLifecycleTemplateGate(t, rt, runID, sibling.gateEntity, sibling.flow+"/sink"); !reflect.DeepEqual(got, sibling.gate) {
+						t.Fatalf("refusal changed sibling gate: before=%+v after=%+v", sibling.gate, got)
+					}
 				}
 			}
 		})
