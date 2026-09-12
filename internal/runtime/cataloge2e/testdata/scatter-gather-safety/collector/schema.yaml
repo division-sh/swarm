@@ -1,0 +1,18 @@
+name: collector
+mode: singleton
+stages:
+  collecting: {initial: true}
+  awaiting: {}
+  complete: {terminal: true}
+  failed: {terminal: true}
+pins:
+  inputs:
+    events:
+      - {event: batch.opened, source: external}
+      - event: item.reported
+        resolution:
+          mode: fan-in
+          aggregation: barrier
+          window: payload.batch_id
+          dedup_by: [payload.item_id]
+          singleton: collector

@@ -1,0 +1,4 @@
+item.reported:
+  item_id: text
+  batch_id: text
+  value: text

@@ -1,0 +1,4 @@
+types:
+  Item:
+    item_id: text
+    value: text

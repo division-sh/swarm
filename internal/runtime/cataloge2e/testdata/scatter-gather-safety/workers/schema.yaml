@@ -1,0 +1,19 @@
+name: workers
+mode: template
+instance: item_id
+stages:
+  registered:
+    initial: true
+    timers:
+      - {after: 72h, advances_to: expired}
+  complete: {terminal: true}
+  expired: {terminal: true}
+pins:
+  inputs:
+    events:
+      - event: item.registered
+        resolution: {mode: select-or-create}
+      - event: item.finished
+        resolution: {mode: select}
+  outputs:
+    events: [item.reported]
