@@ -733,9 +733,6 @@ func routedEventKeysForPlan(evt events.Event) []string {
 		return nil
 	}
 	out := []string{eventType}
-	if concrete := concreteFlowInstanceEventKey(evt); concrete != "" {
-		out = append(out, concrete)
-	}
 	out = append(out, targetedConcreteEventKeysForPlan(evt)...)
 	return uniqueStrings(out)
 }

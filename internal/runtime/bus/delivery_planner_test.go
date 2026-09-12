@@ -1011,7 +1011,7 @@ func TestRoutedNodeInternalSubscriptionAliases_NestedSemanticScopeDoesNotLeakPar
 	}
 }
 
-func TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerivesConcreteKey(t *testing.T) {
+func TestRoutedEventKeysForPlanDoesNotRepairCallbackPublicationNames(t *testing.T) {
 	tests := []struct {
 		name         string
 		eventType    string
@@ -1024,7 +1024,6 @@ func TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerives
 			flowInstance: "repo-scaffold/inst-1",
 			want: []string{
 				"repo_scaffold.repo_commit_succeeded",
-				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 			},
 		},
 		{
@@ -1033,17 +1032,21 @@ func TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerives
 			flowInstance: "repo-scaffold/inst-1",
 			want: []string{
 				"repo_scaffold.repo_commit_failed",
-				"repo-scaffold/inst-1/repo_scaffold.repo_commit_failed",
 			},
 		},
 		{
-			name:         "semantic scoped event keeps existing concrete derivation",
+			name:         "semantic scoped event is not reinterpreted",
 			eventType:    "repo-scaffold/repo_scaffold.repo_commit_succeeded",
 			flowInstance: "repo-scaffold/inst-1",
 			want: []string{
 				"repo-scaffold/repo_scaffold.repo_commit_succeeded",
-				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 			},
+		},
+		{
+			name:         "canonical concrete callback remains exact",
+			eventType:    "repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
+			flowInstance: "repo-scaffold/inst-1",
+			want:         []string{"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded"},
 		},
 		{
 			name:         "root flow instance has no semantic scope",
@@ -1689,14 +1692,14 @@ func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 	}
 }
 
-func TestRoutedEventKeysForPlan_LocalizesStaticAndMaterializedFlowInstances(t *testing.T) {
+func TestRoutedEventKeysForPlanPreservesProtocolNameInEveryFlow(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		flowInstance string
 		want         string
 	}{
-		{name: "static", flowInstance: "provider", want: "provider/mailbox.card_decided"},
-		{name: "materialized template", flowInstance: "requester/account-a", want: "requester/account-a/mailbox.card_decided"},
+		{name: "static", flowInstance: "provider", want: "mailbox.card_decided"},
+		{name: "materialized template", flowInstance: "requester/account-a", want: "mailbox.card_decided"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := eventtest.StaticFlowRoutingSource("provider", "provider", eventtest.UUID("provider-source"))
@@ -1705,6 +1708,9 @@ func TestRoutedEventKeysForPlan_LocalizesStaticAndMaterializedFlowInstances(t *t
 			}
 			evt := eventtest.RunCreatingRootIngressWithRoutingSource("", "mailbox.card_decided", "", "", nil, 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, tc.flowInstance), source, time.Time{})
 			keys := routedEventKeysForPlan(evt)
+			if len(keys) != 1 {
+				t.Fatalf("protocol event acquired aliases: %v", keys)
+			}
 			found := false
 			for _, key := range keys {
 				if key == tc.want {
