@@ -1371,7 +1371,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002201, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
+	seedSelectedExecutionRootInput(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -1424,7 +1424,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002202, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
+	seedSelectedExecutionRootInput(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -1726,7 +1726,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			entityID := uuid.NewString()
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002203, 0).UTC()
-			seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
+			seedSelectedExecutionRootInput(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
 			seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 			captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -2987,7 +2987,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002403, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
+	seedSelectedExecutionRootInput(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.SourceArtifactFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -5311,6 +5311,17 @@ func seedSelectedExecutionStateOnlySourceRun(
 		at,
 	)
 	commitRunForkTestEvent(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event, nil)
+}
+
+// These root input journeys have no business producer. Their source entity
+// history is independent and must not invent a template publication authority.
+func seedSelectedExecutionRootInput(
+	t *testing.T, db *sql.DB, sourceRunID, entityID, sourceEventID, eventName string,
+	at time.Time, entityType string, sourceFact runtimecorrelation.SourceArtifactFact,
+) {
+	t.Helper()
+	seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
+		selectedExecutionEntitylessNodeRoute("test-node"), nil, events.NoRoutingSource(), events.EventEnvelope{}, sourceFact)
 }
 
 func seedSelectedExecutionSourceRunWithRoutes(

@@ -32,7 +32,12 @@ func startLifecycleTemplateRuntime(t *testing.T, backend servedparity.Backend, r
 	}
 	// This larger source repeats full boot verification; no verifier is disabled.
 	_, start := lifecycleRestartHarness(t, store, root, 3*time.Minute)
-	_, rt := start()
+	process, rt := start()
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("served lifecycle output:\n%s", process.outputString())
+		}
+	})
 	return rt
 }
 

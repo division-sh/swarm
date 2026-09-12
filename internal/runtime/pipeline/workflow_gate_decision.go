@@ -566,7 +566,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	}
 	cause, err := runtimeworkflowlifecycle.NewCompiledTransition(route.Transition, handlerselection.NotApplicable(), nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	preparedState, err := (pipelineEngineStateRepo{coordinator: pc}).prepareMutation(ctx, address, runtimeengine.StateMutation{
 		Transition: &cause,
