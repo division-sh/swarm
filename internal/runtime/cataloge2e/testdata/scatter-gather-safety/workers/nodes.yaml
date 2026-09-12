@@ -1,0 +1,22 @@
+worker:
+  execution_type: system_node
+  subscribes_to: [item.registered, item.finished]
+  event_handlers:
+    item.registered:
+      data_accumulation:
+        writes:
+          - {source_field: batch_id, target_field: batch_id}
+          - {source_field: item_id, target_field: item_id}
+          - {source_field: value, target_field: value}
+    item.finished:
+      guard:
+        id: still_registered
+        check: "_entity.current_state == 'registered'"
+        on_fail: discard
+      emit:
+        event: item.reported
+        fields:
+          item_id: entity.item_id
+          batch_id: entity.batch_id
+          value: entity.value
+      advances_to: complete

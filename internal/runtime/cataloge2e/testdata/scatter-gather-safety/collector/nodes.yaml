@@ -1,0 +1,18 @@
+gather:
+  execution_type: system_node
+  subscribes_to: [batch.opened, item.reported]
+  event_handlers:
+    batch.opened:
+      data_accumulation:
+        writes:
+          - {source_field: batch_id, target_field: batch_id}
+          - {source_field: expected_item_ids, target_field: expected_item_ids}
+      advances_to: awaiting
+    item.reported:
+      join:
+        stage: awaiting
+        members: {from: entity.expected_item_ids}
+        window: {from: entity.batch_id}
+        output: payload.value
+        on_complete: {advances_to: complete}
+        timeout: {after: 5m, advances_to: failed}

@@ -1,0 +1,32 @@
+scatter:
+  execution_type: system_node
+  subscribes_to: [batch.submitted, batch.finished]
+  event_handlers:
+    batch.submitted:
+      create_entity: true
+      data_accumulation:
+        writes:
+          - {source_field: batch_id, target_field: batch_id}
+      fan_out:
+        items_from: payload.items
+        as: entry
+        identity: entry.item_id
+        max_items: 50
+        emit:
+          event: item.registered
+          fields:
+            item_id: entry.item_id
+            batch_id: payload.batch_id
+            value: entry.value
+    batch.finished:
+      fan_out:
+        items_from: payload.items
+        as: entry
+        identity: entry.item_id
+        max_items: 50
+        emit:
+          event: item.finished
+          fields:
+            item_id: entry.item_id
+            batch_id: payload.batch_id
+            value: entry.value

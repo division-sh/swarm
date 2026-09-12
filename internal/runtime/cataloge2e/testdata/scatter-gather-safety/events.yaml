@@ -1,0 +1,16 @@
+batch.submitted:
+  batch_id: text
+  items: "[Item]"
+batch.finished:
+  batch_id: text
+  items: "[Item]"
+item.registered:
+  key: item_id
+  item_id: text
+  batch_id: text
+  value: text
+item.finished:
+  key: item_id
+  item_id: text
+  batch_id: text
+  value: text

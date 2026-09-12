@@ -1,0 +1,18 @@
+stages:
+  collecting:
+    initial: true
+    timers:
+      - {after: 72h, advances_to: closed}
+  closed:
+    terminal: true
+pins:
+  inputs:
+    events:
+      - {event: batch.submitted, source: external}
+      - {event: batch.finished, source: external}
+  outputs:
+    events: [item.registered, item.finished]
+connect:
+  - {event: item.registered, from: ., to: workers}
+  - {event: item.finished, from: ., to: workers}
+  - {event: item.reported, from: workers, to: collector}
