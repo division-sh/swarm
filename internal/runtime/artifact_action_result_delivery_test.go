@@ -181,7 +181,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			wantFlowPath:    "repo-scaffold",
 		},
 		{
-			name:            "wildcard_child_inbound_success",
+			name:            "connected_child_inbound_success",
 			requestEventID:  "99999999-9999-4999-8999-999999999963",
 			requestID:       "99999999-9999-4999-8999-999999999973",
 			mvpYAML:         "name: Demo\n",
@@ -191,7 +191,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			wantFlowPath:    "repo-scaffold",
 		},
 		{
-			name:            "wildcard_child_inbound_failure",
+			name:            "connected_child_inbound_failure",
 			requestEventID:  "99999999-9999-4999-8999-999999999964",
 			requestID:       "99999999-9999-4999-8999-999999999974",
 			mvpYAML:         "title: Demo\n",
@@ -205,7 +205,12 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 		t.Run(tc.name, func(t *testing.T) {
 			repoNodeID := artifactActionResultNodeID(t)
 			resultEventType := "repo-scaffold/" + tc.resultEventName
-			bundle := loadRuntimeTempBundle(t, artifactActionResultStaticDeliveryFixtureFiles())
+			files := artifactActionResultStaticDeliveryFixtureFiles()
+			childRequest := tc.requestFlowPath != tc.wantFlowPath
+			if childRequest {
+				addArtifactActionResultChildRequest(files)
+			}
+			bundle := loadRuntimeTempBundle(t, files)
 			source := semanticview.Wrap(bundle)
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
@@ -272,16 +277,38 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				),
 				time.Now().UTC(),
 			)
+			if childRequest {
+				requestEvent = eventtest.ExistingRunRootIngressWithRoutingSource(tc.requestEventID,
+					events.EventType("repo-scaffold/child-1/start.requested"), "test", "", requestPayload, 0, templateInstanceDeliveryRunID,
+					events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: tc.requestFlowPath, FlowInstance: tc.requestFlowPath}),
+					events.NoRoutingSource(), time.Now().UTC())
+			}
 
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)
 			}
 
+			requestEventID := tc.requestEventID
+			if childRequest {
+				requestEventID = waitRuntimeEventID(t, ctx, db, `SELECT event_id::text FROM events WHERE event_name=$1 AND source_event_id=$2::uuid`,
+					[]any{"repo-scaffold/child-1/repo_scaffold.repo_commit_requested", tc.requestEventID})
+				var rawSource string
+				if err := db.QueryRowContext(ctx, `SELECT source_route::text FROM events WHERE event_id=$1::uuid`, requestEventID).Scan(&rawSource); err != nil {
+					t.Fatal(err)
+				}
+				var sourceRoute events.RouteIdentity
+				if err := json.Unmarshal([]byte(rawSource), &sourceRoute); err != nil {
+					t.Fatal(err)
+				}
+				if sourceRoute.FlowID != tc.requestFlowPath || sourceRoute.FlowInstance != tc.requestFlowPath || sourceRoute.EntityID != "" {
+					t.Fatalf("child request borrowed parent state ownership: %s", rawSource)
+				}
+			}
 			resultEventID := waitRuntimeEventID(t, ctx, db, `
 				SELECT event_id::text
 				FROM events
 				WHERE event_name = $1 AND source_event_id = $2::uuid
-			`, []any{resultEventType, tc.requestEventID})
+			`, []any{resultEventType, requestEventID})
 			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, tc.wantFlowPath)
 			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, tc.wantFlowPath)
 			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
@@ -636,4 +663,38 @@ func artifactActionResultStaticDeliveryFixtureFiles() map[string]string {
 	files := artifactActionResultDeliveryFixtureFiles()
 	files["repo-scaffold/schema.yaml"] = strings.Replace(files["repo-scaffold/schema.yaml"], "mode: template", "mode: static", 1)
 	return files
+}
+
+func addArtifactActionResultChildRequest(files map[string]string) {
+	files["repo-scaffold/events.yaml"] = strings.TrimPrefix(files["repo-scaffold/events.yaml"], "repo_scaffold.repo_commit_requested:\n  request_id: string\n  mvp_yaml: string\n")
+	files["repo-scaffold/schema.yaml"] += `pins:
+  inputs:
+    events: [repo_scaffold.repo_commit_requested]
+connect:
+  - {event: repo_scaffold.repo_commit_requested, from: child-1, to: .}
+`
+	files["repo-scaffold/child-1/schema.yaml"] = `name: child-requester
+pins:
+  inputs:
+    events:
+      - {event: start.requested, source: external}
+  outputs:
+    events: [repo_scaffold.repo_commit_requested]
+`
+	files["repo-scaffold/child-1/events.yaml"] = `start.requested:
+  request_id: text
+  mvp_yaml: text
+repo_scaffold.repo_commit_requested:
+  request_id: text
+  mvp_yaml: text
+`
+	files["repo-scaffold/child-1/nodes.yaml"] = `requester:
+  execution_type: system_node
+  subscribes_to: [start.requested]
+  event_handlers:
+    start.requested:
+      emit:
+        event: repo_scaffold.repo_commit_requested
+        fields: {request_id: payload.request_id, mvp_yaml: payload.mvp_yaml}
+`
 }
