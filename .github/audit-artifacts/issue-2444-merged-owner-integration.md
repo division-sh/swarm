@@ -1,6 +1,7 @@
 # #2444 Merged-Owner Integration
 
-Agent-g. Qualification **pending**; not a closure or review-ready claim.
+Agent-g. Qualification **passed** on implementation head `9dd1f08b9`; this
+proof-record amendment changes audit prose only. Independent merge review remains.
 
 Rebased cleanly onto `origin/master` at `2344162f9` after the first qualification.
 That run failed: strict environment admission rejected the test-only SWARM
@@ -11,8 +12,8 @@ expectations lacked E's activity-order fence. The fixes preserve product
 validation and existing owners. Focused pipeline activity and dual-store
 generation/reset/receiver fencing controls now pass, including the latter with
 race detection (46.577s). CLI read-window/validation and configured-monitor-deadline
-spec controls pass with TEST_POSTGRES_BIN supplied (0.423s). Final rerun remains
-pending; the full managed run is first in the shared capacity queue.
+spec controls passed with TEST_POSTGRES_BIN supplied (0.423s). These earlier
+focused receipts did not by themselves qualify the implementation.
 
 ## Second Full Qualification and Bounded Test Repairs
 
@@ -35,8 +36,17 @@ was relaxed.
 
 Focused contention/takeover/claim/fixture tests passed (19.473s), the native claim
 fixture passed (0.993s), and the wider process-capability cancellation/takeover/
-release-failure census passed (9.191s). Final race and full qualification remain
-pending; these receipts do not replace a final-head complete pass.
+release-failure census passed (9.191s). The final corrected cancellation/takeover/
+contention matrix passed with race detection (157.649s).
+
+## Final Qualification
+
+`TEST_POSTGRES_BIN=/usr/lib/postgresql/16/bin go run ./cmd/swarm-test -- ./... -count=1 -timeout=30m`
+completed with exit 0 on `9dd1f08b94e358d4f2be8e53a269ac1079e35e9f`. Serve passed
+1115.180s, runtime persistence 930.449s, release E2E 565.257s, catalog E2E 633.160s,
+pipeline 165.147s and selected execution 188.881s. PostgreSQL private transport
+proofs were enabled. Both preceding failed runs remain recorded above.
+See the final post-implementation audit for the receipt hash and full mapping.
 
 ## Baseline and Boundary
 
@@ -79,17 +89,17 @@ These receipts cover this integration; earlier component timings do not.
 
 | Proof | Current result and limits |
 | --- | --- |
-| Production `go build ./...` | Passed after resolving the production conflicts; final qualification still required. |
+| Production `go build ./...` | Passed after resolving the production conflicts; final full suite also passed. |
 | Startup-ownership and continuation packages, race | Passed. |
 | API conversation-fork and selected adapter outcome matrix, race | Passed, 22.696s. |
 | Selected writer/activation/source-freeze runtime-persistence matrix, race | Passed, 25.114s. |
 | Native PostgreSQL claim exit matrix, race | Passed, 4.410s, after supplying E's real durable preparation/process facts to the relational fixture. |
 | Selected proof/ownership-read local-fence matrix | Passed with race detection, three repetitions. Four barrier cases prove late success cannot revive authority and independent errors survive; these are owner fixtures, not transport proof. |
-| Runtime selected execution and direct activation outcome matrix | Actual runtime cases passed; the old direct fixture omitted original source identity and was repaired. Direct controls pass with the control-lifetime matrix; the whole combined selector remains required in final qualification. |
+| Runtime selected execution and direct activation outcome matrix | Actual runtime cases passed; the old direct fixture omitted original source identity and was repaired. Direct controls pass with the control-lifetime matrix and final whole suite. |
 | Selected stop/recovery consumer outcome matrix | Passed with the existing control-lifetime matrix and direct activation controls, race, 38.944s. Real dual-store lifecycle paths with a post-operation error wrapper prove runtime result preservation and refusal; not a native COMMIT fault injection. |
 | Persistence inventory | Passed after regeneration and explicit classification. |
 | API-spec and persistence-inventory guards | Passed, 0.424s and 5.285s. |
-| Supported serve, remote loss/silence, SIGKILL and final managed whole suite | Pending on the integrated tree. Managed suite submitted with private PostgreSQL configuration; awaiting shared test capacity. |
+| Supported serve, remote loss/silence, SIGKILL and final managed whole suite | Passed on `9dd1f08b9`, with private PostgreSQL configuration supplied; see Final Qualification above. |
 
 ## Tracking and Closure
 

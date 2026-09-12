@@ -1,9 +1,11 @@
 # Post-Implementation Proof Audit: #2444
 
-Agent-g. Final qualification status: **PENDING**. This artifact is not merge
-approval. The final PR comment binds the tested shipping head and actual suite
-result. Component receipts below distinguish fault injection, public HTTP,
-compiled lifecycle, real process death and wire-level proof.
+Agent-g. Final qualification status: **PASSED** on implementation head
+`9dd1f08b94e358d4f2be8e53a269ac1079e35e9f`. The subsequent proof-record commit
+changes only audit prose. Achieved closure claim: **failure class eliminated**
+within the approved #2444 boundary; independent merge review remains required.
+Component receipts below distinguish fault injection, public HTTP, compiled
+lifecycle, real process death and wire-level proof.
 
 ## Binding Boundary
 
@@ -14,7 +16,7 @@ compiled lifecycle, real process death and wire-level proof.
   investigation freeze are superseded, not retained as product behavior.
 - Independent implementation gate: https://github.com/division-sh/swarm/issues/2444#issuecomment-5623494272.
 - Implementation baseline: `origin/master` at
-  `0d7513f76bea234a7c153f488c7167847d1d8bd5`, after E's #2445.
+  `2344162f9997628bb844813506b4b6ac531bfc04`, including E's #2445.
   The pre-integration WIP is preserved at `48f73ad30`; its proof receipts are
   historical, not qualification of this merged-owner integration. See
   `issue-2444-merged-owner-integration.md` for the additional consumer census.
@@ -31,7 +33,7 @@ compiled lifecycle, real process death and wire-level proof.
   (fact propagation versus ambient cancellation). #2442 stays closed historical
   evidence. The original fork-removal question was not a complete consumer model;
   the approved census and amendments expanded it before closure.
-- Intended closure: failure class eliminated, contingent on final qualification.
+- Intended and achieved closure claim: failure class eliminated, qualified below.
   No remaining same-concept writer may be excused as merely sharing a helper.
 
 ## Spec and Architecture
@@ -87,7 +89,7 @@ the eight named read-only snapshots, not writer bypasses.
 
 Each row names execution evidence, not only owner identity. Component receipts
 state which branches use real SQL, seam injection or typed projection controls.
-Final classification below is subject to the full qualification status above.
+Final classification below is backed by the full qualification recorded below.
 
 | Manifestation | Status | Exact proof |
 | --- | --- | --- |
@@ -119,6 +121,9 @@ Final classification below is subject to the full qualification status above.
 | Pipeline/directive/channel/LLM closed writer cancellation | execution-proven through the same corrected path | `TestPostgresWriterMigrationCancellationAndCommitCuts` and exact consumer matrices in pipeline/session writer receipt |
 | External authorize/direct/owned response observation | execution-proven through the same corrected path | `TestExternalEffectClosedMutationCancellation`, 12 cuts; existing dual-store lifecycle and recovery posture tests |
 | Selected runfork manual writer and committed authority results | execution-proven through the same corrected path | `TestSelectedForkWriterPortsSettlement`, `TestSelectedForkClaimPreservesCommittedEvidence`, selected-fork/source-freeze/materialization/activation matrix |
+| E-merged selected stop/recovery and runtime result consumers | execution-proven through the same corrected path | `TestSelectedForkControlCommittedOutcomesBothStores`, `TestSelectedForkRuntimeConsumersSettleReturnedOutcomes`, `TestSelectedForkActivationGateRetainsDirectActivationOutcome`; exact acknowledged results survive post-operation failure, failed authority stays fenced, no duplicate cleanup |
+| Canceled contention, takeover and source-set installation with admitted SQL | execution-proven through the same corrected path | `TestRunForkActivationFrontierContentionBothStores`, `TestSelectedRunForkActivationFrontierContentionBothStores`, `TestProcessCapabilityTakeoverRetiresNewWorkGrantsParity`, `TestSelectedGrantBulkTakeoverBothStores`, `TestProcessCapabilityOperationCancellationPreservesPossessionParity`; release held SQL barriers before joined drain, cancellation and durable-state checks retained; focused race matrix passed |
+| Public node-identity readback combines different-time snapshots | reproduced and fixed | `TestNodeIdentityCanonicalMapKeySQLitePostgres`: require terminal delivery readback as well as later quiescence; real SQLite/PostgreSQL process proof passed three repetitions and full suite |
 | Reset/bootstrap/quiescence/routing/ingress/mailbox DML and cleanup | execution-proven through the same corrected path | `TestBoundedPostgresWritersCancelBeforeCommit`, `TestPostgresBootstrapOwnsSQLAndCommitOutcome`, quiescence/reset receipt and CRUD regression matrix |
 | Runtime LLM committed lease/release error consumers | reproduced and fixed | `TestSessionRotationRetainsAcknowledgedLeaseAndErrors`, `TestSessionPreparationAndProvidersReleaseAcknowledgedAcquireOnError`, `TestSessionStartReleasesCommittedAcquireOnErrorOrCancellation`, `TestSessionCleanupErrorRetainsResponseAndDoesNotReplayProvider`, `TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome`; no live provider calls |
 | Delivery-continuation read interrupted by graceful retirement | reproduced and fixed | `TestCoordinatorDrainsAdmittedReadsBeforeRetirement`, `TestCoordinatorSynchronizeWaiterCancellationKeepsReadLease`; `TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupScanParity` passes ten race repetitions on both stores after the reproduced PostgreSQL failure |
@@ -127,10 +132,25 @@ Final classification below is subject to the full qualification status above.
 
 ## Qualification and Tracking
 
-Final whole suite must use `go run ./cmd/swarm-test -- ./... -count=1 -timeout=30m`.
-An explicit `./...` is required when arguments are supplied. Private PostgreSQL
-transport tests require `TEST_POSTGRES_BIN=/usr/lib/postgresql/16/bin`;
-the final run supplies it rather than counting skipped cases as proof.
+Final qualification command, exit **0**:
+
+```sh
+TEST_POSTGRES_BIN=/usr/lib/postgresql/16/bin go run ./cmd/swarm-test -- ./... -count=1 -timeout=30m
+```
+
+Executed against `9dd1f08b94e358d4f2be8e53a269ac1079e35e9f`, with no code changes
+during qualification. Private PostgreSQL transport tests were enabled rather than
+counted as skipped proof. The full run includes real graceful serve drain,
+private PostgreSQL loss/restart/lost-response/remote-possession/silent-monitor
+tests and dual-store process SIGKILL recovery. Package receipts: serve 1115.180s,
+runtime persistence 930.449s, release E2E 565.257s, catalog E2E 633.160s, pipeline
+165.147s, selected execution 188.881s, PostgreSQL backend 42.266s and SQLite
+backend 15.888s. Additional corrected cancellation/takeover/contention race
+matrix passed (157.649s); node-identity process proof passed count=3 (55.799s).
+
+Local full-run receipt: `/tmp/agent-g-2444-final-qualification.log`, SHA-256
+`0dc5dcad6fc344824d3b5874be777c89935d170c315a0b26bfadbd0206f9ad53`.
+The remote master was rechecked after qualification and remains the baseline above.
 
 The first integrated whole suite failed. Its investigation-prefixed SWARM env
 export contaminated strict product environment admission; the private test
@@ -138,7 +158,13 @@ fixture now uses TEST_POSTGRES_BIN without weakening product validation. Other
 repairs preserve inline dispatch for direct pipeline calls, count an acknowledged
 fork event even when delivery is refused, and update cancellation barriers and
 authority-repair SQL expectations for admitted drain and E's mutation fence.
-A clean whole-suite rerun remains required; focused passes do not erase that run.
+The second integrated run also failed: its remaining cancellation fixtures held
+the lock needed for drain; a cleanup test expected a disposed claim to remain
+usable; a native writer fixture bypassed the canonical run creator; and public
+node readback combined an older event snapshot with newer quiescence. Those
+tests were corrected without relaxing production admission or outcome contracts.
+Both red runs remain historical evidence; the complete third run above, not
+their focused reruns alone, qualifies the final implementation.
 
 Component receipts: `issue-2444-commit-evidence-proof.md`,
 `issue-2444-runfork-writer-migration.md`, `issue-2444-bounded-writers-proof.md`,
@@ -167,5 +193,5 @@ Closure feasibility: the chosen class is closeable in this PR by deleting the
 driver fork and migrating all currently known in-class writers, readers and
 outcome consumers. Fixing only the local transaction or fork-create endpoint
 would have left live sibling interpreters; the census explicitly covered and
-repaired them. Merge-readiness remains contingent on complete final-head proof
-and independent review, not the presence of these owners or this document.
+repaired them. Final-head implementation proof is complete. Independent review
+still decides merge approval; owner names and this document alone do not.
