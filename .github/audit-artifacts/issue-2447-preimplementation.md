@@ -1,5 +1,10 @@
 # Pre-Implementation Coverage Audit: #2447, R1.4 Baseline First
 
+Historical audit below: the independent gate is now **approved as first slice**.
+The binding implementation addendum is [issue-2447-approved-gate.md](issue-2447-approved-gate.md)
+and [the recorded issue ruling](https://github.com/division-sh/swarm/issues/2447#issuecomment-5648061668).
+Pending statements below describe the original submission, not current gate state.
+
 Agent-g. Analysis baseline: `origin/master@90809b1cb55a4bb97655a199292dda338e722bf5`
 (merged #2446). Docs baseline: `fc0eb9500fb5a0c63603dabdc6efad23971e1a53`.
 Status: **independent gate requested, not approved; no implementation started**.
