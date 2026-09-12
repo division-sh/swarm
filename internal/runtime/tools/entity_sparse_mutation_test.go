@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -152,6 +153,7 @@ writer:
 			if testNumericValue(fields["seeded"]) != 7 {
 				t.Fatalf("creation lost explicit initial: %#v", fields)
 			}
+			assertSparseToolContinuation(t, whole, fields)
 			if _, err := exec.Execute(ctx, "read_work_label", map[string]any{}); err == nil {
 				t.Fatal("unassigned typed field read returned a fabricated value")
 			}
@@ -201,6 +203,11 @@ writer:
 			if _, exists := profile["note"]; exists {
 				t.Fatalf("nested optional value fabricated: %#v", fields)
 			}
+			whole, err = exec.Execute(ctx, "read_work", map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertSparseToolContinuation(t, whole, fields)
 
 			// Exercise the persistence entry directly, without optimistic executor checks.
 			before := read()
@@ -222,5 +229,40 @@ writer:
 				t.Fatal("backend rejection changed state or revision")
 			}
 		})
+	}
+}
+
+func assertSparseToolContinuation(t *testing.T, result any, wantFields map[string]any) {
+	t.Helper()
+	raw, err := json.Marshal([]map[string]any{{"name": "read_work", "ok": true, "result": result}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation, err := agentframe.NewToolContinuation("agent-frame:v1:"+uuid.NewString(), raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	durable, err := continuation.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := agentframe.DecodeToolContinuation(durable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var batch []struct {
+		Result struct {
+			Fields map[string]any `json:"fields"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(decoded.ToolResult(), &batch); err != nil || len(batch) != 1 {
+		t.Fatalf("decode canonical tool result: %v", err)
+	}
+	// Compare serialized JSON because the persistence reader and execution
+	// normalizer intentionally use different in-memory integer representations.
+	want, _ := json.Marshal(wantFields)
+	got, _ := json.Marshal(batch[0].Result.Fields)
+	if string(got) != string(want) {
+		t.Fatalf("tool continuation changed field presence: got=%s want=%s", got, want)
 	}
 }

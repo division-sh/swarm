@@ -14,7 +14,7 @@ import (
 )
 
 func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
-	for _, variant := range []string{"ruled", "missing assessment write", "read before write", "retired stage spelling"} {
+	for _, variant := range []string{"ruled", "missing assessment write", "read before write", "retired stage spelling", "naive optional without decision", "naive optional fallback"} {
 		t.Run(variant, func(t *testing.T) {
 			repo := repoRootForBootverifyTest(t)
 			root := t.TempDir()
@@ -24,6 +24,9 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 					t.Fatal(err)
 				}
 				contents := string(data)
+				if name == "entities.yaml" && strings.HasPrefix(variant, "naive optional") {
+					contents = strings.Replace(contents, "business_brief: text", "business_brief: text?", 1)
+				}
 				if name == "nodes.yaml" {
 					switch variant {
 					case "missing assessment write":
@@ -32,15 +35,26 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 						contents = strings.Replace(contents, `check: "_entity.current_state == 'assess'"`, `check: "_entity.current_state == 'assess' && entity.business_brief != ''"`, 1)
 					case "retired stage spelling":
 						contents = strings.ReplaceAll(contents, "_entity.current_state", "_entity.stage")
+					case "naive optional without decision", "naive optional fallback":
+						contents = strings.Replace(contents, "          - business_brief\n", "", 1)
+						contents = strings.Replace(contents, "    work.assessed:\n", "    work.assessed:\n      rules:\n        - condition: payload.business_brief != ''\n          data_accumulation:\n            writes: [business_brief]\n          advances_to: consume\n          emit: {event: work.consume}\n        - condition: \"true\"\n          advances_to: consume\n          emit: {event: work.consume}\n", 1)
+						contents = strings.Replace(contents, "      advances_to: consume\n      emit:\n        event: work.consume\n", "", 1)
+						if variant == "naive optional fallback" {
+							contents = strings.ReplaceAll(contents, "entity.business_brief", "entity.?business_brief.orValue('fallback')")
+						}
 					}
 				}
 				writeBootverifyFixtureFile(t, filepath.Join(root, name), contents)
 			}
 			bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-			if variant == "ruled" {
+			if variant == "ruled" || variant == "naive optional fallback" {
 				if len(report.Errors()) != 0 || len(report.Warnings()) != 0 {
 					t.Fatalf("supported authoring rejected: errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+				}
+			} else if variant == "naive optional without decision" {
+					if !reportContains(report.Errors(), "emit_field_expression_validation", "presence decision") {
+					t.Fatalf("optional declaration admitted without a decision: %#v", report.Errors())
 				}
 			} else if variant == "retired stage spelling" {
 				if !reportContains(report.Errors(), "expression_field_reference_validation", "_entity.stage is not a supported") {
@@ -165,7 +179,7 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 }
 
 func TestEntityDefiniteAssignmentStages(t *testing.T) {
-	for _, variant := range []string{"all paths write", "guard stage then value", "guard short circuit", "bypass", "same destination outcomes", "backedge cannot prove first entry"} {
+	for _, variant := range []string{"all paths write", "guard stage then value", "guard short circuit", "bypass", "same destination outcomes", "on_complete outcomes", "same event different node", "zero trip", "backedge cannot prove first entry"} {
 		t.Run(variant, func(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: assignment-proof\n")
@@ -218,7 +232,7 @@ work.result:
 			if variant == "guard short circuit" {
 				nodes = strings.Replace(nodes, `guard: {check: "_entity.current_state == 'consume'"}`, `guard: {check: "_entity.current_state == 'consume' && entity.score > 0"}`, 1)
 			}
-			if variant == "same destination outcomes" {
+			if variant == "same destination outcomes" || variant == "on_complete outcomes" {
 				nodes = strings.Replace(nodes, "      data_accumulation:\n        writes: [score]\n      advances_to: consume", `      rules:
         - condition: payload.score >= 0
           data_accumulation:
@@ -226,12 +240,35 @@ work.result:
           advances_to: consume
         - condition: else
           advances_to: consume`, 1)
+				if variant == "on_complete outcomes" {
+					nodes = strings.Replace(nodes, "      rules:\n", "      on_complete:\n", 1)
+				}
+			}
+			if variant == "same event different node" {
+				nodes += `other-owner:
+  execution_type: system_node
+  subscribes_to: [work.scored]
+  event_handlers:
+    work.scored:
+      guard: {check: "_entity.current_state == 'assess'"}
+      advances_to: consume
+`
+			}
+			if variant == "zero trip" {
+				nodes = strings.Replace(nodes, "      advances_to: assess", "      advances_to: consume", 1)
 			}
 			if variant == "backedge cannot prove first entry" {
 				nodes = strings.Replace(nodes, "      advances_to: assess", "      advances_to: consume", 1)
 				nodes += "    work.bypass:\n      guard: {check: \"_entity.current_state == 'consume'\"}\n      advances_to: assess\n"
 			}
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), nodes)
+			if variant == "same event different node" {
+				_, err := c.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, c.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+				if err == nil || !strings.Contains(err.Error(), "multiple authoritative system node owners") {
+					t.Fatalf("duplicate owner was not rejected at the earlier ownership gate: %v", err)
+				}
+				return
+			}
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, c.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 			checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}
 			findings := checker.expressionFieldReferences()
@@ -241,7 +278,7 @@ work.result:
 					missing = true
 				}
 			}
-			wantMissing := variant == "bypass" || variant == "same destination outcomes" || variant == "backedge cannot prove first entry"
+			wantMissing := variant == "bypass" || variant == "same destination outcomes" || variant == "on_complete outcomes" || variant == "same event different node" || variant == "zero trip" || variant == "backedge cannot prove first entry"
 			if missing != wantMissing {
 				t.Fatalf("missing=%t, want %t: %#v", missing, wantMissing, findings)
 			}

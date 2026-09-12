@@ -198,10 +198,16 @@ func validateOperationTargetKind(contract Contract, target ContainedOperationTar
 		if !target.MapScoped {
 			return "", fmt.Errorf("op delete requires a map key")
 		}
+		if hasIndex {
+			return "", fmt.Errorf("op delete must not declare index")
+		}
 		if len(target.MapValuePath) > 0 {
 			return "", fmt.Errorf("op delete removes map entries only; target %s must be the map field", target.Path)
 		}
 	case ContainedOperationAppend, ContainedOperationUpdate:
+		if op == ContainedOperationAppend && hasIndex {
+			return "", fmt.Errorf("op append must not declare index")
+		}
 		if !isListType(target.TargetType) && !isJSONArrayType(contract, target.TargetType) {
 			return "", fmt.Errorf("op %s target %s must resolve to a list", op, target.Path)
 		}

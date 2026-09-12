@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/google/uuid"
 )
 
 func TestEntityLastFieldClearAndColdReloadBothStores(t *testing.T) {
@@ -52,6 +54,11 @@ func TestEntityLastFieldClearAndColdReloadBothStores(t *testing.T) {
 					if err != nil || !found || len(loaded.Fields) != 0 {
 						t.Fatalf("cold complete-empty load: found=%v fields=%#v err=%v", found, loaded.Fields, err)
 					}
+				}
+				wrongOwner := address
+				wrongOwner.EntityID = identity.NormalizeEntityID(uuid.NewString())
+				if _, found, err := repo.LoadState(ctx, wrongOwner); err == nil || found {
+					t.Fatalf("complete-empty state bypassed exact owner admission: found=%v err=%v", found, err)
 				}
 				before, found, err := store.Load(ctx, address.FlowInstance)
 				if err != nil || !found {

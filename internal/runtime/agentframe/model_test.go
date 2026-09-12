@@ -331,6 +331,58 @@ func TestExecutionFrameContinuationBindsParentAndCanonicalToolResult(t *testing.
 	}
 }
 
+func TestEntitySparseProviderFramePreservesToolResultPresence(t *testing.T) {
+	for _, fields := range []string{`{}`, `{"note":"","count":0,"enabled":false,"items":[]}`, `{"profile":{"name":"assigned"}}`} {
+		t.Run(fields, func(t *testing.T) {
+			seed, event, firstSurface := testExecutionFrameInputs(t)
+			first, err := Complete(seed, TurnDraft{Kind: TurnInitial, Event: event}, Completion{BundleHash: testBundleHash, Surface: firstSurface})
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := testCapabilityPlan(seed.AgentIdentity, event.RunID(), "00000000-0000-4000-8000-000000000012", 2)
+			surface, err := managedcapabilities.New(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame, err := Complete(seed, TurnDraft{
+				Kind: TurnToolContinuation, Event: event, ParentFrameID: first.FrameID,
+				InputRole: "tool", InputContent: `[{"name":"read_work","ok":true,"result":{"fields":` + fields + `}}]`,
+			}, Completion{BundleHash: testBundleHash, Surface: surface})
+			if err != nil {
+				t.Fatal(err)
+			}
+			role, content, err := frame.ProviderInput()
+			if err != nil || role != "tool" {
+				t.Fatalf("provider input role=%s err=%v", role, err)
+			}
+			results, err := DecodeProviderToolResults(content)
+			if err != nil || len(results) != 1 || !results[0].OK {
+				t.Fatalf("provider results=%#v err=%v", results, err)
+			}
+			var observed struct {
+				Result struct {
+					Fields json.RawMessage `json:"fields"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal(results[0].Payload, &observed); err != nil {
+				t.Fatal(err)
+			}
+			var want, got any
+			if err := json.Unmarshal([]byte(fields), &want); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(observed.Result.Fields, &got); err != nil {
+				t.Fatal(err)
+			}
+			wantJSON, _ := json.Marshal(want)
+			gotJSON, _ := json.Marshal(got)
+			if string(gotJSON) != string(wantJSON) {
+				t.Fatalf("provider projection changed presence: got=%s want=%s", gotJSON, wantJSON)
+			}
+		})
+	}
+}
+
 func TestExecutionFrameRejectsRunAndAuthorityDrift(t *testing.T) {
 	seed, event, surface := testExecutionFrameInputs(t)
 	wrongRun := surface.Clone()

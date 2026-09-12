@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/tools"
 	deliveryowner "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
@@ -103,14 +102,13 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				if err != nil || !found || state.ProcessBinding.GenerationGrantID != evidence.GrantID || (evidence.SelectedFork != nil) != selectedFork {
 					t.Fatalf("exact lifecycle/grant: state=%+v grant=%+v found=%v err=%v", state, evidence, found, err)
 				}
-				writer := selected.(interface {
-					CreateEntity(context.Context, tools.EntityCreateRecord) error
-				})
-				if err := writer.CreateEntity(ctx, tools.EntityCreateRecord{
-					RunID: runID, EntityID: entityID, FlowInstance: identity.FlowInstance(),
-					EntityType: "receiver", CurrentState: "active", FieldsJSON: []byte(`{}`), CreatedAt: time.Now().UTC(),
-					Writer: tools.EntityMutationWriter{Type: "agent", ID: identity.AgentID(), HandlerStep: "grant_probe_setup"},
-				}); err != nil {
+				// This fixture starts after materialization and tests grant/claim
+				// serialization, not a generated entity tool. Seed that boundary
+				// directly; actual source-bound materialization has separate proofs.
+				if _, err := receiverClaimTestDB(t, selected).ExecContext(ctx, `INSERT INTO entity_state
+					(run_id, entity_id, flow_instance, entity_type, current_state, fields, gates, accumulator, revision, entered_state_at, created_at, updated_at)
+					VALUES ($1, $2, $3, 'receiver', 'active', '{}', '{}', '{}', 1, $4, $4, $4)`,
+					runID, entityID, identity.FlowInstance(), time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 				route := events.DeliveryRoute{
