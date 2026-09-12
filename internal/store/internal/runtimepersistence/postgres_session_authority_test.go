@@ -569,7 +569,7 @@ func TestPostgresAdvisoryProofCallerCancellationPreservesExactSession(t *testing
 	lease.SetProveForTest(func(proofCtx context.Context, authority *postgresbackend.SessionAuthority, _ string) (bool, error) {
 		close(entered)
 		var held bool
-		err := authority.QueryRowContext(proofCtx, `SELECT false FROM pg_sleep(60)`).Scan(&held)
+		err := authority.QueryRowContext(proofCtx, `SELECT true FROM pg_sleep(0.1)`).Scan(&held)
 		return held, err
 	})
 	proofCtx, cancel := context.WithCancel(ctx)

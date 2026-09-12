@@ -509,7 +509,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								t.Fatalf("failed final validation lost execution evidence: count=%d calls=%d err=%v", result.ExecutedEventCount, activityCalls.Load(), err)
 							}
 						} else if frontier == "mixed" {
-							if err == nil || !strings.Contains(err.Error(), "authoritative_delivery_incomplete") || result.ExecutedEventCount != 0 || fencedAgentCalls.Load() != 0 {
+							if err == nil || !strings.Contains(err.Error(), "authoritative_delivery_incomplete") || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || result.Activation.Activated || fencedAgentCalls.Load() != 0 {
 								t.Fatalf("terminal-node fence must refuse agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, fencedAgentCalls.Load(), err)
 							}
 						} else if err != nil || result.ExecutedEventCount != 1 {

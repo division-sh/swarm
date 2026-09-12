@@ -39,11 +39,12 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 				// Only the transaction lifetime is held. Cleanup uses the same
 				// retained process operation as the production serve composition.
 				waiting, stop := context.WithTimeout(ctx, time.Second)
-				_, err = process.ApplyDestructiveResetCleanup(waiting, request, nil)
-				stop()
-				if !errors.Is(err, context.DeadlineExceeded) {
-					t.Fatalf("reset crossed held generation mutation fence: %v", err)
-				}
+				reset := make(chan error, 1)
+				go func() {
+					_, err := process.ApplyDestructiveResetCleanup(waiting, request, nil)
+					reset <- err
+				}()
+				<-waiting.Done()
 				if completion == "commit" {
 					err = tx.Commit()
 				} else {
@@ -52,6 +53,10 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if err := <-reset; !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("reset crossed held generation mutation fence: %v", err)
+				}
+				stop()
 				var runs int
 				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id IN ($1,$2)`, runA, runB).Scan(&runs); err != nil || runs != 2 {
 					t.Fatalf("blocked/refused cleanup mutated runs: count=%d err=%v", runs, err)

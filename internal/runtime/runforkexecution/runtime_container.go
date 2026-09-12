@@ -224,7 +224,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	}
 	authorityOwner := executionOwner + ":" + uuid.NewString()
 	authority, err := ports.runtimeExecution.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, authorityOwner, 2*time.Minute)
-	// The builder owns failure settlement, including acknowledged claims with errors.
+	// Construction owns failure settlement, including acknowledged claims with errors.
 	container.authority = authority
 	container.proof.AuthorityExecutionOwner = authority.ExecutionOwner
 	defer func() {
