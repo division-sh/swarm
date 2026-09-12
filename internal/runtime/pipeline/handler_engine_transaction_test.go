@@ -552,6 +552,8 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 }
 
 func TestExecuteNodeContractHandlerReturnsDeferredCommittedEmissions(t *testing.T) {
+	// This no-store fixture tests emission plumbing, not durable admission.
+	// Existing-owner persistence is exercised by the both-store handler tests.
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -566,7 +568,7 @@ func TestExecuteNodeContractHandlerReturnsDeferredCommittedEmissions(t *testing.
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false, true)
+	}, true, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -598,7 +600,7 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -635,7 +637,7 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 			time.Now().UTC(),
 		),
 		State: WorkflowState{EntityID: "env-ent", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -939,7 +941,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
-			RootEntities: testEntityContractsForType("test_entity"),
+			RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{"revision_count": {Type: "integer"}}}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"node-a": {ExecutionType: "system_node"},
 			},
@@ -1532,7 +1534,7 @@ node-a:
 	seedPipelineEventRecord(t, ctx, db, trigger)
 	result, err := pc.executeNodeContractHandler(ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
-		Guard:        &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && entity.kill_reason == ""`},
+		Guard:        &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && !has(entity.kill_reason)`},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "entity.created",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -1574,6 +1576,9 @@ node-a:
 	}
 	if got := instance.Fields["revision_count"]; got != float64(0) && got != 0 {
 		t.Fatalf("persisted revision_count = %#v, want 0", got)
+	}
+	if _, present := instance.Fields["kill_reason"]; present {
+		t.Fatalf("creation synthesized an uninitialized field: %#v", instance.Fields)
 	}
 	assertCreatedChildFlowIdentityCoherent(t, db, "validation", entityID, emitted, instance)
 
@@ -2096,8 +2101,8 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 			time.Time{},
 		),
 
-		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"stage": "queued"}},
-	}, false)
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2446,7 +2451,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
-		module:         handlerEngineProjectNodeModule(),
+		module:         handlerEngineProjectNodeModule(map[string]runtimecontracts.EntityFieldDecl{"branch_target": {Type: "text"}}),
 	}
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
@@ -2462,7 +2467,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	}, true)
 	if err == nil {
 		t.Fatal("expected missing early entity field to fail closed at runtime")
 	}
@@ -2483,7 +2488,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("00000000-0000-0000-0000-000000000002", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Unix(2, 0).UTC()),
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2510,7 +2515,7 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2577,7 +2582,7 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 			time.Time{},
 		),
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2738,7 +2743,7 @@ func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t 
 		),
 
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
-	}, false)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2800,7 +2805,7 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 		),
 
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
-	}, false)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2873,7 +2878,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 			time.Time{},
 		),
 		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
-	}, false)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2966,7 +2971,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmedi
 			_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), tc.handler, workflowTriggerContext{
 				Event: tc.event,
 				State: tc.state,
-			}, false)
+			}, true)
 			if err == nil {
 				t.Fatal("expected undeclared business payload to fail closed")
 			}

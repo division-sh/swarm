@@ -391,7 +391,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, enteredAt); err != nil {
 				t.Fatal(err)
@@ -821,7 +821,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, enteredAt); err != nil {
 				t.Fatal(err)
@@ -1087,7 +1087,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
-		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		Fields:     map[string]any{},
 		EntityType: "test_entity",
 	}, at); err != nil {
 		t.Fatal(err)
@@ -1205,7 +1205,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	if _, err := matching.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
-		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		Fields:     map[string]any{},
 		EntityType: "test_entity",
 	}, enteredAt); err != nil {
 		t.Fatal(err)
@@ -1305,7 +1305,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	if _, err := matching.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
-		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		Fields:     map[string]any{},
 		EntityType: "test_entity",
 	}, scenarioAt); err != nil {
 		t.Fatalf("materialize workflow instance: %v", err)

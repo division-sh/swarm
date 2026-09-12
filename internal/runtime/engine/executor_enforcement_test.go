@@ -17,6 +17,7 @@ import (
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
@@ -383,6 +384,9 @@ func mustEncodeJSON(t *testing.T, value any) []byte {
 }
 
 func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"composite": {Type: "number"}}}},
+	})
 	repo := &persistentStateRepo{
 		found: true,
 		snapshot: StateSnapshot{
@@ -391,7 +395,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        source,
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -449,6 +453,9 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 }
 
 func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"marker": {Type: "text"}}}},
+	})
 	repo := &persistentStateRepo{
 		found: true,
 		snapshot: StateSnapshot{
@@ -457,7 +464,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 		},
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        source,
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -482,7 +489,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	}
 	first := ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"first"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: handler,
@@ -513,7 +520,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	if got := repo.snapshot.StateCarrier.Fields["marker"]; got != "first" {
 		t.Fatalf("marker after duplicate = %#v, want first arrival value", got)
 	}
-	acc, ok := loadAccumulator(repo.snapshot, testFlowExecutableNode(t, "flow-1", "node-1"), events.EventType("task.completed"))
+	acc, ok := loadAccumulator(repo.snapshot, first.Node, events.EventType("task.completed"))
 	if !ok {
 		t.Fatal("expected accumulator state")
 	}

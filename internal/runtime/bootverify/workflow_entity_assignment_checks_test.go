@@ -226,14 +226,14 @@ func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
 `, true},
 		{"constructive root append", `        - op: append
           target: entity.notes
-          value: {literal: supplied}
+          value: supplied
         - target_field: observed
           expression: "string(entity.notes.size())"
 `, false},
 		{"merge cannot construct", `        - op: merge
           target: entity.by_id
-          key: {literal: one}
-          value: {literal: {id: supplied}}
+          key: one
+          value: {id: supplied}
 `, true},
 		{"clear absent parent is noop", `        - op: clear
           target: entity.profile.note

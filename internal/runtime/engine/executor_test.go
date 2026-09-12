@@ -1251,8 +1251,13 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 
 func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	shaper := &recordingPayloadShaper{}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"composite_score": {Type: "integer"}, "dimensions_requested": {Type: "[text]"},
+		}}},
+	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
+		Source:        source,
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -1264,7 +1269,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	}
 	req := ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		Node:     testFlowExecutableNode(t, "scoring", "scoring-node"),
+		Node:     testRootExecutableNode(t, "scoring-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("scoring/score.dimension_complete"),
@@ -1305,7 +1310,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("emit intents = %d, want 1", len(result.EmitIntents))
 	}
-	if got := shaper.lastReq.State.StateCarrier.Fields["composite_score"]; got != 80.0 && got != 80 {
+	if got := shaper.lastReq.State.StateCarrier.Fields["composite_score"]; got != int64(80) {
 		t.Fatalf("payload shaper saw composite_score = %#v, want 80", got)
 	}
 }
@@ -5201,8 +5206,14 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 }
 
 func TestExecutor_FanOutCountPreservesRuleThenTopLevelWriteSnapshots(t *testing.T) {
+	source := fanOutEntitySource(t)
+	bundle, _ := semanticview.Bundle(source)
+	entity := bundle.RootEntities["subject"]
+	entity.Fields["top_count"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	entity.Fields["top_saw_rule"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	bundle.RootEntities["subject"] = entity
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        fanOutEntitySource(t),
+		Source:        source,
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5217,13 +5228,13 @@ func TestExecutor_FanOutCountPreservesRuleThenTopLevelWriteSnapshots(t *testing.
 		Event:    eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-count-order"), "task.completed", "", "", json.RawMessage(`{"enabled":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetRef: "metadata.top_count", Value: runtimecontracts.CELExpression("fan_out.count")},
-				{TargetRef: "metadata.top_saw_rule", Value: runtimecontracts.CELExpression("entity.rule_count")},
+				{TargetRef: "entity.top_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+				{TargetRef: "entity.top_saw_rule", Value: runtimecontracts.CELExpression("entity.rule_count")},
 			}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
 				Condition: "payload.enabled",
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-					{TargetRef: "metadata.rule_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+					{TargetRef: "entity.rule_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}},
 				FanOut: &runtimecontracts.FanOutSpec{
 					ItemsFrom: "entity.items", As: "fan_item", Identity: "fan_item",

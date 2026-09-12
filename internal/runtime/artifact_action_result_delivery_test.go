@@ -500,6 +500,11 @@ terminal_states: [done]
 states: [ready, done]
 `,
 		"repo-scaffold/entities.yaml": `test_entity:
+  repo_id: text
+  namespace: text
+  partition_key: text
+  display_slug: text
+  source_record_id: text
   repo_url: text
   current_ref: text
   file_manifest: ArtifactManifest
