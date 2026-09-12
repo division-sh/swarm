@@ -32,7 +32,7 @@ import (
 type runForkSelectedContractMaterializationPort struct {
 	postgres            bool
 	requireCurrent      func() error
-	runMutation         func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error
+	runMutation         func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error)
 	lockSourceStatus    func(context.Context, *sql.Tx, string) (string, error)
 	plan                func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	deliveries          *storedelivery.Adapter
@@ -64,7 +64,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		return runfork.RunForkMaterialization{}, err
 	}
 
-	err = port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects) error {
+	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects) error {
 		if err := proveSelectedPreparationForMutationTx(txctx, tx, req.Preparation, !port.postgres); err != nil {
 			return err
 		}
@@ -260,6 +260,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		}
 		return nil
 	})
+	if !committed && materialization.ForkRunID != "" {
+		return runfork.RunForkMaterialization{}, err
+	}
 	return materialization, err
 }
 
@@ -306,30 +309,18 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 	return runForkSelectedContractMaterializationPort{
 		postgres:       true,
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
-		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error {
-			tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-			if err != nil {
-				return fmt.Errorf("begin selected-contract fork materialization: %w", err)
-			}
-			committed := false
-			defer func() {
-				if !committed {
-					_ = tx.Rollback()
+		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error) {
+			return s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sql.Tx) error {
+				story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
+				if err != nil {
+					return err
 				}
-			}()
-			story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-			if err != nil {
-				return err
-			}
-			effects := runforkrevision.NewEffects()
-			if err := operation(ctx, tx, story, effects); err != nil {
-				return err
-			}
-			if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
-				return fmt.Errorf("commit selected-contract fork materialization: %w", err)
-			}
-			committed = true
-			return nil
+				effects := runforkrevision.NewEffects()
+				if err := operation(ctx, tx, story, effects); err != nil {
+					return err
+				}
+				return finalizeRunForkAuthorActivityTransaction(ctx, tx, story, effects)
+			})
 		},
 		lockSourceStatus: func(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
 			var status string
@@ -371,8 +362,11 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 	return runForkSelectedContractMaterializationPort{
 		postgres:       false,
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
-		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error {
-			return s.runRuntimeMutation(ctx, "sqlite selected-contract fork materialization", func(txctx context.Context, tx *sql.Tx) error {
+		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error) {
+			if err := s.requireCurrentSchema(); err != nil {
+				return false, err
+			}
+			return s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract fork materialization", func(txctx context.Context, tx *sql.Tx) error {
 				story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 				if err != nil {
 					return err

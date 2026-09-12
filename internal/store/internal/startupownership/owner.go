@@ -199,7 +199,9 @@ func (s *postgresSession) InstallTerminalOwner(owner runtimestartupownership.Ses
 		}
 		return errors.New("install PostgreSQL process capability terminal callback")
 	}
-	return nil
+	return s.lease.InstallLocalFenceOwner(func() {
+		owner.SelectedStoreSessionTerminal(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
+	})
 }
 
 func (s *postgresSession) terminal(owner runtimestartupownership.SessionTerminalOwner) {
@@ -215,9 +217,9 @@ func (s *postgresSession) terminal(owner runtimestartupownership.SessionTerminal
 	deadline := s.terminalDeadline
 	s.released = true
 	s.mu.Unlock()
-	owner.SelectedStoreSessionTerminal(boundedTerminalResult(deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
+	reportTerminalWithReadback(owner, deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
 		return s.owner.terminalResult(ctx, authority, false)
-	}))
+	})
 }
 
 func (s *postgresSession) RecordGenerationGrantTransition(ctx context.Context, previous *runtimestartupownership.GrantEvidence, next runtimestartupownership.GrantEvidence) error {
@@ -535,11 +537,15 @@ func (s *sqliteSession) terminal() {
 	owner := s.terminalOwner
 	authority := s.authority
 	deadline := s.terminalDeadline
-	if !s.released {
-		s.released = true
+	release := !s.released
+	s.released = true
+	s.mu.Unlock()
+	if owner != nil {
+		owner.SelectedStoreSessionTerminal(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
+	}
+	if release {
 		_ = s.possession.Release()
 	}
-	s.mu.Unlock()
 	if owner != nil {
 		owner.SelectedStoreSessionTerminal(boundedTerminalResult(deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
 			return s.owner.terminalResult(ctx, authority, true)
@@ -558,6 +564,13 @@ func boundedTerminalResult(deadline time.Duration, load func(context.Context) ru
 		return runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}
 	}
 	return result
+}
+
+func reportTerminalWithReadback(owner runtimestartupownership.SessionTerminalOwner, deadline time.Duration, load func(context.Context) runtimestartupownership.TerminalResult) {
+	// This first notification is the safety decision, not a readback result.
+	// Readback remains synchronously owned even if its context is not serviced.
+	owner.SelectedStoreSessionTerminal(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
+	owner.SelectedStoreSessionTerminal(boundedTerminalResult(deadline, load))
 }
 
 func (s *StartupPostgresOwner) terminalResult(ctx context.Context, authority runtimestartupownership.Authority, sqlite bool) runtimestartupownership.TerminalResult {

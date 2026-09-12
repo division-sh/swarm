@@ -22,35 +22,40 @@ func (s *RunForkPostgresOwner) StopSelectedFork(ctx context.Context, req runcont
 	if err := s.requireCurrentSchema(); err != nil {
 		return runcontrol.State{}, err
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
+	var state runcontrol.State
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
+		if err := requireSelectedStopTx(ctx, tx, req, false); err != nil {
+			return err
+		}
+		effects := runforkrevision.NewEffects()
+		state, err = s.StopSelectedRunTx(ctx, tx, story, effects, selectedStopTransition(req.Transition))
+		if err != nil {
+			return err
+		}
+		if err := finalizeRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
+			return err
+		}
+		return nil
+	})
+	if !committed {
 		return runcontrol.State{}, err
 	}
-	defer tx.Rollback()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		return runcontrol.State{}, err
-	}
-	if err := requireSelectedStopTx(ctx, tx, req, false); err != nil {
-		return runcontrol.State{}, err
-	}
-	effects := runforkrevision.NewEffects()
-	state, err := s.StopSelectedRunTx(ctx, tx, story, effects, selectedStopTransition(req.Transition))
-	if err != nil {
-		return runcontrol.State{}, err
-	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
-		return runcontrol.State{}, err
-	}
-	return state, nil
+	return state, err
 }
 
 func (s *RunForkSQLiteOwner) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
 	if err := req.Validate(); err != nil {
 		return runcontrol.State{}, err
 	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return runcontrol.State{}, err
+	}
 	var state runcontrol.State
-	err := s.runRuntimeMutation(ctx, "stop selected fork", func(ctx context.Context, tx *sql.Tx) error {
+	committed, err := s.backend.RunTransactionOutcome(ctx, "stop selected fork", func(ctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
@@ -68,10 +73,10 @@ func (s *RunForkSQLiteOwner) StopSelectedFork(ctx context.Context, req runcontro
 		}
 		return story.Finalize(ctx)
 	})
-	if err != nil {
+	if !committed {
 		return runcontrol.State{}, err
 	}
-	return state, nil
+	return state, err
 }
 
 func requireSelectedStopTx(ctx context.Context, tx *sql.Tx, req runcontrol.SelectedStopRequest, sqlite bool) error {

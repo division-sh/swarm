@@ -27,7 +27,7 @@ func (g *generationGrant) InspectRunExecutionOwnership(ctx context.Context, runI
 	}
 	result, err := g.owner.session.InspectRunExecutionOwnership(ctx, evidence, runID)
 	if err != nil {
-		g.owner.retireOnPossessionFailure(err)
+		err = g.owner.retireOnPossessionFailure(err)
 	}
-	return result, err
+	return result, errors.Join(err, g.owner.requireLive())
 }

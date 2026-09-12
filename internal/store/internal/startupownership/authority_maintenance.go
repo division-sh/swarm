@@ -64,7 +64,7 @@ func (s *StartupSQLiteOwner) InspectAuthority(ctx context.Context) (runtimestart
 	return inspectAuthorityHead(ctx, s.backend, "sqlite_retained_owner", true)
 }
 
-func (s *StartupPostgresOwner) RepairAuthority(ctx context.Context, req runtimestartupownership.AuthorityRepairRequest) (runtimestartupownership.AuthorityRepairResult, error) {
+func (s *StartupPostgresOwner) RepairAuthority(ctx context.Context, req runtimestartupownership.AuthorityRepairRequest) (result runtimestartupownership.AuthorityRepairResult, err error) {
 	if err := req.Validate(); err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}
@@ -81,17 +81,19 @@ func (s *StartupPostgresOwner) RepairAuthority(ctx context.Context, req runtimes
 			Detail:  "another serve still owns this project; stop it before repairing",
 		}
 	}
-	defer lease.Release(context.WithoutCancel(ctx))
-	var result runtimestartupownership.AuthorityRepairResult
-	err = lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	defer func() { err = errors.Join(err, lease.Release(ctx)) }()
+	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
 		var repairErr error
 		result, repairErr = repairAuthorityTx(txctx, tx, req, "postgres_retained_session", false)
 		return repairErr
 	})
+	if !committed {
+		result = runtimestartupownership.AuthorityRepairResult{}
+	}
 	return result, err
 }
 
-func (s *StartupSQLiteOwner) RepairAuthority(ctx context.Context, req runtimestartupownership.AuthorityRepairRequest) (runtimestartupownership.AuthorityRepairResult, error) {
+func (s *StartupSQLiteOwner) RepairAuthority(ctx context.Context, req runtimestartupownership.AuthorityRepairRequest) (result runtimestartupownership.AuthorityRepairResult, err error) {
 	if err := req.Validate(); err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}
@@ -102,13 +104,15 @@ func (s *StartupSQLiteOwner) RepairAuthority(ctx context.Context, req runtimesta
 	if err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}
-	defer possession.Release()
-	var result runtimestartupownership.AuthorityRepairResult
-	err = s.backend.RunTransaction(ctx, "repair runtime process authority", func(txctx context.Context, tx *sql.Tx) error {
+	defer func() { err = errors.Join(err, possession.Release()) }()
+	committed, err := s.backend.RunTransactionOutcome(ctx, "repair runtime process authority", func(txctx context.Context, tx *sql.Tx) error {
 		var repairErr error
 		result, repairErr = repairAuthorityTx(txctx, tx, req, "sqlite_retained_owner", true)
 		return repairErr
 	})
+	if !committed {
+		result = runtimestartupownership.AuthorityRepairResult{}
+	}
 	return result, err
 }
 

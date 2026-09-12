@@ -27,7 +27,7 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 	defer handoff.Rollback()
 	request := command.Request.Normalized()
 	var result runtimeinbound.CommitResult
-	err = s.runPrivateAuthorActivityMutation(ctx, "sqlite inbound publication", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite inbound publication", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 		existing, found, err := loadSQLiteInboundPublicationTx(txctx, tx, request.Provider, request.EntityID, request.ProviderEventID)
 		if err != nil {
 			return err
@@ -54,10 +54,10 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 		}
 		return nil
 	})
-	if err != nil {
+	if !committed {
 		return runtimeinbound.CommitResult{}, err
 	}
-	return result, handoff.Commit()
+	return result, errors.Join(err, handoff.Commit())
 }
 
 func (s *EventSQLiteOwner) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (runtimeinbound.Record, bool, error) {

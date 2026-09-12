@@ -533,7 +533,12 @@ func TestProcessCapabilityOperationErrorPossessionRecheckUsesConfiguredDeadline(
 	seenDeadline := make(chan time.Duration, 1)
 	session.mu.Lock()
 	session.loadSourceErr = errors.New("selected-store operation failed")
+	proofs := 0
 	session.monitorProve = func(ctx context.Context, got time.Duration) error {
+		proofs++
+		if proofs == 1 {
+			return nil // The operation's initial serialized authority proof succeeds.
+		}
 		seenDeadline <- got
 		proofCtx, cancel := context.WithTimeout(ctx, got)
 		defer cancel()

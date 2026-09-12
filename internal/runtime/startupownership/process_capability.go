@@ -194,7 +194,8 @@ func (p *processCapability) Evidence() (Authority, error) {
 	if err := p.requireLive(); err != nil {
 		return Authority{}, err
 	}
-	return p.session.Authority()
+	authority, err := p.session.Authority()
+	return authority, errors.Join(err, p.requireLive())
 }
 
 func (p *processCapability) ProveCurrent(ctx context.Context) error {
@@ -217,9 +218,9 @@ func (p *processCapability) CurrentSourceSet(ctx context.Context) (runtimeagentt
 	}
 	plan, exists, err := p.session.LoadSourceSet(ctx)
 	if err != nil {
-		p.retireOnPossessionFailure(err)
+		err = p.retireOnPossessionFailure(err)
 	}
-	return plan, exists, err
+	return plan, exists, errors.Join(err, p.requireLive())
 }
 
 func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantRequest) (LiveGenerationGrant, error) {
@@ -241,7 +242,7 @@ func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantR
 	}
 	plan, exists, err := p.session.LoadSourceSet(ctx)
 	if err != nil {
-		p.retireOnPossessionFailure(err)
+		err = p.retireOnPossessionFailure(err)
 		return nil, err
 	}
 	if !exists || plan.Revision != strings.TrimSpace(req.SourceSetRevision) {
@@ -271,7 +272,7 @@ func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantR
 		return nil, err
 	}
 	if err := p.session.RecordGenerationGrantTransition(ctx, nil, evidence); err != nil {
-		p.retireOnPossessionFailure(err)
+		err = p.retireOnPossessionFailure(err)
 		return nil, err
 	}
 	g := &generationGrant{owner: p, evidence: evidence, done: make(chan struct{})}
@@ -317,9 +318,9 @@ func (p *processCapability) ApplyDestructiveResetCleanup(ctx context.Context, re
 	}
 	result, err := p.session.ApplyDestructiveResetCleanup(ctx, req, topology)
 	if err != nil {
-		p.retireOnPossessionFailure(err)
+		err = p.retireOnPossessionFailure(err)
 	}
-	return result, err
+	return result, errors.Join(err, p.requireLive())
 }
 
 func (p *processCapability) ApplyDestructiveResetTopology(ctx context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
@@ -338,10 +339,10 @@ func (p *processCapability) commitSourceSet(ctx context.Context, operation runti
 	}
 	result, err := p.session.CommitSourceSet(ctx, req)
 	if err != nil {
-		p.retireOnPossessionFailure(err)
-		return runtimeagenttopology.SourceSetCommitResult{}, err
+		err = p.retireOnPossessionFailure(err)
+		return result, err
 	}
-	return result, nil
+	return result, p.requireLive()
 }
 
 func (p *processCapability) Release(ctx context.Context) error {
@@ -357,7 +358,7 @@ func (p *processCapability) Release(ctx context.Context) error {
 	}
 	for _, grant := range p.snapshotGrants() {
 		if err := grant.retireWithSession(ctx); err != nil {
-			p.retireOnPossessionFailure(err)
+			err = p.retireOnPossessionFailure(err)
 			if p.requireLive() == nil {
 				p.startPossessionMonitor()
 			}
@@ -374,7 +375,7 @@ func (p *processCapability) Release(ctx context.Context) error {
 	}
 	if proveErr := p.session.MonitorProveCurrent(context.Background(), p.monitorDeadline); proveErr != nil {
 		p.terminalize(TerminalResult{Cause: TerminalOwnershipUnprovable})
-		return err
+		return errors.Join(err, proveErr)
 	}
 	if p.requireLive() == nil {
 		p.startPossessionMonitor()
@@ -412,9 +413,9 @@ func (p *processCapability) proveCurrent(ctx context.Context) error {
 	if err := callerContextError(ctx); err != nil {
 		return err
 	}
-	if err := p.session.ProveCurrent(ctx); err != nil {
+	if err := p.session.MonitorProveCurrent(ctx, p.monitorDeadline); err != nil {
 		if callerErr := callerContextError(ctx); callerErr != nil {
-			return fmt.Errorf("prove current process startup/topology capability: %w", callerErr)
+			return fmt.Errorf("prove current process startup/topology capability: %w", errors.Join(err, callerErr))
 		}
 		p.terminalize(possessionTerminalResult(err))
 		return fmt.Errorf("prove current process startup/topology capability: %w", err)
@@ -441,15 +442,17 @@ func (p *processCapability) requireLive() error {
 	}
 }
 
-func (p *processCapability) retireOnPossessionFailure(err error) {
-	if err == nil {
-		return
+func (p *processCapability) retireOnPossessionFailure(err error) error {
+	if err == nil || p.requireLive() != nil {
+		return err
 	}
 	// Closed selected-store operations own semantic failures without implying
 	// session loss. A failed proof or terminal callback performs retirement.
 	if proveErr := p.session.MonitorProveCurrent(context.Background(), p.monitorDeadline); proveErr != nil {
 		p.terminalize(possessionTerminalResult(proveErr))
+		return errors.Join(err, proveErr)
 	}
+	return err
 }
 
 func (p *processCapability) snapshotGrants() []*generationGrant {
@@ -488,6 +491,13 @@ func (p *processCapability) SelectedStoreSessionTerminal(result TerminalResult) 
 		result = TerminalResult{Cause: TerminalOwnershipUnprovable}
 	}
 	p.terminalize(result)
+	if result.Cause == TerminalOwnershipSuperseded {
+		p.mu.Lock()
+		if p.terminal.Cause == TerminalOwnershipUnprovable {
+			p.terminal = result
+		}
+		p.mu.Unlock()
+	}
 }
 
 func possessionTerminalResult(err error) TerminalResult {
@@ -592,6 +602,9 @@ func (g *generationGrant) Evidence() (GrantEvidence, error) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if err := g.owner.requireLive(); err != nil {
+		return GrantEvidence{}, err
+	}
 	if g.evidence.State == GrantRetired {
 		return GrantEvidence{}, errors.New("runtime generation grant is retired")
 	}
@@ -638,7 +651,10 @@ func (g *liveGenerationGrant) SourceSetPlan(ctx context.Context) (runtimeagentto
 func (g *generationGrant) requireCurrentSourceSetLocked(ctx context.Context, evidence GrantEvidence) (runtimeagenttopology.SourceSetPlan, error) {
 	plan, exists, err := g.owner.session.LoadSourceSet(ctx)
 	if err != nil {
-		g.owner.retireOnPossessionFailure(err)
+		err = g.owner.retireOnPossessionFailure(err)
+		return runtimeagenttopology.SourceSetPlan{}, err
+	}
+	if err := g.owner.requireLive(); err != nil {
 		return runtimeagenttopology.SourceSetPlan{}, err
 	}
 	if !exists || plan.Revision != evidence.SourceSetRevision {
@@ -692,11 +708,12 @@ func (g *generationGrant) transition(ctx context.Context, from, to GrantState, p
 		return GrantEvidence{}, err
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.evidence.State != from {
+		defer g.mu.Unlock()
 		return GrantEvidence{}, fmt.Errorf("runtime generation grant transition %s -> %s rejected from %s", from, to, g.evidence.State)
 	}
 	previous := g.evidence
+	g.mu.Unlock()
 	next := previous
 	next.State = to
 	next.StateVersion++
@@ -711,8 +728,13 @@ func (g *generationGrant) transition(ctx context.Context, from, to GrantState, p
 		return GrantEvidence{}, err
 	}
 	if err := g.owner.session.RecordGenerationGrantTransition(ctx, &previous, next); err != nil {
-		g.owner.retireOnPossessionFailure(err)
+		err = g.owner.retireOnPossessionFailure(err)
 		return GrantEvidence{}, err
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.evidence.State == GrantRetired || g.owner.requireLive() != nil {
+		return GrantEvidence{}, errors.New("runtime generation grant retired during transition")
 	}
 	g.evidence = next
 	return next.clone(), nil
@@ -769,10 +791,10 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 	mutationCtx := runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))
 	result, err := g.owner.session.CommitAgentLifecycleTransition(mutationCtx, req)
 	if err != nil {
-		g.owner.retireOnPossessionFailure(err)
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
+		err = g.owner.retireOnPossessionFailure(err)
+		return result, err
 	}
-	return result, nil
+	return result, g.owner.requireLive()
 }
 
 func (g *generationGrant) Retire(ctx context.Context) error {
@@ -782,7 +804,7 @@ func (g *generationGrant) Retire(ctx context.Context) error {
 	g.owner.opMu.Lock()
 	defer g.owner.opMu.Unlock()
 	if err := g.retireWithSession(ctx); err != nil {
-		g.owner.retireOnPossessionFailure(err)
+		err = g.owner.retireOnPossessionFailure(err)
 		return err
 	}
 	return nil

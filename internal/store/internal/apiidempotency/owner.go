@@ -80,22 +80,24 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
 	requestLease := &PostgresRequestLease{lease: lease, req: req}
 	session := lease.Session()
 	if session == nil {
-		_ = requestLease.Release(ctx)
-		return nil, fmt.Errorf("api idempotency authority has no current session")
+		return nil, errors.Join(fmt.Errorf("api idempotency authority has no current session"), requestLease.Release(ctx))
 	}
-	if err := purgeExpiredAPIIdempotency(ctx, session, req.Now); err != nil {
-		_ = requestLease.Release(ctx)
-		return nil, err
-	}
-	existing, found, err := loadAPIIdempotency(ctx, session, req)
+	var existing apiIdempotencyRecord
+	var found bool
+	err = postgresbackend.RunAuthorityTransaction(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
+		if err := purgeExpiredAPIIdempotency(sqlCtx, tx, req.Now); err != nil {
+			return err
+		}
+		var err error
+		existing, found, err = loadAPIIdempotency(sqlCtx, tx, req)
+		return err
+	})
 	if err != nil {
-		_ = requestLease.Release(ctx)
-		return nil, err
+		return nil, errors.Join(err, requestLease.Release(ctx))
 	}
 	if found {
 		if existing.RequestHash != req.RequestHash {
-			_ = requestLease.Release(ctx)
-			return nil, conflictError(req, existing)
+			return nil, errors.Join(conflictError(req, existing), requestLease.Release(ctx))
 		}
 		requestLease.replay = true
 		requestLease.completion = apiidempotencycontract.Completion{ResourceID: existing.ResourceID, Response: append(json.RawMessage(nil), existing.Response...)}
@@ -151,7 +153,9 @@ func (s *PostgresOwner) WithAPIIdempotency(
 	if err != nil {
 		return apiidempotencycontract.Completion{}, false, err
 	}
-	if err := storeAPIIdempotency(ctx, requestLease.lease.Session(), requestLease.req, completion); err != nil {
+	if err := postgresbackend.RunAuthorityTransaction(ctx, requestLease.lease.Session(), func(sqlCtx context.Context, tx *sql.Tx) error {
+		return storeAPIIdempotency(sqlCtx, tx, requestLease.req, completion)
+	}); err != nil {
 		return apiidempotencycontract.Completion{}, false, err
 	}
 	return completion, false, nil

@@ -127,15 +127,14 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 	if err != nil {
 		return err
 	}
-	return s.runPostgresRuntimeMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx) error {
-		ctx = txctx
-		if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
+	return s.runPostgresRuntimeMutation(ctx, effects, func(sqlCtx context.Context, tx *sql.Tx) error {
+		if err := storerunstate.RequirePostgresActiveTx(sqlCtx, tx, identity.RunID); err != nil {
 			return err
 		}
-		if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "upsert_conversation", false); err != nil {
+		if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "upsert_conversation", false); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(sqlCtx, `
 		UPDATE agent_sessions SET conversation=$1::jsonb, turn_count=$2,
 			runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $3::jsonb, updated_at=now()
 			WHERE session_id=$4::uuid AND run_id=$5::uuid AND agent_id=$6
@@ -286,39 +285,34 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update
 	if err != nil {
 		return err
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
+	return s.backend.RunTransaction(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		if err := storerunstate.RequirePostgresActiveTx(sqlCtx, tx, identity.RunID); err != nil {
+			return err
+		}
+		if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "update_watchdog", false); err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(sqlCtx, `
+			UPDATE agent_sessions SET runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $1::jsonb,updated_at=now()
+			WHERE session_id=$2::uuid AND run_id=$3::uuid AND agent_id=$4
+			  AND agent_name_owner=$5 AND agent_name_source=$6 AND agent_route_presence=$7
+			  AND flow_scope_key=$8 AND flow_instance_id=$9 AND flow_instance=$10
+			  AND memory_enabled=TRUE AND status='active'
+		`, patch, update.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
+		if err != nil {
+			return fmt.Errorf("update exact memory watchdog: %w", err)
+		}
+		if rows, _ := res.RowsAffected(); rows != 1 {
+			return fmt.Errorf("no exact active memory row found for watchdog update")
+		}
+		effects, err := agentSessionEffects(identity.RunID)
+		if err != nil {
+			return err
+		}
+		_, err = runforkrevision.FinalizePostgres(sqlCtx, tx, effects)
 		return err
-	}
-	defer tx.Rollback()
-	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
-		return err
-	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "update_watchdog", false); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE agent_sessions SET runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $1::jsonb,updated_at=now()
-		WHERE session_id=$2::uuid AND run_id=$3::uuid AND agent_id=$4
-		  AND agent_name_owner=$5 AND agent_name_source=$6 AND agent_route_presence=$7
-		  AND flow_scope_key=$8 AND flow_instance_id=$9 AND flow_instance=$10
-		  AND memory_enabled=TRUE AND status='active'
-	`, patch, update.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
-	if err != nil {
-		return fmt.Errorf("update exact memory watchdog: %w", err)
-	}
-	if rows, _ := res.RowsAffected(); rows != 1 {
-		return fmt.Errorf("no exact active memory row found for watchdog update")
-	}
-	effects, err := agentSessionEffects(identity.RunID)
-	if err != nil {
-		return err
-	}
-	if err := finalizePostgresRunForkRevisionTx(ctx, tx, effects); err != nil {
-		return fmt.Errorf("update live session watchdog commit: %w", err)
-	}
-	return nil
+	})
 }
 
 func marshalConversationRuntimeStatePatch(summary *string, watchdog *runtimellm.ConversationWatchdog) (string, error) {

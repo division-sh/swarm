@@ -845,13 +845,11 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	ctx = context.WithValue(receiverCtx.Context, deliveryDispatchScopeKey{}, scope)
 	if route.Recipient.IsNode() {
 		interception, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, []events.DeliveryRoute{route})
+		if len(interception.Deferred) > 0 {
+			err = errors.Join(err, (engineDispatcher{bus: eb}).dispatchCommittedInterceptorPublications(ctx, interception.Deferred))
+		}
 		if err != nil {
 			return runtimedeliverycontinuation.Fatal(err)
-		}
-		if len(interception.Deferred) > 0 {
-			if err := (engineDispatcher{bus: eb}).dispatchCommittedInterceptorPublications(ctx, interception.Deferred); err != nil {
-				return runtimedeliverycontinuation.Fatal(err)
-			}
 		}
 		if _, retry := interception.Outcome.RetryRelease(); retry {
 			return runtimedeliverycontinuation.Fatal(errors.New("delivery continuation route requested event-level retry release"))

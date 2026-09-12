@@ -94,6 +94,8 @@ func (r RetryRelease) Failure() *runtimefailures.Envelope {
 // are settled by the durable owner; retry release leaves the obligation
 // unchanged and replayable.
 type ExecutionOutcome struct {
+	// Committed marks a completed intercepted mutation, independent of cleanup errors.
+	Committed    bool
 	disposition  *Disposition
 	retryRelease *RetryRelease
 }

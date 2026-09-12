@@ -169,7 +169,7 @@ func (s *DecisionPostgresOwner) CompleteHumanTaskOutcome(ctx context.Context, ca
 	}
 	defer handoff.Rollback()
 	var continuation decisioncard.HumanTaskContinuation
-	err = runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+	committed, err := runPostgresDecisionCardMutationOutcome(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var changed bool
 		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, true)
 		if err != nil || !changed {
@@ -178,10 +178,10 @@ func (s *DecisionPostgresOwner) CompleteHumanTaskOutcome(ctx context.Context, ca
 		_, err = s.requestCompletionCandidateTx(txctx, tx, continuation.RunID, nil, handoff)
 		return err
 	})
-	if err != nil {
+	if !committed {
 		return decisioncard.HumanTaskContinuation{}, err
 	}
-	return continuation, handoff.Commit()
+	return continuation, errors.Join(err, handoff.Commit())
 }
 
 func (s *DecisionSQLiteOwner) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
@@ -191,7 +191,7 @@ func (s *DecisionSQLiteOwner) CompleteHumanTaskOutcome(ctx context.Context, card
 	}
 	defer handoff.Rollback()
 	var continuation decisioncard.HumanTaskContinuation
-	err = s.runDecisionCardMutation(ctx, "sqlite complete human-task outcome", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+	committed, err := s.runDecisionCardMutationOutcome(ctx, "sqlite complete human-task outcome", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var changed bool
 		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, false)
 		if err != nil || !changed {
@@ -200,10 +200,10 @@ func (s *DecisionSQLiteOwner) CompleteHumanTaskOutcome(ctx context.Context, card
 		_, err = s.requestCompletionCandidateTx(txctx, tx, continuation.RunID, nil, handoff)
 		return err
 	})
-	if err != nil {
+	if !committed {
 		return decisioncard.HumanTaskContinuation{}, err
 	}
-	return continuation, handoff.Commit()
+	return continuation, errors.Join(err, handoff.Commit())
 }
 
 func (s *DecisionPostgresOwner) CompleteHumanTaskOutcomeTx(ctx context.Context, tx *sql.Tx, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, bool, error) {

@@ -70,41 +70,36 @@ func ReserveCandidateHandoff(ctx context.Context) (*CandidateHandoff, error) {
 	return &CandidateHandoff{lease: lease, ctx: detached}, nil
 }
 
-func WithCandidateHandoff(
-	ctx context.Context,
-	fn func(*CandidateHandoff) error,
-) error {
+// WithCandidateHandoffOutcome settles live notification after acknowledged
+// COMMIT even when the transaction owner also reports a cleanup failure.
+func WithCandidateHandoffOutcome(ctx context.Context, fn func(*CandidateHandoff) (bool, error)) (bool, error) {
 	handoff, err := ReserveCandidateHandoff(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer handoff.Rollback()
-	if fn != nil {
-		if err := fn(handoff); err != nil {
-			return err
-		}
+	committed, err := fn(handoff)
+	if !committed {
+		return false, err
 	}
-	return handoff.Commit()
+	return true, errors.Join(err, handoff.Commit())
 }
 
-func WithCandidateHandoffResult[T any](
-	ctx context.Context,
-	fn func(*CandidateHandoff) (T, error),
-) (T, error) {
-	var zero T
-	handoff, err := ReserveCandidateHandoff(ctx)
-	if err != nil {
+// WithCandidateHandoffOutcomeResult exposes results only after acknowledged
+// COMMIT. An independent postcommit error never erases that durable result.
+func WithCandidateHandoffOutcomeResult[T any](ctx context.Context, fn func(*CandidateHandoff) (T, bool, error)) (T, error) {
+	var result T
+	committed, err := WithCandidateHandoffOutcome(ctx, func(handoff *CandidateHandoff) (bool, error) {
+		var acknowledged bool
+		var err error
+		result, acknowledged, err = fn(handoff)
+		return acknowledged, err
+	})
+	if !committed {
+		var zero T
 		return zero, err
 	}
-	defer handoff.Rollback()
-	result, err := fn(handoff)
-	if err != nil {
-		return zero, err
-	}
-	if err := handoff.Commit(); err != nil {
-		return zero, err
-	}
-	return result, nil
+	return result, err
 }
 
 func (r *CandidateHandoff) Prepare(

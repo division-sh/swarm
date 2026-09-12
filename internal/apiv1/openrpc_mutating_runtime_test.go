@@ -239,7 +239,7 @@ func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 }
 
 func mutatingProbeGenericIdempotencyCalls(methodName string, normal int) int {
-	if methodName == runtimeagentcontrol.DirectiveOperationMethod {
+	if methodName == runtimeagentcontrol.DirectiveOperationMethod || methodName == "conversation.fork" {
 		return 0
 	}
 	return normal

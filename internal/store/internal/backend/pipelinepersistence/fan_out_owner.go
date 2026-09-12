@@ -125,7 +125,7 @@ func (s *PipelinePostgresOwner) ClaimFanOutIntent(ctx context.Context, request r
 	if err := request.Validate(); err != nil {
 		return intent, claim, false, err
 	}
-	err = s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
 			WHERE status='open' AND bundle_hash=$1 AND (claim_owner IS NULL OR lease_expires_at <= $2)
 			ORDER BY last_served_at ASC NULLS FIRST, created_at ASC, run_id ASC, triggering_delivery_id ASC, flow_path ASC, declaration_family ASC, semantic_path ASC
@@ -141,6 +141,9 @@ func (s *PipelinePostgresOwner) ClaimFanOutIntent(ctx context.Context, request r
 		found = true
 		return claimFanOutIntentRow(txctx, tx, request, &intent, &claim)
 	})
+	if !committed {
+		return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, err
+	}
 	return intent, claim, found, err
 }
 
@@ -153,7 +156,7 @@ func (s *PipelineSQLiteOwner) ClaimFanOutIntent(ctx context.Context, request run
 	}
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
-	err = s.backend.RunTransaction(ctx, "claim fan-out intent", func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := s.backend.RunTransactionOutcome(ctx, "claim fan-out intent", func(txctx context.Context, tx *sql.Tx) error {
 		row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
 			WHERE status='open' AND bundle_hash=? AND (claim_owner IS NULL OR lease_expires_at <= ?)
 			ORDER BY CASE WHEN last_served_at IS NULL THEN 0 ELSE 1 END, last_served_at ASC, created_at ASC, run_id ASC, triggering_delivery_id ASC, flow_path ASC, declaration_family ASC, semantic_path ASC
@@ -169,6 +172,9 @@ func (s *PipelineSQLiteOwner) ClaimFanOutIntent(ctx context.Context, request run
 		found = true
 		return claimFanOutIntentRow(txctx, tx, request, &intent, &claim)
 	})
+	if !committed {
+		return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, err
+	}
 	return intent, claim, found, err
 }
 
@@ -532,7 +538,7 @@ func commitFanOutChunk(
 	ctx context.Context,
 	store eventCommitTxStore,
 	postgres bool,
-	run func(context.Context, *revisionEffects, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, *revisionEffects, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
 	finishTurn func(context.Context, fanoutobligation.Claim, fanoutobligation.Status, int, int64, time.Time) error,
 	observeNow func() time.Time,
 	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
@@ -552,7 +558,7 @@ func commitFanOutChunk(
 	result := runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
 	selectedStoreCallStarted := time.Now()
 	operationComplete := false
-	err = run(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := run(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		intent, err := lockClaimedFanOutIntent(txctx, tx, postgres, command.Claim, command.Now)
 		if err != nil {
 			return err
@@ -662,8 +668,8 @@ func commitFanOutChunk(
 		operationComplete = true
 		return nil
 	})
-	if err != nil {
-		if !operationComplete {
+	if !committed {
+		if err == nil || !operationComplete {
 			return runtimepipeline.CommittedFanOutChunk{}, err
 		}
 		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -683,6 +689,8 @@ func commitFanOutChunk(
 			return runtimepipeline.CommittedFanOutChunk{}, err
 		}
 	}
+	// Keep post-commit failures out of the runtime's mutation retry path.
+	result.PostCommitFailure = err
 	observedDuration := time.Since(selectedStoreCallStarted)
 	nextChunk := adaptiveFanOutChunk(result.Intent.NextChunkSize, observedDuration)
 	lastChunkMS := observedFanOutMilliseconds(observedDuration)
@@ -694,9 +702,9 @@ func commitFanOutChunk(
 		observedAt = command.Now.UTC()
 	}
 	if finishTurn == nil {
-		result.PostCommitFailure = fmt.Errorf("fan-out successful turn release owner is required")
+		result.PostCommitFailure = errors.Join(result.PostCommitFailure, fmt.Errorf("fan-out successful turn release owner is required"))
 	} else if finishErr := finishTurn(ctx, command.Claim, result.Intent.Status, nextChunk, lastChunkMS, observedAt); finishErr != nil {
-		result.PostCommitFailure = fmt.Errorf("finish successful fan-out turn: %w", finishErr)
+		result.PostCommitFailure = errors.Join(result.PostCommitFailure, fmt.Errorf("finish successful fan-out turn: %w", finishErr))
 	} else {
 		result.Intent.NextChunkSize = nextChunk
 		result.Intent.LastChunkMS = lastChunkMS
@@ -876,8 +884,8 @@ func lockClaimedFanOutIntent(ctx context.Context, tx *sql.Tx, postgres bool, cla
 
 func (s *PipelinePostgresOwner) CommitFanOutChunk(ctx context.Context, command runtimepipeline.FanOutChunkCommand) (runtimepipeline.CommittedFanOutChunk, error) {
 	return commitFanOutChunk(ctx, s, true,
-		func(ctx context.Context, effects *revisionEffects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+		func(ctx context.Context, effects *revisionEffects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+			return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
 		},
 		func(ctx context.Context, claim fanoutobligation.Claim, status fanoutobligation.Status, nextChunk int, lastChunkMS int64, observedAt time.Time) error {
 			return finishFanOutSuccessfulTurn(ctx, s.backend, "", claim, status, nextChunk, lastChunkMS, observedAt)
@@ -892,8 +900,8 @@ func (s *PipelinePostgresOwner) CommitFanOutChunk(ctx context.Context, command r
 
 func (s *PipelineSQLiteOwner) CommitFanOutChunk(ctx context.Context, command runtimepipeline.FanOutChunkCommand) (runtimepipeline.CommittedFanOutChunk, error) {
 	return commitFanOutChunk(ctx, s, false,
-		func(ctx context.Context, effects *revisionEffects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, "commit fan-out chunk", effects, fn)
+		func(ctx context.Context, effects *revisionEffects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+			return s.runPrivateAuthorActivityMutationOutcome(ctx, "commit fan-out chunk", effects, fn)
 		},
 		func(ctx context.Context, claim fanoutobligation.Claim, status fanoutobligation.Status, nextChunk int, lastChunkMS int64, observedAt time.Time) error {
 			return finishFanOutSuccessfulTurn(ctx, s.backend, "finish successful fan-out turn", claim, status, nextChunk, lastChunkMS, observedAt)

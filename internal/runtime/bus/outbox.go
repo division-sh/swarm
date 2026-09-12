@@ -284,22 +284,48 @@ func (eb *EventBus) requireCommittedInheritedFanOut(ctx context.Context, event e
 // A continuation must never reinterpret a missing operation as permission to
 // append or dispatch a fresh event.
 func (d engineDispatcher) dispatchCommittedInterceptorPublications(ctx context.Context, events []events.Event) error {
+	var dispatchErr error
 	for _, event := range events {
 		result, err := d.dispatchPendingOutboxOperation(ctx, runtimeengine.EmitIntent{
 			Event:   event,
 			Context: event.DeliveryContext(),
 		})
 		if err != nil {
-			if result.deliveryHandoffsTransferred && errors.Is(err, errAuthoritativeDeliveryIncomplete) {
+			if result.deliveryHandoffsTransferred && onlyAuthoritativeDeliveryIncomplete(err) {
 				continue
 			}
-			return err
+			dispatchErr = errors.Join(dispatchErr, err)
+			continue
 		}
 		if !result.handled {
-			return fmt.Errorf("deferred interceptor publication %s has no committed post-commit operation", strings.TrimSpace(event.ID()))
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("deferred interceptor publication %s has no committed post-commit operation", strings.TrimSpace(event.ID())))
 		}
 	}
-	return nil
+	return dispatchErr
+}
+
+// A transferred handoff owns incomplete live delivery, but never an independent
+// error joined by claim release, receiver cleanup, or another interceptor.
+func onlyAuthoritativeDeliveryIncomplete(err error) bool {
+	if err == errAuthoritativeDeliveryIncomplete {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyAuthoritativeDeliveryIncomplete(child) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return onlyAuthoritativeDeliveryIncomplete(wrapped.Unwrap())
+	}
+	return false
 }
 
 func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (result pendingOutboxDispatch, err error) {
@@ -371,6 +397,15 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 		return nil
 	}
 	queued, outcome, err := d.dispatchIntent(ctx, intent)
+	if outcome.Committed && outcome.ContinueDispatch() {
+		return errors.Join(err, settle(runtimepipelineobligation.Acknowledged("pipeline_persisted")))
+	}
+	if _, retry := outcome.RetryRelease(); retry {
+		return err
+	}
+	if disposition, ok := outcome.Disposition(); ok {
+		return errors.Join(err, settle(disposition))
+	}
 	if err != nil {
 		if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) || errors.Is(err, errAuthoritativeDeliveryIncomplete) {
 			return err
@@ -379,12 +414,6 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 	}
 	if queued {
 		return nil
-	}
-	if _, retry := outcome.RetryRelease(); retry {
-		return nil
-	}
-	if disposition, ok := outcome.Disposition(); ok {
-		return settle(disposition)
 	}
 	return settle(runtimepipelineobligation.Acknowledged("pipeline_persisted"))
 }
@@ -422,21 +451,33 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	defer func() { err = errors.Join(err, closeDispatch()) }()
 	nodePassthrough := true
 	if intent.Recipients == nil {
-		interception, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
-		if err != nil {
+		var interception deliveryRouteInterception
+		interception, err = d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
+		if err != nil && !interception.Outcome.Committed && interception.Outcome.ContinueDispatch() {
+			for _, deferred := range interception.Deferred {
+				err = errors.Join(err, d.bus.publishDeferred(ctx, deferred))
+			}
 			return false, runtimepipelineobligation.Continue(), err
 		}
+		result = interception.Outcome
+		postCommitErr := err
+		defer func() { err = errors.Join(postCommitErr, err) }()
 		if !interception.Outcome.ContinueDispatch() {
+			for _, next := range interception.Deferred {
+				postCommitErr = errors.Join(postCommitErr, d.bus.publishDeferred(ctx, next))
+			}
 			return false, interception.Outcome, nil
 		}
+		var deferredErr error
 		for _, next := range interception.Deferred {
-			if err := d.bus.publishDeferred(ctx, next); err != nil {
-				return false, runtimepipelineobligation.Continue(), err
-			}
+			deferredErr = errors.Join(deferredErr, d.bus.publishDeferred(ctx, next))
+		}
+		if deferredErr != nil {
+			return false, runtimepipelineobligation.Continue(), deferredErr
 		}
 		if !interception.EventPassthrough {
 			d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
-			return false, runtimepipelineobligation.Continue(), nil
+			return false, result, nil
 		}
 		nodePassthrough = interception.NodePassthrough
 	}
@@ -452,7 +493,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		deliveryRoutes = nonCollidingAgentDeliveryRoutesAfterNodeConsume(deliveryRoutes)
 		recipients = deliveryRouteAgentRecipientIDs(deliveryRoutes)
 		if len(recipients) == 0 {
-			return false, runtimepipelineobligation.Continue(), nil
+			return false, result, nil
 		}
 	}
 	pendingInternal := d.bus.pendingInternalDeliveryForEvent(intent.Event.ID())
@@ -475,7 +516,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 			d.bus.recordTargetDeliveryFailure(ctx, intent.Event, plan)
 			return false, runtimepipelineobligation.DeadLetterExecution(plan.TargetFailure.Code(), targetDeliveryFailureEnvelope(plan.TargetFailure)), nil
 		}
-		return false, runtimepipelineobligation.Continue(), nil
+		return false, result, nil
 	}
 	dispatch, err := d.bus.deliverToRecipientsWithRoutes(ctx, intent.Event, liveRecipients, deliveryRoutes)
 	if err != nil {
@@ -496,7 +537,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		"persisted_recipients":       append([]string(nil), recipients...),
 		"internal_recipients":        append([]string(nil), internalRecipients...),
 	}, nil, 0)
-	return false, runtimepipelineobligation.Continue(), nil
+	return false, result, nil
 }
 
 func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, eventID string) ([]events.DeliveryRoute, error) {

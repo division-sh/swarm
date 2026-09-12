@@ -3,6 +3,7 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,7 +19,7 @@ func commitGenericScheduleOccurrence(
 	store eventCommitTxStore,
 	postgres bool,
 	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
 	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
 	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
 	requestCandidate func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error),
@@ -39,7 +40,7 @@ func commitGenericScheduleOccurrence(
 	defer handoff.Rollback()
 
 	result := runtimegenericschedule.CommitResult{}
-	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		acceptedAt, err := stampAcceptedAt(txctx, tx)
 		if err != nil {
 			return fmt.Errorf("stamp generic schedule occurrence acceptance: %w", err)
@@ -133,24 +134,18 @@ func commitGenericScheduleOccurrence(
 		result = runtimegenericschedule.CommitResult{Outcome: outcome, Next: next, Publication: evidence}
 		return nil
 	})
-	if err != nil {
+	if !committed {
 		return runtimegenericschedule.CommitResult{}, err
 	}
-	if err := result.Validate(); err != nil {
-		return runtimegenericschedule.CommitResult{}, err
-	}
-	if err := handoff.Commit(); err != nil {
-		return runtimegenericschedule.CommitResult{}, err
-	}
-	return result, nil
+	return result, errors.Join(err, result.Validate(), handoff.Commit())
 }
 
 func (s *PipelinePostgresOwner) CommitGenericScheduleOccurrence(ctx context.Context, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
 	effects := newRevisionEffects()
 	return commitGenericScheduleOccurrence(
 		ctx, s, true, effects,
-		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+			return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
 		},
 		reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
@@ -168,8 +163,8 @@ func (s *PipelineSQLiteOwner) CommitGenericScheduleOccurrence(ctx context.Contex
 	effects := newRevisionEffects()
 	return commitGenericScheduleOccurrence(
 		ctx, s, false, effects,
-		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, "sqlite generic schedule occurrence", effects, fn)
+		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+			return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite generic schedule occurrence", effects, fn)
 		},
 		reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {

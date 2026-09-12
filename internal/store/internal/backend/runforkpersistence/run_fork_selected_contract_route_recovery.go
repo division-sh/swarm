@@ -36,24 +36,19 @@ func (s *RunForkPostgresOwner) RecordRunForkSelectedContractRouteRecovery(ctx co
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("begin selected-contract route recovery: %w", err)
-	}
-	defer tx.Rollback()
-	if err := requirePostgresRunActive(ctx, tx, record.SourceRunID); err != nil {
-		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery source: %w", err)
-	}
-	if err := requirePostgresRunActive(ctx, tx, record.ForkRunID); err != nil {
-		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery fork: %w", err)
-	}
-	if err := insertRunForkSelectedContractRouteRecovery(ctx, tx, record); err != nil {
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requirePostgresRunActive(ctx, tx, record.SourceRunID); err != nil {
+			return fmt.Errorf("admit selected-contract route recovery source: %w", err)
+		}
+		if err := requirePostgresRunActive(ctx, tx, record.ForkRunID); err != nil {
+			return fmt.Errorf("admit selected-contract route recovery fork: %w", err)
+		}
+		return insertRunForkSelectedContractRouteRecovery(ctx, tx, record)
+	})
+	if !committed {
 		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("commit selected-contract route recovery: %w", err)
-	}
-	return record, nil
+	return record, err
 }
 
 func (s *RunForkSQLiteOwner) RecordRunForkSelectedContractRouteRecovery(ctx context.Context, req runfork.RunForkSelectedContractRouteRecoveryRequest) (runfork.RunForkSelectedContractRouteRecovery, error) {

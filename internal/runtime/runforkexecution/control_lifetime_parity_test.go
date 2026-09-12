@@ -22,9 +22,49 @@ import (
 )
 
 func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
+	testSelectedForkControlLifetime(t, "")
+}
+
+func TestSelectedForkControlCommittedOutcomesBothStores(t *testing.T) {
+	for _, operation := range []string{"stop", "recovery"} {
+		t.Run(operation, func(t *testing.T) { testSelectedForkControlLifetime(t, operation) })
+	}
+}
+
+type selectedControlOutcomeStore struct {
+	SelectedContractForkLifecycle
+	operation string
+	cause     error
+}
+
+func (s selectedControlOutcomeStore) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
+	result, err := s.SelectedContractForkLifecycle.StopSelectedFork(ctx, req)
+	if err == nil && s.operation == "stop" {
+		err = s.cause
+	}
+	return result, err
+}
+
+func (s selectedControlOutcomeStore) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
+	result, err := s.SelectedContractForkLifecycle.RecoverSelectedFork(ctx, req)
+	if err == nil && s.operation == "recovery" {
+		err = s.cause
+	}
+	return result, err
+}
+
+func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
+	t.Helper()
+	phases := []string{"executing", "executing_retirement", "retained", "reconstructed"}
+	if outcomeOperation == "stop" {
+		phases = []string{"retained", "reconstructed"}
+	} else if outcomeOperation == "recovery" {
+		phases = []string{"reconstructed"}
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, phase := range []string{"executing", "executing_retirement", "retained", "reconstructed"} {
+		for _, phase := range phases {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
+				outcomeErr := errors.New("acknowledged selected control cleanup")
 				var selected any
 				var db *sql.DB
 				var authorityStore startupownership.Store
@@ -89,8 +129,11 @@ func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 						if err := db.QueryRow(`SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkRun).Scan(&beforeExecutions); err != nil {
 							t.Fatal(err)
 						}
+						if outcomeOperation == "recovery" {
+							owner.ports.fork = selectedControlOutcomeStore{SelectedContractForkLifecycle: owner.ports.fork, operation: outcomeOperation, cause: outcomeErr}
+						}
 						recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
-						if err != nil || len(recovered) != 1 || recovered[0].RunID != forkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
+						if (outcomeOperation != "recovery" && err != nil) || (outcomeOperation == "recovery" && !errors.Is(err, outcomeErr)) || len(recovered) != 1 || recovered[0].RunID != forkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
 							t.Fatalf("control reconstruction = %+v %v", recovered, err)
 						}
 						var afterEvents, afterExecutions int
@@ -103,13 +146,31 @@ func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 						if afterEvents != beforeEvents || afterExecutions != beforeExecutions {
 							t.Fatal("control reconstruction executed selected work")
 						}
+						if outcomeOperation == "recovery" {
+							owner.ports.contexts.mu.Lock()
+							retired, admitted := owner.ports.contexts.retired, owner.ports.contexts.recovered
+							owner.ports.contexts.mu.Unlock()
+							if !retired || admitted {
+								t.Fatal("failed recovery admitted executable work")
+							}
+							if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+								t.Fatal(err)
+							}
+							return
+						}
 					}
 					if _, err := testGatewayWorkOwner(t).RetireAndWait(context.Background()); err != nil {
 						t.Fatal(err)
 					}
+					if outcomeOperation == "stop" {
+						owner.ports.fork = selectedControlOutcomeStore{SelectedContractForkLifecycle: owner.ports.fork, operation: outcomeOperation, cause: outcomeErr}
+					}
 					resultStop, selected, err := owner.StopSelectedFork(context.Background(), runcontrol.TransitionRequest{RunID: forkRun})
-					if err != nil || !selected || resultStop.Status != "cancelled" {
+					if (outcomeOperation != "stop" && err != nil) || (outcomeOperation == "stop" && !errors.Is(err, outcomeErr)) || !selected || resultStop.RunID != forkRun || resultStop.Status != "cancelled" {
 						t.Fatalf("retained stop = %+v selected=%v err=%v", resultStop, selected, err)
+					}
+					if outcomeOperation == "stop" && (resultStop.Recovery.Disposition != runcontrol.RecoveryFailed || !errors.Is(resultStop.Recovery.Err, outcomeErr)) {
+						t.Fatalf("stop lost independent cleanup failure: %+v", resultStop.Recovery)
 					}
 				} else {
 					entered, cancelled, release := make(chan string, 1), make(chan struct{}), make(chan struct{})

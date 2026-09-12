@@ -441,6 +441,8 @@ func canonicalWorkflowInstanceOptionalPersistedTime(value time.Time) time.Time {
 }
 
 type CommittedWorkflowEngineMutation struct {
+	// Committed is set only after the selected store acknowledges COMMIT.
+	Committed       bool
 	Publications    []runtimeengine.CommittedDurablePublication
 	Lifecycle       CommittedWorkflowLifecycleMutation
 	RouteRetirement *WorkflowEngineRouteRetirement

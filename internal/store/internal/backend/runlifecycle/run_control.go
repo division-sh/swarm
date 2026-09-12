@@ -3,6 +3,7 @@ package runlifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -85,7 +86,7 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 	defer handoff.Rollback()
 	var state runtimeruncontrol.State
 	effects := runforkrevision.NewEffects()
-	err = s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		state, err = lockRunControlState(txctx, tx, runID)
 		if err != nil {
@@ -130,10 +131,10 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 		}
 		return nil
 	})
-	if err != nil {
+	if !committed {
 		return runtimeruncontrol.State{}, err
 	}
-	return state, handoff.Commit()
+	return state, errors.Join(err, handoff.Commit())
 }
 
 func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtimeruncontrol.State, error) {

@@ -3,13 +3,14 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 )
 
 type conversationForkDialect uint8
@@ -132,55 +133,76 @@ func (s conversationForkStore) runMutation(ctx context.Context, serializable boo
 	if s.dialect == conversationForkSQLite {
 		return s.sqlite.runRuntimeMutation(ctx, "sqlite conversation fork mutation", fn)
 	}
-	return s.runPostgresMutation(ctx, s.postgres.backend, serializable, fn)
+	return s.runPostgresMutation(ctx, nil, serializable, fn)
 }
 
 func (s conversationForkStore) runForkMutation(ctx context.Context, forkID string, serializable bool, fn func(context.Context, *sql.Tx) error) (err error) {
 	if s.dialect == conversationForkSQLite {
 		return s.sqlite.runRuntimeMutation(ctx, "sqlite conversation fork mutation", fn)
 	}
+	return s.runPostgresMutation(ctx, &forkID, serializable, fn)
+}
+
+func (s conversationForkStore) runPostgresMutation(ctx context.Context, forkID *string, serializable bool, fn func(context.Context, *sql.Tx) error) (err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, forkID); err != nil {
-		return fmt.Errorf("lock postgres conversation fork %s: %w", forkID, err)
+	session, err := postgresbackend.NewSessionAuthority(conn)
+	if err != nil {
+		return errors.Join(err, conn.Close())
 	}
 	defer func() {
-		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		var unlocked bool
-		unlockErr := conn.QueryRowContext(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, forkID).Scan(&unlocked)
-		if unlockErr == nil && unlocked {
-			return
+		if releaseErr := session.Release(); releaseErr != nil {
+			cleanupErr := errors.Join(releaseErr, session.ForceDiscard())
+			slog.Error("postgres conversation fork session release failed", "error", cleanupErr)
+			err = errors.Join(err, cleanupErr)
 		}
-		if unlockErr == nil {
-			unlockErr = fmt.Errorf("postgres conversation fork advisory lock was not held")
-		}
-		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		err = errors.Join(err, fmt.Errorf("unlock postgres conversation fork %s: %w", forkID, unlockErr))
 	}()
-	err = s.runPostgresMutation(ctx, conn, serializable, fn)
-	return err
-}
-
-func (s conversationForkStore) runPostgresMutation(ctx context.Context, q interface {
-	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
-}, serializable bool, fn func(context.Context, *sql.Tx) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if forkID != nil {
+		// The session lock precedes BEGIN so serializable snapshots are taken
+		// only after competing fork mutations settle. Admitted lock SQL drains.
+		if _, lockErr := conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_lock(hashtextextended($1, 0))`, *forkID); lockErr != nil {
+			return errors.Join(ctx.Err(), fmt.Errorf("lock postgres conversation fork %s: %w", *forkID, lockErr), session.ForceDiscard())
+		}
+		defer func() {
+			// The transaction owner may already have disposed this exact socket.
+			probeErr := conn.Raw(func(any) error { return nil })
+			if probeErr == sql.ErrConnDone {
+				return
+			}
+			unlockErr := probeErr
+			if unlockErr == nil {
+				unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				var unlocked bool
+				unlockErr = conn.QueryRowContext(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, *forkID).Scan(&unlocked)
+				if unlockErr == nil && !unlocked {
+					unlockErr = fmt.Errorf("postgres conversation fork advisory lock was not held")
+				}
+			}
+			if unlockErr != nil {
+				cleanupErr := errors.Join(fmt.Errorf("unlock postgres conversation fork %s: %w", *forkID, unlockErr), session.ForceDiscard())
+				slog.Error("postgres conversation fork unlock failed", "error", cleanupErr)
+				err = errors.Join(err, cleanupErr)
+			}
+		}()
+	}
 	opts := &sql.TxOptions{}
 	if serializable {
 		opts.Isolation = sql.LevelSerializable
 	}
-	tx, err := q.BeginTx(ctx, opts)
-	if err != nil {
-		return err
-	}
-	if err := fn(ctx, tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	_, err = postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, session, opts, fn)
+	return err
 }
 
 func nullableConversationForkID(value string) any {

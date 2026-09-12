@@ -77,9 +77,6 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		ContractSelection:  req.ContractSelection,
 		AgentRuntime:       e.AgentRuntime,
 	})
-	if err != nil {
-		return RunForkExecutionResult{}, err
-	}
 	status := strings.TrimSpace(result.Activation.ForkRunStatus)
 	if status == "" {
 		status = strings.TrimSpace(result.Materialization.ForkRunStatus)
@@ -100,7 +97,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		BundleHash:         strings.TrimSpace(req.BundleHash),
 		ExecutedEventCount: result.ExecutedEventCount,
 		DataPins:           pins,
-	}, nil
+	}, err
 }
 
 func OperatorRunForkHandlers(opts RunForkHandlerOptions) map[string]MethodHandler {

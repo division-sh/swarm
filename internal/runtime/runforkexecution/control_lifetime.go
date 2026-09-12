@@ -170,13 +170,16 @@ func (o SelectedContractExecutionOwner) StopSelectedFork(ctx context.Context, re
 		}
 	}
 	state, err := o.ports.fork.StopSelectedFork(context.WithoutCancel(use.ctx), runcontrol.SelectedStopRequest{Transition: req, Binding: use.binding, Process: use.process})
-	if err != nil {
+	if state.RunID == "" {
 		return result, true, err
 	}
 	result = runcontrol.TransitionResult{RunID: state.RunID, Status: state.Status, AbandonedDeliveries: state.AbandonedDeliveries,
 		Recovery: runcontrol.PostCommitRecovery{Disposition: runcontrol.RecoveryComplete}}
-	if len(state.TimerCancellations) != 0 {
-		result.Recovery = runcontrol.PostCommitRecovery{Disposition: runcontrol.RecoveryFailed, Err: errors.New("selected stop encountered unsupported durable timer work")}
+	if err != nil {
+		result.Recovery = runcontrol.PostCommitRecovery{Disposition: runcontrol.RecoveryFailed, Err: err}
 	}
-	return result, true, nil
+	if len(state.TimerCancellations) != 0 {
+		result.Recovery = runcontrol.PostCommitRecovery{Disposition: runcontrol.RecoveryFailed, Err: errors.Join(err, errors.New("selected stop encountered unsupported durable timer work"))}
+	}
+	return result, true, err
 }

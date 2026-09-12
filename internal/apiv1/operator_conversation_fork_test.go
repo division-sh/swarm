@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -31,20 +33,21 @@ func (r staticForkChatRuntimeResolver) ResolveAgentRuntime(actor runtimeactors.A
 }
 
 type fakeConversationForkLifecycleStore struct {
-	createResult  runfork.OperatorConversationForkSession
-	createErr     error
-	listResult    runfork.ConversationForkListResult
-	listErr       error
-	viewResult    runfork.OperatorConversationForkSession
-	viewErr       error
-	prepareResult runfork.ConversationForkChatPrepared
-	admitErr      error
-	prepareErr    error
-	recordResult  runfork.ConversationForkChatResult
-	recordErr     error
-	heartbeatErr  error
-	deleteResult  runfork.ConversationForkDeleteResult
-	deleteErr     error
+	createIdempotency APIIdempotencyStore
+	createResult      runfork.OperatorConversationForkSession
+	createErr         error
+	listResult        runfork.ConversationForkListResult
+	listErr           error
+	viewResult        runfork.OperatorConversationForkSession
+	viewErr           error
+	prepareResult     runfork.ConversationForkChatPrepared
+	admitErr          error
+	prepareErr        error
+	recordResult      runfork.ConversationForkChatResult
+	recordErr         error
+	heartbeatErr      error
+	deleteResult      runfork.ConversationForkDeleteResult
+	deleteErr         error
 
 	createCalls    int
 	listCalls      int
@@ -68,6 +71,26 @@ type fakeConversationForkLifecycleStore struct {
 	lastNow     time.Time
 
 	recordEffect func()
+}
+
+func (s *fakeConversationForkLifecycleStore) CreateAPIConversationFork(ctx context.Context, req runfork.APIConversationForkCreateRequest) (runfork.ConversationForkCreateResult, error) {
+	if s.createIdempotency == nil {
+		s.createIdempotency = newMutatingProbeIdempotencyStore()
+	}
+	completion, replay, err := s.createIdempotency.WithAPIIdempotency(ctx, req.Idempotency, func(ctx context.Context) (apiidempotency.Completion, error) {
+		fork, err := s.CreateOperatorConversationFork(ctx, req.Creation)
+		if err != nil {
+			return apiidempotency.Completion{}, err
+		}
+		response, err := json.Marshal(runfork.ConversationForkCreateResult{Fork: fork})
+		return apiidempotency.Completion{ResourceID: fork.ForkID, Response: response}, err
+	})
+	var result runfork.ConversationForkCreateResult
+	if err == nil {
+		err = json.Unmarshal(completion.Response, &result)
+	}
+	result.IdempotencyReplayed = replay
+	return result, err
 }
 
 func (s *fakeConversationForkLifecycleStore) CreateOperatorConversationFork(_ context.Context, req runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error) {

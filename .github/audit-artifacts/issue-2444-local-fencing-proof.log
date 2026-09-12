@@ -1,0 +1,61 @@
+# Implementation #2444 local authority fencing receipt (focused qualification).
+# Transcribed from completed tool output; not an additional test invocation.
+# Worktree: /tmp/agent-g-2444-implementation
+
+go test -race ./internal/runtime/startupownership ./internal/store/internal/startupownership ./internal/store/internal/backend/postgres -run 'Test(ProcessCapability|GenerationGrantLocal|TerminalFence|SessionMonitor|SessionAuthorityBeginTxFailure|PostgresSessionScope|Implicit)' -count=3 -timeout=120s
+# Exit code: 0
+ok  github.com/division-sh/swarm/internal/runtime/startupownership  1.129s
+ok  github.com/division-sh/swarm/internal/store/internal/startupownership  1.147s
+ok  github.com/division-sh/swarm/internal/store/internal/backend/postgres  23.605s
+
+# Final fenced-retain/acquisition controls after the last admission checks:
+go test -race ./internal/store/internal/backend/postgres -run '^Test(SessionMonitor|AuthorityAcquisition)' -count=3 -timeout=60s
+# Exit code: 0
+ok  github.com/division-sh/swarm/internal/store/internal/backend/postgres  15.127s
+
+# New behavior proofs:
+# TestSessionMonitorFenceBeforeSilentProofDrain: deadline/cancel/complete;
+# late success cannot revive, later cancellation cannot erase a decided deadline,
+# new transaction/retained owner refused, remote advisory lock still held.
+# TestSessionMonitorBudgetStartsAfterAdmittedTransaction: healthy serialized
+# transaction exceeds proof budget without consuming it; successor remains usable.
+# TestSessionMonitorSilentSocketFencesBeforeJoinedRelease: real stock pq and PG,
+# controlled socket Read stall; local fence precedes physical retirement; release
+# remains joined; remote lock observed while local authority is already fenced.
+# TestGenerationGrantLocalFenceDuringTransition: transition, transition error,
+# retirement; terminal notification is not blocked by the grant/operation mutex;
+# late successful persistence cannot overwrite local GrantRetired.
+# TestProcessCapabilityRecheckFencesBeforeOperationJoin: operation-error and
+# failed-release independent rechecks notify while blocked and preserve both errors.
+# TestTerminalFencePrecedesStalledReadbackAndJoins: local notification precedes
+# context-unresponsive diagnostic readback; late expired lineage is not takeover.
+# TestProcessCapabilityLateLineageOnlyEnrichesTerminal: valid later lineage can
+# enrich terminal diagnostics, never restore authority.
+# Existing ProcessCapability monitor/release/cancellation controls included.
+# Existing implicit settlement/successor/prepared/advisory cleanup controls retained.
+# Scope tests adapted to observable stock-pq errors and exact disposal counters;
+# no claim that database/sql exposes driver-internal Close errors.
+
+# Scoped git diff --check passed. No full suite, commit, spec edit, or transport timeout.
+# Limit: socket fencing, capability/grant notification, and lineage joining are
+# separately exercised; these rows are not an integrated public serve readiness
+# or supported restart/takeover proof. Parent owns composed qualification.
+
+# Follow-up composed serve proof closes the readiness/dependency-join gap above.
+SWARM_INVESTIGATION_PG_BIN=/usr/lib/postgresql/16/bin go test -race ./internal/serveapp -run '^TestServePostgresSilentMonitorWithdrawsReadinessAndJoins$' -count=3 -timeout=120s -v
+# Exit code: 0; actual private PostgreSQL 16, no skip.
+# Readiness and generation authority withdrawn while exact monitor reply remained held:
+# repetition 1: 2.007365956s; exit 1 after release and joined cleanup.
+# repetition 2: 2.007395357s; exit 1 after release and joined cleanup.
+# repetition 3: 2.001655740s; exit 1 after release and joined cleanup.
+ok  github.com/division-sh/swarm/internal/serveapp  18.465s
+# Real runFrom, stock construction/pq, exact backend PID selected from advisory
+# possession; test proxy holds (does not drop) a proof reply on live TCP.
+# HTTP ready control starts 200; after local fencing the endpoint is unavailable
+# or 503 and generation evidence refuses execution before the proxy is released.
+# Serve has not exited, workspace projection has not been released, selected DB
+# still answers Ping, and the same remote backend still holds process possession.
+# Releasing the late healthy reply joins cleanup, exits nonzero with unprovable
+# ownership diagnostic, releases workspace/DB dependencies, and never revives grant.
+# No production changes or edits to existing shared tests for this follow-up.
+# This is a silence/readiness/join proof, not an additional crash/restart proof.

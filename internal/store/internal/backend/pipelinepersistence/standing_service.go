@@ -23,6 +23,7 @@ import (
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
+	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
 
@@ -36,6 +37,7 @@ type standingServiceAdapter struct {
 	handoff                      *runLifecycleCandidateHandoffReservation
 	revisionEffects              *revisionEffects
 	deliveryContinuationRequired bool
+	committed                    bool
 }
 
 func newPostgresStandingServiceAdapter(store *PipelinePostgresOwner) *standingServiceAdapter {
@@ -48,9 +50,9 @@ func newPostgresStandingServiceAdapter(store *PipelinePostgresOwner) *standingSe
 		postgresStore: store,
 	}
 	adapter.run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-		return withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
+		committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
 			effects := newRevisionEffects()
-			return store.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return store.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 				adapter.story = story
 				adapter.handoff = handoff
 				adapter.revisionEffects = effects
@@ -62,6 +64,8 @@ func newPostgresStandingServiceAdapter(store *PipelinePostgresOwner) *standingSe
 				return fn(txctx, tx)
 			})
 		})
+		adapter.committed = committed
+		return err
 	}
 	return adapter
 }
@@ -75,9 +79,9 @@ func newSQLiteStandingServiceAdapter(store *PipelineSQLiteOwner) *standingServic
 		sqliteStore: store,
 	}
 	adapter.run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-		return withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
+		committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
 			effects := newRevisionEffects()
-			return store.runPrivateAuthorActivityMutation(ctx, "sqlite standing service mutation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return store.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite standing service mutation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 				adapter.story = story
 				adapter.handoff = handoff
 				adapter.revisionEffects = effects
@@ -89,6 +93,8 @@ func newSQLiteStandingServiceAdapter(store *PipelineSQLiteOwner) *standingServic
 				return fn(txctx, tx)
 			})
 		})
+		adapter.committed = committed
+		return err
 	}
 	return adapter
 }
@@ -175,14 +181,14 @@ func (s *standingServiceAdapter) markTerminalRun(ctx context.Context, tx *sql.Tx
 }
 
 func standingServiceResultEvidence(result runtimepipeline.StandingServiceReconciliation, adapter *standingServiceAdapter, err error) (runtimepipeline.StandingServiceReconciliation, error) {
-	if err == nil && adapter != nil {
+	if adapter != nil && adapter.committed {
 		result.DeliveryContinuationRequired = adapter.deliveryContinuationRequired
 	}
 	return result, err
 }
 
 func standingServiceResultsEvidence(results []runtimepipeline.StandingServiceReconciliation, adapter *standingServiceAdapter, err error) ([]runtimepipeline.StandingServiceReconciliation, error) {
-	if err == nil && adapter != nil && adapter.deliveryContinuationRequired && len(results) > 0 {
+	if adapter != nil && adapter.committed && adapter.deliveryContinuationRequired && len(results) > 0 {
 		results[0].DeliveryContinuationRequired = true
 	}
 	return results, err
@@ -342,6 +348,9 @@ func (s *standingServiceAdapter) ReconcileStandingService(ctx context.Context, c
 		result, err = s.reconcileStandingServiceTx(txctx, tx, candidate)
 		return err
 	})
+	if !s.committed {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
 	return result, err
 }
 
@@ -386,6 +395,9 @@ func (s *standingServiceAdapter) LoadReconciledStandingService(ctx context.Conte
 		found = true
 		return nil
 	})
+	if !s.committed {
+		return runtimepipeline.StandingServiceReconciliation{}, false, err
+	}
 	return result, found, err
 }
 
@@ -435,6 +447,9 @@ func (s *standingServiceAdapter) ReconcileStandingServiceSet(ctx context.Context
 		}
 		return nil
 	})
+	if !s.committed {
+		return nil, err
+	}
 	return results, err
 }
 
@@ -521,6 +536,9 @@ func (s *standingServiceAdapter) SuspendStandingService(ctx context.Context, ope
 		}
 		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
+	if !s.committed {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
 	return result, err
 }
 
@@ -578,6 +596,9 @@ func (s *standingServiceAdapter) ResumeStandingService(ctx context.Context, oper
 		}
 		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
+	if !s.committed {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
 	return result, err
 }
 
@@ -695,6 +716,9 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		}
 		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
+	if !s.committed {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
 	return result, err
 }
 
@@ -844,8 +868,11 @@ func (s *standingServiceAdapter) PublishStandingService(ctx context.Context, ser
 			RETURNING publication_sequence
 		`, serviceID, runID, generation).Scan(&sequence)
 	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("standing service changed before ingress publication")
+	if !s.committed {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("standing service changed before ingress publication")
+		}
+		return 0, err
 	}
 	return sequence, err
 }

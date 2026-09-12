@@ -26,7 +26,7 @@ type ConversationForkReadStore interface {
 }
 
 type ConversationForkLifecycleStore interface {
-	CreateOperatorConversationFork(context.Context, runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error)
+	CreateAPIConversationFork(context.Context, runfork.APIConversationForkCreateRequest) (runfork.ConversationForkCreateResult, error)
 	AdmitOperatorConversationForkChat(context.Context, string, executionposture.Posture) error
 	PrepareOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error)
 	HeartbeatOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepared, time.Time) error
@@ -37,11 +37,6 @@ type ConversationForkLifecycleStore interface {
 
 type ForkChatExecutor interface {
 	ExecuteForkChat(context.Context, runfork.ConversationForkChatPrepared, string) (runfork.ConversationForkChatExecution, error)
-}
-
-type conversationForkCreateResult struct {
-	Fork                runfork.OperatorConversationForkSession `json:"fork"`
-	IdempotencyReplayed bool                                    `json:"idempotency_replayed"`
 }
 
 type conversationForkDeleteResult struct {
@@ -122,36 +117,22 @@ func executeConversationForkCreate(ctx context.Context, req Request, opts Conver
 	if err != nil {
 		return nil, err
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
-		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
-		IdempotencyKey: idempotencyKey,
-		RequestHash:    req.RequestHash,
-		ResourceID:     sourceSessionID,
-		TTL:            conversationForkIdempotencyTTL,
-		Now:            now,
-	}, func(ctx context.Context) (apiidempotency.Completion, error) {
-		fork, err := opts.Lifecycle.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
+	result, err := opts.Lifecycle.CreateAPIConversationFork(ctx, runfork.APIConversationForkCreateRequest{
+		Creation: runfork.ConversationForkCreateRequest{
 			SourceSessionID: sourceSessionID,
 			ForkPoint:       forkPoint,
 			CreatedBy:       req.ActorTokenID,
 			Now:             now,
-		})
-		if err != nil {
-			return apiidempotency.Completion{}, conversationForkError(err, conversationForkErrorDetails{
-				SessionID: sourceSessionID,
-				TurnID:    forkPoint.TurnID,
-				EventID:   forkPoint.EventID,
-			})
-		}
-		response, err := json.Marshal(conversationForkCreateResult{
-			Fork:                fork,
-			IdempotencyReplayed: false,
-		})
-		if err != nil {
-			return apiidempotency.Completion{}, err
-		}
-		return apiidempotency.Completion{ResourceID: fork.ForkID, Response: response}, nil
+		},
+		Idempotency: apiidempotency.Request{
+			Method:         req.Method,
+			ActorTokenID:   req.ActorTokenID,
+			IdempotencyKey: idempotencyKey,
+			RequestHash:    req.RequestHash,
+			ResourceID:     sourceSessionID,
+			TTL:            conversationForkIdempotencyTTL,
+			Now:            now,
+		},
 	})
 	if err != nil {
 		return nil, conversationForkError(err, conversationForkErrorDetails{
@@ -160,14 +141,6 @@ func executeConversationForkCreate(ctx context.Context, req Request, opts Conver
 			EventID:   forkPoint.EventID,
 		})
 	}
-	var result conversationForkCreateResult
-	if err := json.Unmarshal(completion.Response, &result); err != nil {
-		if replay {
-			return nil, fmt.Errorf("decode conversation.fork idempotency response: %w", err)
-		}
-		return nil, fmt.Errorf("decode conversation.fork response: %w", err)
-	}
-	result.IdempotencyReplayed = replay
 	return result, nil
 }
 

@@ -881,41 +881,37 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 	}
 	defer handoff.Rollback()
 	lease := state.postgresLease
-	tx, err := lease.Session().BeginTx(ctx)
-	if err != nil {
+	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
+		if err := markDecisionRouteProcessedTx(txctx, tx, claim.EventID(), true, time.Now().UTC()); err != nil {
+			return err
+		}
+		effects := newRevisionEffects()
+		if err := declareEventRevisionFamily(txctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventReceipts); err != nil {
+			return err
+		}
+		runID, err := eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), true)
+		if err != nil {
+			return err
+		}
+		if runID != "" {
+			if _, err := s.candidateRequests.RequestCompletionCandidateTx(txctx, tx, runID, nil, handoff); err != nil {
+				return err
+			}
+		}
+		if err := postgresDeliveryAdapter.CommitPipelineHandoff(txctx, tx, claim.EventID()); err != nil {
+			return err
+		}
+		if err := declareEventRevisionFamily(txctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
+			return err
+		}
+		_, err = privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
+		return err
+	})
+	if !committed {
 		return err
 	}
-	if err := markDecisionRouteProcessedTx(ctx, tx, claim.EventID(), true, time.Now().UTC()); err != nil {
-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	effects := newRevisionEffects()
-	if err := declareEventRevisionFamily(ctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventReceipts); err != nil {
-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	runID, err := eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), true)
-	if err != nil {
-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	if runID != "" {
-		if _, err := s.candidateRequests.RequestCompletionCandidateTx(ctx, tx, runID, nil, handoff); err != nil {
-			return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-		}
-	}
-	if err := postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, claim.EventID()); err != nil {
-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	if err := declareEventRevisionFamily(ctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	if err := tx.Commit(); err != nil {
-		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	endErr := lease.Session().EndTx(tx)
 	handoffErr := handoff.Commit()
-	return errors.Join(endErr, handoffErr)
+	return errors.Join(err, handoffErr)
 }
 
 func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Context, claim runtimepipelineobligation.Claim) error {
@@ -1091,7 +1087,12 @@ func (s *PipelinePostgresOwner) claimPostgresPipelineEvent(ctx context.Context, 
 	if purpose == runtimepipelineobligation.PurposePublication {
 		return claim, nil
 	}
-	eligible, err := postgresPipelineEligible(ctx, lease.Session(), eventID, purpose)
+	var eligible bool
+	err = postgresbackend.RunAuthorityReadTransaction(ctx, lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		eligible, err = postgresPipelineEligible(txctx, tx, eventID, purpose)
+		return err
+	})
 	if err != nil {
 		return runtimepipelineobligation.Claim{}, errors.Join(err, s.releasePostgresPipelineClaim(context.WithoutCancel(ctx), claim))
 	}
@@ -1192,16 +1193,25 @@ func (s *PipelinePostgresOwner) loadPostgresClaimedPipelineWork(ctx context.Cont
 		return runtimepipelineobligation.ClaimedWork{}, err
 	}
 	defer state.operationMu.Unlock()
-	if claim.Purpose() != runtimepipelineobligation.PurposePublication {
-		eligible, err := postgresPipelineEligible(ctx, state.postgresLease.Session(), claim.EventID(), claim.Purpose())
-		if err != nil {
-			return runtimepipelineobligation.ClaimedWork{}, err
+	var work runtimepipelineobligation.ClaimedWork
+	err = postgresbackend.RunAuthorityReadTransaction(ctx, state.postgresLease.Session(), func(txctx context.Context, tx *sql.Tx) error {
+		if claim.Purpose() != runtimepipelineobligation.PurposePublication {
+			eligible, err := postgresPipelineEligible(txctx, tx, claim.EventID(), claim.Purpose())
+			if err != nil {
+				return err
+			}
+			if !eligible {
+				return runtimepipelineobligation.ErrIneligible
+			}
 		}
-		if !eligible {
-			return runtimepipelineobligation.ClaimedWork{}, runtimepipelineobligation.ErrIneligible
-		}
+		var err error
+		work, err = loadClaimedPipelineWork(txctx, tx, claim, true)
+		return err
+	})
+	if err != nil {
+		return runtimepipelineobligation.ClaimedWork{}, err
 	}
-	return loadClaimedPipelineWork(ctx, state.postgresLease.Session(), claim, true)
+	return work, nil
 }
 
 func (s *PipelineSQLiteOwner) loadSQLiteClaimedPipelineWork(ctx context.Context, claim runtimepipelineobligation.Claim) (runtimepipelineobligation.ClaimedWork, error) {
@@ -1910,45 +1920,45 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
 	}
 	defer handoff.Rollback()
 	lease := state.postgresLease
-	tx, err := lease.Session().BeginTx(ctx)
-	if err != nil {
+	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
+		if err := writePipelineDispositionTx(txctx, tx, claim.EventID(), claim.Purpose(), disposition, true, time.Now().UTC()); err != nil {
+			return err
+		}
+		effects := newRevisionEffects()
+		if err := declareEventRevisionFamily(txctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventReceipts); err != nil {
+			return err
+		}
+		runID, err := eventRunIDForCompletionCandidateTx(txctx, tx, claim.EventID(), true)
+		if err != nil {
+			return err
+		}
+		if runID != "" {
+			if _, err := s.candidateRequests.RequestCompletionCandidateTx(txctx, tx, runID, nil, handoff); err != nil {
+				return err
+			}
+		}
+		if disposition.Successful() {
+			if err := postgresDeliveryAdapter.CommitPipelineHandoff(txctx, tx, claim.EventID()); err != nil {
+				return err
+			}
+			if err := declareEventRevisionFamily(txctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
+				return err
+			}
+		}
+		_, err = privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
+		return err
+	})
+	if !committed {
 		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
-	if err := writePipelineDispositionTx(ctx, tx, claim.EventID(), claim.Purpose(), disposition, true, time.Now().UTC()); err != nil {
-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	effects := newRevisionEffects()
-	if err := declareEventRevisionFamily(ctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventReceipts); err != nil {
-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	runID, err := eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), true)
-	if err != nil {
-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	if runID != "" {
-		if _, err := s.candidateRequests.RequestCompletionCandidateTx(ctx, tx, runID, nil, handoff); err != nil {
-			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-		}
-	}
-	if disposition.Successful() {
-		if err := postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, claim.EventID()); err != nil {
-			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-		}
-		if err := declareEventRevisionFamily(ctx, tx, effects, claim.EventID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
-			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-		}
-	}
-	if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
-	if err := tx.Commit(); err != nil {
-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-	}
 	outcome := runtimepipelineobligation.CommittedSettlement(disposition.Successful())
-	endErr := lease.Session().EndTx(tx)
-	releaseErr := s.releasePostgresPipelineClaimLocked(context.WithoutCancel(ctx), claim, state)
+	// EndTx may already have terminalized this exact lease on cleanup failure.
+	// Release it idempotently, rather than diagnosing its retired registry entry
+	// as a new stale-claim failure after an acknowledged commit.
+	releaseErr := lease.ReleaseTerminal(context.WithoutCancel(ctx))
+	state.postgresLease = nil
 	handoffErr := handoff.Commit()
-	return outcome, errors.Join(endErr, releaseErr, handoffErr)
+	return outcome, errors.Join(err, releaseErr, handoffErr)
 }
 
 func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
@@ -2059,19 +2069,15 @@ func awaitPostgresPipelineParentFence(ctx context.Context, session *postgresback
 	if session == nil {
 		return errors.New("PostgreSQL pipeline parent fence requires session authority")
 	}
-	key := pipelineParentFenceLockKey(eventID)
-	var parentFence any
-	if err := session.QueryRowContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, key).Scan(&parentFence); err != nil {
-		return fmt.Errorf("await pipeline parent transaction: %w", err)
-	}
-	var released bool
-	if err := session.QueryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key).Scan(&released); err != nil {
-		return fmt.Errorf("release pipeline parent transaction fence: %w", err)
-	}
-	if !released {
-		return errors.New("release pipeline parent transaction fence: lock was not owned")
-	}
-	return nil
+	return postgresbackend.RunAuthorityReadTransaction(ctx, session, func(txctx context.Context, tx *sql.Tx) error {
+		// Transaction settlement releases the fence even when cancellation wins
+		// after the wait; no session-level unlock can be skipped.
+		var parentFence any
+		if err := tx.QueryRowContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, pipelineParentFenceLockKey(eventID)).Scan(&parentFence); err != nil {
+			return fmt.Errorf("await pipeline parent transaction: %w", err)
+		}
+		return nil
+	})
 }
 
 func pipelineParentFenceLockKey(eventID string) string {

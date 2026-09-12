@@ -17,23 +17,20 @@ func (s *DestructiveResetPostgresOwner) ApplyDestructiveResetCleanup(ctx context
 	if s == nil || s.backend == nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("postgres store is required")
 	}
-	txOptions := (*sql.TxOptions)(nil)
+	var txOptions *sql.TxOptions
 	if req.Result.DryRun {
 		txOptions = &sql.TxOptions{ReadOnly: true}
 	}
-	tx, err := s.backend.BeginTx(ctx, txOptions)
-	if err != nil {
-		return destructivereset.CleanupResult{}, fmt.Errorf("begin destructive reset cleanup tx: %w", err)
-	}
-	out, err := applyDestructiveResetCleanupTx(ctx, tx, req, false)
-	if err != nil {
-		_ = tx.Rollback()
+	var out destructivereset.CleanupResult
+	committed, err := s.backend.RunTransactionWithOptionsOutcome(ctx, txOptions, func(sqlCtx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = applyDestructiveResetCleanupTx(sqlCtx, tx, req, false)
+		return err
+	})
+	if !committed {
 		return destructivereset.CleanupResult{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return destructivereset.CleanupResult{}, fmt.Errorf("commit destructive reset cleanup tx: %w", err)
-	}
-	return out, nil
+	return out, err
 }
 
 // ApplyDestructiveResetCleanupInRetainedTransaction lets the startup owner

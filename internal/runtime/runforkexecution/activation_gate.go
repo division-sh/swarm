@@ -324,12 +324,17 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			DeferredWorkAdmission: deferredWorkAdmission,
 			AgentRuntime:          agentRuntime,
 		})
+		containerProof := container.Proof()
+		if containerProof.RuntimeExecutionID != "" {
+			result.ForkLocalRuntimeContainer = &containerProof
+		}
 		if err != nil {
+			if container.authority.Valid() {
+				return result, err
+			}
 			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
 		ctx = operation.Context()
-		containerProof := container.Proof()
-		result.ForkLocalRuntimeContainer = &containerProof
 		published, err := container.Publish(ctx)
 		result.ExecutedEventCount = len(published)
 		result.ForkEvents = published
@@ -357,23 +362,14 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			RecipientPlanning:     *model.RecipientPlanning,
 		})
 		result.RunForkActivation = activation
-		if err != nil {
-			if closeErr := container.Close(ctx); closeErr != nil {
-				err = errors.Join(err, closeErr)
-			} else if !activation.Activated {
-				err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
-			}
-			return result, err
+		closeErr := container.Close(ctx)
+		err = errors.Join(err, closeErr)
+		if activation.Activated {
+			err = errors.Join(err, req.ExecutionOwner.retainPrepared(resources))
+		} else if err != nil && closeErr == nil {
+			err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
-		if err := container.Close(ctx); err != nil {
-			return result, err
-		}
-		if activation.ForkRunStatus == runfork.RunForkActivatedStatus {
-			if err := req.ExecutionOwner.retainPrepared(resources); err != nil {
-				return result, err
-			}
-		}
-		return result, nil
+		return result, err
 	}
 	if plan.ReplayResumeAdmission.ReplayResumeFactsPresent {
 		return result, fmt.Errorf("selected-contract activation gate blocks historical replay before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))

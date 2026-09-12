@@ -72,7 +72,7 @@ func TestPostgresSessionScopeMonitorReleasesHealthyBinding(t *testing.T) {
 	t.Logf("owner PID %d preserved; competitor PID %d blocked before release and acquired afterward", ownerPID, competitorPID)
 }
 
-func TestPostgresSessionScopeFailedBeginPreservesNativeCloseFailure(t *testing.T) {
+func TestPostgresSessionScopeFailedBeginFencesWithOpaqueCloseFailure(t *testing.T) {
 	for _, failClose := range []bool{false, true} {
 		name := "clean_close"
 		if failClose {
@@ -111,8 +111,10 @@ func TestPostgresSessionScopeFailedBeginPreservesNativeCloseFailure(t *testing.T
 			if !errors.Is(err, beginFailure) {
 				t.Errorf("lost independent BEGIN error: %v", err)
 			}
-			if errors.Is(err, closeFailure) != failClose {
-				t.Errorf("native Close error preserved=%t, want %t: %v", errors.Is(err, closeFailure), failClose, err)
+			// database/sql discards the driver Close error during bad-connection
+			// disposal. The application must preserve BEGIN failure, not invent it.
+			if errors.Is(err, closeFailure) {
+				t.Errorf("manufactured driver-internal disposal evidence: %v", err)
 			}
 			if errors.Is(err, sql.ErrConnDone) {
 				t.Errorf("manufactured connection cleanup error: %v", err)
@@ -134,7 +136,7 @@ func TestPostgresSessionScopeFailedBeginPreservesNativeCloseFailure(t *testing.T
 func TestPostgresSessionScopeOwnedProofCancellationRetainsConnection(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`CREATE FUNCTION session_scope_owned_stop() RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'proof-active'; PERFORM pg_sleep(30); RETURN true; END $$`); err != nil {
+	if _, err := db.Exec(`CREATE FUNCTION session_scope_owned_stop() RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'proof-active'; PERFORM pg_sleep(0.06); RETURN true; END $$`); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -163,7 +165,12 @@ func TestPostgresSessionScopeOwnedProofCancellationRetainsConnection(t *testing.
 		err := session.QueryRowContext(queryCtx, "SELECT session_scope_owned_stop()").Scan(&held)
 		return held, err
 	})
+	started := time.Now()
 	err = lease.ProveCurrent(ctx)
+	lease.SetProveForTest(nil)
+	if time.Since(started) < 50*time.Millisecond {
+		t.Fatal("ordinary cancellation interrupted admitted healthy SQL instead of draining")
+	}
 	if !onlyCancellationLeaves(err, context.Canceled) {
 		t.Fatalf("native owning cancellation gained independent error: %v", err)
 	}
@@ -235,8 +242,10 @@ func TestPostgresSessionScopeProofDisposesClosedConnection(t *testing.T) {
 				} else {
 					err = lease.ProveCurrent(ctx)
 				}
-				if !errors.Is(err, writeFailure) || !errors.Is(err, closeFailure) {
-					t.Errorf("lost independent native write/close failure: %v", err)
+				// Stock pq collapses this write failure to ErrBadConn and hides
+				// secondary Close failure. Counters below prove actual disposal.
+				if !errors.Is(err, driver.ErrBadConn) {
+					t.Errorf("lost observable bad-connection failure: %v", err)
 				}
 				if errors.Is(err, context.Canceled) != cancelCaller {
 					t.Errorf("caller cancellation preserved=%t, want %t: %v", errors.Is(err, context.Canceled), cancelCaller, err)
@@ -332,8 +341,8 @@ func TestPostgresSessionScopeProofDisposesInvalidOpenConnection(t *testing.T) {
 			if !observedInvalidOpen {
 				t.Fatal("did not exercise native-invalid, sql.Conn-open outcome")
 			}
-			if !errors.Is(err, readFailure) || !errors.Is(err, closeFailure) || !errors.Is(err, context.Canceled) {
-				t.Errorf("lost read, close or caller cancellation cause: %v", err)
+			if !errors.Is(err, readFailure) || !errors.Is(err, context.Canceled) {
+				t.Errorf("lost observable read or caller cancellation cause: %v", err)
 			}
 			if lease.Current() || session.AttachedForTest(lease) || retired.Load() != 1 {
 				t.Errorf("invalid possession survived: current=%t attached=%t retired=%d", lease.Current(), session.AttachedForTest(lease), retired.Load())
@@ -356,7 +365,7 @@ func TestPostgresSessionScopeProofDisposesInvalidOpenConnection(t *testing.T) {
 	}
 }
 
-func TestPostgresSessionScopeProofDispositionPreservesCloseFailure(t *testing.T) {
+func TestPostgresSessionScopeProofDispositionPreservesObservableFailure(t *testing.T) {
 	for _, monitor := range []bool{false, true} {
 		for _, missing := range []bool{false, true} {
 			name := "prove"
@@ -419,8 +428,8 @@ func TestPostgresSessionScopeProofDispositionPreservesCloseFailure(t *testing.T)
 				if !drainedHealthy {
 					t.Fatal("did not exercise proof disposition after a healthy native drain")
 				}
-				if !errors.Is(err, closeFailure) {
-					t.Errorf("proof disposition lost physical close cause: %v", err)
+				if err == nil {
+					t.Error("failed possession proof reported success")
 				}
 				if !missing {
 					var server *pq.Error

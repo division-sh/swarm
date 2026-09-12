@@ -503,7 +503,13 @@ func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore,
 	if err := store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(ctx, tx, story, effects, lineage, now, confirmed, handoff); err != nil {
 		return err
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
+	if err := story.Finalize(ctx); err != nil {
+		return err
+	}
+	if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return handoff.Commit()

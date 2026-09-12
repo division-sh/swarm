@@ -58,8 +58,7 @@ func (pc *PipelineCoordinator) handleWorkflowGateDecisionEvent(ctx context.Conte
 	case decisioncard.AnchorKindStageGate:
 		return pc.handleStageGateDecisionCard(ctx, evt, card)
 	case decisioncard.AnchorKindHumanTask:
-		emitted, err := pc.handleHumanTaskDecisionCard(ctx, evt, card)
-		return emitted, runtimepipelineobligation.Continue(), err
+		return pc.handleHumanTaskDecisionCard(ctx, evt, card)
 	case decisioncard.AnchorKindProposedEffect:
 		return pc.handleProposedEffectDecisionCard(ctx, evt, card)
 	default:
@@ -135,20 +134,18 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 	committed, err := pc.workflowStore.decisionRoutes.CommitProposedEffectRoute(ctx, ProposedEffectRouteCommand{
 		CardID: card.CardID, RouteEventID: evt.ID(), OccurredAt: card.DecidedAt, Publication: plans[0],
 	})
-	if err != nil {
-		return nil, runtimepipelineobligation.Continue(), errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+	if committed.Publication == nil {
+		return nil, runtimepipelineobligation.Continue(), errors.Join(err, committed.Validate(), planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
-	if err := planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); err != nil {
-		return nil, runtimepipelineobligation.Continue(), err
+	if validationErr := committed.Validate(); validationErr != nil {
+		return nil, runtimepipelineobligation.ExecutionOutcome{Committed: true}, errors.Join(err, validationErr, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
+	err = errors.Join(err, planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}))
 	dispatcher := pc.bus.EngineDispatcher()
 	if dispatcher == nil {
-		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("proposed-effect route requires post-commit dispatcher")
+		return nil, runtimepipelineobligation.ExecutionOutcome{Committed: true}, errors.Join(err, fmt.Errorf("proposed-effect route requires post-commit dispatcher"))
 	}
-	if err := dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent}); err != nil {
-		return nil, runtimepipelineobligation.Continue(), err
-	}
-	return nil, runtimepipelineobligation.Continue(), nil
+	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: true}, errors.Join(err, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent}))
 }
 
 func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectContinuation, source events.RoutingSource) (runtimeengine.ActivityIntent, error) {
@@ -219,105 +216,107 @@ func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, con
 	return newWorkflowChildEvent(eventID, events.EventType(eventType), continuation.SourceTaskID, raw, parent.ChainDepth()+1, source, parent, envelope, card.DecidedAt.UTC())
 }
 
-func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Context, evt events.Event) ([]events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if pc == nil || pc.decisionCards == nil || pc.workflowStore == nil {
-		return nil, fmt.Errorf("decision-card runtime is not configured")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("decision-card runtime is not configured")
 	}
 	cardID, err := decisionCardLifecycleEventCardID(evt)
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	card, err := pc.decisionCards.GetDecisionCard(ctx, cardID)
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	if card.Status != decisioncard.StatusPending || card.DeferredUntil.IsZero() {
-		return nil, fmt.Errorf("mailbox.card_deferred does not match the authoritative card state")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("mailbox.card_deferred does not match the authoritative card state")
 	}
 	if card.Anchor.Kind() != decisioncard.AnchorKindHumanTask {
-		return nil, nil
+		return nil, runtimepipelineobligation.Continue(), nil
 	}
 	store := pc.humanTasks
 	if store == nil {
-		return nil, fmt.Errorf("human-task continuation store is not configured")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("human-task continuation store is not configured")
 	}
 	anchor, err := card.Anchor.HumanTask()
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	continuation, err := store.LoadHumanTaskContinuation(ctx, card.CardID)
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	if err := continuation.Validate(card); err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	if continuation.State != decisioncard.HumanTaskContinuationPending || !continuation.DeferredUntil.Equal(card.DeferredUntil) {
-		return nil, fmt.Errorf("mailbox.card_deferred does not match the authoritative human-task continuation")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("mailbox.card_deferred does not match the authoritative human-task continuation")
 	}
 	payload, err := canonicaljson.Bytes(map[string]any{
 		"card_id": card.CardID, "status": "deferred", "cause": continuation.DeferCause,
 		"resume_at": continuation.DeferredUntil.UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	productID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.deferred.v1\x00"+card.CardID+"\x00"+evt.ID())).String()
 	product, err := newWorkflowChildEvent(productID, "human_task.deferred", "", payload, evt.ChainDepth()+1, anchor.Source, evt,
 		humanTaskRequesterOutcomeEnvelope(continuation), evt.CreatedAt().UTC())
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
-	return nil, pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), evt.CreatedAt(), false)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), evt.CreatedAt(), false)
+	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
-func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Context, evt events.Event) ([]events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if pc == nil || pc.decisionCards == nil || pc.workflowStore == nil {
-		return nil, fmt.Errorf("decision-card runtime is not configured")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("decision-card runtime is not configured")
 	}
 	cardID, err := decisionCardLifecycleEventCardID(evt)
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	card, err := pc.decisionCards.GetDecisionCard(ctx, cardID)
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	if card.Anchor.Kind() != decisioncard.AnchorKindHumanTask || card.Status != decisioncard.StatusExpired {
-		return nil, fmt.Errorf("mailbox.card_expired does not match an authoritative expired human-task card")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("mailbox.card_expired does not match an authoritative expired human-task card")
 	}
 	store := pc.humanTasks
 	if store == nil {
-		return nil, fmt.Errorf("human-task continuation store is not configured")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("human-task continuation store is not configured")
 	}
 	anchor, err := card.Anchor.HumanTask()
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	continuation, err := store.LoadHumanTaskContinuation(ctx, card.CardID)
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	if err := continuation.Validate(card); err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	if continuation.OutcomeEventID != evt.ID() || (continuation.State != decisioncard.HumanTaskContinuationExpired && continuation.State != decisioncard.HumanTaskContinuationOutcomeDispatched) {
-		return nil, fmt.Errorf("mailbox.card_expired does not match the authoritative human-task continuation")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("mailbox.card_expired does not match the authoritative human-task continuation")
 	}
 	payload, err := canonicaljson.Bytes(map[string]any{
 		"card_id": card.CardID, "status": "expired", "cause": "deadline_elapsed",
 		"deadline_at": continuation.DeadlineAt.UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	productID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.expiry-outcome.v1\x00"+card.CardID+"\x00"+evt.ID())).String()
 	product, err := newWorkflowChildEvent(productID, "human_task.expired", "", payload, evt.ChainDepth()+1, anchor.Source, evt,
 		humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
-	return nil, pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
 func decisionCardLifecycleEventCardID(evt events.Event) (string, error) {
@@ -362,10 +361,8 @@ func (pc *PipelineCoordinator) handleStageGateDecisionCard(ctx context.Context, 
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
-	if err := pc.routeWorkflowGateDecision(ctx, card, evt, route, emitted); err != nil {
-		return nil, runtimepipelineobligation.Continue(), err
-	}
-	return nil, runtimepipelineobligation.Continue(), nil
+	committed, err := pc.routeWorkflowGateDecision(ctx, card, evt, route, emitted)
+	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
 func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card decisioncard.Card) (gateruntime.Route, error) {
@@ -414,14 +411,14 @@ func validateStageGateInstanceOwner(anchor decisioncard.StageGateAnchor, instanc
 	return nil
 }
 
-func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, error) {
+func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	store := pc.humanTasks
 	if store == nil {
-		return nil, fmt.Errorf("human-task continuation store is not configured")
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("human-task continuation store is not configured")
 	}
 	anchor, err := card.Anchor.HumanTask()
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	var eventType events.EventType
 	switch card.Verdict {
@@ -430,7 +427,7 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 	case "reject":
 		eventType = "human_task.rejected"
 	default:
-		return nil, fmt.Errorf("human-task card verdict %q is unsupported", card.Verdict)
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("human-task card verdict %q is unsupported", card.Verdict)
 	}
 	payload, err := canonicaljson.Bytes(map[string]any{
 		"card_id": card.CardID, "requester_agent_id": anchor.RequesterAgentID,
@@ -439,19 +436,20 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 		"decided_at": card.DecidedAt.UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	continuation, err := store.LoadHumanTaskContinuation(ctx, card.CardID)
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
 	productEventID := decisioncard.HumanTaskOutcomeEventID(card.CardID, evt.ID())
 	product, err := newWorkflowChildEvent(productEventID, eventType, "", payload, evt.ChainDepth()+1, anchor.Source, evt,
 		humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 	if err != nil {
-		return nil, err
+		return nil, runtimepipelineobligation.Continue(), err
 	}
-	return nil, pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+	committed, err := pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+	return nil, runtimepipelineobligation.ExecutionOutcome{Committed: committed}, err
 }
 
 func (pc *PipelineCoordinator) commitHumanTaskRoute(
@@ -463,13 +461,13 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 	routeEventID string,
 	occurredAt time.Time,
 	completeOutcome bool,
-) error {
+) (bool, error) {
 	if pc == nil || pc.workflowStore == nil || pc.workflowStore.decisionRoutes == nil {
-		return fmt.Errorf("human-task route requires the selected-store decision route owner")
+		return false, fmt.Errorf("human-task route requires the selected-store decision route owner")
 	}
 	planner, ok := pc.bus.(EnginePublicationPlanner)
 	if !ok {
-		return fmt.Errorf("human-task route requires the publication planner")
+		return false, fmt.Errorf("human-task route requires the publication planner")
 	}
 	intent := runtimeengine.EmitIntent{Event: product, Recipients: append([]string(nil), recipients...)}
 	if strings.TrimSpace(replyContextID) != "" {
@@ -477,11 +475,11 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 	}
 	plans, err := planner.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(plans) != 1 {
 		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
-		return errors.Join(fmt.Errorf("human-task route planner returned %d plans", len(plans)), releaseErr)
+		return false, errors.Join(fmt.Errorf("human-task route planner returned %d plans", len(plans)), releaseErr)
 	}
 	var committed CommittedHumanTaskRoute
 	if completeOutcome {
@@ -493,66 +491,67 @@ func (pc *PipelineCoordinator) commitHumanTaskRoute(
 			CardID: cardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
 		})
 	}
-	if err != nil {
-		return errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+	if committed.Publication == nil {
+		return false, errors.Join(err, committed.Validate(), planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
-	if err := planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); err != nil {
-		return err
+	if validationErr := committed.Validate(); validationErr != nil {
+		return true, errors.Join(err, validationErr, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
+	err = errors.Join(err, planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}))
 	dispatcher := pc.bus.EngineDispatcher()
 	if dispatcher == nil {
-		return fmt.Errorf("human-task route requires post-commit dispatcher")
+		return true, errors.Join(err, fmt.Errorf("human-task route requires post-commit dispatcher"))
 	}
-	return dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent})
+	return true, errors.Join(err, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent}))
 }
 
-func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, route gateruntime.Route, emitted *events.Event) error {
+func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, route gateruntime.Route, emitted *events.Event) (bool, error) {
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if pc.workflowStore == nil || pc.workflowStore.engineMutations == nil {
-		return fmt.Errorf("gate route requires the selected workflow engine mutation owner")
+		return false, fmt.Errorf("gate route requires the selected workflow engine mutation owner")
 	}
 	instanceRoute := anchor.Route
 	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(card.RunID, instanceRoute)
 	if err != nil {
-		return err
+		return false, err
 	}
 	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !found {
-		return fmt.Errorf("decision card workflow instance is missing")
+		return false, fmt.Errorf("decision card workflow instance is missing")
 	}
 	currentStage := strings.TrimSpace(instance.CurrentState)
 	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
-		return err
+		return false, err
 	}
 	activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
 	if err != nil {
-		return err
+		return false, err
 	}
 	nextStage := strings.TrimSpace(route.AdvancesTo)
 	if found && activation.ActivationID == anchor.StageActivationID && activation.CardID == card.CardID && activation.Status == gateruntime.StatusRouted && activation.DecisionEventID == evt.ID() {
 		if currentStage != nextStage {
-			return fmt.Errorf("routed decision card state does not match its frozen outcome")
+			return false, fmt.Errorf("routed decision card state does not match its frozen outcome")
 		}
-		return nil
+		return true, nil
 	}
 	if currentStage != anchor.Stage {
-		return fmt.Errorf("decision card stage is no longer current")
+		return false, fmt.Errorf("decision card stage is no longer current")
 	}
 	if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID {
-		return fmt.Errorf("decision card activation is no longer authoritative")
+		return false, fmt.Errorf("decision card activation is no longer authoritative")
 	}
 	if err := activation.Route(evt.ID(), evt.CreatedAt()); err != nil {
-		return err
+		return false, err
 	}
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
-		return err
+		return false, err
 	}
 	address := runtimeengine.StateAddress{
 		FlowID:       identity.NormalizeFlowID(anchor.FlowID),
@@ -564,19 +563,19 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		TriggeredAt: evt.CreatedAt(), StateCarrier: carrier,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(instanceRoute, address.EntityID, evt, currentStage, nextStage)
 	if err != nil {
-		return err
+		return false, err
 	}
 	lifecycle, err := pc.prepareWorkflowLifecycleMutation(ctx, address.FlowInstance, &preparedState.instance, []runtimeworkflowlifecycle.Effect{effect}, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	state, err := preparedState.record()
 	if err != nil {
-		return err
+		return false, err
 	}
 	var intents []runtimeengine.EmitIntent
 	var publications []runtimeengine.DurablePublicationPlan
@@ -584,46 +583,41 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		intents = []runtimeengine.EmitIntent{{Event: *emitted}}
 		planner, ok := pc.bus.(EnginePublicationPlanner)
 		if !ok {
-			return fmt.Errorf("gate route requires the publication planner")
+			return false, fmt.Errorf("gate route requires the publication planner")
 		}
 		publications, err = planner.PrepareEnginePublications(ctx, intents)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if len(publications) != 1 {
 			releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications)
-			return errors.Join(fmt.Errorf("gate route planner returned %d plans", len(publications)), releaseErr)
+			return false, errors.Join(fmt.Errorf("gate route planner returned %d plans", len(publications)), releaseErr)
 		}
 	}
 	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
 		State: state, GateRouteAdmissionRunID: card.RunID,
 		Lifecycle: lifecycle.Commit, Publications: publications,
 	})
-	if err != nil {
+	if !committed.Committed {
+		err = errors.Join(err, fmt.Errorf("workflow gate mutation has no acknowledged result"))
 		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
 			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
 		}
-		return err
+		return false, err
 	}
 	if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
-		if err := planner.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
-			return err
-		}
+		err = errors.Join(err, planner.FinalizeEnginePublications(ctx, committed.Publications))
 	}
-	if err := pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
-		return err
-	}
+	err = errors.Join(err, pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle))
 	if len(intents) > 0 {
 		dispatcher := pc.bus.EngineDispatcher()
 		if dispatcher == nil {
-			return fmt.Errorf("gate route requires the post-commit dispatcher")
+			return true, errors.Join(err, fmt.Errorf("gate route requires the post-commit dispatcher"))
 		}
-		if err := dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), intents); err != nil {
-			return err
-		}
+		err = errors.Join(err, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), intents))
 	}
 	pc.notifyTestEntityStateUpdated(anchor.EntityID, nextStage)
-	return nil
+	return true, err
 }
 
 func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, route gateruntime.Route) (*events.Event, error) {

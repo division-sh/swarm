@@ -12,10 +12,6 @@ func ReserveCandidateHandoff(ctx context.Context) (*CandidateHandoff, error) {
 	return storerunhandoff.ReserveCandidateHandoff(ctx)
 }
 
-func WithCandidateHandoff(ctx context.Context, fn func(*CandidateHandoff) error) error {
-	return storerunhandoff.WithCandidateHandoff(ctx, fn)
-}
-
-func WithCandidateHandoffResult[T any](ctx context.Context, fn func(*CandidateHandoff) (T, error)) (T, error) {
-	return storerunhandoff.WithCandidateHandoffResult(ctx, fn)
+func WithCandidateHandoffOutcomeResult[T any](ctx context.Context, fn func(*CandidateHandoff) (T, bool, error)) (T, error) {
+	return storerunhandoff.WithCandidateHandoffOutcomeResult(ctx, fn)
 }

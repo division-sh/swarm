@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -485,7 +486,7 @@ func commitWorkflowEngineMutation(
 	store eventCommitTxStore,
 	postgres bool,
 	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
 	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
 	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
 	requestCandidate func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error),
@@ -504,7 +505,7 @@ func commitWorkflowEngineMutation(
 		PostCommit:   command.PostCommit,
 	}
 	entityless := !command.EntitylessTarget.Empty()
-	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if runID := strings.TrimSpace(command.GateRouteAdmissionRunID); runID != "" {
 			if postgres {
 				err = gaterouteadapter.RequirePostgres(txctx, tx, runID)
@@ -641,22 +642,18 @@ func commitWorkflowEngineMutation(
 		}
 		return nil
 	})
-	if err != nil {
+	if !committed {
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 	}
-	if err := result.Validate(); err != nil {
-		return result, err
-	}
-	if err := handoff.Commit(); err != nil {
-		return result, err
-	}
-	return result, nil
+	result.Committed = true
+	result.Lifecycle.Committed = true
+	return result, errors.Join(err, result.Validate(), handoff.Commit())
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
 	effects := newRevisionEffects()
-	return commitWorkflowEngineMutation(ctx, s, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+	return commitWorkflowEngineMutation(ctx, s, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+		return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
 	}, reserveRunLifecycleCandidateHandoff, func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 		return reservation.Prepare(s.runLifecycleCandidates, result)
 	}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
@@ -666,8 +663,8 @@ func (s *PipelinePostgresOwner) CommitWorkflowEngineMutation(ctx context.Context
 
 func (s *PipelineSQLiteOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
 	effects := newRevisionEffects()
-	return commitWorkflowEngineMutation(ctx, s, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow engine mutation", effects, fn)
+	return commitWorkflowEngineMutation(ctx, s, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite workflow engine mutation", effects, fn)
 	}, reserveRunLifecycleCandidateHandoff, func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 		return reservation.Prepare(s.runLifecycleCandidates, result)
 	}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {

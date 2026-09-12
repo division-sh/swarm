@@ -26,12 +26,16 @@ type selectedRecoveryTxOwner interface {
 }
 
 func (s *RunForkPostgresOwner) ListSelectedForkRecoveryEntries(ctx context.Context) ([]runfork.SelectedForkRecoveryEntry, error) {
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	var entries []runfork.SelectedForkRecoveryEntry
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		entries, err = listSelectedForkRecoveryEntries(ctx, tx)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	return listSelectedForkRecoveryEntries(ctx, tx)
+	return entries, nil
 }
 
 func (s *RunForkSQLiteOwner) ListSelectedForkRecoveryEntries(ctx context.Context) ([]runfork.SelectedForkRecoveryEntry, error) {
@@ -80,39 +84,44 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 	if err := req.Validate(); err != nil {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
+	var result runfork.SelectedForkRecoveryResult
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
+		if err := admitSelectedRecoveryTx(ctx, tx, req, false); err != nil {
+			return err
+		}
+		snapshot, err := s.LoadSnapshotTx(ctx, tx, req.Entry.Binding.ForkRunID, true)
+		if err != nil {
+			return err
+		}
+		effects := runforkrevision.NewEffects()
+		result, err = recoverSelectedForkTx(ctx, tx, s, story, effects, snapshot, req, false)
+		if err != nil {
+			return err
+		}
+		if err := finalizeRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
+			return err
+		}
+		return nil
+	})
+	if !committed {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
-	defer tx.Rollback()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		return runfork.SelectedForkRecoveryResult{}, err
-	}
-	if err := admitSelectedRecoveryTx(ctx, tx, req, false); err != nil {
-		return runfork.SelectedForkRecoveryResult{}, err
-	}
-	snapshot, err := s.LoadSnapshotTx(ctx, tx, req.Entry.Binding.ForkRunID, true)
-	if err != nil {
-		return runfork.SelectedForkRecoveryResult{}, err
-	}
-	effects := runforkrevision.NewEffects()
-	result, err := recoverSelectedForkTx(ctx, tx, s, story, effects, snapshot, req, false)
-	if err != nil {
-		return runfork.SelectedForkRecoveryResult{}, err
-	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
-		return runfork.SelectedForkRecoveryResult{}, err
-	}
-	return result, nil
+	return result, err
 }
 
 func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
 	if err := req.Validate(); err != nil {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return runfork.SelectedForkRecoveryResult{}, err
+	}
 	var result runfork.SelectedForkRecoveryResult
-	err := s.runRuntimeMutation(ctx, "recover selected fork", func(ctx context.Context, tx *sql.Tx) error {
+	committed, err := s.backend.RunTransactionOutcome(ctx, "recover selected fork", func(ctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
@@ -134,10 +143,10 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 		}
 		return story.Finalize(ctx)
 	})
-	if err != nil {
+	if !committed {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
-	return result, nil
+	return result, err
 }
 
 func admitSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) error {
