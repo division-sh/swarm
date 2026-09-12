@@ -98,7 +98,7 @@ func publicationProjectionFindings(t *testing.T, overlay map[string][]byte) []st
 						return true
 					}
 					// Tool spelling is a representation, never declaration/schema authority.
-					if used.Name() == "LeafName" && pkg.PkgPath == "github.com/division-sh/swarm/internal/runtime/tools" && fn.Name.Name == "localEmitEventType" {
+					if used.Name() == "LeafName" && pkg.PkgPath == "github.com/division-sh/swarm/internal/runtime/tools" && pkg.TypesInfo.Defs[fn.Name] == pkg.Types.Scope().Lookup("localEmitEventType") {
 						return true
 					}
 					findings = append(findings, pkg.PkgPath+"."+fn.Name.Name+":"+used.Name())
@@ -109,4 +109,24 @@ func publicationProjectionFindings(t *testing.T, overlay map[string][]byte) []st
 	}
 	sort.Strings(findings)
 	return findings
+}
+
+func TestPublicationProjectionGuardRejectsSameNamedReceiverMethod(t *testing.T) {
+	root := agentNameGuardRepoRoot(t)
+	overlay := map[string][]byte{
+		filepath.Join(root, "internal/runtime/tools/publication_hostile_receiver.go"): []byte(`package tools
+import disguise "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+type unrelatedPublicationReceiver struct{}
+func (unrelatedPublicationReceiver) localEmitEventType(event string) string {
+	return disguise.LeafName(event)
+}
+`),
+	}
+	findings := publicationProjectionFindings(t, overlay)
+	for _, finding := range findings {
+		if strings.Contains(finding, ".localEmitEventType:LeafName") {
+			return
+		}
+	}
+	t.Fatalf("guard allowed a receiver method to borrow the exact function exception: %v", findings)
 }
