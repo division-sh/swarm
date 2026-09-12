@@ -80,6 +80,18 @@ func (a AuthoredSubscriptionAdmission) PersistedValue() string {
 	return a.persistedValue
 }
 
+// PersistedValueAt keeps wildcard grammar local across configuration readback;
+// concrete route patterns are execution evidence, not authored subscriptions.
+func (a AuthoredSubscriptionAdmission) PersistedValueAt(flowPath string) string {
+	if !a.Admitted() {
+		return ""
+	}
+	if a.Pattern() || a.consumerKind != AuthoredSubscriptionConsumerAgent {
+		return a.persistedValue
+	}
+	return a.RoutePatternsAt(flowPath)[0]
+}
+
 func (a AuthoredSubscriptionAdmission) RoutePatterns() []string {
 	return append([]string(nil), a.routePatterns...)
 }
@@ -219,7 +231,7 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 				fmt.Sprintf("%s %q subscription %q cannot be resolved in its declaring scope", req.ConsumerKind, req.ConsumerID, req.Authored))
 		}
 		result.class = AuthoredSubscriptionLocalPattern
-		result.persistedValue = pattern
+		result.persistedValue = req.Authored
 		result.routePatterns = []string{pattern}
 		return result
 	}

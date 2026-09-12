@@ -1229,7 +1229,7 @@ func buildFlowAgentBlueprint(
 		if !admission.Admitted() {
 			return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s: %s", key, admission.Message())
 		}
-		rendered = append(rendered, admission.RoutePatternsAt(flowPath)...)
+		rendered = append(rendered, admission.PersistedValueAt(flowPath))
 	}
 	rendered = dedupeStrings(rendered)
 
@@ -1450,7 +1450,7 @@ func buildStaticFlowAgentBlueprint(
 		if !admission.Admitted() {
 			return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s: %s", logicalID, admission.Message())
 		}
-		rendered = append(rendered, admission.RoutePatternsAt(flowPath)...)
+		rendered = append(rendered, admission.PersistedValueAt(flowPath))
 	}
 	rendered = dedupeStrings(rendered)
 

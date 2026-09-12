@@ -7922,6 +7922,7 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 				"ticket.created": {
 					AdvancesTo: "opened",
 					Action:     runtimecontracts.ActionSpec{ID: "emit_opened"},
+					Emit:       runtimecontracts.EmitSpec{Event: "ticket.opened"},
 					Guard:      &runtimecontracts.GuardSpec{ID: "allow_ticket"},
 				},
 			},
@@ -7962,8 +7963,8 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 			},
 			ActionByID: map[string]runtimecontracts.GuardActionEntry{
 				"emit_opened": {
-					ID:    "emit_opened",
-					Emits: "ticket.opened",
+					ID:              "emit_opened",
+					PlatformBuiltin: "record_evidence",
 				},
 			},
 			GuardByID: map[string]runtimecontracts.GuardActionEntry{

@@ -4879,6 +4879,53 @@ func TestBuildFlowAgentConfigRebasesAdmittedSameScopeExactToConcreteInstance(t *
 	}
 }
 
+func TestFlowAgentWildcardConfigurationSurvivesRecoveryAdmission(t *testing.T) {
+	source := semanticview.Wrap(testFlowBundle(t, ""))
+	localEvents := map[string]struct{}{"task.started": {}}
+	for _, dynamic := range []bool{false, true} {
+		t.Run(fmt.Sprintf("template_%t", dynamic), func(t *testing.T) {
+			entry := managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{
+				ID: "reviewer", Type: "generic", Subscriptions: []string{"task.*", "review/task.started"},
+			})
+			name := managerTestFlowAgentNamePlan(t, source, "review", "reviewer")
+			path := "review"
+			var cfg models.AgentConfig
+			var err error
+			if dynamic {
+				path = "review/inst-1"
+				cfg, err = buildFlowAgentConfig(managerIdentityTestRunID, source, name, "review", "inst-1", "ent-1", path, "reviewer", entry, nil, localEvents, nil)
+			} else {
+				cfg, err = buildStaticFlowAgentConfig(managerIdentityTestRunID, source, name, "review", path, "reviewer", entry, localEvents)
+			}
+			if err != nil {
+				t.Fatalf("materialization: %v", err)
+			}
+			for recovery := 0; recovery < 3; recovery++ {
+				wire, err := json.Marshal(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var recovered models.AgentConfig
+				if err := json.Unmarshal(wire, &recovered); err != nil {
+					t.Fatal(err)
+				}
+				admission, err := admitAgentConfigSubscriptions(source, &recovered, localEvents)
+				if err != nil {
+					t.Fatalf("recovery %d: %v", recovery, err)
+				}
+				want := []string{path + "/task.*", path + "/task.started"}
+				if !reflect.DeepEqual(admission.RoutePatterns(), want) {
+					t.Fatalf("recovery routes = %v, want %v", admission.RoutePatterns(), want)
+				}
+				if !reflect.DeepEqual(cfg.Subscriptions, recovered.Subscriptions) {
+					t.Fatalf("recovery rewrote subscriptions: %v -> %v", cfg.Subscriptions, recovered.Subscriptions)
+				}
+				cfg = recovered
+			}
+		})
+	}
+}
+
 func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t *testing.T) {
 	source := loadAgentPlatformDefaultsMaterializationSource(t)
 

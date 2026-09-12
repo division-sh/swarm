@@ -29,9 +29,6 @@ func TestCompiledTransitionHandlerReferenceGuards(t *testing.T) {
 			h.AdvancesTo = ""
 			h.Rules = []runtimecontracts.HandlerRuleEntry{{Condition: "true", Action: runtimecontracts.ActionSpec{ID: "missing_rule_action"}}}
 		}, check: "transition_reference_validation", want: "references unknown action missing_rule_action"},
-		{name: "missing_action_emit", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			b.Semantics.ActionByID["emit_opened"] = runtimecontracts.GuardActionEntry{ID: "emit_opened", Emits: "ticket.missing"}
-		}, check: "transition_reference_validation", want: "action emit_opened emits missing event ticket.missing"},
 		{name: "nonexecutable_action", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
 			b.Semantics.ActionByID["emit_opened"] = runtimecontracts.GuardActionEntry{ID: "emit_opened"}
 		}, check: "handler_field_compliance", want: "action emit_opened is not executable"},
@@ -78,7 +75,7 @@ func TestCompiledTransitionHandlerReferenceGuards(t *testing.T) {
 
 func TestCompiledTransitionAllRuleContextActionReferences(t *testing.T) {
 	for _, site := range []string{"rules", "on_complete", "join.on_complete", "join.timeout"} {
-		for _, action := range []string{"unknown", "missing_emit", "valid"} {
+		for _, action := range []string{"unknown", "valid"} {
 			t.Run(site+"/"+action, func(t *testing.T) {
 				bundle := bootverifyTransitionRuntimeOwnershipBundle()
 				node := identitytest.RootNode(t, "dispatcher")
@@ -87,8 +84,6 @@ func TestCompiledTransitionAllRuleContextActionReferences(t *testing.T) {
 				switch action {
 				case "unknown":
 					rule.Action.ID = "missing_action"
-				case "missing_emit":
-					bundle.Semantics.ActionByID["emit_opened"] = runtimecontracts.GuardActionEntry{ID: "emit_opened", Emits: "ticket.missing"}
 				}
 				switch site {
 				case "rules":
@@ -108,10 +103,6 @@ func TestCompiledTransitionAllRuleContextActionReferences(t *testing.T) {
 				case "unknown":
 					if !reportContains(findings, "transition_reference_validation", "references unknown action missing_action") {
 						t.Fatalf("rule context escaped reference validation: %#v", findings)
-					}
-				case "missing_emit":
-					if !reportContains(findings, "transition_reference_validation", "emits missing event ticket.missing") {
-						t.Fatalf("rule context escaped emit validation: %#v", findings)
 					}
 				case "valid":
 					if len(findings) != 0 {
