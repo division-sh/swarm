@@ -20,6 +20,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  complexity:
+    name: Exact-snapshot complexity ratchet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check independently measured base and head
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: go run ./cmd/swarm-complexity -event "$EVENT_NAME" -event-file "$GITHUB_EVENT_PATH" -evidence test-results/complexity
+      - name: Upload complexity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: complexity
+          path: test-results/complexity
+          if-no-files-found: error
+
   ci-plan:
     name: CI plan
     runs-on: ubuntu-latest
@@ -418,7 +443,7 @@ jobs:
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
     if: always()
-    needs: [ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, proof-unit, semantic-smoke, timing-budget]
+    needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, proof-unit, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -427,6 +452,9 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
+          complexity_result="${{ needs.complexity.result }}"
+          echo "- complexity: \`${complexity_result}\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$complexity_result" != success ]; then failed=1; fi
           for item in \
             "ci-plan:${{ needs.ci-plan.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
