@@ -9,7 +9,10 @@ the selected negative fixture dropped acknowledged event evidence; cancellation
 barriers expected SQL interruption instead of admitted drain; and SQL-mock
 expectations lacked E's activity-order fence. The fixes preserve product
 validation and existing owners. Focused pipeline activity and dual-store
-generation/reset/receiver fencing controls now pass. Final rerun remains pending.
+generation/reset/receiver fencing controls now pass, including the latter with
+race detection (46.577s). CLI read-window/validation and configured-monitor-deadline
+spec controls pass with TEST_POSTGRES_BIN supplied (0.423s). Final rerun remains
+pending; the full managed run is first in the shared capacity queue.
 
 ## Baseline and Boundary
 
