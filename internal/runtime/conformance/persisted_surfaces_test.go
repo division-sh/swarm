@@ -1732,7 +1732,11 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 	requireMutationSurface(t, db)
 
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	module := loadConformanceRuntimeWorkflowModule(t)
+	fixtureRoot := t.TempDir()
+	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: mutation-proof\nstages: {}\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/schema.yaml", "mode: singleton\nstages:\n  done: {initial: true, terminal: true}\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "mutation-flow/entities.yaml", "test_entity:\n  status: text\n")
+	module := loadConformanceWorkflowFixtureModule(t, fixtureRoot)
 	eventBus, err := newScopedTestEventBus(t, selected, durableConformanceEventBusOptions(selected, runtimebus.EventBusOptions{ContractBundle: module.source}))
 	if err != nil {
 		t.Fatalf("construct workflow mutation event bus: %v", err)

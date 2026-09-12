@@ -3573,6 +3573,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 
 func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
+	stages := runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}}}
 	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
 		ID: "selected_owner", Check: `_entity.id != ""`,
 	}}
@@ -3580,7 +3581,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		Path:  "child",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeStatic,
+			Mode: runtimecontracts.FlowModeStatic, StageDeclarations: stages,
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "route.start"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -3600,7 +3601,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: "mixed-route",
-			Mode: runtimecontracts.FlowModeStatic,
+			Mode: runtimecontracts.FlowModeStatic, StageDeclarations: stages,
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"route.start": {},
@@ -3662,6 +3663,9 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	admitted.Semantics = bundle.Semantics
 	admitted.FlowTree = bundle.FlowTree
 	admitted.FlowSchemas = bundle.FlowSchemas
+	if err := runtimecontracts.CompileWorkflowSemantics(admitted); err != nil {
+		t.Fatalf("compile mixed-route fixture: %v", err)
+	}
 	bundle = admitted
 	source := semanticview.Wrap(bundle)
 	return &fixtureWorkflowModule{
