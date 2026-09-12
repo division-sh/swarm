@@ -344,7 +344,7 @@ func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend stri
 		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
 	}
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID), at, executionmode.Mock)
+		events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	if len(input) == 1 {
 		event = input[0]
 	}

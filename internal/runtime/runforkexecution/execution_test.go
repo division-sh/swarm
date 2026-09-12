@@ -718,13 +718,21 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	t.Cleanup(lease.Release)
 
 	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
+	entityID := sourceRunID
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002200, 0).UTC()
-	seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
+	// The historical receiver owns this entity; external ingress has no producer
+	// ownership. The selected contract replaces this receiver with its root node.
+	historicalNode := mustRunForkRootNode("source-only-node")
+	historicalTarget := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID}
+	seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
 		"test_entity",
 		executionmode.Mock,
-		selectedExecutionEntitylessNodeRoute("source-only-node"), nil, loaded.SourceArtifactFact)
+		events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(historicalNode), Target: events.MustExistingEntityTarget(historicalTarget)}, nil,
+		events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), loaded.SourceArtifactFact)
+	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $2::uuid AND entity_id = $3::uuid`, sourceRunID, sourceRunID, entityID); err != nil {
+		t.Fatalf("bind historical root receiver: %v", err)
+	}
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -878,7 +886,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 
 	var forkReceipts, targetNodeDeliveries, sourceNodeDeliveries int
 	targetNodeID := runForkSourceNode(t, loaded.Source, "test-node").Key()
-	sourceNodeID := mustRunForkRootNode("source-only-node").Key()
+	sourceNodeID := historicalNode.Key()
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, forkEventID).Scan(&forkReceipts); err != nil {
 		t.Fatalf("count fork receipts: %v", err)
 	}
@@ -927,7 +935,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, result.Materialization.ForkRunID, entityID).Scan(&forkEntityState); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, result.Materialization.ForkRunID, result.Materialization.ForkRunID).Scan(&forkEntityState); err != nil {
 		t.Fatalf("load fork entity state: %v", err)
 	}
 	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != runfork.RunForkActivatedStatus || forkEntityState == "" {
@@ -5383,8 +5391,10 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	extraRoutes []events.DeliveryRoute,
 	sourceFacts ...runtimecorrelation.SourceArtifactFact,
 ) events.Event {
-	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
+	// This seed is external ingress. Historical entity rows and receiver routes
+	// are separate facts, not evidence that a template produced the event.
+	routingSource := events.NoRoutingSource()
+	envelope := events.EventEnvelope{}
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
@@ -5402,8 +5412,8 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(
 	extraRoutes []events.DeliveryRoute,
 	sourceFacts ...runtimecorrelation.SourceArtifactFact,
 ) events.Event {
-	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
+	routingSource := events.NoRoutingSource()
+	envelope := events.EventEnvelope{}
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		mode, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
