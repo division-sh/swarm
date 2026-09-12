@@ -38,6 +38,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -823,7 +824,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, db, selected := backend.setup(t)
-			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
+			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
@@ -917,7 +918,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, db, selected := backend.setup(t)
-			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
+			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
@@ -1067,7 +1068,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, db, selected := backend.setup(t)
-			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
+			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{

@@ -200,21 +200,7 @@ func TestCompiledInputNameUsesOnlyAdmittedCoordinates(t *testing.T) {
 }
 
 func TestConnectedRootInputUsesExactBindingForBothRootCoordinates(t *testing.T) {
-	root := t.TempDir()
-	files := map[string]string{
-		"schema.yaml":          "name: root-input\npins:\n  inputs:\n    events: [work.ready]\nconnect:\n  - {event: work.ready, from: producer, to: .}\n",
-		"producer/schema.yaml": "name: producer\nmode: static\npins:\n  outputs:\n    events: [work.ready]\n",
-		"producer/events.yaml": "work.ready:\n  value: text\n",
-	}
-	for name, body := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	root := canonicalrouting.CopyConnectedRootInput(t)
 	repo := repoRootForContractsTest(t)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
