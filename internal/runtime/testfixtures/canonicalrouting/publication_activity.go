@@ -60,6 +60,16 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	if approval {
 		activity += "        approval: {decision: approve_send}\n"
 		effect = "non_idempotent_write"
+		// Approval execution requires existing receiver state. A real upstream
+		// handler acquires it; the approval test must not seed a database row.
+		activity = strings.ReplaceAll(activity, "activity.requested", "activity.execute")
+		activity = "intake:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      data_accumulation:\n        writes: [{target_field: case_id, expression: payload.case_id}]\n      emit: {event: activity.execute, fields: {message: payload.message}}\n" + activity
+		declarations := "activity.execute:\n  message: text\n"
+		if !template {
+			declarations = request + declarations
+		}
+		writeClosedVariantFile(t, root, prefix+"events.yaml", declarations)
+		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: approval receiver identity}\n")
 	}
 	local := "local:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(results, ", ") + "]\n  event_handlers:\n"
 	for _, event := range results {

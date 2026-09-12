@@ -50,6 +50,28 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 					params := map[string]any{"event_name": inputName, "bundle_hash": rt.BundleHash,
 						"payload": map[string]any{"case_id": "alpha", "message": "exact-provider-input"}, "idempotency_key": "activity-seed"}
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+					defer func() {
+						if !t.Failed() {
+							return
+						}
+						rows, err := rt.DB.Query(`SELECT failure FROM dead_letters WHERE original_event_id IN (SELECT event_id FROM events WHERE run_id=$1)`, seed.RunID)
+						if err != nil {
+							t.Logf("failure readback: %v", err)
+							return
+						}
+						defer rows.Close()
+						for rows.Next() {
+							var failure string
+							if err := rows.Scan(&failure); err != nil {
+								t.Log(err)
+								return
+							}
+							t.Logf("activity failure: %s", failure)
+						}
+						if err := rows.Err(); err != nil {
+							t.Logf("failure readback: %v", err)
+						}
+					}()
 					var decisionParams map[string]any
 					if approval {
 						decisionParams = lifecycleGateDecisionParams(t, rt, seed.RunID, outcome)
