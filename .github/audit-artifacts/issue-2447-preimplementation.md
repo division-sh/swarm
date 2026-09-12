@@ -5,6 +5,14 @@ The binding implementation addendum is [issue-2447-approved-gate.md](issue-2447-
 and [the recorded issue ruling](https://github.com/division-sh/swarm/issues/2447#issuecomment-5648061668).
 Pending statements below describe the original submission, not current gate state.
 
+Implementation integration addendum: the repository-wide route-authority drift
+inventory also reads the new JSON artifact as searchable text. Its references to
+routing callable names are measurement metadata, not another complexity or runtime
+route interpreter. The exact baseline path is classified as a separate semantic
+concept in the existing inventory; no search exclusion or test assertion changes.
+The unchanged inventory guards and narrow/stale-audit negative controls prove this
+classification. The score/CI gate boundary is unchanged.
+
 Agent-g. Analysis baseline: `origin/master@90809b1cb55a4bb97655a199292dda338e722bf5`
 (merged #2446). Docs baseline: `fc0eb9500fb5a0c63603dabdc6efad23971e1a53`.
 Status: **independent gate requested, not approved; no implementation started**.
