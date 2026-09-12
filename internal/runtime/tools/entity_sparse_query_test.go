@@ -28,7 +28,7 @@ func TestEntityInternalQuerySparseBothStores(t *testing.T) {
 				mustCreateEntityID(t, ctx, executor, map[string]any{"flow_instance": "review/inst-1", "fields": fields})
 			}
 			for _, tool := range []string{"query_entities", "query_metrics"} {
-				for _, filter := range []string{`!has(fields.score)`, `has(fields.score) && fields.score == 0`, `fields.?score.orValue(-1) == -1`, `has(fields.label) && fields.label == "" && has(fields.enabled) && !fields.enabled`} {
+				for _, filter := range []string{`!has(fields.score)`, `has(fields.score) && fields.score == 0`, `has(fields.score) && score == 0`, `fields.?score.orValue(-1) == -1`, `has(fields.label) && fields.label == "" && has(fields.enabled) && !fields.enabled`} {
 					out, err := executor.Execute(ctx, tool, map[string]any{"filter": filter, "metric": "count", "limit": 100})
 					if err != nil {
 						t.Fatalf("%s %s: %v; cause=%v", tool, filter, err, errors.Unwrap(err))

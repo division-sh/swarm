@@ -3036,10 +3036,13 @@ runtime_enforcement:
       declared field paths must resolve to declared scalar or enum leaves.
       `entity.*` is not accepted as a filter selector root on this projection
       surface. Composite whole-value comparison is not part of Wave 1.
-      Concrete-value predicates require a non-null operand. A row with an
-      absent selected leaf does not match any concrete-value comparison,
+      System-node query condition comparisons require a non-null operand. A
+      row with an absent selected leaf does not match a concrete comparison,
       including inequality; absence is never compared as nil, zero or text.
-      Explicit absence-aware collection filters use stock CEL presence operations.
+      CEL filter readers use stock presence operations to decide omission;
+      an evaluated unassigned read fails closed rather than acquiring a
+      fabricated comparison value. The fields envelope supports has and
+      optional selection; bare aliases retain the same business value types.
     handler_expression_rule: |
       `query_entities(...).count` used inside handler boolean expressions
       (guards, rules/on_complete conditions, and join completion
