@@ -148,17 +148,7 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 }
 
 func TestNestedChildToRootReceiverUsesSelectedOwner(t *testing.T) {
-	source := connectRoutePlanSingletonProducerRootReceiverSource(t)
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("root-return source does not expose its semantic bundle")
-	}
-	scout, ok := bundle.FlowViewByID("scout")
-	if !ok {
-		t.Fatal("root-return source is missing scout flow")
-	}
-	scout.Path = "left/child/scout"
-	source = semanticview.Wrap(bundle)
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyNestedSingletonOutputRootConnect(t))
 	runID := uuid.NewString()
 	rootEntityID := eventtest.UUID("nested-root-selected-owner")
 	store := newTargetRouteMemoryStore()
@@ -171,7 +161,7 @@ func TestNestedChildToRootReceiverUsesSelectedOwner(t *testing.T) {
 		t.Fatalf("create EventBus: %v", err)
 	}
 	sourceRoute := events.RouteIdentity{
-		FlowID: "scout", FlowInstance: "left/child/scout", EntityID: eventtest.UUID("nested-root-source-owner"),
+		FlowID: "left/child/scout", FlowInstance: "left/child/scout", EntityID: eventtest.UUID("nested-root-source-owner"),
 	}.Normalized()
 	routingSource, err := events.NewStaticFlowRoutingSource(sourceRoute)
 	if err != nil {
