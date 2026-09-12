@@ -21394,6 +21394,10 @@ test_specification:
           current run through mailbox.list, load its immutable content hash
           through mailbox.get, and call mailbox.decide. Zero or multiple matches
           and stale content fail closed before mutation.
+          Exact-one selection consumes every mailbox.list page, forwarding each
+          returned cursor unchanged with the same filters. Validate every page
+          and reject repeated or cyclic continuations and later-page failures
+          before mailbox.get or mutation; a first-page match is not uniqueness.
       mailbox_defer:
         syntax: "`mailbox.defer` with match, until, and optional idempotency_key."
         owner: /v1/rpc mailbox.defer
@@ -21402,6 +21406,9 @@ test_specification:
           and call mailbox.defer with an RFC3339 timestamp or deterministic CEL
           expression resolving to one. Zero or multiple matches fail closed
           before mutation.
+          Selection uses the same complete, validated mailbox.list traversal as
+          mailbox_decide, including unchanged cursors, retained filters and
+          fail-closed repeated/cyclic or failing continuation admission.
       unsupported_actions:
       - direct database writes
       - direct EventBus publish

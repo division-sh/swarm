@@ -2292,53 +2292,65 @@ func (r scenarioRunner) findDecisionCard(ctx context.Context, evaluator *scenari
 			}
 		}
 	}
-	var result mailboxListResult
-	if err := r.client.call(ctx, "mailbox.list", params, &result); err != nil {
-		return "", "", err
-	}
-	if err := validateMailboxListResult(result); err != nil {
-		return "", "", err
-	}
 	matches := make([]mailboxDecisionCardSummary, 0)
-	for _, item := range result.Items {
-		if item.Kind != "decision_card" || item.DecisionCard == nil {
-			continue
+	seen := make(map[string]struct{})
+	// Uniqueness is a property of the complete public match set, not a page.
+	for {
+		var result mailboxListResult
+		if err := r.client.call(ctx, "mailbox.list", params, &result); err != nil {
+			return "", "", err
 		}
-		card := *item.DecisionCard
-		if card.AnchorKind != anchorKind {
-			continue
+		if err := validateMailboxListResult(result); err != nil {
+			return "", "", err
 		}
-		if expected := evaluatedMatch["card_id"]; expected != "" && card.CardID != expected {
-			continue
+		for _, item := range result.Items {
+			if item.Kind != "decision_card" || item.DecisionCard == nil {
+				continue
+			}
+			card := *item.DecisionCard
+			if card.AnchorKind != anchorKind {
+				continue
+			}
+			if expected := evaluatedMatch["card_id"]; expected != "" && card.CardID != expected {
+				continue
+			}
+			if expected := evaluatedMatch["entity_id"]; expected != "" && card.Scope.EntityID != expected {
+				continue
+			}
+			if expected := evaluatedMatch["flow_instance"]; expected != "" && card.Scope.FlowInstance != expected {
+				continue
+			}
+			if expected := evaluatedMatch["decision"]; expected != "" && card.Decision != expected {
+				continue
+			}
+			if expected := evaluatedMatch["stage"]; expected != "" && card.Anchor.Stage != expected {
+				continue
+			}
+			if expected := evaluatedMatch["requester_agent_id"]; expected != "" && card.Anchor.RequesterAgentID != expected {
+				continue
+			}
+			if expected := evaluatedMatch["category"]; expected != "" && card.Category != expected {
+				continue
+			}
+			if expected := evaluatedMatch["request_event_id"]; expected != "" && card.Anchor.RequestEventID != expected {
+				continue
+			}
+			if expected := evaluatedMatch["activity_id"]; expected != "" && card.Anchor.ActivityID != expected {
+				continue
+			}
+			if expected := evaluatedMatch["scope"]; expected != "" && card.Scope.Kind != expected {
+				continue
+			}
+			matches = append(matches, card)
 		}
-		if expected := evaluatedMatch["entity_id"]; expected != "" && card.Scope.EntityID != expected {
-			continue
+		if result.NextCursor == "" {
+			break
 		}
-		if expected := evaluatedMatch["flow_instance"]; expected != "" && card.Scope.FlowInstance != expected {
-			continue
+		if _, exists := seen[result.NextCursor]; exists {
+			return "", "", fmt.Errorf("malformed mailbox.list result: repeated next_cursor %q", result.NextCursor)
 		}
-		if expected := evaluatedMatch["decision"]; expected != "" && card.Decision != expected {
-			continue
-		}
-		if expected := evaluatedMatch["stage"]; expected != "" && card.Anchor.Stage != expected {
-			continue
-		}
-		if expected := evaluatedMatch["requester_agent_id"]; expected != "" && card.Anchor.RequesterAgentID != expected {
-			continue
-		}
-		if expected := evaluatedMatch["category"]; expected != "" && card.Category != expected {
-			continue
-		}
-		if expected := evaluatedMatch["request_event_id"]; expected != "" && card.Anchor.RequestEventID != expected {
-			continue
-		}
-		if expected := evaluatedMatch["activity_id"]; expected != "" && card.Anchor.ActivityID != expected {
-			continue
-		}
-		if expected := evaluatedMatch["scope"]; expected != "" && card.Scope.Kind != expected {
-			continue
-		}
-		matches = append(matches, card)
+		seen[result.NextCursor] = struct{}{}
+		params["cursor"] = result.NextCursor
 	}
 	if len(matches) != 1 {
 		return "", "", fmt.Errorf("decision-card match for run %s returned %d items, want exactly one", runID, len(matches))
