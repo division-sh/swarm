@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -31,8 +30,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			})
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "static-fork"}
-			var fork, duplicate apiv1.RunForkExecutionResult
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
+			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
 			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("invalid static fork result: %+v", fork)
 			}
@@ -66,7 +64,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			}
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
 			childBefore := lifecycleStoredSnapshot(t, rt, fork.ForkRunID)
-			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
+			duplicate := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
 			if !reflect.DeepEqual(fork, duplicate) || lifecycleStoredSnapshot(t, rt, seed.RunID) != before || lifecycleStoredSnapshot(t, rt, fork.ForkRunID) != childBefore {
 				t.Fatal("duplicate fork changed child evidence or source state")
 			}
