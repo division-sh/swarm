@@ -324,20 +324,77 @@ func (b *WorkflowContractBundle) GeneratedActivityEventEntries() map[string]Even
 		return nil
 	}
 	out := map[string]EventCatalogEntry{}
+	for _, record := range b.generatedActivityDeclarationRecords() {
+		out[record.qualifiedName] = record.entry
+	}
+	return out
+}
+
+// Generated records retain the declaring flow before any catalog projection.
+// A global event-name map cannot establish ownership for a scoped lookup.
+func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() []currentEventDeclarationRecord {
+	var out []currentEventDeclarationRecord
 	for _, site := range b.ActivitySites() {
 		tool, ok := b.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
 		if !ok {
 			continue
 		}
 		events := ActivityResultEventsForSite(site)
-		out[events.SuccessEvent] = ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusSucceeded)
-		out[events.FailureEvent] = ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusFailed)
+		entries := map[string]EventCatalogEntry{
+			events.SuccessEvent: ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusSucceeded),
+			events.FailureEvent: ActivityResultEventCatalogEntry(site, tool, ActivityResultStatusFailed),
+		}
+		schemas := ActivityResultEventSchemasForSite(site, tool)
 		if site.Spec.Approval != nil {
-			out[events.RevisionRequested] = ActivityApprovalEventCatalogEntry(site, true)
-			out[events.Rejected] = ActivityApprovalEventCatalogEntry(site, false)
+			entries[events.RevisionRequested] = ActivityApprovalEventCatalogEntry(site, true)
+			entries[events.Rejected] = ActivityApprovalEventCatalogEntry(site, false)
+			schemas[events.RevisionRequested] = activityApprovalEventSchema(true)
+			schemas[events.Rejected] = activityApprovalEventSchema(false)
+		}
+		for _, name := range sortedContractKeys(entries) {
+			entry := entries[name]
+			properties, _ := schemas[name].Schema["properties"].(map[string]any)
+			for fieldName, field := range entry.Payload.Properties {
+				raw, _ := properties[fieldName].(map[string]any)
+				exact, err := AdmitToolInputSchemaMap(raw)
+				if err != nil {
+					panic(fmt.Sprintf("generated activity schema %s.%s: %v", name, fieldName, err))
+				}
+				field.ExactSchema = &exact
+				entry.Payload.Properties[fieldName] = field
+			}
+			out = append(out, currentEventDeclarationRecord{flowPath: site.Node.FlowPath(), qualifiedName: name, entry: entry})
 		}
 	}
 	return out
+}
+
+func (b *WorkflowContractBundle) generatedActivityDeclaration(flowID, eventType string) (EventCatalogEntry, string, bool) {
+	if flowID == "" {
+		flowID = "."
+	}
+	flow, err := runtimeidentity.AdmitFlowIdentity(flowID)
+	if err != nil {
+		return EventCatalogEntry{}, "", false
+	}
+	requested := eventidentity.Normalize(eventType)
+	var selected currentEventDeclarationRecord
+	found := false
+	for _, record := range b.generatedActivityDeclarationRecords() {
+		owner, err := runtimeidentity.AdmitFlowIdentity(record.flowPath)
+		if err != nil || owner != flow {
+			continue
+		}
+		local := eventidentity.LeafName(record.qualifiedName)
+		if requested != record.qualifiedName && requested != local {
+			continue
+		}
+		if found {
+			return EventCatalogEntry{}, "", false
+		}
+		selected, found = record, true
+	}
+	return selected.entry, selected.qualifiedName, found
 }
 
 func (b *WorkflowContractBundle) GeneratedActivityEventSchemas() map[string]EventSchema {
@@ -345,19 +402,8 @@ func (b *WorkflowContractBundle) GeneratedActivityEventSchemas() map[string]Even
 		return nil
 	}
 	out := map[string]EventSchema{}
-	for _, site := range b.ActivitySites() {
-		tool, ok := b.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
-		if !ok {
-			continue
-		}
-		for eventType, schema := range ActivityResultEventSchemasForSite(site, tool) {
-			out[eventType] = schema
-		}
-		if site.Spec.Approval != nil {
-			events := ActivityResultEventsForSite(site)
-			out[events.RevisionRequested] = activityApprovalEventSchema(true)
-			out[events.Rejected] = activityApprovalEventSchema(false)
-		}
+	for _, record := range b.generatedActivityDeclarationRecords() {
+		out[record.qualifiedName] = eventSchemaFromCatalogEntry(record.qualifiedName, record.entry, TypeCatalogDocument{})
 	}
 	return out
 }

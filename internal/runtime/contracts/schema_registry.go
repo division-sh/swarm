@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -126,11 +125,16 @@ func EventSchemaForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType s
 	if bundle == nil || eventType == "" {
 		return EventSchema{}, "", false
 	}
+	if _, ok := bundle.exactFlowEventDeclarationView(flowID); !ok {
+		return EventSchema{}, "", false
+	}
+	if compiled, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType); err != nil {
+		return EventSchema{}, "", false
+	} else if ok {
+		return compiled.EventSchema(), compiled.EventName(), true
+	}
 	entry, key, types, ok := effectiveEventDeclarationForFlowEvent(bundle, flowID, eventType)
 	if !ok {
-		if schema, generatedOK := bundle.GeneratedActivityEventSchemas()[eventidentity.Normalize(eventType)]; generatedOK {
-			return schema, eventidentity.Normalize(eventType), true
-		}
 		return EventSchema{}, "", false
 	}
 	return eventSchemaFromCatalogEntry(key, entry, types), key, true

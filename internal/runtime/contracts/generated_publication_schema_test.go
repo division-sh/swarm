@@ -1,6 +1,9 @@
 package contracts
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -57,6 +60,79 @@ func TestGeneratedPublicationSchemaOwnershipDoesNotBorrowSibling(t *testing.T) {
 				if schema.FlowPath() == flow && strings.Contains(schema.EventName(), "send.") {
 					t.Errorf("generated activity became importable: %+v", schema)
 				}
+			}
+		})
+	}
+}
+
+func TestGeneratedPublicationSchemaExactCoordinatesAndReadback(t *testing.T) {
+	for _, mode := range []string{"root", "static", "template", "nested_template"} {
+		t.Run(mode, func(t *testing.T) {
+			root := canonicalrouting.CopyPublicationActivity(t, mode, "http://127.0.0.1:1/send", true)
+			flow := map[string]string{"root": ".", "static": "source", "template": "source", "nested_template": "outer/source"}[mode]
+			// Rename only the connected delivery. The producer and incompatible
+			// sibling keep their declaration spelling and must remain independent.
+			path := filepath.Join(root, "schema.yaml")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := "event: send.succeeded, from: " + flow + ", to: sink"
+			if strings.Count(string(raw), before) != 1 {
+				t.Fatal("missing exact connect to rename")
+			}
+			if err := os.WriteFile(path, []byte(strings.Replace(string(raw), before, before+", rename: delivery.observed", 1)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"schema.yaml", "nodes.yaml"} {
+				path = filepath.Join(root, "sink", name)
+				raw, err = os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(raw), "send.succeeded", "delivery.observed")), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			producer, ok, err := bundle.ResolveCompiledFlowEventSchema(flow, "send.succeeded")
+			if err != nil || !ok {
+				t.Fatalf("producer=%t %v", ok, err)
+			}
+			receiver, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema("sink", "delivery.observed")
+			if err != nil || !ok || receiver.FlowPath() != producer.FlowPath() || receiver.EventName() != producer.EventName() || receiver.AcceptanceSchemaDigest() != producer.AcceptanceSchemaDigest() {
+				t.Fatalf("renamed receiver lost exact source: producer=%#v receiver=%#v found=%t err=%v", producer, receiver, ok, err)
+			}
+			for _, absent := range []string{"absent", flow + "/not-a-declaration"} {
+				if _, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(absent, producer.EventName()); ok || err != nil {
+					t.Fatalf("non-owner %s admitted: %t %v", absent, ok, err)
+				}
+			}
+			if flow != "." {
+				if _, ok, _ := bundle.ResolveCompiledFlowEventSchema("sibling", producer.EventName()); ok {
+					t.Fatal("sibling borrowed qualified producer")
+				}
+			} else {
+				alias, ok, err := bundle.ResolveCompiledFlowEventSchema("", "send.succeeded")
+				if err != nil || !ok || alias.FlowPath() != "." || alias.AcceptanceSchemaDigest() != producer.AcceptanceSchemaDigest() {
+					t.Fatal("empty/dot root diverged")
+				}
+			}
+			beforeSchema := producer.EventSchema()
+			mutated := receiver.EventSchema()
+			mutated.Schema["properties"].(map[string]any)["activity_id"].(map[string]any)["type"] = "integer"
+			mutated.CitationFields["injected"] = CriteriaCitation{}
+			if !reflect.DeepEqual(beforeSchema, producer.EventSchema()) || !reflect.DeepEqual(beforeSchema, receiver.EventSchema()) {
+				t.Fatal("readback mutation crossed schema owner")
+			}
+			result, ok := producer.StructuralField("result")
+			delivered, fieldOK := result.Type.Field("delivered")
+			if !ok || !fieldOK || delivered.IsOptional || delivered.Type.Kind != "boolean" {
+				t.Fatalf("tool output structural type lost: %#v", result)
 			}
 		})
 	}

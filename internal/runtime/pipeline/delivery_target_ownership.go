@@ -32,20 +32,31 @@ type DeliveryTargetAvailability struct {
 	inactive bool
 }
 
+// TerminalReceiverError is a proven receiver-state refusal, not an inactive
+// lifecycle or storage failure. Wrapping must preserve this typed cause.
+type TerminalReceiverError struct {
+	FlowID string
+	Stage  string
+}
+
+func (e *TerminalReceiverError) Error() string {
+	return fmt.Sprintf("receiver target owner is unavailable: terminal state %q in flow %q", e.Stage, e.FlowID)
+}
+
 func NewDeliveryTargetAvailability(stage, status string, terminated bool) DeliveryTargetAvailability {
 	return DeliveryTargetAvailability{stage: strings.TrimSpace(stage), inactive: terminated || !strings.EqualFold(strings.TrimSpace(status), "active")}
 }
 
 func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID string) error {
-	if a.inactive {
-		return fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
-	}
 	if source != nil {
 		for _, terminal := range source.FlowTerminalStages(flowID) {
 			if strings.EqualFold(strings.TrimSpace(terminal), a.stage) {
-				return fmt.Errorf("receiver target owner is unavailable: terminal state %q", a.stage)
+				return &TerminalReceiverError{FlowID: flowID, Stage: a.stage}
 			}
 		}
+	}
+	if a.inactive {
+		return fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
 	}
 	return nil
 }

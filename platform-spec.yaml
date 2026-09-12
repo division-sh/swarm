@@ -12089,8 +12089,20 @@ flow_model:
       concrete declaration.
   compiled_event_schema_projection:
     status: implemented_recursive_structural_presence
-    owner: internal/runtime/contracts.WorkflowContractBundle.CompiledEventSchemas
-    rule: Downstream compilers consume one immutable admitted CompiledEventSchema projection and never inspect events.yaml, EventCatalogEntry maps, retired required lists, route aliases, or generated-event registries directly. The projection enumerates only exact authored declarations after filesystem-flow and event admission, in canonical (flow_path, qualified_event_name) order. Pattern declarations, generated events, provider mappings, and noncanonical receiver restatements do not become declaration identities.
+    owner: internal/runtime/contracts.WorkflowContractBundle.ResolveEffectiveCompiledFlowEventSchema
+    rule: >-
+      Runtime consumers use one immutable admitted CompiledEventSchema projection for the exact owning flow and
+      event, including compiler-generated activity results and approvals. Receiver schemas derive only from that
+      receiver's admitted input pin and connected producer evidence, including intrinsic carries. Missing or wrong
+      flow ownership fails closed; raw generated-name rescue, all-flow lookup and unique-sibling guessing are forbidden.
+      Downstream compilers never inspect events.yaml, EventCatalogEntry maps, retired required lists, route aliases,
+      or generated-event registries to reconstruct that evidence. Tool descriptions/citations remain mutation-isolated
+      readback metadata and do not enter acceptance-schema identity.
+    resource_enumeration: >-
+      CompiledEventSchemas enumerates only exact authored resource-eligible declarations in canonical
+      (flow_path, qualified_event_name) order. Runtime generated-schema availability never makes a generated,
+      platform or pattern event importable and never grants publication or actor authorization. Provider imports
+      retain their typed admitted input-pin evidence; they do not authorize a global fallback.
     fields: Each declaration carries its canonical flow path and qualified authored event name, authored classification, a closed ordered recursive structural field set with admitted semantic schema and optionality on every named-record field edge, an optional already-admitted scalar business key, canonical acceptance-schema bytes and digest, and diagnostic source provenance. Diagnostic source is never identity or hash input. Readbacks are mutation-isolated.
     canonical_schema_owner: >-
       internal/runtime/contracts eventSchemaFromCatalogEntry lowers admitted type meaning;
@@ -32725,6 +32737,13 @@ api_specification:
             enum:
             - publish
           reason:
+            description: A proven terminal receiver entity is receiver_entity_terminal and retryable is false. Lifecycle inactivity and infrastructure failures are not classified as terminal by message matching. Terminal run admission retains the distinct RUN_ALREADY_TERMINAL code.
+            type: string
+          flow_id:
+            description: Exact flow owning the terminal receiver, present for receiver_entity_terminal.
+            type: string
+          stage:
+            description: Proven terminal receiver stage, present for receiver_entity_terminal.
             type: string
       PAYLOAD_VALIDATION_FAILED:
         type: object

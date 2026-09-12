@@ -190,19 +190,19 @@ func validateActivityResultEventNameCollisions(source semanticview.Source) []err
 		return nil
 	}
 	authored := map[string]string{}
-	addAuthoredEvents := func(entries map[string]runtimecontracts.EventCatalogEntry, owner string) {
-		for eventType := range entries {
-			normalized := eventidentity.Normalize(eventType)
-			if normalized == "" {
-				continue
-			}
-			if _, exists := authored[normalized]; !exists {
-				authored[normalized] = owner
-			}
-		}
+	// The effective flat catalog includes connected delivery projections; those
+	// are consumers, not a second authored producer at the generated name.
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return []error{fmt.Errorf("activity collision validation requires admitted declaration evidence")}
 	}
-	addAuthoredEvents(source.AuthoredEventEntries(), "authored event")
-	addAuthoredEvents(source.AuthoredResolvedEventCatalog(), "authored resolved event")
+	schemas, err := bundle.CompiledEventSchemas()
+	if err != nil {
+		return []error{err}
+	}
+	for _, schema := range schemas {
+		authored[schema.EventName()] = "authored event"
+	}
 
 	var errs []error
 	generated := map[string]string{}

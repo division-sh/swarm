@@ -384,10 +384,7 @@ func (b *WorkflowContractBundle) resolveAuthoredExecutableNodeEventCatalogEntry(
 			return entry, key, true
 		}
 	}
-	if entry, ok := b.GeneratedActivityEventEntries()[canonical]; ok {
-		return entry, canonical, true
-	}
-	return EventCatalogEntry{}, "", false
+	return b.generatedActivityDeclaration(ref.FlowPath(), canonical)
 }
 
 func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeidentity.ExecutableNode, pattern string) string {
@@ -709,15 +706,7 @@ func (b *WorkflowContractBundle) resolveAuthoredFlowEventCatalogEntry(flowID, ev
 			return entry, canonicalKey, true
 		}
 	}
-	if entry, ok := b.GeneratedActivityEventEntries()[rawKey]; ok {
-		return entry, rawKey, true
-	}
-	if resolvedKey != rawKey {
-		if entry, ok := b.GeneratedActivityEventEntries()[resolvedKey]; ok {
-			return entry, resolvedKey, true
-		}
-	}
-	return EventCatalogEntry{}, "", false
+	return b.generatedActivityDeclaration(flowID, eventType)
 }
 
 func (b *WorkflowContractBundle) exactFlowEventDeclarationView(flowID string) (*FlowContractView, bool) {

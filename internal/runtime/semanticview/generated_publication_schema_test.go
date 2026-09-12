@@ -38,8 +38,12 @@ func TestGeneratedPublicationStructuralSchemaPreservesExactOwner(t *testing.T) {
 					t.Run(receiver+"/"+local, func(t *testing.T) {
 						resolution := ResolveEventSchema(source, receiver, local)
 						field, ok := resolution.Field("activity_id")
-						if !ok || field.Type.Kind != "string" || resolution.Classification != contracts.CompiledEventSchemaGenerated {
+						if !ok || field.Type.Kind != "text" || field.IsOptional || resolution.Classification != contracts.CompiledEventSchemaGenerated || resolution.CompiledSchema.FlowPath() != flow || resolution.CompiledSchema.EventName() != qualified {
 							t.Fatalf("structural schema borrowed another owner: found=%t kind=%q class=%q compiled_flow=%q compiled_event=%q", ok, field.Type.Kind, resolution.Classification, resolution.CompiledSchema.FlowPath(), resolution.CompiledSchema.EventName())
+						}
+						properties := resolution.Schema.Schema["properties"].(map[string]any)
+						if properties["activity_id"].(map[string]any)["type"] != "string" {
+							t.Fatal("structural text did not preserve JSON string semantics")
 						}
 					})
 				}

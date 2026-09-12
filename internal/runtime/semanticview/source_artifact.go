@@ -269,25 +269,8 @@ func (s bundleSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (ru
 	return s.bundle.EffectiveEventCatalogEntryForFlowEvent(flowID, eventType)
 }
 func (s bundleSource) ResolveFlowEventStructuralType(flowID, eventType string) (runtimecontracts.ResolvedCatalogType, bool) {
-	if compiled, ok, err := s.bundle.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType); err == nil && ok {
-		if structural, owned := compiled.StructuralType(); owned {
-			return structural, true
-		}
-	}
-	schema, _, ok := runtimecontracts.EventSchemaForFlowEvent(s.bundle, flowID, eventType)
-	if !ok {
-		return runtimecontracts.ResolvedCatalogType{}, false
-	}
-	structural, err := runtimecontracts.ResolveJSONSchemaStructuralType(schema.Schema, "event."+strings.TrimSpace(eventType))
-	if err != nil {
-		return runtimecontracts.ResolvedCatalogType{}, false
-	}
-	for index := range structural.Fields {
-		if strings.TrimSpace(structural.Fields[index].TypeRef) == "" {
-			structural.Fields[index].TypeRef = runtimecontracts.StructuralCatalogTypeSyntax(structural.Fields[index].Type)
-		}
-	}
-	return structural, true
+	resolved := ResolveEventSchema(s, flowID, eventType)
+	return resolved.StructuralType, resolved.HasStructural
 }
 func (s bundleSource) DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic {
 	return s.bundle.DerivedHandlerTransitions()

@@ -92,6 +92,7 @@ type compiledEventSchemaValue struct {
 	acceptanceSchemaDigest string
 	source                 CompiledEventSchemaSource
 	structuralType         ResolvedCatalogType
+	readback               EventSchema
 }
 
 // CompiledEventSchema is the immutable, admitted event-schema boundary used
@@ -145,6 +146,22 @@ func (s CompiledEventSchema) AcceptanceSchema() map[string]any {
 		return nil
 	}
 	return cloneEventSchemaMap(s.value.acceptanceSchema)
+}
+
+// EventSchema is the immutable owner's tooling/readback projection, including
+// diagnostic descriptions and citations that do not belong in the digest.
+func (s CompiledEventSchema) EventSchema() EventSchema {
+	if s.value == nil {
+		return EventSchema{}
+	}
+	out := s.value.readback
+	out.Schema = cloneEventSchemaMap(out.Schema)
+	out.CitationFields = make(map[string]CriteriaCitation, len(s.value.readback.CitationFields))
+	for name, citation := range s.value.readback.CitationFields {
+		citation.AllowedClasses = append([]string(nil), citation.AllowedClasses...)
+		out.CitationFields[name] = citation
+	}
+	return out
 }
 
 func (s CompiledEventSchema) CanonicalAcceptanceSchema() []byte {
@@ -243,6 +260,14 @@ func (s CompiledEventSchema) withRequiredField(name, typeRef string, fieldSchema
 	value := *s.value
 	value.fields = fields
 	value.acceptanceSchema = cloneEventSchemaMap(acceptanceSchema)
+	value.readback = s.EventSchema()
+	readbackProperties, _ := value.readback.Schema["properties"].(map[string]any)
+	if readbackProperties == nil {
+		readbackProperties = map[string]any{}
+		value.readback.Schema["properties"] = readbackProperties
+	}
+	readbackProperties[name] = cloneEventSchemaMap(fieldSchema)
+	value.readback.Schema["required"] = append([]string(nil), requiredNames...)
 	value.canonicalSchema = append([]byte(nil), canonicalSchema...)
 	value.acceptanceSchemaDigest = canonicaljson.HashBytes(canonicalSchema)
 	structuralType := s.value.structuralType.Clone()
@@ -269,20 +294,28 @@ func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventTyp
 	if b == nil {
 		return CompiledEventSchema{}, false, nil
 	}
-	resolved := eventidentity.Normalize(b.ResolveFlowEventReference(flowID, eventType))
-	if resolved == "" {
+	view, exists := b.exactFlowEventDeclarationView(flowID)
+	if !exists || view == nil {
 		return CompiledEventSchema{}, false, nil
 	}
-	schemas, err := b.CompiledEventSchemas()
-	if err != nil {
-		return CompiledEventSchema{}, false, err
+	declaration := eventSchemaDeclarationScope{flowID: flowID, view: view, types: b.ResolvedTypeCatalogForFlow(flowID)}
+	entry, key, ok := eventSchemaDeclarationEntry(b, declaration, eventSchemaLookupKeys(b, flowID, eventType))
+	generated := false
+	if !ok {
+		entry, key, ok = b.generatedActivityDeclaration(flowID, eventType)
+		generated = ok
 	}
-	for _, schema := range schemas {
-		if eventidentity.Normalize(schema.EventName()) == resolved {
-			return schema, true, nil
-		}
+	if !ok || eventidentity.IsCanonicalPattern(key) {
+		return CompiledEventSchema{}, false, nil
 	}
-	return CompiledEventSchema{}, false, nil
+	compiled, ok, err := b.compileCurrentEventDeclaration(view.Paths.FlowPath, "flow", view.Paths.EventsFile, key, key, entry, b.ResolvedTypeCatalogForFlow(flowID))
+	if err != nil || !ok {
+		return CompiledEventSchema{}, ok, err
+	}
+	if generated {
+		compiled.value.classification = CompiledEventSchemaGenerated
+	}
+	return compiled, true, nil
 }
 
 // ResolveEffectiveCompiledFlowEventSchema returns the exact receiver schema
@@ -290,6 +323,9 @@ func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventTyp
 // not rebuild structural evidence from the JSON-schema readback projection.
 func (b *WorkflowContractBundle) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (CompiledEventSchema, bool, error) {
 	if b == nil {
+		return CompiledEventSchema{}, false, nil
+	}
+	if _, ok := b.exactFlowEventDeclarationView(flowID); !ok {
 		return CompiledEventSchema{}, false, nil
 	}
 	if pin, ok := b.flowInputEventPinForResolvedEvent(flowID, eventType); ok {
@@ -462,8 +498,8 @@ func newCompiledEventSchema(
 	businessKeyField string,
 	source CompiledEventSchemaSource,
 ) (CompiledEventSchema, error) {
-	schema := eventSchemaFromCatalogEntry(eventName, entry, types).Schema
-	acceptanceSchema := runtimeeventschema.CanonicalAcceptanceSchema(schema)
+	readback := eventSchemaFromCatalogEntry(eventName, entry, types)
+	acceptanceSchema := runtimeeventschema.CanonicalAcceptanceSchema(readback.Schema)
 	canonicalSchema, err := canonicaljson.Bytes(acceptanceSchema)
 	if err != nil {
 		return CompiledEventSchema{}, fmt.Errorf("canonical acceptance schema: %w", err)
@@ -497,6 +533,7 @@ func newCompiledEventSchema(
 		canonicalSchema:        append([]byte(nil), canonicalSchema...),
 		acceptanceSchemaDigest: canonicaljson.HashBytes(canonicalSchema),
 		source:                 source,
+		readback:               readback,
 	}
 	structuralType, err := ResolveJSONSchemaStructuralType(acceptanceSchema, "event."+value.acceptanceSchemaDigest)
 	if err != nil {

@@ -209,10 +209,12 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 				t.Fatal("duplicate reminted cap event")
 			}
 			late := requestServedJSONRPC(t, rt.Endpoint, "event.publish", map[string]any{"event_name": "loop.repeat", "run_id": started.RunID, "source_event_id": started.EventID, "payload": map[string]any{"revision_id": first.RevisionID}, "idempotency_key": "stale-repeat"})
-			// Run completion can fence public admission before the loop owner.
-			// If admitted, the closed revision must still settle without effects.
-			if late.Error != nil && late.Error.Data["code"] != "RUN_ALREADY_TERMINAL" {
+			if late.Error == nil || late.Error.Data["code"] != "EVENT_PUBLISH_FAILED" || late.Error.Data["retryable"] != false {
 				t.Fatalf("late repeat admission=%#v", late.Error)
+			}
+			details, _ := late.Error.Data["details"].(map[string]any)
+			if details["reason"] != "receiver_entity_terminal" || details["stage"] != "escaped" || details["flow_id"] != "." {
+				t.Fatalf("late repeat reason=%#v", details)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
 			if after := lifecycleStoredSnapshot(t, rt, started.RunID); after != before {

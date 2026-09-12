@@ -21,6 +21,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
@@ -1130,6 +1131,18 @@ func runStartEventPublishError(params eventPublicationParams, err error) error {
 }
 
 func eventPublishFailureError(params eventPublicationParams, err error, retryable bool) error {
+	var terminal *pipeline.TerminalReceiverError
+	if errors.As(err, &terminal) {
+		return NewApplicationError(EventPublishFailedCode, false, map[string]any{
+			"event_name": params.EventName,
+			"event_id":   params.EventID,
+			"run_id":     params.RunID,
+			"phase":      "publish",
+			"reason":     "receiver_entity_terminal",
+			"flow_id":    terminal.FlowID,
+			"stage":      terminal.Stage,
+		})
+	}
 	return NewApplicationError(EventPublishFailedCode, retryable, map[string]any{
 		"event_name": params.EventName,
 		"event_id":   params.EventID,

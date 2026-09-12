@@ -213,7 +213,10 @@ func connectEndpointEventDeclaration(bundle *WorkflowContractBundle, flowID, eve
 		return EventCatalogEntry{}, "", false
 	}
 	localName := packageEndpointLocalEvent(bundle, flowID, eventName, input)
-	return eventDeclarationByCandidates(view.Events, localName, eventName, eventidentity.LeafName(eventName))
+	if entry, key, ok := eventDeclarationByCandidates(view.Events, localName, eventName); ok {
+		return entry, key, true
+	}
+	return bundle.generatedActivityDeclaration(flowID, localName)
 }
 
 func normalizedConnectOwnerFlowPath(raw string) string {
@@ -352,6 +355,9 @@ func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, ev
 		return eventSchemaOwnershipRow{}, false, false
 	}
 	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		flowID = "."
+	}
 	var selected eventSchemaOwnershipRow
 	found := false
 	for _, row := range eventSchemaOwnershipRowsForReceiver(bundle, flowID) {

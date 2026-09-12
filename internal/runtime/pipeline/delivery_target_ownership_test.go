@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -782,6 +783,11 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 				EntityType: "review_entity"}
 			if got := deliveryTargetWorkflowInstanceUnavailable(source, ".", instance); got != testCase.unavailable {
 				t.Fatalf("delivery target unavailable = %t, want %t for status=%q state=%q", got, testCase.unavailable, testCase.status, testCase.state)
+			}
+			err := NewDeliveryTargetAvailability(testCase.state, testCase.status, !testCase.terminated.IsZero()).Validate(source, ".")
+			var terminal *TerminalReceiverError
+			if errors.As(err, &terminal) != (testCase.state == "killed") {
+				t.Fatalf("terminal receiver classification=%#v err=%v", terminal, err)
 			}
 		})
 	}
