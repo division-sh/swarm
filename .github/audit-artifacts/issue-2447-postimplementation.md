@@ -1,6 +1,6 @@
 # Post-Implementation Proof Audit: #2447 R1.4
 
-Agent-g. **Qualification blocked by #2353 LSF-044; not review-ready.**
+Agent-g. **LSF-044 test repair implemented; integrated qualification pending.**
 Executable checker/test Go head: `3ba8c5678`; inventory-metadata heads: `ac3d00dde`
 and `6019a729f` (plus this artifact's exact classification entry);
 base: `27a9f1b8c` (current master integration,
@@ -60,7 +60,7 @@ new exported library, production dependency or custom complexity algorithm.
 | Repository-wide route-authority drift census | Different semantic concept: reads callable names as searchable text, not scores or executable route authority. Exact baseline path classified in its existing inventory; no search exclusion or test-assertion change. |
 | Retired-transport reference census | Different semantic concept: its existing exact-count table classifies the JSON's 75 metadata references and this audit's single test-name reference. No path-wide exclusion or assertion removed. |
 | Monthly delta publication / protection administration | Explicitly split / tracked separately in #2407 R1.5 / R1.3. No second checker or invented publication framework. |
-| Runtime/golden consumers | Different semantic concept; all runtime, store, provider, lifecycle and golden fixture code stays unchanged. |
+| Runtime/golden consumers | Different semantic concept; production and golden fixture code stays unchanged. The separately approved disposal-observation test repair is tabulated below. |
 
 Every earlier gate must succeed before comparison is meaningful. Unsupported
 sources, missing records and invalid facts fail before acceptance; downstream
@@ -100,7 +100,7 @@ unit controls; workflow assertions are not the only proof.
 | New artifact references unclassified by route-authority text census | reproduced and fixed | `TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified`, `TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions`, and `TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit` pass unchanged after exact metadata-path classification. No runtime routing or search bypass added. |
 | New artifact references unclassified by retirement census | reproduced and fixed | `TestRetiredBuilderSemanticReferencesStayExplicit`: exact-count classification additions only; all existing search and refusal assertions retained. |
 | Unchanged supported runtime workload | execution-proven through the same corrected path | Default full-suite releasee2e package PASS (636.150s, includes smoke); explicit full-profile dual-store restart/SIGKILL and burst iterations 1/2 PASS (330.937s). The whole suite did NOT pass; see the separate fork finding. |
-| PostgreSQL failed-commit immediate competing-lock assertion | split / escalated as separate class | #2353 LSF-044: full-suite failure reproduced on unchanged master27a9f1b8c, one failure in20 targeted repetitions. Test-contract versus production-cleanup obligation requires lead classification; no fork repair or assertion relaxation authorized in #2447. |
+| PostgreSQL failed-commit immediate competing-lock assertion | reproduced and fixed | #2353 LSF-044 bounded test-only approval; commit `054b888e5` replaces the false post-disposal timing requirement with actual server acquisition. Detailed sibling table and pending integrated qualification below. |
 | Later factoring, runtime ownership and monthly publication | split / escalated as separate class | #2447 later family gate; #2443/#2250 and R4-R7; #2407 R1.3/R1.5. No closure credit assigned. |
 
 ## Qualification and Measurements
@@ -126,10 +126,11 @@ Measured base -> head: cyclo >=30 **236 -> 236**, >=50 **43 -> 43**, maximum
 repository (equality here does not imply equal upstream populations generally).
 No runtime complexity reduction is claimed. Added authored files are exclusively
 development tooling; generated baseline/audit/test lines are reported separately.
-Production `internal/**/*.go`, `platform-spec.yaml`, `go.mod`, `go.sum` and vendor
+Non-test production `internal/**/*.go`, `platform-spec.yaml`, `go.mod`, `go.sum` and vendor
 have zero changes. Existing test metadata changes classify the new JSON path in
 the route inventory and the retirement guard's exact-count table, including this
-audit's named-test reference. No workload fixture or search/refusal assertion changes.
+audit's named-test reference. The separate approved test commit repairs only
+post-disposal observations; no workload fixture or search/refusal assertion changes.
 
 ## Parent, Watchlist and Architecture Decision
 
@@ -149,9 +150,44 @@ blanket exclusion or weakened guards. No new node, issue or potential-issues ent
 no change to the audited score/CI class or its approved gate. This proof artifact
 and the issue update record implementation status; published docs refinement is
 not claimed merged. #2353's canonical body now records LSF-044 and both failure
-receipts; historical #2444 is not reopened. Request lead disposition before any
-fork-test/runtime repair or qualification exception. The #2447 implementation
-gate remains unchanged; no new runtime work is silently absorbed.
+receipts; historical #2444 is not reopened. The subsequent bounded approval and
+docs `ca5db26` authorize the test-only repair below, not runtime work or a
+qualification exception. The original complexity gate remains unchanged.
+
+## LSF-044 Test-Only Qualification Addendum
+
+[Independent approval](https://github.com/division-sh/swarm/issues/2447#issuecomment-5648722245)
+and the checked-in approved-gate amendment bind this additional class. Exact
+concept: local disposal versus observed remote lock availability. Canonical
+product owners remain PostgreSQL possession, the existing session/transaction
+owners and fork/pipeline claim owners; none changes. Test-local observers in the
+two existing test files now consume that contract. No new production interpreter.
+The immediate helper and all acknowledged-unlock consumers remain unchanged.
+
+| Manifestation | Status | Exact proof |
+| --- | --- | --- |
+| Keyed fork failed COMMIT | reproduced and fixed | `TestConversationForkGracefulMutation/keyed/commit_failure`; one bounded actual acquisition, SQL23505, exactly one callback/commit, zero durable rows and fresh PID. |
+| Terminal pipeline release, false result/query error | execution-proven through the same corrected path | `TestPostgresPipelineClaimReleaseFailureIsTerminalAndReclaimable`; stale claim, retired lease, one release attempt, actual acquisition then reclaim. |
+| Setup issuer/eligibility/hydration with both cleanup modes | execution-proven through the same corrected path | `TestPostgresPipelineClaimSetupFailuresTerminallyReleaseAndReclaim`; primary/cleanup error retention and registry absence precede server proof. |
+| Attach/publication poison | execution-proven through the same corrected path | `TestPostgresPipelineClaimPoisonBetweenLeaseAttachAndRegistryPublicationIsTerminal`; registry, scan and capacity checks precede server proof. |
+| Scan-close failure followed by ClaimBatch | execution-proven through the same corrected path | `TestPostgresPipelineScanCloseFailureIsTerminalAndReclaimable`; stale scan/claim, actual server acquisition, then fresh nonblocking batch. |
+| Terminal advisory failure / ambiguous acquisition | execution-proven through the same corrected path | `TestPostgresTerminalAdvisoryReleaseFailureDiscardsExactSession`, `TestPostgresAmbiguousAdvisoryAcquireDiscardsBorrowedSessionAfterTransaction`; independent errors and unusable retained session, then server acquisition. |
+| A genuinely held server lock | reproduced and fixed | `TestForkPostDisposalObservationRejectsHeldLock`, `TestPostgresPostDisposalObservationRejectsHeldLock`; acquisition must fail at its safety deadline while held, succeed after explicit unlock, and pass the strict immediate control. |
+| Acknowledged unlock / transaction state / remote lock under local fence | execution-proven through the same corrected path | Full fork matrix; unchanged borrowed/foreign, commit/rollback, retained-reference, cancellation and unlocked-close-error cases; `TestAuthorityTransactionOutcomeEvidence`, `TestPostgresSessionScopeMonitorReleasesHealthyBinding`, `TestSessionMonitorFenceBeforeSilentProofDrain`, generic-schedule and pipeline parent-fence controls. |
+
+Caller census is exhaustive for the two helpers plus scan-reclaim: five original
+disposal-helper callers moved, six original acknowledged-unlock callers retained,
+and the generic-schedule acknowledged-unlock caller retained. The separate fork
+helper changes only keyed failed COMMIT, not other cases or its healthy successor.
+No passing sibling is misrepresented as an independently reproduced failure.
+
+Original full-suite and unchanged-base failures above remain valid historical
+receipts. The repair removes an invalid distributed timing guarantee, not a
+production cleanup bug. Achieved test-class closure is pending integrated suite
+and review; #2353 LSF-044 stays repair-open. Architecture tracking remains in
+existing nodes, docs `ca5db26` incorporated by fast-forward. Effort/ROI: one small
+test-only patch removes a false full-load failure without runtime machinery.
+No new issue, platform behavior, compatibility or factoring is introduced.
 
 Architecture feedback is tracked in existing #2447/#2407 and #2443/#2250. Scores
 can reward relocating complexity without repairing semantic ownership; keep
