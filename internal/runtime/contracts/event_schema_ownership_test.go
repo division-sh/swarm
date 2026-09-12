@@ -121,6 +121,81 @@ func TestConnectedOutputBindingCompilesProducerSchemaIntoReceiverPin(t *testing.
 	t.Fatal("consumer work.ready input pin not found")
 }
 
+func TestConnectedSchemaReadersUseRetainedReceiverCoordinates(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect), DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, found, ambiguous := connectedEventSchemaOwnershipRow(bundle, "consumer", "consumer/work.ready")
+	if !found || ambiguous {
+		t.Fatal("missing initial qualified receiver binding")
+	}
+	pin, ok := bundle.flowInputEventPinForResolvedEvent("consumer", "consumer/work.ready")
+	if !ok {
+		t.Fatal("missing initial qualified input pin")
+	}
+	bundle.Semantics.CompositionConnects = nil
+	for _, view := range bundle.FlowTree.ByID {
+		view.Path = "unrelated"
+		view.Events = nil
+		view.Schema.Pins = FlowPins{}
+	}
+	for _, event := range []string{"work.ready", "consumer/work.ready"} {
+		got, found, ambiguous := connectedEventSchemaOwnershipRow(bundle, "consumer", event)
+		if !found || ambiguous || !sameEventSchemaProducerOwner(got, want) {
+			t.Fatalf("%s lost retained ownership: found=%t ambiguous=%t", event, found, ambiguous)
+		}
+		gotPin, ok := bundle.flowInputEventPinForResolvedEvent("consumer", event)
+		if !ok || gotPin.value != pin.value {
+			t.Fatalf("%s reconstructed or lost input binding", event)
+		}
+	}
+	for _, event := range []string{"unrelated/work.ready", "producer/work.ready", "absent.event"} {
+		if _, found, _ := connectedEventSchemaOwnershipRow(bundle, "consumer", event); found {
+			t.Fatalf("raw metadata invented receiver ownership for %s", event)
+		}
+		if _, found := bundle.flowInputEventPinForResolvedEvent("consumer", event); found {
+			t.Fatalf("raw metadata invented input binding for %s", event)
+		}
+	}
+}
+
+func TestConnectedSchemaReadersCannotRecompileMissingIndex(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect), DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.eventOwnership) == 0 {
+		t.Fatal("fixture has no admitted connect evidence")
+	}
+	bundle.eventOwnership, bundle.eventOwnersByFlow = nil, nil
+	if rows := effectiveEventSchemaOwnershipRows(bundle); len(rows) != 0 {
+		t.Fatal("reader recompiled missing ownership from raw connect rows")
+	}
+	if rows := eventSchemaOwnershipRowsForReceiver(bundle, "consumer"); len(rows) != 0 {
+		t.Fatal("receiver reader recompiled missing ownership from raw connect rows")
+	}
+}
+
+func TestCompiledInputNameUsesOnlyAdmittedCoordinates(t *testing.T) {
+	for _, item := range []struct{ flow, want string }{
+		{"", "work.ready"}, {".", "work.ready"},
+		{"child", "child/work.ready"}, {"parent/child", "parent/child/work.ready"},
+	} {
+		t.Run(item.flow, func(t *testing.T) {
+			pin := mustCompileInputPinForTest(t, item.flow, "work.ready")
+			if got := pin.QualifiedEventName(); got != item.want {
+				t.Fatalf("compiled name = %q, want %q", got, item.want)
+			}
+		})
+	}
+	if got := (CompiledFlowInputPin{}).QualifiedEventName(); got != "" {
+		t.Fatalf("empty pin invented event %q", got)
+	}
+}
+
 func TestIntrinsicProjectionKeepsProducerAndReceiverSchemasDistinct(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(
@@ -214,7 +289,7 @@ validation.requested:
 	}
 
 	entry, key, ok := bundle.ResolveFlowEventCatalogEntry("validator", "validation.requested")
-	if !ok || key != "validation.requested" {
+	if !ok || key != "producer/validation.requested" {
 		t.Fatalf("effective resolution = key:%q ok:%t", key, ok)
 	}
 	for _, field := range []string{"candidate", "validation_case_id"} {

@@ -12106,6 +12106,9 @@ flow_model:
       may project an admitted template declaration for readback; they do not establish execution ownership or eligibility.
       Runtime subscription admission consumes the same exact event/input bindings. Caller-supplied local-event maps
       and re-enumerated raw activity handlers cannot establish a missing declaration or override an admitted one.
+      Connected schema readers consume retained producer and receiver coordinates; they never rebuild a missing
+      ownership index from raw connect rows. Input pin names project only their immutable admitted receiver scope,
+      not a fresh flow-tree search or the connected producer's publication name.
     resource_enumeration: >-
       CompiledEventSchemas enumerates only exact authored resource-eligible declarations in canonical
       (flow_path, qualified_event_name) order. Runtime generated-schema availability never makes a generated,

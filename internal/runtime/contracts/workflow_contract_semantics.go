@@ -67,6 +67,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	// Connected producer ownership is an input to independent pin compilation,
 	// not a reader-side reconstruction performed by route-plan consumers.
 	bundle.Semantics = semantics
+	bundle.eventOwnership, bundle.eventOwnersByFlow = nil, nil
 	if err := bundle.compileEventSchemaBindings(); err != nil {
 		return err
 	}

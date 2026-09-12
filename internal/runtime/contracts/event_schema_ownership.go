@@ -15,18 +15,19 @@ const (
 )
 
 type eventSchemaOwnershipRow struct {
-	ownerFlowPath       string
-	producerEndpoint    string
-	producerFlowID      string
-	producerEvent       string
-	producerName        string
-	producer            EventCatalogEntry
-	receiverEndpoint    string
-	receiverFlowID      string
-	receiverEvent       string
-	receiverName        string
-	receiver            EventCatalogEntry
-	receiverRestatement bool
+	ownerFlowPath         string
+	producerEndpoint      string
+	producerFlowID        string
+	producerEvent         string
+	producerName          string
+	producer              EventCatalogEntry
+	receiverEndpoint      string
+	receiverFlowID        string
+	receiverEvent         string
+	receiverQualifiedName string
+	receiverName          string
+	receiver              EventCatalogEntry
+	receiverRestatement   bool
 }
 
 // compileEventSchemaOwnershipRows is the sole non-behavioral reader of
@@ -62,10 +63,7 @@ func effectiveEventSchemaOwnershipRows(bundle *WorkflowContractBundle) []eventSc
 	if bundle == nil {
 		return nil
 	}
-	if bundle.eventOwnersByFlow != nil {
-		return bundle.eventOwnership
-	}
-	return compileEventSchemaOwnershipRows(bundle)
+	return bundle.eventOwnership
 }
 
 func eventSchemaOwnershipRowsForReceiver(bundle *WorkflowContractBundle, flowID string) []eventSchemaOwnershipRow {
@@ -73,16 +71,7 @@ func eventSchemaOwnershipRowsForReceiver(bundle *WorkflowContractBundle, flowID 
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
-	if bundle.eventOwnersByFlow != nil {
-		return bundle.eventOwnersByFlow[flowID]
-	}
-	var rows []eventSchemaOwnershipRow
-	for _, row := range compileEventSchemaOwnershipRows(bundle) {
-		if row.receiverFlowID == flowID {
-			rows = append(rows, row)
-		}
-	}
-	return rows
+	return bundle.eventOwnersByFlow[flowID]
 }
 
 func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect FlowConnect) (eventSchemaOwnershipRow, bool) {
@@ -97,20 +86,22 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 		receiverEvent = connect.Rename
 	}
 	receiverFlowID := connectEndpointFlowID(connect.OwnerFlowPath, connect.To)
+	receiverEvent = packageEndpointLocalEvent(bundle, receiverFlowID, receiverEvent, true)
 	receiver, receiverName, receiverOK := connectEndpointEventDeclaration(bundle, receiverFlowID, receiverEvent, true)
 	return eventSchemaOwnershipRow{
-		ownerFlowPath:       normalizedConnectOwnerFlowPath(connect.OwnerFlowPath),
-		producerEndpoint:    strings.TrimSpace(connect.From),
-		producerFlowID:      producerFlowID,
-		producerEvent:       eventidentity.Normalize(producerEvent),
-		producerName:        producerName,
-		producer:            producer,
-		receiverEndpoint:    strings.TrimSpace(connect.To),
-		receiverFlowID:      receiverFlowID,
-		receiverEvent:       eventidentity.Normalize(receiverEvent),
-		receiverName:        receiverName,
-		receiver:            receiver,
-		receiverRestatement: receiverOK,
+		ownerFlowPath:         normalizedConnectOwnerFlowPath(connect.OwnerFlowPath),
+		producerEndpoint:      strings.TrimSpace(connect.From),
+		producerFlowID:        producerFlowID,
+		producerEvent:         eventidentity.Normalize(producerEvent),
+		producerName:          producerName,
+		producer:              producer,
+		receiverEndpoint:      strings.TrimSpace(connect.To),
+		receiverFlowID:        receiverFlowID,
+		receiverEvent:         eventidentity.Normalize(receiverEvent),
+		receiverQualifiedName: compiledPinEventName(bundle.FlowPath(receiverFlowID), receiverEvent),
+		receiverName:          receiverName,
+		receiver:              receiver,
+		receiverRestatement:   receiverOK,
 	}, true
 }
 
@@ -119,7 +110,7 @@ func validateCompiledConnectEventSchemaOwnership(bundle *WorkflowContractBundle)
 	rows := effectiveEventSchemaOwnershipRows(bundle)
 	ownersByReceiver := make(map[string]map[string]eventSchemaOwnershipRow)
 	for _, row := range rows {
-		receiverKey := eventSchemaReceiverOwnerKey(bundle, row)
+		receiverKey := eventSchemaReceiverOwnerKey(row)
 		producerKey := eventSchemaProducerOwnerKey(row)
 		if receiverKey != "" && producerKey != "" {
 			if ownersByReceiver[receiverKey] == nil {
@@ -173,12 +164,8 @@ func validateCompiledConnectEventSchemaOwnership(bundle *WorkflowContractBundle)
 	return errs
 }
 
-func eventSchemaReceiverOwnerKey(bundle *WorkflowContractBundle, row eventSchemaOwnershipRow) string {
+func eventSchemaReceiverOwnerKey(row eventSchemaOwnershipRow) string {
 	receiverEvent := eventidentity.Normalize(row.receiverEvent)
-	if bundle != nil && row.receiverFlowID != "" {
-		local := packageEndpointLocalEvent(bundle, row.receiverFlowID, receiverEvent, true)
-		receiverEvent = eventidentity.ExternalizeForFlow(bundle.FlowPath(row.receiverFlowID), bundle.FlowInputEvents(row.receiverFlowID), local)
-	}
 	if receiverEvent == "" {
 		return ""
 	}
@@ -247,19 +234,6 @@ func packageEndpointLocalEvent(bundle *WorkflowContractBundle, endpoint, eventNa
 	return scope.LocalizeOutput(eventName)
 }
 
-func eventDeclarationByCandidates(entries map[string]EventCatalogEntry, candidates ...string) (EventCatalogEntry, string, bool) {
-	for _, candidate := range candidates {
-		candidate = eventidentity.Normalize(candidate)
-		if candidate == "" {
-			continue
-		}
-		if entry, ok := entries[candidate]; ok {
-			return entry, candidate, true
-		}
-	}
-	return EventCatalogEntry{}, "", false
-}
-
 func eventDeclarationLocation(entry EventCatalogEntry) string {
 	provenance, ok := entry.admissionProvenance["declaration"]
 	if !ok || strings.TrimSpace(provenance.SourceFile) == "" {
@@ -307,23 +281,12 @@ func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, event
 	requested := eventidentity.Normalize(eventType)
 	for _, pin := range b.FlowInputEventPins(flowID) {
 		local := eventidentity.Normalize(pin.EventType())
-		resolved := eventidentity.Normalize(b.ResolveFlowEventReference(flowID, local))
+		resolved := pin.QualifiedEventName()
 		if requested == local || requested == resolved {
 			return pin, true
 		}
 	}
 	return CompiledFlowInputPin{}, false
-}
-
-func (b *WorkflowContractBundle) flowInputEventMatches(flowID, subscription, eventType string) bool {
-	if b == nil {
-		return false
-	}
-	scope := eventidentity.Scope{
-		Path:        b.FlowPath(flowID),
-		InputEvents: b.FlowInputEvents(flowID),
-	}
-	return scope.Matches(subscription, eventType, nil)
 }
 
 func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, eventType string) (eventSchemaOwnershipRow, bool, bool) {
@@ -338,7 +301,7 @@ func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, ev
 	found := false
 	for _, row := range eventSchemaOwnershipRowsForReceiver(bundle, flowID) {
 		localEvent := eventidentity.Normalize(row.receiverEvent)
-		resolvedEvent := eventidentity.Normalize(bundle.ResolveFlowEventReference(flowID, localEvent))
+		resolvedEvent := row.receiverQualifiedName
 		requestedEvent := eventidentity.Normalize(eventType)
 		if localEvent != requestedEvent && resolvedEvent != requestedEvent {
 			continue

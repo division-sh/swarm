@@ -251,4 +251,7 @@ func TestFailedPublicationSchemaAdmissionCannotRetainOldBindings(t *testing.T) {
 	if _, err := bundle.CompiledEventSchemas(); err == nil || len(bundle.GeneratedActivityEventSchemas()) != 0 {
 		t.Fatal("rejected admission exposed previous resource or generated schemas")
 	}
+	if len(effectiveEventSchemaOwnershipRows(bundle)) != 0 || len(eventSchemaOwnershipRowsForReceiver(bundle, "sink")) != 0 {
+		t.Fatal("rejected admission retained previous connect ownership")
+	}
 }

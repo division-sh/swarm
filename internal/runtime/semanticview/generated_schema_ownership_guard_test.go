@@ -50,6 +50,17 @@ func hostileSchemaRecompile(unrelated *WorkflowContractBundle) any {
     return schema
 }
 `)...)
+	connectPath := filepath.Join(root, "internal/runtime/contracts/event_schema_ownership.go")
+	connectRaw, err := os.ReadFile(connectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlay[connectPath] = append(connectRaw, []byte(`
+func hostileConnectRecompile(unrelated *WorkflowContractBundle) any {
+    borrowed := compileEventSchemaOwnershipRows
+    return borrowed(unrelated)
+}
+`)...)
 	subscriptionPath := filepath.Join(root, "internal/runtime/semanticview/subscription_admission.go")
 	subscriptionRaw, err := os.ReadFile(subscriptionPath)
 	if err != nil {
@@ -61,14 +72,15 @@ func hostileSchemaRecompile(unrelated *WorkflowContractBundle) any {
 	}
 	overlay[subscriptionPath] = []byte(strings.Replace(string(subscriptionRaw), subscriptionMarker, subscriptionMarker+"\n _ = runtimecontracts.ActivitySitesForNode", 1))
 	findings := generatedSchemaFindings(t, overlay)
-	alias, scope, recompile, subscription := false, false, false, false
+	alias, scope, recompile, subscription, connect := false, false, false, false, false
 	for _, finding := range findings {
 		alias = alias || strings.Contains(finding, "hostileGeneratedSchema")
 		scope = scope || (strings.Contains(finding, "ResolveEventSchema") && strings.HasSuffix(finding, ":FlowScopes"))
 		recompile = recompile || strings.Contains(finding, "hostileSchemaRecompile")
 		subscription = subscription || strings.Contains(finding, "fillAuthoredSubscriptionScope")
+		connect = connect || strings.Contains(finding, "hostileConnectRecompile")
 	}
-	if len(findings) != 4 || !alias || !scope || !recompile || !subscription {
+	if len(findings) != 5 || !alias || !scope || !recompile || !subscription || !connect {
 		t.Fatalf("guard missed alias or in-owner scope search: %v", findings)
 	}
 }
@@ -122,6 +134,9 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 						findings = append(findings, owner.String()+":"+used.FullName())
 					}
 					if used.Pkg().Path() == contracts && (used.Name() == "compileCurrentEventDeclaration" || used.Name() == "generatedActivityDeclarationRecords") && owner != bindingCompiler {
+						findings = append(findings, owner.String()+":"+used.FullName())
+					}
+					if used.Pkg().Path() == contracts && used.Name() == "compileEventSchemaOwnershipRows" && owner != pkg.Types.Scope().Lookup("populateEventSchemaOwnershipIndex") {
 						findings = append(findings, owner.String()+":"+used.FullName())
 					}
 					if used.Pkg().Path() == contracts && (used.Name() == "ActivitySitesForNode" || used.Name() == "ActivityResultEventsForSite") && owner == pkg.Types.Scope().Lookup("fillAuthoredSubscriptionScope") {

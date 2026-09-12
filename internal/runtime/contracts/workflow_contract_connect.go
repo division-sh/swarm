@@ -180,6 +180,23 @@ func validateCompiledFlowInputResolution(resolution FlowInputPinResolution) erro
 }
 
 func (p CompiledFlowInputPin) Empty() bool { return p.value == nil }
+
+// QualifiedEventName projects only the scope and local event admitted with this
+// pin; it never consults the mutable source tree or the producer's event name.
+func (p CompiledFlowInputPin) QualifiedEventName() string {
+	if p.value == nil {
+		return ""
+	}
+	return compiledPinEventName(p.value.context.FlowPath, p.value.event)
+}
+
+func compiledPinEventName(flowPath, event string) string {
+	if flowPath == "." {
+		flowPath = ""
+	}
+	return eventidentity.ExternalizeForFlow(flowPath, []string{event}, event)
+}
+
 func (p CompiledFlowInputPin) EventType() string {
 	if p.value == nil {
 		return ""
