@@ -60,7 +60,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 					return errors.New("activity HTTP call happened before the node handler started")
 				}
 				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityRequestEventID(expected), 0)
-				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(expected, expected.SuccessEvent), 0)
+				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityBoringSuccessEventID(expected), 0)
 				return nil
 			})
 			fixture.bus.beforeActivityRequestHandle = func(ctx context.Context, evt events.Event) error {
@@ -74,7 +74,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 					return fmt.Errorf("activity HTTP call count before activity request delivery = %d, want 0", got)
 				}
 				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityRequestEventID(expected), 1)
-				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(expected, expected.SuccessEvent), 0)
+				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityBoringSuccessEventID(expected), 0)
 				return nil
 			}
 
@@ -94,7 +94,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 				t.Fatalf("server calls after supported flow = %d, want 1", got)
 			}
 			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityRequestEventID(expected), 1)
-			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(expected, expected.SuccessEvent), 1)
+			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityBoringSuccessEventID(expected), 1)
 			assertActivityBoringDeliveryStatus(t, fixture.db, tc.kind, sourceEvent.ID(), mustActivityBoringNode("scanner").Key(), "delivered")
 
 			request := fixture.bus.outboxIntent(0)
@@ -141,7 +141,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 		t.Fatalf("server calls after supported request persistence = %d, want 0 before crash recovery", got)
 	}
 	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityRequestEventID(expected), 1)
-	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityResultEventID(expected, expected.SuccessEvent), 0)
+	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityBoringSuccessEventID(expected), 0)
 
 	restarted := newActivityBoringFullFlowCoordinator(t, fixture.db, activityBoringStorePostgres, server.URL, true)
 	request := loadActivityBoringPersistedEvent(t, fixture.db, activityBoringStorePostgres, activityRequestEventID(expected))
@@ -156,7 +156,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("server calls after restart completion = %d, want 1", got)
 	}
-	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityResultEventID(expected, expected.SuccessEvent), 1)
+	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityBoringSuccessEventID(expected), 1)
 
 	handled, _, err = restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
@@ -205,7 +205,7 @@ func TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdenti
 			if got := calls.Load(); got != 2 {
 				t.Fatalf("server calls across source+fork hand-authored read_only execution = %d, want declared reexecute_read call per identity", got)
 			}
-			if activityResultEventID(sourceExpected, sourceExpected.SuccessEvent) == activityResultEventID(forkExpected, forkExpected.SuccessEvent) {
+			if activityBoringSuccessEventID(sourceExpected) == activityBoringSuccessEventID(forkExpected) {
 				t.Fatal("fork-local hand-authored result identity did not change")
 			}
 		})
@@ -240,7 +240,7 @@ func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.
 			if got := calls.Load(); got != 1 {
 				t.Fatalf("server calls after first request = %d, want 1", got)
 			}
-			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(intent, intent.SuccessEvent), 1)
+			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityBoringSuccessEventID(intent), 1)
 
 			handled, _, err = fixture.pc.handleEventResult(ctx, request.Event)
 			if err != nil {
@@ -295,7 +295,7 @@ func TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity(t 
 			if got := calls.Load(); got != 2 {
 				t.Fatalf("server calls across source+fork read_only execution = %d, want declared reexecute_read call per identity", got)
 			}
-			if activityResultEventID(sourceIntent, sourceIntent.SuccessEvent) == activityResultEventID(forkIntent, forkIntent.SuccessEvent) {
+			if activityBoringSuccessEventID(sourceIntent) == activityBoringSuccessEventID(forkIntent) {
 				t.Fatal("fork-local result identity did not change")
 			}
 		})
@@ -602,6 +602,13 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 		Attempt:          1,
 		ExecutionMode:    evt.ExecutionMode(),
 	}.Normalized()
+}
+
+// This fixture always executes the research template. Keep its expected
+// publication independent of the runtime projection under test.
+func activityBoringSuccessEventID(intent runtimeengine.ActivityIntent) string {
+	local := strings.TrimPrefix(intent.SuccessEvent, "research/")
+	return activityResultEventID(intent, "research/"+intent.EntityID.String()+"/"+local)
 }
 
 func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityIntent {

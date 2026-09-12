@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -263,7 +264,10 @@ func (pc *PipelineCoordinator) artifactRepoResultEvent(execCtx runtimeengine.Exe
 		return runtimeengine.EmitIntent{}, fmt.Errorf("artifact result requires admitted execution producer source")
 	}
 	sourceRoute := routingSource.Route()
-	eventType = actionResultEventType(pc.SemanticSource(), execCtx.Request.Node.FlowPath(), eventType, sourceRoute)
+	publication, err := runtimepinrouting.AdmitPublicationIdentity(execCtx.Request.ExecutionFlowID.String(), eventType, routingSource)
+	if err != nil {
+		return runtimeengine.EmitIntent{}, fmt.Errorf("artifact result publication: %w", err)
+	}
 	entityID := sourceRoute.EntityID
 	flowInstance := sourceRoute.FlowInstance
 	envelope := events.EventEnvelope{
@@ -275,7 +279,7 @@ func (pc *PipelineCoordinator) artifactRepoResultEvent(execCtx runtimeengine.Exe
 	}
 	evt, err := events.NewChildEvent(events.ChildEventInput{
 		Facts: events.EventFacts{
-			ID: uuid.NewString(), Type: events.EventType(eventType),
+			ID: uuid.NewString(), Type: publication,
 			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: runtimeWorkflowID},
 			Payload:  mustJSON(payload), ChainDepth: chainDepth, Envelope: envelope,
 			RoutingSource: routingSource, CreatedAt: time.Now().UTC(),

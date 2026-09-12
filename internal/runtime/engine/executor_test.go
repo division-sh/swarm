@@ -717,8 +717,8 @@ func (r stubGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardIns
 }
 func (r stubActionRegistry) HasAction(id identity.ActionKey) bool { _, ok := r.entries[id]; return ok }
 func (r stubActionRegistry) IsExecutable(id identity.ActionKey) bool {
-	_, ok := r.entries[id]
-	return ok
+	entry, ok := r.entries[id]
+	return ok && entry.Executable()
 }
 func (r stubActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
 	entry, ok := r.entries[id]
@@ -5831,6 +5831,12 @@ func TestExecutor_EmitIntentUsesExplicitProducerSourceWhenStateFlowPathNormalize
 
 func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *testing.T) {
 	source := sourceWithDeclarativeEmitExternalizationFlows()
+	producerSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: "component-scaffold", FlowInstance: "component-scaffold/component-1", EntityID: "component-entity",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	parentRoute := events.RouteIdentity{
 		FlowID:       "operating",
 		FlowInstance: "operating/opco-1",
@@ -5887,10 +5893,11 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 				payload = json.RawMessage(`{}`)
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-				EntityID: "component-entity",
-				Node:     testFlowExecutableNode(t, "component-scaffold", "component-node"),
-				Event:    eventtest.RunCreatingRootIngress("evt-1", events.EventType(eventType), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
-				Handler:  tc.handler,
+				EntityID:       "component-entity",
+				ProducerSource: producerSource,
+				Node:           testFlowExecutableNode(t, "component-scaffold", "component-node"),
+				Event:          eventtest.RunCreatingRootIngress("evt-1", events.EventType(eventType), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Handler:        tc.handler,
 				State: testStateSnapshot("ready", map[string]any{
 					"flow_path":            "component-scaffold/component-1",
 					"parent_flow_id":       parentRoute.FlowID,
@@ -7085,7 +7092,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 	}
 }
 
-func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
+func TestExecutor_ActionRegistryDoesNotInventEmitsAndRunsActionRunner(t *testing.T) {
 	runner := &stubActionRunner{}
 	shaper := &recordingPayloadShaper{}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -7096,8 +7103,8 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 		Dispatcher:    stubDispatcher{},
 		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
 			identity.NormalizeActionKey("notify"): {
-				Key:   identity.NormalizeActionKey("notify"),
-				Emits: "action.emitted",
+				Key:     identity.NormalizeActionKey("notify"),
+				Builtin: "notify",
 			},
 		}},
 		ActionRunner:  runner,
@@ -7124,14 +7131,11 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	if got := result.ActionsExecuted; !reflect.DeepEqual(got, []string{"notify"}) {
 		t.Fatalf("ActionsExecuted = %#v", got)
 	}
-	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type()) != "action.emitted" {
+	if len(result.EmitIntents) != 0 {
 		t.Fatalf("unexpected action emit intents: %#v", result.EmitIntents)
 	}
-	if got := shaper.lastPayload["score"]; got != float64(9) {
-		t.Fatalf("action emit payload score = %#v, want 9", got)
-	}
-	if shaper.lastSurface != EmitSurfaceAction {
-		t.Fatalf("action emit surface = %q, want %q", shaper.lastSurface, EmitSurfaceAction)
+	if shaper.lastPayload != nil {
+		t.Fatal("action registry invoked implicit emit payload shaping")
 	}
 }
 
@@ -7145,10 +7149,10 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 		Dispatcher:    stubDispatcher{},
 		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
 			identity.NormalizeActionKey("auto_action"): {
-				Key: identity.NormalizeActionKey("auto_action"),
+				Key: identity.NormalizeActionKey("auto_action"), Builtin: "auto_action",
 			},
 			identity.NormalizeActionKey("human_action"): {
-				Key: identity.NormalizeActionKey("human_action"),
+				Key: identity.NormalizeActionKey("human_action"), Builtin: "human_action",
 			},
 		}},
 		ActionRunner: runner,
@@ -7367,9 +7371,9 @@ func TestExecutor_MergeActionStatePreservesInMemoryWrites(t *testing.T) {
 	}
 }
 
-func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T) {
+func TestExecutor_ActionRegistryWithoutImplementationRejectsHandler(t *testing.T) {
 	runner := &stubActionRunner{}
-	shaper := &recordingPayloadShaper{err: errors.Join(ErrEmitPayloadContractViolation, errors.New("wrapped payload contract failure"))}
+	shaper := &recordingPayloadShaper{}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
@@ -7378,8 +7382,7 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 		Dispatcher:    stubDispatcher{},
 		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
 			identity.NormalizeActionKey("notify"): {
-				Key:   identity.NormalizeActionKey("notify"),
-				Emits: "action.emitted",
+				Key: identity.NormalizeActionKey("notify"),
 			},
 		}},
 		ActionRunner:  runner,
@@ -7397,14 +7400,8 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 		},
 		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
 	})
-	if !errors.Is(err, ErrEmitPayloadContractViolation) {
-		t.Fatalf("Execute error = %v, want %v", err, ErrEmitPayloadContractViolation)
-	}
-	if result.Status != OutcomeRejected {
-		t.Fatalf("Status = %q, want %q", result.Status, OutcomeRejected)
-	}
-	if result.Failure == nil || result.Failure.Class != failures.ClassSchemaInvalid || result.FailureDisposition != FailureDispositionTerminal {
-		t.Fatalf("failure = %#v disposition=%q", result.Failure, result.FailureDisposition)
+	if err == nil || !strings.Contains(err.Error(), "not executable") {
+		t.Fatalf("Execute error = %v, want not executable", err)
 	}
 	if len(result.EmitIntents) != 0 {
 		t.Fatalf("EmitIntents = %#v, want none", result.EmitIntents)
@@ -7415,8 +7412,8 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 	if len(runner.called) != 0 {
 		t.Fatalf("action runner calls = %#v, want none", runner.called)
 	}
-	if shaper.lastSurface != EmitSurfaceAction {
-		t.Fatalf("action emit surface = %q, want %q", shaper.lastSurface, EmitSurfaceAction)
+	if shaper.lastPayload != nil {
+		t.Fatal("non-executable action invoked implicit emit payload shaping")
 	}
 }
 

@@ -489,10 +489,18 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 }
 
 func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry, mockResponse *providerconnectors.AdmittedMockResponse) error {
+	intent.Attempt = 1
+	success, err := admitActivityPublication(intent, intent.SuccessEvent)
+	if err != nil {
+		return err
+	}
+	failure, err := admitActivityPublication(intent, intent.FailureEvent)
+	if err != nil {
+		return err
+	}
 	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_journal_unavailable", "activity-runtime", "load_activity_attempt", map[string]any{"tool": strings.TrimSpace(intent.Tool)}))
 	}
-	intent.Attempt = 1
 	startRecord := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
 	started, inserted, err := d.coordinator.workflowStore.ClaimActivityAttemptForLoopGeneration(ctx, startRecord)
@@ -516,8 +524,8 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 		}
 		terminal := started.withTerminal(
 			ActivityAttemptStatusSucceeded,
-			activityResultEventID(intent, intent.SuccessEvent),
-			intent.SuccessEvent,
+			success.eventID,
+			string(success.eventType),
 			activitySuccessPayload(intent, result),
 			nil,
 		)
@@ -536,8 +544,8 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 		cause := runtimefailures.FromError(err, "activity-runtime", "prepare_non_idempotent_http")
 		terminal := started.withTerminal(
 			ActivityAttemptStatusFailed,
-			activityResultEventID(intent, intent.FailureEvent),
-			intent.FailureEvent,
+			failure.eventID,
+			string(failure.eventType),
 			activityFailurePayload(intent, cause),
 			&cause.Failure,
 		)
@@ -560,10 +568,10 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 			}, err), "activity-runtime", "execute_non_idempotent_http")
 		}
 		payload := activityFailurePayload(intent, cause)
-		terminal = started.withTerminal(status, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, payload, &cause.Failure)
+		terminal = started.withTerminal(status, failure.eventID, string(failure.eventType), payload, &cause.Failure)
 	} else {
 		payload := activitySuccessPayload(intent, result)
-		terminal = started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, nil)
+		terminal = started.withTerminal(ActivityAttemptStatusSucceeded, success.eventID, string(success.eventType), payload, nil)
 	}
 	var stored ActivityAttemptRecord
 	if terminal.Status == ActivityAttemptStatusUncertain {
@@ -585,6 +593,10 @@ func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Cont
 		return d.publishActivityFailure(ctx, intent, cause)
 	}
 	intent.Attempt = 1
+	publication, err := admitActivityPublication(intent, intent.FailureEvent)
+	if err != nil {
+		return err
+	}
 	startRecord := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
 	started, inserted, err := d.coordinator.workflowStore.ClaimActivityAttemptForLoopGeneration(ctx, startRecord)
@@ -604,8 +616,8 @@ func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Cont
 	failure := runtimefailures.FromError(cause, "activity-runtime", "reject_channel_activity_target")
 	terminal := started.withTerminal(
 		ActivityAttemptStatusFailed,
-		activityResultEventID(intent, intent.FailureEvent),
-		intent.FailureEvent,
+		publication.eventID,
+		string(publication.eventType),
 		activityFailurePayload(intent, failure),
 		&failure.Failure,
 	)
@@ -1524,7 +1536,11 @@ func activityPayloadWithGeneration(intent runtimeengine.ActivityIntent, payload 
 }
 
 func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent, eventType string, payload map[string]any) error {
-	return d.publishActivityResultWithID(ctx, intent, activityResultEventID(intent, eventType), eventType, payload)
+	publication, err := admitActivityPublication(intent, eventType)
+	if err != nil {
+		return err
+	}
+	return d.publishActivityResultWithID(ctx, intent, publication.eventID, string(publication.eventType), payload)
 }
 
 func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any) error {

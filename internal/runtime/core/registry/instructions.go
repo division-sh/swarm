@@ -59,7 +59,6 @@ type ActionInstruction struct {
 	PolicyRef   string
 	Builtin     string
 	Effect      string
-	Emits       string
 }
 
 func ActionFromContract(entry runtimecontracts.GuardActionEntry) ActionInstruction {
@@ -70,7 +69,6 @@ func ActionFromContract(entry runtimecontracts.GuardActionEntry) ActionInstructi
 		PolicyRef:   strings.TrimSpace(entry.PolicyRef),
 		Builtin:     strings.TrimSpace(entry.PlatformBuiltin),
 		Effect:      strings.TrimSpace(entry.Effect),
-		Emits:       strings.TrimSpace(entry.Emits),
 	}
 }
 
@@ -78,7 +76,7 @@ func (a ActionInstruction) Kind() InstructionKind {
 	switch {
 	case a.Builtin != "":
 		return InstructionBuiltin
-	case a.Emits != "" || a.Effect != "":
+	case a.Effect != "":
 		return InstructionCEL
 	default:
 		return InstructionUnknown

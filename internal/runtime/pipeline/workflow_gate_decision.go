@@ -13,6 +13,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -217,7 +218,11 @@ func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, con
 	if err != nil {
 		return noEvent, err
 	}
-	return newWorkflowChildEvent(eventID, events.EventType(eventType), continuation.SourceTaskID, raw, parent.ChainDepth()+1, source, parent, envelope, card.DecidedAt.UTC())
+	publication, err := runtimepinrouting.AdmitPublicationIdentity(continuation.FlowID, eventType, source)
+	if err != nil {
+		return noEvent, fmt.Errorf("proposed-effect outcome publication: %w", err)
+	}
+	return newWorkflowChildEvent(eventID, publication, continuation.SourceTaskID, raw, parent.ChainDepth()+1, source, parent, envelope, card.DecidedAt.UTC())
 }
 
 func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
@@ -644,13 +649,16 @@ func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, route
 	if err != nil {
 		return nil, err
 	}
-	eventType := strings.TrimSpace(route.Emit.Event)
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
 		return nil, err
 	}
+	eventType, err := runtimepinrouting.AdmitPublicationIdentity(route.Transition.FlowID(), route.Emit.Event, anchor.Source)
+	if err != nil {
+		return nil, err
+	}
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.Route.InstancePath)
-	identity := strings.Join([]string{card.CardID, card.DecisionEventID, card.Verdict, eventType}, "\x00")
+	identity := strings.Join([]string{card.CardID, card.DecisionEventID, card.Verdict, string(eventType)}, "\x00")
 	createdAt := card.DecidedAt
 	if createdAt.IsZero() {
 		createdAt = parent.CreatedAt()

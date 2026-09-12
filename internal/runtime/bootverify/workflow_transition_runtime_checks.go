@@ -36,15 +36,12 @@ func (c *checkerContext) transitionReferences() []Finding {
 				if actionID == "" {
 					continue
 				}
-				action, ok := c.source.ActionInstructionByID(actionID)
+				_, ok := c.source.ActionInstructionByID(actionID)
 				if !ok {
 					if !isSupportedWorkflowHandlerActionID(actionID) {
 						c.transitionReferenceFinding(location, "references unknown action %s", actionID)
 					}
 					continue
-				}
-				if emits := strings.TrimSpace(action.Emits); emits != "" && !flowEventExists(c.source, node.FlowPath(), emits) {
-					c.transitionReferenceFinding(location, "action %s emits missing event %s", actionID, emits)
 				}
 			}
 			for _, check := range handler.Guard.EffectiveChecks() {

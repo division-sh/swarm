@@ -18,7 +18,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -2522,7 +2521,10 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 		if eventType == "" {
 			continue
 		}
-		eventType = e.resolveDeclarativeEmitEventType(frame, eventType)
+		eventType, err = admittedDeclarativeEmitEventType(frame, eventType)
+		if err != nil {
+			return err
+		}
 		if previousSource := seen[eventType]; previousSource != "" {
 			return fmt.Errorf("duplicate declarative emit event %q from %s and %s; additive on_success emits must be distinct from the selected rule emit", eventType, previousSource, activeEmit.Source)
 		}
@@ -2562,23 +2564,13 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 		if !ok || !e.deps.ActionRegistry.IsExecutable(actionKey) {
 			return fmt.Errorf("action %q is not executable", actionKey.String())
 		}
-		if strings.TrimSpace(entry.Emits) != "" {
-			actionCtx := WithEmitSurface(frame.ctx, EmitSurfaceAction)
-			shaped, err := e.shapeEmitPayloadWithContext(actionCtx, frame, entry.Emits, frame.payload)
-			if err != nil {
-				return err
-			}
-			if _, err := e.queueEmitIntent(frame, entry.Emits, shaped); err != nil {
-				return err
-			}
-		}
 		if e.deps.ActionRunner != nil {
 			execCtx := e.executionContext(frame, StepAction)
 			execution, err := e.deps.ActionRunner.ExecuteAction(frame.ctx, actionSpec, entry, execCtx)
 			if err != nil {
 				return err
 			}
-			if !execution.Handled && strings.TrimSpace(entry.Emits) == "" {
+			if !execution.Handled {
 				return fmt.Errorf("action %q is not executable", actionKey.String())
 			}
 			if len(execution.EmitIntents) > 0 {
@@ -3505,77 +3497,12 @@ func (e *Executor) shapeEmitPayloadWithContext(ctx context.Context, frame *execu
 	return e.deps.PayloadShaper.ShapeEmitPayload(ctx, req, strings.TrimSpace(eventType), cloned)
 }
 
-func (e *Executor) resolveDeclarativeEmitEventType(frame *executionFrame, eventType string) string {
-	eventType = runtimeeventidentity.Normalize(eventType)
-	if eventType == "" || e == nil || e.deps.Source == nil || frame == nil {
-		return eventType
+func admittedDeclarativeEmitEventType(frame *executionFrame, eventType string) (string, error) {
+	if frame == nil {
+		return "", fmt.Errorf("business emission requires an execution frame")
 	}
-	flowID := frame.req.ExecutionFlowID.String()
-	if flowID == "" {
-		return eventType
-	}
-	scope, ok := semanticview.FlowScopeByID(e.deps.Source, flowID)
-	if !ok {
-		return eventType
-	}
-	sourceRoute := emitSourceRoute(frame)
-	namespacePath := emitNamespaceSourcePath(scope, sourceRoute.FlowInstance)
-	localEvent := emitScopeLocalEventName(scope, namespacePath, eventType)
-	if localEvent == "" {
-		return eventType
-	}
-	if namespacePath == "" {
-		return localEvent
-	}
-	return namespacePath + "/" + localEvent
-}
-
-func emitNamespaceSourcePath(scope semanticview.FlowScope, sourcePath string) string {
-	scopePath := runtimeeventidentity.Normalize(scope.Path)
-	sourcePath = runtimeeventidentity.Normalize(sourcePath)
-	if scopePath == "" {
-		return ""
-	}
-	if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") || sourcePath == "" {
-		return scopePath
-	}
-	if sourcePath == scopePath || strings.HasPrefix(sourcePath, scopePath+"/") {
-		return sourcePath
-	}
-	return scopePath
-}
-
-func emitScopeLocalEventName(scope semanticview.FlowScope, sourcePath, eventType string) string {
-	eventType = runtimeeventidentity.Normalize(eventType)
-	if eventType == "" {
-		return ""
-	}
-	localEvents := emitScopeLocalEvents(scope)
-	if _, ok := localEvents[eventType]; ok {
-		return eventType
-	}
-	for _, prefix := range []string{sourcePath, scope.Path} {
-		prefix = runtimeeventidentity.Normalize(prefix)
-		if prefix == "" || !strings.HasPrefix(eventType, prefix+"/") {
-			continue
-		}
-		local := strings.TrimPrefix(eventType, prefix+"/")
-		if _, ok := localEvents[local]; ok {
-			return local
-		}
-	}
-	return ""
-}
-
-func emitScopeLocalEvents(scope semanticview.FlowScope) map[string]struct{} {
-	out := map[string]struct{}{}
-	for _, eventType := range scope.OutputEvents {
-		eventType = runtimeeventidentity.Normalize(eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
-	}
-	return out
+	name, err := runtimepinrouting.AdmitPublicationIdentity(frame.req.ExecutionFlowID.String(), eventType, frame.req.ProducerSource)
+	return string(name), err
 }
 
 func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, payload map[string]any, chainDepth int) (EmitIntent, error) {

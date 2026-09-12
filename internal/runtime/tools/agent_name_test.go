@@ -13,9 +13,9 @@ func wrapRootAgentBundle(bundle *runtimecontracts.WorkflowContractBundle) semant
 	return semanticviewtest.WrapRootAgents(bundle)
 }
 
-func toolTestSourceWithDeclaredAgent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, agentID, flowID string) semanticview.Source {
+func toolTestSourceWithDeclaredAgent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, agentID, flowID string, emitEvents ...string) semanticview.Source {
 	t.Helper()
-	toolTestDeclareAgent(t, bundle, agentID, flowID)
+	toolTestDeclareAgent(t, bundle, agentID, flowID, emitEvents...)
 	if bundle.FlowSchemas == nil {
 		bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{}
 	}
@@ -37,7 +37,7 @@ func toolTestSourceWithDeclaredAgent(t testing.TB, bundle *runtimecontracts.Work
 	return semanticview.Wrap(bundle)
 }
 
-func toolTestDeclareAgent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, agentID, flowID string) {
+func toolTestDeclareAgent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, agentID, flowID string, emitEvents ...string) {
 	t.Helper()
 	if bundle == nil {
 		t.Fatal("tool test agent declaration requires bundle")
@@ -67,6 +67,11 @@ func toolTestDeclareAgent(t testing.TB, bundle *runtimecontracts.WorkflowContrac
 	}
 	if _, ok := view.Agents[localID]; !ok {
 		view.Agents[localID] = runtimecontracts.EffectiveAgentRegistryEntry(localID, runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID})
+	}
+	if len(emitEvents) > 0 {
+		entry := view.Agents[localID]
+		entry.EmitEvents = append([]string(nil), emitEvents...)
+		view.Agents[localID] = entry
 	}
 	if strings.TrimSpace(view.Paths.FlowPath) == "" {
 		view.Paths.FlowPath = flowID

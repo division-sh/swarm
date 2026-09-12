@@ -89,7 +89,10 @@ func (e *Executor) EvaluateFanOutOrdinal(ctx context.Context, intent fanoutoblig
 	}
 	frame.payloadType = e.executionPayloadType(frame.req)
 	emitSpec := plan.Emit
-	eventType := e.resolveDeclarativeEmitEventType(frame, emitSpec.EventType())
+	eventType, err := admittedDeclarativeEmitEventType(frame, emitSpec.EventType())
+	if err != nil {
+		return EmitIntent{}, err
+	}
 	if eventType == "" {
 		return EmitIntent{}, fmt.Errorf("fan-out compiled plan has no emitted event")
 	}

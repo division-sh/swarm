@@ -297,7 +297,7 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 		},
 	}
 	bundle.FlowTree.ByID["discovery"].Events["category.assessed"] = bundle.Events["category.assessed"]
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "market-research-agent", "discovery")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "market-research-agent", "discovery", "category.assessed")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -516,7 +516,7 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "cto-agent", "validation")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "cto-agent", "validation", "cto.spec_vetoed")
 	emitRegistry := NewEmitRegistry(source, nil)
 	bus := &publishBusCapture{}
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
@@ -563,7 +563,7 @@ func TestHandleEmitTool_RejectsMutableActorCriteriaGrant(t *testing.T) {
 	}
 }
 
-func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testing.T) {
+func TestHandleEmitTool_PreservesAdmittedChildFlowOwnerAndExecutionMode(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"research.completed": {
@@ -592,7 +592,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testin
 		},
 	}
 	bundle.FlowTree.ByID["validation"].Events["research.completed"] = bundle.Events["research.completed"]
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "business-research-agent", "validation")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "business-research-agent", "validation", "research.completed")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -601,6 +601,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testin
 		ExecutionMode: "mock",
 		ID:            "business-research-agent",
 		Identity:      toolTestAgentIdentity(t, "business-research-agent", "validation", "validation/inst-1"),
+		EntityID:      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		Role:          "business_research",
 		FlowID:        "validation",
 		FlowPath:      "validation/inst-1",
@@ -667,7 +668,7 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 		},
 	}
 	bundle.FlowTree.ByID["validation"].Events["research.completed"] = bundle.Events["research.completed"]
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "business-research-agent", "validation")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "business-research-agent", "validation", "research.completed")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -715,9 +716,9 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"discovery": {
+				"root/discovery": {
 					Paths: runtimecontracts.FlowContractPaths{
-						FlowPath: "discovery",
+						FlowPath: "root/discovery",
 					},
 					Schema: runtimecontracts.FlowSchemaDocument{
 						Mode: runtimecontracts.FlowModeStatic,
@@ -735,8 +736,8 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 			},
 		},
 	}
-	bundle.FlowTree.ByID["discovery"].Events["vertical.discovered"] = bundle.Events["vertical.discovered"]
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "discovery-coordinator", "discovery")
+	bundle.FlowTree.ByID["root/discovery"].Events["vertical.discovered"] = bundle.Events["vertical.discovered"]
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "discovery-coordinator", "root/discovery", "vertical.discovered")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -744,10 +745,10 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "discovery-coordinator",
-		Identity:      toolTestAgentIdentity(t, "discovery-coordinator", "discovery", "root/discovery"),
+		Identity:      toolTestAgentIdentity(t, "discovery-coordinator", "root/discovery", "root/discovery"),
 		EntityID:      eventtest.UUID("discovery-coordinator-source"),
 		Role:          "discovery_coordinator",
-		FlowID:        "discovery",
+		FlowID:        "root/discovery",
 		FlowPath:      "root/discovery",
 		EmitEvents:    []string{"vertical.discovered"},
 	}
@@ -810,7 +811,7 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 			"analyzer-flow": &analyzerFlow,
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "analyzer-flow")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "analyzer-flow", "analysis.done")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -903,7 +904,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 			"analyzer-flow": &analyzerFlow,
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "analyzer-flow")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "analyzer-flow", "analysis.done")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1055,7 +1056,7 @@ func staticChildPinOutputTestSource(t testing.TB) semanticview.Source {
 	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
 		Root: &root,
 	}
-	return toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "root/analyzer-flow")
+	return toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "root/analyzer-flow", "analysis.done")
 }
 
 func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
@@ -1091,7 +1092,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 			"analyzer-flow": &analyzerFlow,
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "analyzer-flow")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "analyzer", "analyzer-flow", "analysis.done")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1140,7 +1141,7 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "root-agent", ".")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "root-agent", ".", "root.ready")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1177,7 +1178,7 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load cycle fixture: %v", err)
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "root-agent", ".")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "root-agent", ".", "cycle.ping")
 	store := newEmitRoutePlanStore()
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "root-agent", Identity: toolTestRootAgentIdentity(t, "root-agent"), FlowID: ".", Role: "root-agent", EntityID: eventtest.UUID("root-agent-cycle-source"), EmitEvents: []string{"cycle.ping"}}
@@ -1220,7 +1221,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 			},
 		},
 	}}, nil)
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "reviewer", "review")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "reviewer", "review", "assessment.reported")
 	store := newEmitRoutePlanStore()
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
 	route := runtimeflowidentity.DeriveRoute("review", "instance-1")
@@ -1504,7 +1505,7 @@ func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 			},
 		},
 	}
-	source := semanticview.Wrap(bundle)
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "market-research-agent", ".", "category.assessed")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1512,6 +1513,8 @@ func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
+		Identity:      toolTestRootAgentIdentity(t, "market-research-agent"),
+		FlowID:        ".",
 		Role:          "market_research",
 		EmitEvents:    []string{"category.assessed"},
 	}
@@ -1540,7 +1543,7 @@ func TestHandleEmitTool_AllowsDeclaredTemplateIDBusinessPayload(t *testing.T) {
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "repo-agent", ".")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "repo-agent", ".", "repo.template.selected")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1606,7 +1609,7 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "market-research-agent", ".")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "market-research-agent", ".", "scan.completed")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1703,8 +1706,8 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 			},
 		},
 	}
-	toolTestDeclareAgent(t, bundle, "review-agent", "review")
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "validation-agent", "validation")
+	toolTestDeclareAgent(t, bundle, "review-agent", "review", "task.requested")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "validation-agent", "validation", "task.requested")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1849,7 +1852,7 @@ func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 			},
 		},
 	}
-	source := semanticview.Wrap(bundle)
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "market-research-agent", ".", "scan.completed")
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -1857,6 +1860,8 @@ func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
+		Identity:      toolTestRootAgentIdentity(t, "market-research-agent"),
+		FlowID:        ".",
 		Role:          "market_research",
 		EmitEvents:    []string{"scan.completed"},
 	}
@@ -1895,7 +1900,7 @@ func emitRoutePlanRootReceiverSource(t *testing.T) semanticview.Source {
 	if err != nil {
 		t.Fatalf("load template-output root-connect fixture: %v", err)
 	}
-	return toolTestSourceWithDeclaredAgent(t, bundle, "producer-agent", "producer")
+	return toolTestSourceWithDeclaredAgent(t, bundle, "producer-agent", "producer", "deploy.done")
 }
 
 func emitRoutePlanSource(t testing.TB, connects []runtimecontracts.FlowConnect) semanticview.Source {
@@ -1921,7 +1926,7 @@ func emitRoutePlanSource(t testing.TB, connects []runtimecontracts.FlowConnect) 
 			},
 		},
 	}, connects)
-	return toolTestSourceWithDeclaredAgent(t, bundle, "producer-agent", "producer")
+	return toolTestSourceWithDeclaredAgent(t, bundle, "producer-agent", "producer", "deploy.done")
 }
 
 func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimecontracts.FlowConnect) *runtimecontracts.WorkflowContractBundle {

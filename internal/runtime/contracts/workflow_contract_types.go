@@ -1698,7 +1698,6 @@ type GuardActionEntry struct {
 	PolicyRef       string `yaml:"policy_ref"`
 	PlatformBuiltin string `yaml:"platform_builtin"`
 	Effect          string `yaml:"effect"`
-	Emits           string `yaml:"emits"`
 }
 type SystemNodeContract struct {
 	Description      string                            `yaml:"description"`

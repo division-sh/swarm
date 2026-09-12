@@ -8,9 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -71,7 +69,6 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}
 	preValidationPayload := diagnosticPayloadMap(payloadMap)
 	schemaEventType := eventType
-	eventType = e.resolveAgentScopedEmitEventType(actor, eventType)
 
 	inbound, _ := runtimebus.InboundEventFromContext(ctx)
 	executionMode := actor.ExecutionMode
@@ -110,16 +107,23 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}
 
 	entityID := strings.TrimSpace(actor.EffectiveEntityID())
-	if entityID == "" {
-		entityID = strings.TrimSpace(inbound.EntityID())
+	projection, ok := semanticview.ResolveAgentContractProjection(e.workflowSource, actor)
+	if !ok {
+		return nil, fmt.Errorf("emit tool requires exact agent declaration")
 	}
-	flowInstance := emitFlowInstanceForActorEvent(actor, inbound)
-	flowID := emitActorFlowID(e.workflowSource, actor, flowInstance)
+	flowID := projection.OwnerFlowID
 	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, entityID)
 	if err != nil {
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "routing_source_invalid", "routing_source", "construct", err)
 		return nil, err
 	}
+	flowInstance := routingSource.Route().FlowInstance
+	publication, err := runtimepinrouting.AdmitPublicationIdentity(flowID, schemaEventType, routingSource)
+	if err != nil {
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "publication_identity_invalid", "routing_source", "construct", err)
+		return nil, err
+	}
+	eventType = string(publication)
 	envelope := events.EventEnvelope{
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
@@ -323,15 +327,6 @@ func (e *Executor) emitTargetEvidenceForActor(ctx context.Context, actor models.
 	return runtimepinrouting.PersistedStructuralParent{}, currentDeliveryOwner, nil
 }
 
-func emitFlowInstanceForActorEvent(actor models.AgentConfig, inbound events.Event) string {
-	actorFlow := strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
-	inboundFlow := strings.Trim(strings.TrimSpace(inbound.FlowInstance()), "/")
-	if inboundFlow != "" && flowWithinActorScope(actorFlow, inboundFlow) {
-		return inboundFlow
-	}
-	return actorFlow
-}
-
 func emitActorFlowID(source semanticview.Source, actor models.AgentConfig, flowInstance string) string {
 	if source == nil {
 		return ""
@@ -355,64 +350,4 @@ func emitActorFlowID(source semanticview.Source, actor models.AgentConfig, flowI
 		}
 	}
 	return ""
-}
-
-func flowWithinActorScope(actorFlow, inboundFlow string) bool {
-	actorFlow = strings.Trim(strings.TrimSpace(actorFlow), "/")
-	inboundFlow = strings.Trim(strings.TrimSpace(inboundFlow), "/")
-	if actorFlow == "" || inboundFlow == "" {
-		return false
-	}
-	return inboundFlow == actorFlow || strings.HasPrefix(inboundFlow, actorFlow+"/")
-}
-
-func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eventType string) string {
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return eventType
-	}
-	if !strings.Contains(eventType, "/") {
-		configured := UniqueNonEmpty(actor.EmitEvents)
-		for _, candidate := range configured {
-			if strings.Contains(candidate, "/") && eventidentity.LeafName(candidate) == eventType {
-				eventType = strings.TrimSpace(candidate)
-				break
-			}
-		}
-	}
-	flowID := strings.TrimSpace(actor.FlowID)
-	if flowID == "" {
-		return eventType
-	}
-	flowPath := actor.CanonicalFlowPath()
-	if flowPath == "" {
-		return eventType
-	}
-	e.mu.RLock()
-	source := e.workflowSource
-	e.mu.RUnlock()
-	if source == nil {
-		return eventType
-	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
-		return eventType
-	}
-	localEvents := make([]string, 0, len(scope.OutputEvents)+len(scope.Events))
-	localEvents = append(localEvents, scope.OutputEvents...)
-	for candidate := range scope.Events {
-		localEvents = append(localEvents, candidate)
-	}
-	scopePath := eventidentity.Normalize(scope.Path)
-	if strings.EqualFold(strings.TrimSpace(scope.Mode), runtimecontracts.FlowModeTemplate) &&
-		flowPath != scopePath && strings.HasPrefix(eventidentity.Normalize(eventType), scopePath+"/") {
-		local := strings.TrimPrefix(eventidentity.Normalize(eventType), scopePath+"/")
-		for _, candidate := range eventidentity.NormalizeList(localEvents) {
-			if local == candidate {
-				eventType = local
-				break
-			}
-		}
-	}
-	return eventidentity.ExternalizeForFlow(flowPath, localEvents, eventType)
 }

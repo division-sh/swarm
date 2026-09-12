@@ -149,7 +149,9 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 func (l ActivityRequestLineage) RequestID() string { return l.request.ID() }
 
 func (l ActivityRequestLineage) OwnsResultType(eventType events.EventType) bool {
-	return string(eventType) == l.intent.SuccessEvent || string(eventType) == l.intent.FailureEvent
+	success, successErr := admitActivityPublication(l.intent, l.intent.SuccessEvent)
+	failure, failureErr := admitActivityPublication(l.intent, l.intent.FailureEvent)
+	return successErr == nil && failureErr == nil && (eventType == success.eventType || eventType == failure.eventType)
 }
 
 func (l ActivityRequestLineage) ValidateResult(result events.Event) error {
@@ -187,7 +189,11 @@ func (l ActivityRequestLineage) ValidateResult(result events.Event) error {
 			return fmt.Errorf("activity result has foreign loop revision")
 		}
 	}
-	if string(result.Type()) == intent.SuccessEvent {
+	success, err := admitActivityPublication(intent, intent.SuccessEvent)
+	if err != nil {
+		return err
+	}
+	if result.Type() == success.eventType {
 		if len(payload.Result) == 0 || payload.Failure != nil {
 			return fmt.Errorf("activity success payload is invalid")
 		}
