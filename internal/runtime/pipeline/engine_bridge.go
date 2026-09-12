@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -46,6 +47,7 @@ type handlerExecutionOutcome struct {
 }
 
 type contractHandlerExecutionResult struct {
+	Committed                 bool
 	Transition                WorkflowTransition
 	Plan                      handlerExecutionPlan
 	Outcome                   *handlerExecutionOutcome
@@ -317,7 +319,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		logComputeModuleReplayEvidence(ctx, pc.bus, node.Key(), triggerCtx.Event, result.ComputeModuleTraces)
 		logLoopExecution(ctx, pc.bus, node.Key(), triggerCtx.Event, result.LoopTrace)
 	}
-	if err != nil {
+	if err != nil && !result.Committed {
 		return contractHandlerExecutionResult{
 			SettledDeliveryClaim: result.SettledDeliveryClaim,
 			Handled:              runtimeengine.IsHandledOutcome(result.Status),
@@ -341,9 +343,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 				immediateActivities = append(immediateActivities, intent)
 			}
 		}
-		activityEmissions, err := activityRequestEmitIntents(immediateActivities)
-		if err != nil {
-			return contractHandlerExecutionResult{}, err
+		activityEmissions, activityErr := activityRequestEmitIntents(immediateActivities)
+		if activityErr != nil {
+			err = errors.Join(err, activityErr)
 		}
 		emissions.appendIntents(activityEmissions)
 	}
@@ -353,11 +355,12 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	handled := runtimeengine.IsHandledOutcome(result.Status)
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return contractHandlerExecutionResult{
+			Committed:            result.Committed,
 			Handled:              handled,
 			Emissions:            emissions.immutableEvents(),
 			SettledDeliveryClaim: result.SettledDeliveryClaim,
 			RuleSelection:        admittedHandlerRuleSelection(result.HandlerRuleSelection),
-		}, nil
+		}, err
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
 	plan := handlerExecutionPlanFromNodeHandler(source, node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
@@ -373,6 +376,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	plan.DataAccumulation = outcome.DataAccumulation
 	return contractHandlerExecutionResult{
+		Committed:                 result.Committed,
 		Transition:                workflowTransitionFromHandlerOutcome(triggerCtx.State, node, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
 		Plan:                      plan,
 		Outcome:                   outcome,
@@ -383,7 +387,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		SettledDeliveryClaim:      result.SettledDeliveryClaim,
 		Handled:                   handled,
 		RuleSelection:             admittedHandlerRuleSelection(result.HandlerRuleSelection),
-	}, nil
+	}, err
 }
 
 func emissionPlanWhen(enabled bool, plan *pipelineEmissionPlan) *pipelineEmissionPlan {

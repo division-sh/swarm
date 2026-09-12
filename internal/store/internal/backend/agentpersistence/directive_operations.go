@@ -341,19 +341,13 @@ func requireDirectiveTransition(res sql.Result, err error) error {
 }
 
 func (s *AgentPostgresOwner) RenewDirectiveExecutionLease(ctx context.Context, operationID, ownerID string, now time.Time, lease time.Duration) error {
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := requireActivePostgresDirectiveOperation(ctx, tx, operationID); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET execution_lease_expires_at = $4, updated_at = $3 WHERE operation_id = $1::uuid AND execution_owner_id = $2 AND state = 'executing'`, operationID, ownerID, now.UTC(), now.Add(normalizeDirectiveLease(lease)).UTC())
-	if err := requireDirectiveTransition(res, err); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.backend.RunTransaction(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		if _, err := requireActivePostgresDirectiveOperation(sqlCtx, tx, operationID); err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(sqlCtx, `UPDATE agent_directive_operations SET execution_lease_expires_at = $4, updated_at = $3 WHERE operation_id = $1::uuid AND execution_owner_id = $2 AND state = 'executing'`, operationID, ownerID, now.UTC(), now.Add(normalizeDirectiveLease(lease)).UTC())
+		return requireDirectiveTransition(res, err)
+	})
 }
 
 func (s *AgentSQLiteOwner) RenewDirectiveExecutionLease(ctx context.Context, operationID, ownerID string, now time.Time, lease time.Duration) error {
@@ -811,12 +805,21 @@ func (s *AgentPostgresOwner) reconcilePostgresDirectiveOperationIDs(ctx context.
 		}
 		switch {
 		case (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now):
-			res, err := s.backend.ExecContext(ctx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
+			var deleted int64
+			committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+				res, err := tx.ExecContext(sqlCtx, `DELETE FROM agent_directive_operations o WHERE o.operation_id = $1::uuid AND o.state IN ('succeeded', 'failed') AND o.expires_at <= $2 AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = o.resolved_run_id AND run.status IN (`+runLifecycleActiveStateSQLValues+`))`, id, now.UTC())
+				if err != nil {
+					return err
+				}
+				deleted, err = res.RowsAffected()
+				return err
+			})
+			if committed {
+				out.Deleted += int(deleted)
+			}
 			if err != nil {
 				return out, err
 			}
-			rows, _ := res.RowsAffected()
-			out.Deleted += int(rows)
 		case op.State == runtimeagentcontrol.DirectiveOperationExecuted || op.State == runtimeagentcontrol.DirectiveOperationSucceeded:
 			if _, err := s.FinalizeDirectiveSuccess(ctx, id, now, ttl); err != nil {
 				return out, err

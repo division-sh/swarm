@@ -4722,6 +4722,7 @@ func startServedEventPublishFollowUpRuntime(t *testing.T, opts cliapp.ServeOptio
 		cancelServe()
 		select {
 		case code := <-done:
+			t.Logf("stock-pq investigation served exit=%d transcript:\n%s", code, out.String())
 			if code != 0 {
 				t.Errorf("Run exit code = %d\noutput:\n%s", code, out.String())
 			}
@@ -6461,6 +6462,7 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode:        "postgres",
+		StoreModeSet:     true,
 		APIListenAddr:    "127.0.0.1:0",
 		MCPListenAddr:    "127.0.0.1:0",
 		SelfCheck:        true,
@@ -6468,6 +6470,9 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 	})
 
 	serve.waitForReadyLine()
+	if !strings.Contains(serve.outputString(), "backend=postgres") {
+		t.Fatalf("investigation requires actual PostgreSQL selection:\n%s", serve.outputString())
+	}
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
 	}
@@ -9210,6 +9215,7 @@ func (p *serveRuntimeTestProcess) waitForExit(timeout time.Duration) (int, bool)
 	select {
 	case code := <-p.done:
 		p.recordStopped(code)
+		p.t.Logf("stock-pq investigation served exit=%d transcript:\n%s", code, p.outputString())
 		return code, true
 	case <-timer.C:
 		return 0, false

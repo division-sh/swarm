@@ -240,37 +240,40 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ExecutionOwner:        runfork.RunForkSelectedContractExecutionOwner,
 		DeferredWorkAdmission: deferredWorkAdmission,
 	})
-	if err != nil {
-		return SelectedContractExecutionResult{
-			Owner:                              runfork.RunForkSelectedContractExecutionOwner,
-			Materialization:                    materialization,
-			SelectedContractExecutionAdmission: &admission,
-			AgentRuntimeMaterialization:        &agentRuntime.Proof,
-		}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
+	result := SelectedContractExecutionResult{
+		Owner:                              runfork.RunForkSelectedContractExecutionOwner,
+		Materialization:                    materialization,
+		SelectedContractExecutionAdmission: &admission,
+		AgentRuntimeMaterialization:        &agentRuntime.Proof,
 	}
 	containerProof := container.Proof()
+	if containerProof.RuntimeExecutionID != "" {
+		result.ForkLocalRuntimeContainer = &containerProof
+	}
+	if err != nil {
+		if container.authority.Valid() {
+			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+				return result, errors.Join(err, authorityErr)
+			}
+		}
+		return result, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
+	}
 	published, err := container.Publish(ctx)
+	result.ExecutedEventCount = len(published)
+	result.ForkEvents = published
 	if err != nil {
 		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 			err = errors.Join(err, authorityErr)
 		} else {
 			err = cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 		}
-		return SelectedContractExecutionResult{
-			Owner:                              runfork.RunForkSelectedContractExecutionOwner,
-			Materialization:                    materialization,
-			SelectedContractExecutionAdmission: &admission,
-			AgentRuntimeMaterialization:        &agentRuntime.Proof,
-			ForkLocalRuntimeContainer:          &containerProof,
-			ExecutedEventCount:                 len(published),
-			ForkEvents:                         published,
-		}, err
+		return result, err
 	}
 	if err := container.Quiesce(ctx); err != nil {
 		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-			return SelectedContractExecutionResult{}, errors.Join(err, authorityErr)
+			return result, errors.Join(err, authorityErr)
 		}
-		return SelectedContractExecutionResult{}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
+		return result, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
 	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ExecutionSource:       loadedSource.Source,
@@ -281,35 +284,17 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		RouteTopology:         routeTopology,
 		RecipientPlanning:     *model.RecipientPlanning,
 	})
+	result.Activation = activation
 	if err != nil {
 		if closeErr := container.Close(ctx); closeErr != nil {
 			err = errors.Join(err, closeErr)
-		} else {
+		} else if !activation.Activated {
 			err = cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 		}
-		return SelectedContractExecutionResult{
-			Owner:                              runfork.RunForkSelectedContractExecutionOwner,
-			Materialization:                    materialization,
-			Activation:                         activation,
-			SelectedContractExecutionAdmission: &admission,
-			AgentRuntimeMaterialization:        &agentRuntime.Proof,
-			ForkLocalRuntimeContainer:          &containerProof,
-			ExecutedEventCount:                 len(published),
-			ForkEvents:                         published,
-		}, err
+		return result, err
 	}
 	if err := container.Close(ctx); err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	result := SelectedContractExecutionResult{
-		Owner:                              runfork.RunForkSelectedContractExecutionOwner,
-		Materialization:                    materialization,
-		Activation:                         activation,
-		SelectedContractExecutionAdmission: &admission,
-		AgentRuntimeMaterialization:        &agentRuntime.Proof,
-		ForkLocalRuntimeContainer:          &containerProof,
-		ExecutedEventCount:                 len(published),
-		ForkEvents:                         published,
+		return result, err
 	}
 	return result, err
 }
@@ -337,8 +322,8 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store Selected
 	if store == nil || strings.TrimSpace(forkRunID) == "" {
 		return cause
 	}
-	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, forkRunID); err != nil {
-		return fmt.Errorf("%w; cleanup selected-contract fork %s: %v", cause, forkRunID, err)
+	if err := store.DiscardMaterializedSelectedContractExecutionFork(context.WithoutCancel(ctx), forkRunID); err != nil {
+		return errors.Join(cause, fmt.Errorf("cleanup selected-contract fork %s: %w", forkRunID, err))
 	}
 	return cause
 }

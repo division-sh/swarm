@@ -15,13 +15,13 @@ import (
 
 // The server notice is the barrier: cancellation occurs during actual query
 // execution, not before acquisition or after an already completed callback.
-func TestPostgresNativeQueryCancellation(t *testing.T) {
+func TestPostgresQueryCancellationAndMutationDrain(t *testing.T) {
 	for _, read := range []bool{false, true} {
 		for _, surface := range []string{"exec", "query_row", "rows", "prepared_exec", "prepared_rows"} {
 			t.Run(fmt.Sprintf("read=%t/%s", read, surface), func(t *testing.T) {
 				_, db, _ := testutil.StartPostgres(t)
 				db.SetMaxOpenConns(1)
-				if _, err := db.Exec(`CREATE FUNCTION cancellation_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'query-active'; PERFORM pg_sleep(30); RETURN 1; END $$`); err != nil {
+				if _, err := db.Exec(`CREATE FUNCTION cancellation_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'query-active'; PERFORM pg_sleep(0.03); RETURN 1; END $$`); err != nil {
 					t.Fatal(err)
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -87,8 +87,11 @@ func TestPostgresNativeQueryCancellation(t *testing.T) {
 				if !noticed {
 					t.Fatal("actual server execution barrier was not reached")
 				}
-				if !onlyCancellationLeaves(err, context.Canceled) {
-					t.Errorf("native owning cancellation lost provenance: %T %v", err, err)
+				if !errors.Is(err, context.Canceled) {
+					t.Errorf("operation cancellation lost: %T %v", err, err)
+				}
+				if !read && !onlyCancellationLeaves(err, context.Canceled) {
+					t.Errorf("drained mutation gained an independent failure: %v", err)
 				}
 				progress, stop := context.WithTimeout(context.Background(), 3*time.Second)
 				defer stop()
@@ -118,7 +121,7 @@ func onlyCancellationLeaves(err, cause error) bool {
 	return err == cause
 }
 
-func TestPostgresNativeCancellationPreservesIndependentFailures(t *testing.T) {
+func TestPostgresCancellationPreservesObservedIndependentFailures(t *testing.T) {
 	for _, read := range []bool{false, true} {
 		for _, scenario := range []string{"statement_timeout", "server_cancel", "server_error_then_cancel", "callback_57014", "callback_bad_connection"} {
 			t.Run(fmt.Sprintf("read=%t/%s", read, scenario), func(t *testing.T) {
@@ -196,7 +199,7 @@ func TestPostgresNativeCancellationPreservesIndependentFailures(t *testing.T) {
 	}
 }
 
-func TestPostgresNativeStreamingCancellation(t *testing.T) {
+func TestPostgresEphemeralStreamingCancellation(t *testing.T) {
 	for _, prepared := range []bool{false, true} {
 		t.Run(fmt.Sprintf("prepared=%t", prepared), func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
@@ -232,8 +235,8 @@ func TestPostgresNativeStreamingCancellation(t *testing.T) {
 				}
 				return errors.Join(rows.Err(), rows.Close())
 			})
-			if !onlyCancellationLeaves(err, context.Canceled) {
-				t.Fatalf("streaming cancellation lost ownership: %v", err)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("streaming cancellation lost: %v", err)
 			}
 			progress, stop := context.WithTimeout(context.Background(), time.Second)
 			defer stop()
@@ -244,12 +247,12 @@ func TestPostgresNativeStreamingCancellation(t *testing.T) {
 	}
 }
 
-func TestRetainedPostgresNativeCancellationPreservesExactSession(t *testing.T) {
+func TestRetainedPostgresCancellationDrainsAndPreservesExactSession(t *testing.T) {
 	for _, surface := range []string{"exec", "query_row", "prepared_exec", "prepared_rows"} {
 		t.Run(surface, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
 			db.SetMaxOpenConns(1)
-			if _, err := db.Exec(`CREATE FUNCTION retained_cancel_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'query-active'; PERFORM pg_sleep(30); RETURN 1; END $$`); err != nil {
+			if _, err := db.Exec(`CREATE FUNCTION retained_cancel_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'query-active'; PERFORM pg_sleep(0.03); RETURN 1; END $$`); err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -271,7 +274,7 @@ func TestRetainedPostgresNativeCancellationPreservesExactSession(t *testing.T) {
 			if err := conn.Close(); err != nil {
 				t.Fatal(err)
 			}
-			lease, acquired, err := AcquireAdvisoryLockLease(ctx, db, "native-cancel-exact-session")
+			lease, acquired, err := AcquireAdvisoryLockLease(ctx, db, "cancel-exact-session")
 			if err != nil || !acquired {
 				t.Fatalf("acquire=%t err=%v", acquired, err)
 			}
@@ -305,7 +308,7 @@ func TestRetainedPostgresNativeCancellationPreservesExactSession(t *testing.T) {
 				}
 			})
 			if !onlyCancellationLeaves(err, context.Canceled) {
-				t.Fatalf("retained native cancellation lost: %v", err)
+				t.Fatalf("retained cancellation lost after drain: %v", err)
 			}
 			next, stop := context.WithTimeout(context.Background(), time.Second)
 			defer stop()
@@ -328,12 +331,12 @@ func TestRetainedPostgresNativeCancellationPreservesExactSession(t *testing.T) {
 	}
 }
 
-func TestPostgresNativeQueryDeadline(t *testing.T) {
+func TestPostgresQueryDeadlineAndRetainedDrain(t *testing.T) {
 	for _, retained := range []bool{false, true} {
 		t.Run(fmt.Sprintf("retained=%t", retained), func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
 			db.SetMaxOpenConns(1)
-			if _, err := db.Exec(`CREATE FUNCTION deadline_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'deadline-query-active'; PERFORM pg_sleep(30); RETURN 1; END $$`); err != nil {
+			if _, err := db.Exec(`CREATE FUNCTION deadline_probe() RETURNS integer LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'deadline-query-active'; PERFORM pg_sleep(0.03); RETURN 1; END $$`); err != nil {
 				t.Fatal(err)
 			}
 			conn, err := db.Conn(context.Background())
@@ -341,8 +344,12 @@ func TestPostgresNativeQueryDeadline(t *testing.T) {
 				t.Fatal(err)
 			}
 			noticed := false
+			var operationDone <-chan struct{}
 			if err := conn.Raw(func(raw any) error {
-				pq.SetNoticeHandler(raw.(driver.Conn), func(*pq.Error) { noticed = true })
+				pq.SetNoticeHandler(raw.(driver.Conn), func(*pq.Error) {
+					noticed = true
+					<-operationDone
+				})
 				return nil
 			}); err != nil {
 				t.Fatal(err)
@@ -358,7 +365,7 @@ func TestPostgresNativeQueryDeadline(t *testing.T) {
 			var lease *AdvisoryLockLease
 			if retained {
 				var acquired bool
-				lease, acquired, err = AcquireAdvisoryLockLease(context.Background(), db, "native-deadline")
+				lease, acquired, err = AcquireAdvisoryLockLease(context.Background(), db, "operation-deadline")
 				if err != nil || !acquired {
 					t.Fatalf("acquire=%t err=%v", acquired, err)
 				}
@@ -367,6 +374,7 @@ func TestPostgresNativeQueryDeadline(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
+			operationDone = ctx.Done()
 			err = run(ctx, func(ctx context.Context, tx *sql.Tx) error {
 				var value int
 				return tx.QueryRowContext(ctx, "SELECT deadline_probe()").Scan(&value)
@@ -374,8 +382,11 @@ func TestPostgresNativeQueryDeadline(t *testing.T) {
 			if !noticed {
 				t.Fatal("deadline elapsed before native query execution")
 			}
-			if !onlyCancellationLeaves(err, context.DeadlineExceeded) {
-				t.Fatalf("deadline lost native attribution: %v", err)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("operation deadline lost: %v", err)
+			}
+			if retained && !onlyCancellationLeaves(err, context.DeadlineExceeded) {
+				t.Fatalf("retained drain gained an independent error: %v", err)
 			}
 			if lease != nil {
 				if err := lease.ProveCurrent(context.Background()); err != nil {

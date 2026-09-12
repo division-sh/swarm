@@ -274,6 +274,7 @@ func (p pipelineTestWorkflowTimerPersistence) CommitWorkflowTimerReconciliation(
 	if err != nil {
 		return CommittedWorkflowLifecycleMutation{}, err
 	}
+	result.Committed = true
 	return result, result.Validate()
 }
 

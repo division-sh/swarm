@@ -30,45 +30,36 @@ func (s *Postgres) BootstrapSchema(ctx context.Context, request SchemaBootstrapR
 	if err != nil {
 		return err
 	}
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin postgres schema bootstrap: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	committed, err := s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{}, func(sqlCtx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(sqlCtx, `SELECT pg_advisory_xact_lock($1)`, postgresSchemaBootstrapLock); err != nil {
+			return fmt.Errorf("serialize postgres schema bootstrap: %w", err)
 		}
-	}()
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, postgresSchemaBootstrapLock); err != nil {
-		return fmt.Errorf("serialize postgres schema bootstrap: %w", err)
-	}
-	target, report, err := inspectPostgresCompatibility(ctx, tx, expected)
-	if err != nil {
-		return err
-	}
-	report.Target = target
-	diagnostic := schemaCompatibilityDiagnostic{Backend: SchemaDialectPostgres, Target: target, Current: request.Origin, Origin: report.Origin}
-	switch report.State {
-	case schemaStateFresh:
-		if err := platformschema.BootstrapFreshPostgres(ctx, tx, request.PlatformPlans, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt); err != nil {
+		target, report, err := inspectPostgresCompatibility(sqlCtx, tx, expected)
+		if err != nil {
 			return err
 		}
-	case schemaStateCompatible:
-	case schemaStateIncompatible:
-		return diagnostic.failure(report.Drift)
-	default:
-		return fmt.Errorf("unknown postgres schema compatibility state %q", report.State)
+		report.Target = target
+		diagnostic := schemaCompatibilityDiagnostic{Backend: SchemaDialectPostgres, Target: target, Current: request.Origin, Origin: report.Origin}
+		switch report.State {
+		case schemaStateFresh:
+			if err := platformschema.BootstrapFreshPostgres(sqlCtx, tx, request.PlatformPlans, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt); err != nil {
+				return err
+			}
+		case schemaStateCompatible:
+		case schemaStateIncompatible:
+			return diagnostic.failure(report.Drift)
+		default:
+			return fmt.Errorf("unknown postgres schema compatibility state %q", report.State)
+		}
+		if err := ensurePostgresStatePlans(sqlCtx, tx, request.StatePlans, diagnostic); err != nil {
+			return err
+		}
+		return nil
+	})
+	if committed {
+		s.schemaAdmission.markCurrent()
 	}
-	if err := ensurePostgresStatePlans(ctx, tx, request.StatePlans, diagnostic); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit postgres schema bootstrap: %w", err)
-	}
-	committed = true
-	s.schemaAdmission.markCurrent()
-	return nil
+	return err
 }
 
 func inspectPostgresCompatibility(ctx context.Context, q schemaQueryer, expected schemaShape) (string, schemaCompatibilityReport, error) {

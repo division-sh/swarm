@@ -86,14 +86,14 @@ func (s *RunLifecyclePostgresOwner) RequestCompletionCandidate(
 		dueAt = &request.DueAt
 	}
 	var result runtimerunlifecycle.CandidateRequestResult
-	err = s.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := s.runPostgresRuntimeMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		result, err = s.RequestCompletionCandidateTx(txctx, tx, request.RunID, dueAt, handoff)
 		return err
 	})
-	if err != nil {
+	if !committed {
 		return "", err
 	}
-	return result.Disposition, handoff.Commit()
+	return result.Disposition, errors.Join(err, handoff.Commit())
 }
 
 func (s *RunLifecycleSQLiteOwner) RequestCompletionCandidate(
@@ -113,14 +113,14 @@ func (s *RunLifecycleSQLiteOwner) RequestCompletionCandidate(
 		dueAt = &request.DueAt
 	}
 	var result runtimerunlifecycle.CandidateRequestResult
-	err = s.runRuntimeMutation(ctx, "sqlite request completion candidate", func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := s.runRuntimeMutationOutcome(ctx, "sqlite request completion candidate", func(txctx context.Context, tx *sql.Tx) error {
 		result, err = s.RequestCompletionCandidateTx(txctx, tx, request.RunID, dueAt, handoff)
 		return err
 	})
-	if err != nil {
+	if !committed {
 		return "", err
 	}
-	return result.Disposition, handoff.Commit()
+	return result.Disposition, errors.Join(err, handoff.Commit())
 }
 
 func requestPostgresCompletionCandidateTx(
@@ -464,11 +464,15 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 	}
 	var outcome runtimerunlifecycle.CompletionResult
 	effects := privaterunforkrevision.NewEffects()
-	err := s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, effects, candidate, catalog)
 		return err
 	})
+	if !committed {
+		return runtimerunlifecycle.CompletionResult{}, err
+	}
+	outcome.Committed = true
 	return outcome, err
 }
 
@@ -482,11 +486,15 @@ func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 	}
 	var outcome runtimerunlifecycle.CompletionResult
 	effects := privaterunforkrevision.NewEffects()
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite execute run completion candidate", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite execute run completion candidate", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, effects, candidate, catalog)
 		return err
 	})
+	if !committed {
+		return runtimerunlifecycle.CompletionResult{}, err
+	}
+	outcome.Committed = true
 	return outcome, err
 }
 

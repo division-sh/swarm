@@ -924,8 +924,8 @@ func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftT
 }
 
 func (s *DecisionPostgresOwner) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
-	return withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
-		return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+	return withRunLifecycleCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
+		return runPostgresDecisionCardMutationOutcome(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 			changed, err := supersedeDecisionCardsForStageWithStory(txctx, story, tx, runID, entityID, activationID, reason, now, true)
 			if err != nil || !changed {
 				return err
@@ -937,8 +937,8 @@ func (s *DecisionPostgresOwner) SupersedeDecisionCardsForStage(ctx context.Conte
 }
 
 func (s *DecisionSQLiteOwner) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
-	return withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
-		return s.runDecisionCardMutation(ctx, "sqlite supersede decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+	return withRunLifecycleCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
+		return s.runDecisionCardMutationOutcome(ctx, "sqlite supersede decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 			changed, err := supersedeDecisionCardsForStageWithStory(txctx, story, tx, runID, entityID, activationID, reason, now, false)
 			if err != nil || !changed {
 				return err
@@ -1431,10 +1431,15 @@ func DecisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, e
 }
 
 func runPostgresDecisionCardMutation(ctx context.Context, selected *DecisionPostgresOwner, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) error {
+	_, err := runPostgresDecisionCardMutationOutcome(ctx, selected, fn)
+	return err
+}
+
+func runPostgresDecisionCardMutationOutcome(ctx context.Context, selected *DecisionPostgresOwner, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) (bool, error) {
 	if selected == nil || selected.backend == nil {
-		return errors.New("PostgreSQL decision card mutation requires selected store")
+		return false, errors.New("PostgreSQL decision card mutation requires selected store")
 	}
-	return selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	return selected.runPrivateAuthorActivityMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		return fn(txctx, tx, runtimeAuthorActivityMutation(story))
 	})
 }
@@ -1448,7 +1453,12 @@ func (s *DecisionSQLiteOwner) RunDecisionCardMutation(ctx context.Context, label
 }
 
 func (s *DecisionSQLiteOwner) runDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) error {
-	return s.runPrivateAuthorActivityMutation(ctx, label, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	_, err := s.runDecisionCardMutationOutcome(ctx, label, fn)
+	return err
+}
+
+func (s *DecisionSQLiteOwner) runDecisionCardMutationOutcome(ctx context.Context, label string, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) (bool, error) {
+	return s.runPrivateAuthorActivityMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		return fn(txctx, tx, runtimeAuthorActivityMutation(story))
 	})
 }

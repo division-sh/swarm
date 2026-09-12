@@ -32,11 +32,18 @@ type mutationOperation struct {
 }
 
 func (b *Backend) RunTransaction(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
+	_, err := b.RunTransactionOutcome(ctx, label, operation)
+	return err
+}
+
+// RunTransactionOutcome keeps acknowledged COMMIT separate from later cleanup
+// errors. False is not evidence that an uncertain COMMIT rolled back.
+func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	if !b.Valid() {
-		return fmt.Errorf("sqlite backend is required")
+		return false, fmt.Errorf("sqlite backend is required")
 	}
 	if operation == nil {
-		return nil
+		return false, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -49,12 +56,12 @@ func (b *Backend) RunTransaction(ctx context.Context, label string, operation fu
 		current := mutationOperation{label: label, phase: mutationPhaseFirstAttempt, attempt: busyAttempts + 1}
 		if err := ctx.Err(); err != nil {
 			b.observeFirstCancellation(current, "before_attempt", err)
-			return err
+			return false, err
 		}
 
 		recovering := lastBusy != nil
 		if recovering && !time.Now().Before(recoveryDeadline) {
-			return mutationBudgetError(label, lastBusy)
+			return false, mutationBudgetError(label, lastBusy)
 		}
 
 		attemptCtx := ctx
@@ -68,36 +75,41 @@ func (b *Backend) RunTransaction(ctx context.Context, label string, operation fu
 		if err := b.acquireMutation(attemptCtx, current); err != nil {
 			cancelAttempt()
 			if callerErr := ctx.Err(); callerErr != nil {
-				return callerErr
+				return false, callerErr
 			}
 			if recovering && errors.Is(err, context.DeadlineExceeded) {
-				return mutationBudgetError(label, lastBusy)
+				return false, mutationBudgetError(label, lastBusy)
 			}
-			return err
+			return false, err
 		}
-		err := func() error {
+		committed, err := func() (bool, error) {
 			defer b.releaseMutation()
-			return b.runTransactionOnce(attemptCtx, nil, operation)
+			return b.runTransactionOnceOutcome(attemptCtx, nil, operation)
 		}()
 		attemptErr := attemptCtx.Err()
 		cancelAttempt()
+		// Cancellation after COMMIT admission cannot erase acknowledged success
+		// or grant busy-policy replay because of a later cleanup failure.
+		if committed {
+			return true, err
+		}
 
 		if callerErr := ctx.Err(); callerErr != nil {
 			b.observeFirstCancellation(current, "attempt", callerErr)
-			return errors.Join(callerErr, err)
+			return false, errors.Join(callerErr, err)
 		}
 		if err == nil {
-			return nil
+			return false, nil
 		}
 		if attemptErr != nil {
 			if recovering && errors.Is(attemptErr, context.DeadlineExceeded) {
-				return errors.Join(mutationBudgetError(label, lastBusy), err)
+				return false, errors.Join(mutationBudgetError(label, lastBusy), err)
 			}
-			return errors.Join(attemptErr, err)
+			return false, errors.Join(attemptErr, err)
 		}
 		var terminal *transactionTerminationError
 		if errors.As(err, &terminal) || !mutationBusyError(err) {
-			return err
+			return false, err
 		}
 
 		lastBusy = err
@@ -113,9 +125,9 @@ func (b *Backend) RunTransaction(ctx context.Context, label string, operation fu
 		if err := waitMutationBackoff(ctx, recoveryDeadline, delay); err != nil {
 			if callerErr := ctx.Err(); callerErr != nil {
 				b.observeFirstCancellation(current, "backoff", callerErr)
-				return callerErr
+				return false, callerErr
 			}
-			return mutationBudgetError(label, lastBusy)
+			return false, mutationBudgetError(label, lastBusy)
 		}
 	}
 }
@@ -230,9 +242,14 @@ func waitMutationBackoff(ctx context.Context, deadline time.Time, delay time.Dur
 }
 
 func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (err error) {
+	_, err = b.runTransactionOnceOutcome(ctx, opts, operation)
+	return err
+}
+
+func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var tx *sql.Tx
 	discard := false
@@ -260,32 +277,32 @@ func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, o
 	tx, err = conn.BeginTx(ctx, opts)
 	if err != nil {
 		discard = true
-		return err
+		return false, err
 	}
 	if err = ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	if err = operation(ctx, tx); err != nil {
-		return err
+		return false, err
 	}
 	if err = ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	if err = tx.Commit(); err != nil {
 		discard = true
 		// Only this owner's Commit result is classified here. Automatic rollback
 		// can win after the context check; callback and cleanup errors stay intact.
 		if err == sql.ErrTxDone && ctx.Err() != nil {
-			return ctx.Err()
+			return false, ctx.Err()
 		}
 		var coded interface{ Code() int }
 		if !errors.As(err, &coded) || (coded.Code()&255 != 5 && coded.Code()&255 != 6) {
-			return &transactionTerminationError{err}
+			return false, &transactionTerminationError{err}
 		}
-		return err
+		return false, err
 	}
 	tx = nil
-	return nil
+	return true, nil
 }
 
 // A failed cleanup or an uncertain commit never grants busy-policy replay.

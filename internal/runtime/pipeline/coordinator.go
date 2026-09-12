@@ -529,12 +529,12 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 		return false, emitted, outcome, err
 	}
 	if evt.Type() == decisionCardDeferredEventType {
-		emitted, err := pc.handleDecisionCardDeferredEvent(ctx, evt)
-		return false, emitted, runtimepipelineobligation.Continue(), err
+		emitted, outcome, err := pc.handleDecisionCardDeferredEvent(ctx, evt)
+		return false, emitted, outcome, err
 	}
 	if evt.Type() == decisionCardExpiredEventType {
-		emitted, err := pc.handleDecisionCardExpiredEvent(ctx, evt)
-		return false, emitted, runtimepipelineobligation.Continue(), err
+		emitted, outcome, err := pc.handleDecisionCardExpiredEvent(ctx, evt)
+		return false, emitted, outcome, err
 	}
 	stageTimer, firedStageTimer, err := pc.handleWorkflowStageTimerFire(ctx, evt)
 	if err != nil {
@@ -553,6 +553,9 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 	emissions := &pipelineEmissionPlan{}
 	handled, outcome, err := pc.handleEventResultWithEmissionPlan(ctx, evt, emissions)
 	emitted := emissions.immutableEvents()
+	if outcome.Committed {
+		return !consume && !exactDeliveryBoundary, emitted, outcome, err
+	}
 	if !outcome.ContinueDispatch() {
 		// A non-consuming event-wide policy has no node-delivery authority.
 		// Only an exact node route or a consuming platform policy may settle
@@ -611,7 +614,13 @@ func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Con
 	if evt.Type() == activityRequestEventType {
 		return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, emissions)
 	}
+	if emissions == nil {
+		emissions = &pipelineEmissionPlan{}
+	}
 	handled, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, emissions)
+	if emissions.committed {
+		return handled, runtimepipelineobligation.ExecutionOutcome{Committed: true}, err
+	}
 	if err == nil {
 		return handled, runtimepipelineobligation.Continue(), nil
 	}
@@ -723,21 +732,14 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				State:           application.State(),
 			}, false, emissions != nil)
 		}()
+		if emissions != nil {
+			emissions.committed = result.Committed
+		}
 		if result.SettledDeliveryClaim != nil && !result.SettledDeliveryClaim.Same(claim) {
 			return false, fmt.Errorf("workflow node engine settled a different delivery claim")
 		}
-		if result.SettledDeliveryClaim != nil && err != nil {
-			pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "completed")
-			stopErr := heartbeat.Stop()
-			releaser := pc.deliveryRuntime
-			if releaser == nil {
-				return false, errors.Join(err, stopErr, errors.New("terminal workflow node delivery continuation owner is required"))
-			}
-			releaseErr := releaser.ReleaseDeliveryContinuation(claim.DeliveryID())
-			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered")
-			return result.Handled, errors.Join(err, stopErr, releaseErr)
-		}
-		if err == nil {
+		if err == nil || result.Committed || result.SettledDeliveryClaim != nil {
+			postCommitErr := err
 			for _, emitted := range result.Emissions {
 				emissions.appendEvent(emitted)
 			}
@@ -746,24 +748,28 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				stopErr := heartbeat.Stop()
 				releaser := pc.deliveryRuntime
 				if releaser == nil {
-					return false, errors.Join(stopErr, errors.New("terminal workflow node delivery continuation owner is required"))
+					return result.Handled, errors.Join(postCommitErr, stopErr, errors.New("terminal workflow node delivery continuation owner is required"))
 				}
 				if err := errors.Join(stopErr, releaser.ReleaseDeliveryContinuation(claim.DeliveryID())); err != nil {
-					return false, fmt.Errorf("finish settled workflow node delivery continuation: %w", err)
+					return result.Handled, errors.Join(postCommitErr, fmt.Errorf("finish settled workflow node delivery continuation: %w", err))
 				}
 				pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered")
-				return result.Handled, nil
+				return result.Handled, postCommitErr
 			}
 			sideEffects := []string{"handler_completed"}
 			settlementGuard, settleErr := heartbeat.BeginSettlement()
 			if settleErr != nil {
 				_ = heartbeat.Stop()
-				return false, fmt.Errorf("prepare workflow node delivery settlement: %w", settleErr)
+				return result.Handled, errors.Join(postCommitErr, fmt.Errorf("prepare workflow node delivery settlement: %w", settleErr))
 			}
-			_, settleErr = deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started), admittedHandlerRuleSelection(result.RuleSelection))
-			finishErr := settlementGuard.Finish(settleErr == nil)
+			snapshot, settleErr := deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started), admittedHandlerRuleSelection(result.RuleSelection))
+			settled := snapshot.Status == runtimedelivery.StatusDelivered && snapshot.MatchesSettlementClaim(claim)
+			if !settled && settleErr == nil {
+				settleErr = errors.New("workflow node success settlement returned no exact acknowledged snapshot")
+			}
+			finishErr := settlementGuard.Finish(settled)
 			var releaseErr error
-			if settleErr == nil {
+			if settled {
 				releaser := pc.deliveryRuntime
 				if releaser == nil {
 					releaseErr = errors.New("terminal workflow node delivery continuation owner is required")
@@ -772,10 +778,10 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				}
 			}
 			if err := errors.Join(settleErr, finishErr, releaseErr); err != nil {
-				return false, fmt.Errorf("settle workflow node delivery: %w", err)
+				return result.Handled, errors.Join(postCommitErr, fmt.Errorf("settle workflow node delivery: %w", err))
 			}
 			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered")
-			return result.Handled, nil
+			return result.Handled, postCommitErr
 		}
 		pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "failed")
 		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
@@ -802,9 +808,13 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			Duration: time.Since(started), RetryBase: semanticview.HandlerRetryBase(source),
 			RuleSelection: admittedHandlerRuleSelection(result.RuleSelection),
 		})
-		finishErr := settlementGuard.Finish(settleErr == nil)
+		settled := (snapshot.Status == runtimedelivery.StatusFailed || snapshot.Status == runtimedelivery.StatusDeadLetter) && snapshot.MatchesSettlementClaim(claim)
+		if !settled && settleErr == nil {
+			settleErr = errors.New("workflow node failure settlement returned no exact acknowledged snapshot")
+		}
+		finishErr := settlementGuard.Finish(settled)
 		var releaseErr error
-		if settleErr == nil && snapshot.Status == runtimedelivery.StatusDeadLetter {
+		if settled && snapshot.Status == runtimedelivery.StatusDeadLetter {
 			releaser := pc.deliveryRuntime
 			if releaser == nil {
 				releaseErr = errors.New("terminal workflow node delivery continuation owner is required")
@@ -812,8 +822,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				releaseErr = releaser.ReleaseDeliveryContinuation(snapshot.DeliveryID)
 			}
 		}
-		if err := errors.Join(settleErr, finishErr, releaseErr); err != nil {
-			return false, fmt.Errorf("settle failed workflow node delivery: %w", err)
+		settlementErr := errors.Join(settleErr, finishErr, releaseErr)
+		if !settled {
+			return false, errors.Join(err, fmt.Errorf("settle failed workflow node delivery: %w", settlementErr))
 		}
 		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(snapshot.Status))
 		if snapshot.Status == runtimedelivery.StatusDeadLetter {
@@ -821,18 +832,18 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			if recoveryClaim {
 				// The recovered handler failure is now durable terminal evidence.
 				// Only claim or settlement failures make readiness unsafe.
-				return true, nil
+				return true, settlementErr
 			}
-			return true, err
+			return true, errors.Join(err, settlementErr)
 		}
 		retainer := pc.deliveryRuntime
 		if retainer == nil {
-			return false, fmt.Errorf("workflow node retry continuation owner is required")
+			return false, errors.Join(settlementErr, fmt.Errorf("workflow node retry continuation owner is required"))
 		}
 		if err := retainer.RetainDeliveryContinuation(snapshot); err != nil {
-			return false, fmt.Errorf("transfer workflow node retry continuation: %w", err)
+			return false, errors.Join(settlementErr, fmt.Errorf("transfer workflow node retry continuation: %w", err))
 		}
-		return true, nil
+		return true, settlementErr
 	}
 }
 

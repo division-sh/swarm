@@ -107,6 +107,7 @@ type CommittedDurablePublication interface {
 }
 
 type CommittedEngineMutation struct {
+	Committed            bool
 	ActivityIntents      []ActivityIntent
 	EmitIntents          []EmitIntent
 	SettledDeliveryClaim *runtimedelivery.Claim

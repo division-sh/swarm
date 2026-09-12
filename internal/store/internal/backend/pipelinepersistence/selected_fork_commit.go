@@ -10,6 +10,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -28,7 +29,7 @@ func (s *PipelinePostgresOwner) CommitSelectedForkEvent(ctx context.Context, req
 	defer state.operationMu.Unlock()
 	effects := newRevisionEffects()
 	var result runtimebus.CommittedSelectedForkEvent
-	err = state.postgresLease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, state.postgresLease.Session(), func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
@@ -42,6 +43,9 @@ func (s *PipelinePostgresOwner) CommitSelectedForkEvent(ctx context.Context, req
 		}
 		return story.Finalize(txctx)
 	})
+	if !committed {
+		return runtimebus.CommittedSelectedForkEvent{}, err
+	}
 	return result, err
 }
 
@@ -60,7 +64,7 @@ func (s *PipelineSQLiteOwner) CommitSelectedForkEvent(ctx context.Context, reque
 	defer state.operationMu.Unlock()
 	effects := newRevisionEffects()
 	var result runtimebus.CommittedSelectedForkEvent
-	err = s.backend.RunTransaction(ctx, "sqlite selected-fork event commit", func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite selected-fork event commit", func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
@@ -74,6 +78,9 @@ func (s *PipelineSQLiteOwner) CommitSelectedForkEvent(ctx context.Context, reque
 		}
 		return story.Finalize(txctx)
 	})
+	if !committed {
+		return runtimebus.CommittedSelectedForkEvent{}, err
+	}
 	return result, err
 }
 

@@ -276,11 +276,18 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			DeferredWorkAdmission: deferredWorkAdmission,
 			AgentRuntime:          agentRuntime,
 		})
+		containerProof := container.Proof()
+		if containerProof.RuntimeExecutionID != "" {
+			result.ForkLocalRuntimeContainer = &containerProof
+		}
 		if err != nil {
+			if container.authority.Valid() {
+				if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+					return result, errors.Join(err, authorityErr)
+				}
+			}
 			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
-		containerProof := container.Proof()
-		result.ForkLocalRuntimeContainer = &containerProof
 		published, err := container.Publish(ctx)
 		result.ExecutedEventCount = len(published)
 		result.ForkEvents = published
@@ -311,8 +318,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			if closeErr := container.Close(ctx); closeErr != nil {
 				err = errors.Join(err, closeErr)
+			} else if !activation.Activated {
+				err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
+			return result, err
 		}
 		if err := container.Close(ctx); err != nil {
 			return result, err

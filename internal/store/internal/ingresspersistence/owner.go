@@ -47,14 +47,33 @@ func (s *RuntimeIngressPostgresOwner) EnsureRuntimeIngressState(ctx context.Cont
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	if _, err := s.backend.ExecContext(ctx, `
+	var state runtimeingress.State
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(sqlCtx, `
 		INSERT INTO runtime_ingress_state (id, status, controlled_by, updated_at)
 		VALUES (1, 'running', 'runtime', $1)
 		ON CONFLICT (id) DO NOTHING
 	`, now.UTC()); err != nil {
-		return runtimeingress.State{}, fmt.Errorf("ensure runtime ingress state: %w", err)
+			return fmt.Errorf("ensure runtime ingress state: %w", err)
+		}
+		var err error
+		state, err = scanRuntimeIngressState(tx.QueryRowContext(sqlCtx, `
+		SELECT status, COALESCE(reason, ''), controlled_by, COALESCE(transition_event_id::text, ''), updated_at
+		FROM runtime_ingress_state
+		WHERE id = 1
+	`))
+		if err == sql.ErrNoRows {
+			return runtimeingress.ErrStateNotInitialized
+		}
+		if err != nil {
+			return fmt.Errorf("load runtime ingress state: %w", err)
+		}
+		return nil
+	})
+	if !committed {
+		return runtimeingress.State{}, err
 	}
-	return s.LoadRuntimeIngressState(ctx)
+	return state, err
 }
 
 func (s *RuntimeIngressPostgresOwner) LoadRuntimeIngressState(ctx context.Context) (runtimeingress.State, error) {
@@ -91,7 +110,7 @@ func (s *RuntimeIngressPostgresOwner) TransitionRuntimeIngressState(ctx context.
 	reason, controlledBy, now = normalizeTransition(reason, controlledBy, now)
 	var state runtimeingress.State
 	changed := false
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(txctx, `
 			INSERT INTO runtime_ingress_state (id, status, controlled_by, updated_at)
 			VALUES (1, 'running', 'runtime', $1)
@@ -125,6 +144,9 @@ func (s *RuntimeIngressPostgresOwner) TransitionRuntimeIngressState(ctx context.
 		changed = true
 		return nil
 	})
+	if !committed {
+		return runtimeingress.State{}, false, err
+	}
 	return state, changed, err
 }
 
@@ -138,19 +160,27 @@ func (s *RuntimeIngressPostgresOwner) SetRuntimeIngressTransitionEvent(ctx conte
 	if err := validateTransitionEvent(target, eventID, transitionAt); err != nil || strings.TrimSpace(eventID) == "" {
 		return false, err
 	}
-	res, err := s.backend.ExecContext(ctx, `
+	updated := false
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(sqlCtx, `
 		UPDATE runtime_ingress_state
 		SET transition_event_id = $1::uuid, updated_at = $3
 		WHERE id = 1 AND status = $2 AND updated_at = $3
 	`, strings.TrimSpace(eventID), string(target), transitionAt.UTC())
-	if err != nil {
-		return false, fmt.Errorf("set runtime ingress transition event: %w", err)
+		if err != nil {
+			return fmt.Errorf("set runtime ingress transition event: %w", err)
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("set runtime ingress transition event rows: %w", err)
+		}
+		updated = rows > 0
+		return nil
+	})
+	if !committed {
+		return false, err
 	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("set runtime ingress transition event rows: %w", err)
-	}
-	return rows > 0, nil
+	return updated, err
 }
 
 func (s *RuntimeIngressSQLiteOwner) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (runtimeingress.State, error) {

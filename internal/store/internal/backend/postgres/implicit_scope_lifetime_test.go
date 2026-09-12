@@ -109,7 +109,6 @@ func TestImplicitTransactionScopeDoesNotBlockAdvisoryCleanup(t *testing.T) {
 	// Mirror conversation-fork's retained connection, transaction and independent
 	// cleanup contexts. The fallback cleanup only prevents a failed probe leaking a lock.
 	defer func() {
-		_ = bindNativeOperation(conn, nil)
 		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock_all()")
 	}()
 	if _, err := conn.ExecContext(context.Background(), "SELECT pg_advisory_lock(244105)"); err != nil {

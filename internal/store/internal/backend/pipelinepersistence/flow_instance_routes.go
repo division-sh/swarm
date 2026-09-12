@@ -27,22 +27,16 @@ type flowInstanceRouteExecutor interface {
 }
 
 type flowInstanceRouteDatabase interface {
-	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	RunTransaction(context.Context, func(context.Context, *sql.Tx) error) error
 }
 
-func runPostgresFlowInstanceRouteMutation(ctx context.Context, db flowInstanceRouteDatabase, runID string, fn func(flowInstanceRouteExecutor) error) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := requirePostgresRunActive(ctx, tx, runID); err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+func runPostgresFlowInstanceRouteMutation(ctx context.Context, db flowInstanceRouteDatabase, runID string, fn func(context.Context, flowInstanceRouteExecutor) error) error {
+	return db.RunTransaction(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		if err := requirePostgresRunActive(sqlCtx, tx, runID); err != nil {
+			return err
+		}
+		return fn(sqlCtx, tx)
+	})
 }
 
 func (s *PipelinePostgresOwner) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
@@ -54,8 +48,8 @@ func (s *PipelinePostgresOwner) UpsertFlowInstanceRoute(ctx context.Context, rou
 	if err != nil {
 		return err
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, route.Identity.RunID, func(exec flowInstanceRouteExecutor) error {
-		return upsertPostgresFlowInstanceRoute(ctx, exec, route)
+	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, route.Identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
+		return upsertPostgresFlowInstanceRoute(sqlCtx, exec, route)
 	})
 }
 
@@ -238,8 +232,8 @@ func (s *PipelinePostgresOwner) ReplaceFlowInstanceRouteRecords(
 	if err != nil {
 		return err
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(exec flowInstanceRouteExecutor) error {
-		if _, err := exec.ExecContext(ctx, `
+	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
+		if _, err := exec.ExecContext(sqlCtx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
 			WHERE run_id = $1::uuid AND flow_instance = $2
@@ -249,7 +243,7 @@ func (s *PipelinePostgresOwner) ReplaceFlowInstanceRouteRecords(
 			return fmt.Errorf("inactivate postgres flow-instance route owner %s: %w", identity.Key(), err)
 		}
 		for _, route := range normalized {
-			if err := upsertPostgresFlowInstanceRoute(ctx, exec, route); err != nil {
+			if err := upsertPostgresFlowInstanceRoute(sqlCtx, exec, route); err != nil {
 				return err
 			}
 		}
@@ -450,9 +444,9 @@ func (s *PipelinePostgresOwner) DeleteFlowInstanceRoute(ctx context.Context, ide
 	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
 		var status string
-		err := exec.QueryRowContext(ctx, `
+		err := exec.QueryRowContext(sqlCtx, `
 		SELECT status
 		FROM flow_instances
 		WHERE run_id = $1::uuid AND instance_path = $2
@@ -466,7 +460,7 @@ func (s *PipelinePostgresOwner) DeleteFlowInstanceRoute(ctx context.Context, ide
 		if strings.TrimSpace(status) != "terminated" {
 			return fmt.Errorf("flow instance route removal requires terminal flow_instances status for %s", identity.Key())
 		}
-		if _, err := exec.ExecContext(ctx, `
+		if _, err := exec.ExecContext(sqlCtx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
 			WHERE run_id = $1::uuid AND flow_instance = $2
@@ -520,8 +514,8 @@ func (s *PipelinePostgresOwner) RollbackFlowInstanceRoute(ctx context.Context, i
 	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(exec flowInstanceRouteExecutor) error {
-		if _, err := exec.ExecContext(ctx, `
+	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
+		if _, err := exec.ExecContext(sqlCtx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
 			WHERE run_id = $1::uuid AND flow_instance = $2

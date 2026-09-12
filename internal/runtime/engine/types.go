@@ -486,6 +486,8 @@ type RuleMatch struct {
 }
 
 type ExecutionResult struct {
+	// Committed is acknowledged persistence, not a prediction from partial intents.
+	Committed               bool
 	Status                  OutcomeStatus
 	Failure                 *failures.Envelope
 	FailureDisposition      FailureDisposition

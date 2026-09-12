@@ -55,6 +55,10 @@ func (s *RunForkSQLiteOwner) ResolveConversationForkPoint(ctx context.Context, s
 }
 
 func (s conversationForkStore) createOperatorConversationFork(ctx context.Context, req runtimerunfork.ConversationForkCreateRequest) (runtimerunfork.OperatorConversationForkSession, error) {
+	return s.createConversationForkWithCompletion(ctx, req, nil)
+}
+
+func (s conversationForkStore) createConversationForkWithCompletion(ctx context.Context, req runtimerunfork.ConversationForkCreateRequest, complete func(context.Context, *sql.Tx, runtimerunfork.OperatorConversationForkSession) error) (runtimerunfork.OperatorConversationForkSession, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
@@ -80,7 +84,7 @@ func (s conversationForkStore) createOperatorConversationFork(ctx context.Contex
 		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	var created runtimerunfork.OperatorConversationForkSession
-	err = s.runMutation(ctx, false, func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runMutation(ctx, complete != nil, func(txctx context.Context, tx *sql.Tx) error {
 		row := s.queryRow(txctx, tx, `
 		INSERT INTO conversation_forks (
 			source_session_id, source_run_id, source_agent_id,
@@ -111,6 +115,9 @@ func (s conversationForkStore) createOperatorConversationFork(ctx context.Contex
 			descriptor.Kind, descriptor.TurnIndex, descriptor.TurnID,
 			nullableConversationForkID(descriptor.EventID), descriptor.At, descriptor.SelectedAt, createdBy, now, expiresAt)
 		created, err = scanConversationForkSession(row, now)
+		if err == nil && complete != nil {
+			return complete(txctx, tx, created)
+		}
 		return err
 	})
 	return created, err

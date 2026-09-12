@@ -86,16 +86,31 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescence(ctx context.Context
 		return out, nil
 	}
 
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return runtimerunquiescence.Result{}, fmt.Errorf("begin active run quiescence tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		// Previews and empty selections must roll back even author-activity
+		// initialization. Keep that rollback under the draining transaction owner.
+		if _, err := tx.ExecContext(sqlCtx, "SAVEPOINT active_run_quiescence_selection"); err != nil {
+			return fmt.Errorf("begin active run quiescence selection: %w", err)
 		}
-	}()
+		var err error
+		out, err = s.applyActiveRunQuiescenceTx(sqlCtx, tx, req, reset, out, runIDs, now)
+		if err != nil {
+			return err
+		}
+		if req.DryRun || (len(out.Runs) == 0 && reset == nil) {
+			if _, err := tx.ExecContext(sqlCtx, "ROLLBACK TO SAVEPOINT active_run_quiescence_selection"); err != nil {
+				return fmt.Errorf("rollback active run quiescence selection: %w", err)
+			}
+		}
+		return nil
+	})
+	if !committed {
+		return runtimerunquiescence.Result{}, err
+	}
+	return out, err
+}
+
+func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Context, tx *sql.Tx, req runtimerunquiescence.Request, reset *runtimedestructivereset.QuiescenceRequest, out runtimerunquiescence.Result, runIDs []string, now time.Time) (runtimerunquiescence.Result, error) {
 	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
@@ -201,10 +216,6 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescence(ctx context.Context
 			return runtimerunquiescence.Result{}, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return runtimerunquiescence.Result{}, fmt.Errorf("commit active run quiescence tx: %w", err)
-	}
-	committed = true
 	return out, nil
 }
 

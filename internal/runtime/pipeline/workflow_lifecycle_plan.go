@@ -175,6 +175,8 @@ func (p WorkflowLifecycleMutationPlan) Validate(runID string, route runtimeflowi
 }
 
 type CommittedWorkflowLifecycleMutation struct {
+	// Committed distinguishes an acknowledged empty mutation from refusal.
+	Committed                    bool
 	Wakeups                      []timeridentity.WorkflowTimerActivationRef
 	Cancellations                []timeridentity.WorkflowTimerActivationRef
 	GenericScheduleActivations   []runtimegenericschedule.Activation

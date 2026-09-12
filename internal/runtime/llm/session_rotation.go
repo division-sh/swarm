@@ -23,6 +23,9 @@ func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sess
 	}
 	lease, resolved, err := acquireContinuedMemory(ctx, registry, s, lockOwner)
 	if err != nil {
+		if lease != nil {
+			err = errors.Join(err, registry.Release(context.WithoutCancel(ctx), lease))
+		}
 		return err
 	}
 	if !resolved.Enabled() || lease == nil {
@@ -59,7 +62,8 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Reg
 	lease, err := registry.Rotate(ctx, s.MemoryIdentity, lockOwner, sessions.RotationMetadata{
 		CheckpointSummary: summary,
 	})
-	if err != nil {
+	// A returned lease acknowledges rotation even if its postcommit handoff failed.
+	if lease == nil {
 		return nil, err
 	}
 	s.ID = lease.SessionID
@@ -81,7 +85,7 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Reg
 			oldParseFailures,
 		)
 	}
-	return lease, nil
+	return lease, err
 }
 
 func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, threshold int, sink any) (*sessions.Lease, error) {
@@ -101,7 +105,7 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 	lease, err := registry.Rotate(ctx, s.MemoryIdentity, lockOwner, sessions.RotationMetadata{
 		CheckpointSummary: summary,
 	})
-	if err != nil {
+	if lease == nil {
 		return nil, err
 	}
 	s.ID = lease.SessionID
@@ -123,7 +127,7 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 			oldParseFailures,
 		)
 	}
-	return lease, nil
+	return lease, err
 }
 
 func BuildSessionSummary(s *Session) string {

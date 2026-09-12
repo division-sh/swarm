@@ -465,87 +465,80 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return nil, fmt.Errorf("begin selected-contract source event preparation: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	var out []runfork.RunForkSelectedContractSourceEvent
+	committed, err := s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
 		}
-	}()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
+		var sourceStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR SHARE`, sourceRunID).Scan(&sourceStatus); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return &runtimerunlifecycle.RunNotFoundError{RunID: sourceRunID}
+			}
+			return fmt.Errorf("load selected-contract source event preparation status: %w", err)
+		}
+		if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
+			state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
+			if parseErr != nil {
+				return parseErr
+			}
+			return fmt.Errorf("selected-contract source event preparation state %s is unsupported", state)
+		}
+		if err := requirePostgresRunActive(ctx, tx, forkRunID); err != nil {
+			return fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
+		}
+		records, err := eventrecordpostgres.LoadMany(ctx, tx, ids)
+		if err != nil {
+			return fmt.Errorf("load selected-contract source events: %w", err)
+		}
+		sort.Slice(records, func(i, j int) bool {
+			if records[i].CreatedAt.Equal(records[j].CreatedAt) {
+				return records[i].EventID < records[j].EventID
+			}
+			return records[i].CreatedAt.Before(records[j].CreatedAt)
+		})
+		out = make([]runfork.RunForkSelectedContractSourceEvent, 0, len(ids))
+		for _, record := range records {
+			admitted, err := record.Decode()
+			if err != nil {
+				return fmt.Errorf("decode selected-contract source event %s: %w", record.EventID, err)
+			}
+			event := admitted.Event()
+			if event.RunID() != sourceRunID {
+				return fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
+			}
+			out = append(out, runfork.RunForkSelectedContractSourceEvent{
+				SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
+				EntityID: event.EntityID(), FlowInstance: event.FlowInstance(), Scope: string(event.Scope()),
+				RoutingSource: event.RoutingSource(),
+				Payload:       event.Payload(),
+			})
+		}
+		for idx := range out {
+			projected, err := projectRunForkSelectedContractSourceEventWorkflowState(sourceRunID, forkRunID, workflowStates, out[idx])
+			if err != nil {
+				return err
+			}
+			out[idx] = projected
+			prepared, err := prepareRunForkSelectedContractSourceEvent(ctx, tx, story, forkRunID, out[idx])
+			if err != nil {
+				return err
+			}
+			out[idx] = prepared
+		}
+		if err := story.Finalize(ctx); err != nil {
+			return fmt.Errorf("finalize selected-contract source event author activity: %w", err)
+		}
+		if _, err := runforkrevision.FinalizePostgres(ctx, tx, runforkrevision.NewEffects()); err != nil {
+			return fmt.Errorf("finalize selected-contract source event preparation revisions: %w", err)
+		}
+		return nil
+	})
+	if !committed {
 		return nil, err
 	}
-	var sourceStatus string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR SHARE`, sourceRunID).Scan(&sourceStatus); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, &runtimerunlifecycle.RunNotFoundError{RunID: sourceRunID}
-		}
-		return nil, fmt.Errorf("load selected-contract source event preparation status: %w", err)
-	}
-	if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
-		state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		return nil, fmt.Errorf("selected-contract source event preparation state %s is unsupported", state)
-	}
-	if err := requirePostgresRunActive(ctx, tx, forkRunID); err != nil {
-		return nil, fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
-	}
-	records, err := eventrecordpostgres.LoadMany(ctx, tx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("load selected-contract source events: %w", err)
-	}
-	sort.Slice(records, func(i, j int) bool {
-		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
-			return records[i].EventID < records[j].EventID
-		}
-		return records[i].CreatedAt.Before(records[j].CreatedAt)
-	})
-	out := make([]runfork.RunForkSelectedContractSourceEvent, 0, len(ids))
-	for _, record := range records {
-		admitted, err := record.Decode()
-		if err != nil {
-			return nil, fmt.Errorf("decode selected-contract source event %s: %w", record.EventID, err)
-		}
-		event := admitted.Event()
-		if event.RunID() != sourceRunID {
-			return nil, fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
-		}
-		out = append(out, runfork.RunForkSelectedContractSourceEvent{
-			SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
-			EntityID: event.EntityID(), FlowInstance: event.FlowInstance(), Scope: string(event.Scope()),
-			RoutingSource: event.RoutingSource(),
-			Payload:       event.Payload(),
-		})
-	}
-	for idx := range out {
-		projected, err := projectRunForkSelectedContractSourceEventWorkflowState(sourceRunID, forkRunID, workflowStates, out[idx])
-		if err != nil {
-			return nil, err
-		}
-		out[idx] = projected
-		prepared, err := prepareRunForkSelectedContractSourceEvent(ctx, tx, story, forkRunID, out[idx])
-		if err != nil {
-			return nil, err
-		}
-		out[idx] = prepared
-	}
-	if err := story.Finalize(ctx); err != nil {
-		return nil, fmt.Errorf("finalize selected-contract source event author activity: %w", err)
-	}
-	if _, err := runforkrevision.FinalizePostgres(ctx, tx, runforkrevision.NewEffects()); err != nil {
-		return nil, fmt.Errorf("finalize selected-contract source event preparation revisions: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit selected-contract source event preparation: %w", err)
-	}
-	committed = true
-	return out, nil
+	return out, err
 }
 
 func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEventModes(ctx context.Context, sourceRunID string, sourceEventIDs []string) ([]executionmode.Mode, error) {

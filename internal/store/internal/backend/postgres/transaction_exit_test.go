@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/lib/pq"
 )
 
 // Observe real driver transaction exits; barriers never fabricate query success.
@@ -28,7 +27,9 @@ type exitProbeConnector struct {
 	closeOnce                        sync.Once
 	commitFailure, rollbackFailure   error
 	beginFailure                     error
+	beforeCommit                     func()
 	afterCommit                      func()
+	afterQuery                       func(context.Context, string)
 }
 
 func (p *exitProbeConnector) Driver() driver.Driver { return p.driver }
@@ -45,15 +46,15 @@ type exitProbeConn struct {
 	probe *exitProbeConnector
 }
 
-func (c *exitProbeConn) BindOperationScope(scope *pq.OperationScope) error {
-	return pq.BindOperationScope(c.Conn, scope)
-}
-
 func (c *exitProbeConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 }
 func (c *exitProbeConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	if c.probe.afterQuery != nil {
+		c.probe.afterQuery(ctx, query)
+	}
+	return rows, err
 }
 func (c *exitProbeConn) ResetSession(ctx context.Context) error {
 	return c.Conn.(driver.SessionResetter).ResetSession(ctx)
@@ -83,6 +84,9 @@ type exitProbeTx struct {
 }
 
 func (t *exitProbeTx) Commit() error {
+	if t.probe.beforeCommit != nil {
+		t.probe.beforeCommit()
+	}
 	err := t.Tx.Commit()
 	if t.probe.afterCommit != nil {
 		t.probe.afterCommit()
@@ -114,6 +118,39 @@ func newExitProbe(t *testing.T) (*Backend, *exitProbeConnector) {
 	return b, p
 }
 
+func TestPostgresTransactionSoleErrorIdentity(t *testing.T) {
+	for _, read := range []bool{false, true} {
+		for _, stage := range []string{"begin", "callback"} {
+			t.Run(fmt.Sprintf("read=%t/%s", read, stage), func(t *testing.T) {
+				b, p := newExitProbe(t)
+				sentinel := errors.New("exact sole operation error")
+				if stage == "begin" {
+					p.beginFailure = sentinel
+				}
+				run := b.RunTransaction
+				if read {
+					run = b.RunReadTransaction
+				}
+				calls := 0
+				err := run(context.Background(), func(context.Context, *sql.Tx) error {
+					calls++
+					return sentinel
+				})
+				if err != sentinel {
+					t.Fatalf("sole error identity lost: got %T %v, want original sentinel", err, err)
+				}
+				wantCalls := 0
+				if stage == "callback" {
+					wantCalls = 1
+				}
+				if calls != wantCalls {
+					t.Fatalf("callback calls=%d want=%d", calls, wantCalls)
+				}
+			})
+		}
+	}
+}
+
 func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 	for _, read := range []bool{false, true} {
 		for _, deadline := range []bool{false, true} {
@@ -140,19 +177,30 @@ func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 							if read {
 								run = b.RunReadTransaction
 							}
-							done <- run(ctx, func(ctx context.Context, tx *sql.Tx) error {
+							done <- run(ctx, func(txctx context.Context, tx *sql.Tx) error {
 								var n int
-								if err := tx.QueryRowContext(ctx, "SELECT 1").Scan(&n); err != nil {
+								if err := tx.QueryRowContext(txctx, "SELECT 1").Scan(&n); err != nil {
 									return err
 								}
 								if !deadline {
 									cancel()
 								}
 								<-ctx.Done()
-								<-p.rollbackEntered
-								if finished {
-									release()
-									<-p.rollbackDone
+								if read {
+									<-p.rollbackEntered
+									if finished {
+										release()
+										<-p.rollbackDone
+									}
+								} else {
+									// A closed admitted mutation drains SQL; cancellation
+									// is checked by the owner before COMMIT, not by auto-RB.
+									if txctx.Err() != nil {
+										t.Error("mutation transport was canceled")
+									}
+									if err := tx.QueryRowContext(txctx, "SELECT 1").Scan(&n); err != nil {
+										return err
+									}
 								}
 								close(callbackReturned)
 								if callbackFailure {
@@ -263,7 +311,7 @@ func TestPostgresTransactionPanicAndFailureExits(t *testing.T) {
 						t.Fatal(err)
 					}
 				case "commit_canceled":
-					if !errors.Is(err, commit) || !errors.Is(err, context.Canceled) {
+					if !errors.Is(err, commit) || errors.Is(err, context.Canceled) {
 						t.Fatal(err)
 					}
 				case "success":

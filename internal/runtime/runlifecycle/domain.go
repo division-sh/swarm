@@ -702,6 +702,9 @@ const (
 )
 
 type CompletionResult struct {
+	// Committed is set by the selected transaction owner after acknowledged
+	// COMMIT. A later error does not authorize replay of this candidate.
+	Committed                  bool
 	Outcome                    CompletionOutcome
 	Candidate                  Candidate
 	Retryable                  error

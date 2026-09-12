@@ -251,8 +251,11 @@ func (d CompletionSettlementDisposition) Valid() bool {
 }
 
 // CompletionSettlementResult is selected-store truth about a terminal
-// settlement. Committed may be true with a non-nil error when the transaction
-// deliberately committed an outcome-uncertain provider-head conflict.
+// settlement. Committed means COMMIT was acknowledged, including when later
+// cleanup/handoff fails or a provider-head conflict was deliberately persisted.
+// False does not prove rollback when COMMIT itself returned an error. Callers
+// must preserve the result alongside errors, never replay the provider operation
+// merely because live notification or acknowledgement was unavailable.
 type CompletionSettlementResult struct {
 	Committed     bool
 	Disposition   CompletionSettlementDisposition

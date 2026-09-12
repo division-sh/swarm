@@ -18,7 +18,7 @@ func commitWorkflowTimerOccurrence(
 	store eventCommitTxStore,
 	postgres bool,
 	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
 	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
 	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
 	requestCandidate func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error),
@@ -38,7 +38,7 @@ func commitWorkflowTimerOccurrence(
 	defer handoff.Rollback()
 
 	result := runtimepipeline.CommittedWorkflowTimerOccurrence{}
-	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		activation, found, err := loadWorkflowEngineTimerActivation(txctx, tx, postgres, command.Activation.Ref)
 		if err != nil {
 			return err
@@ -98,16 +98,10 @@ func commitWorkflowTimerOccurrence(
 		}
 		return nil
 	})
-	if err != nil {
+	if !committed {
 		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
 	}
-	if err := result.Validate(); err != nil {
-		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
-	}
-	if err := handoff.Commit(); err != nil {
-		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
-	}
-	return result, nil
+	return result, errors.Join(err, result.Validate(), handoff.Commit())
 }
 
 func advanceWorkflowEngineTimerOccurrence(
@@ -165,8 +159,8 @@ func (s *PipelinePostgresOwner) CommitWorkflowTimerOccurrence(ctx context.Contex
 		s,
 		true,
 		effects,
-		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+			return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
 		},
 		reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
@@ -186,8 +180,8 @@ func (s *PipelineSQLiteOwner) CommitWorkflowTimerOccurrence(ctx context.Context,
 		s,
 		false,
 		effects,
-		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow timer occurrence", effects, fn)
+		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+			return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite workflow timer occurrence", effects, fn)
 		},
 		reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {

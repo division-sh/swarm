@@ -160,10 +160,13 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
 	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
+		if lease != nil {
+			err = errors.Join(err, r.sessions.Release(context.WithoutCancel(ctx), lease))
+		}
 		return nil, err
 	}
 	if resolved.Enabled() {
-		if err := r.sessions.Release(ctx, lease); err != nil {
+		if err := r.sessions.Release(context.WithoutCancel(ctx), lease); err != nil {
 			return nil, err
 		}
 	}
@@ -242,10 +245,13 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 
 	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, s, r.lockOwner)
 	if err != nil {
+		if lease != nil {
+			err = errors.Join(err, r.sessions.Release(context.WithoutCancel(ctx), lease))
+		}
 		return nil, sessionAcquireFailure(err, s.AgentID)
 	}
 	if resolved.Enabled() {
-		defer func() { _ = r.sessions.Release(ctx, lease) }()
+		defer func() { retErr = errors.Join(retErr, r.sessions.Release(context.WithoutCancel(ctx), lease)) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the CLI session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
 				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
@@ -427,9 +433,11 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			s.ParseFailures++
 		}
 		if projectionErr == nil && resolved.Enabled() {
-			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
+			rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events)
+			if rotated != nil {
 				lease = rotated
 			}
+			err = errors.Join(err, rotateErr)
 		}
 		if projectionErr != nil {
 			return nil, errors.Join(err, projectionErr)

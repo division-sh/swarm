@@ -277,11 +277,19 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			FanOutBarrier:           mutation.FanOutBarrier,
 			FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
 		})
+		if !committed.Committed {
+			commitErr = errors.Join(commitErr, fmt.Errorf("workflow engine mutation has no acknowledged result"))
+			if o.publication != nil {
+				commitErr = errors.Join(commitErr, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+			}
+			return runtimeengine.CommittedEngineMutation{}, commitErr
+		}
 		settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
 		commitErr = errors.Join(commitErr, settlementErr)
 		// A later panic must return the exact committed claim to the caller,
 		// which owns heartbeat and continuation release even on an error result.
 		result.SettledDeliveryClaim = settledClaim
+		result.Committed = committed.Committed
 		resultErr = commitErr
 		// Transfer committed terminal work before any auxiliary finalizer can
 		// fail or unwind. The reserved completion performs no fresh admission.
@@ -291,16 +299,10 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			terminalEvidence = false
 			commitErr = errors.Join(commitErr, terminal.Commit())
 		}
-		if commitErr == nil && mutation.FanOutIntent != nil {
+		if committed.Committed && mutation.FanOutIntent != nil {
 			o.state.coordinator.signalFanOutWork()
 		}
-		if commitErr != nil && settledClaim == nil && committed.PostCommit.FlowDeactivation == nil {
-			if o.publication != nil {
-				commitErr = errors.Join(commitErr, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
-			}
-			return runtimeengine.CommittedEngineMutation{}, commitErr
-		}
-		engineCommit := runtimeengine.CommittedEngineMutation{SettledDeliveryClaim: settledClaim}
+		engineCommit := runtimeengine.CommittedEngineMutation{Committed: true, SettledDeliveryClaim: settledClaim}
 		var postCommitErr error
 		if o.publication != nil {
 			if err := o.publication.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
@@ -426,18 +428,22 @@ func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.
 		FanOutBarrier:           mutation.FanOutBarrier,
 		FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
 	})
-	if commitErr == nil && mutation.FanOutIntent != nil {
-		o.state.coordinator.signalFanOutWork()
-	}
-	settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
-	commitErr = errors.Join(commitErr, settlementErr)
-	if commitErr != nil && settledClaim == nil {
+	if !committed.Committed {
+		commitErr = errors.Join(commitErr, fmt.Errorf("workflow engine mutation has no acknowledged result"))
+		if settlementGuard != nil {
+			settlementGuard.Abort()
+		}
 		if o.publication != nil {
 			commitErr = errors.Join(commitErr, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
 		}
 		return runtimeengine.CommittedEngineMutation{}, commitErr
 	}
-	engineCommit := runtimeengine.CommittedEngineMutation{SettledDeliveryClaim: settledClaim}
+	if committed.Committed && mutation.FanOutIntent != nil {
+		o.state.coordinator.signalFanOutWork()
+	}
+	settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
+	commitErr = errors.Join(commitErr, settlementErr)
+	engineCommit := runtimeengine.CommittedEngineMutation{Committed: true, SettledDeliveryClaim: settledClaim}
 	var postCommitErr error
 	if o.publication != nil {
 		if err := o.publication.FinalizeEnginePublications(ctx, committed.Publications); err != nil {

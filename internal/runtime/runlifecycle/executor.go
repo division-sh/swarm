@@ -86,13 +86,14 @@ type Executor struct {
 	pageSize         int
 	genericSchedules GenericScheduleWakeupOwner
 
-	mu          sync.Mutex
-	chains      map[string]*candidateChain
-	started     bool
-	ready       bool
-	retiring    bool
-	pending     int
-	pendingZero chan struct{}
+	mu            sync.Mutex
+	chains        map[string]*candidateChain
+	started       bool
+	ready         bool
+	retiring      bool
+	pending       int
+	pendingZero   chan struct{}
+	settlementErr error
 }
 
 func NewExecutor(
@@ -346,10 +347,21 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, chai
 		// Retirement cancels waits and retries, but an admitted persistence
 		// operation must finish before its occurrence lease can settle.
 		result, err := e.store.ExecuteCompletionCandidate(context.WithoutCancel(ctx), candidate, e.catalog)
-		if err != nil {
+		if err != nil && !result.Committed {
 			result = CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: err}
+		} else if err != nil {
+			e.mu.Lock()
+			e.settlementErr = errors.Join(e.settlementErr, err)
+			e.mu.Unlock()
 		}
 		if validationErr := result.Validate(); validationErr != nil {
+			if result.Committed {
+				e.mu.Lock()
+				e.settlementErr = errors.Join(e.settlementErr, validationErr)
+				e.mu.Unlock()
+				e.removeChain(chain)
+				return
+			}
 			result = CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: validationErr}
 		}
 		if result.Outcome != OutcomeRetryCurrent && !e.reconcileCommittedGenericSchedules(ctx, result.GenericScheduleActivations) {
@@ -572,13 +584,19 @@ func (e *Executor) Retire(ctx context.Context) error {
 		chain.cancel(worklifetime.ErrRetired)
 	}
 	if pendingZero == nil {
-		return nil
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.settlementErr
 	}
 	select {
 	case <-pendingZero:
-		return nil
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return e.settlementErr
 	case <-ctx.Done():
-		return context.Cause(ctx)
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return errors.Join(context.Cause(ctx), e.settlementErr)
 	}
 }
 

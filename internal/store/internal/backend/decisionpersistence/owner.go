@@ -49,13 +49,18 @@ func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, cand
 }
 
 func (s *DecisionPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, operation)
+	return err
+}
+
+func (s *DecisionPostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
 	if s == nil || s.backend == nil || s.requireCurrent == nil {
-		return errors.New("decision-card PostgreSQL owner is required")
+		return false, errors.New("decision-card PostgreSQL owner is required")
 	}
 	if err := s.requireCurrent(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
@@ -68,13 +73,18 @@ func (s *DecisionPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Con
 }
 
 func (s *DecisionSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, operation)
+	return err
+}
+
+func (s *DecisionSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
 	if s == nil || s.backend == nil || s.requireCurrent == nil {
-		return errors.New("decision-card SQLite owner is required")
+		return false, errors.New("decision-card SQLite owner is required")
 	}
 	if err := s.requireCurrent(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err

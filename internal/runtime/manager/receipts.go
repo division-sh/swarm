@@ -536,7 +536,28 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 	default:
 		err = fmt.Errorf("delivery receipt status %q is invalid", status)
 	}
-	finishErr := settlementGuard.Finish(err == nil)
+	committed := snapshot.MatchesSettlementClaim(claim)
+	if !committed && err == nil {
+		err = fmt.Errorf("%w: delivery settlement returned no exact settled snapshot", runtimedelivery.ErrConflict)
+	}
+	finishErr := settlementGuard.Finish(committed)
+	err = errors.Join(err, finishErr)
+	if committed {
+		ownerProvider := am.roles.DeliveryRuntime
+		if snapshot.Status == runtimedelivery.StatusFailed {
+			if ownerProvider == nil {
+				err = errors.Join(err, errors.New("retry settlement requires the normal generation continuation owner"))
+			} else if retainErr := ownerProvider.RetainDeliveryContinuation(snapshot); retainErr != nil {
+				err = errors.Join(err, fmt.Errorf("transfer retry continuation: %w", retainErr))
+			}
+		} else if snapshot.Terminal() {
+			if ownerProvider == nil {
+				err = errors.Join(err, errors.New("terminal settlement requires the exact continuation owner"))
+			} else if releaseErr := ownerProvider.ReleaseDeliveryContinuation(snapshot.DeliveryID); releaseErr != nil {
+				err = errors.Join(err, fmt.Errorf("release terminal continuation: %w", releaseErr))
+			}
+		}
+	}
 	postCtx := context.WithoutCancel(ctx)
 	if err != nil {
 		if am.bus != nil {
@@ -548,37 +569,15 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 				AgentID:   strings.TrimSpace(agentID),
 				Failure:   failureEnvelope(err, "agent-manager", "settle_delivery"),
 				Detail: map[string]any{
-					"status": strings.TrimSpace(string(status)),
+					"status":    strings.TrimSpace(string(status)),
+					"committed": committed,
 				},
 			})
 		}
-		return runtimedelivery.Snapshot{}, errors.Join(err, finishErr)
-	}
-	if snapshot.Status == runtimedelivery.StatusFailed {
-		if finishErr != nil {
-			return runtimedelivery.Snapshot{}, finishErr
+		if !committed {
+			return runtimedelivery.Snapshot{}, err
 		}
-		ownerProvider := am.roles.DeliveryRuntime
-		if ownerProvider == nil {
-			return runtimedelivery.Snapshot{}, errors.New("retry settlement requires the normal generation continuation owner")
-		}
-		if err := ownerProvider.RetainDeliveryContinuation(snapshot); err != nil {
-			return runtimedelivery.Snapshot{}, fmt.Errorf("transfer retry continuation: %w", err)
-		}
-	} else if snapshot.Terminal() {
-		ownerProvider := am.roles.DeliveryRuntime
-		if ownerProvider == nil {
-			return runtimedelivery.Snapshot{}, errors.Join(
-				finishErr,
-				errors.New("terminal settlement requires the exact continuation owner"),
-			)
-		}
-		if err := ownerProvider.ReleaseDeliveryContinuation(snapshot.DeliveryID); err != nil {
-			return runtimedelivery.Snapshot{}, errors.Join(finishErr, fmt.Errorf("release terminal continuation: %w", err))
-		}
-	}
-	if finishErr != nil {
-		return runtimedelivery.Snapshot{}, finishErr
+		return snapshot, err
 	}
 	am.logDeliveryLifecycle(postCtx, snapshot)
 	am.notifyTestDeliveryStatus(postCtx, evt, agentID, snapshot.Status)

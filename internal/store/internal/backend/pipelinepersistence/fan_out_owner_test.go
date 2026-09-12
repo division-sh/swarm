@@ -96,42 +96,51 @@ func TestFanOutIntentSQLArgsEncodeClosedSourceUnionWithExplicitAbsence(t *testin
 
 func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, outcome := range []string{"committed", "rolled_back", "contradictory"} {
+		for _, outcome := range []string{"committed", "rolled_back", "contradictory", "acknowledged_cleanup"} {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				db := fanOutReadbackTestDB(t, backend)
 				command := seedFanOutReadbackClaim(t, db)
 				ackLost := errors.New("injected fan-out commit acknowledgement loss")
-				run := func(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+				finishFailure := errors.New("injected successful-turn release failure")
+				run := func(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
 					tx, err := db.BeginTx(ctx, nil)
 					if err != nil {
-						return err
+						return false, err
 					}
 					if err := operation(ctx, tx, nil); err != nil {
 						_ = tx.Rollback()
-						return err
+						return false, err
 					}
 					if outcome == "rolled_back" {
 						if err := tx.Rollback(); err != nil {
-							return err
+							return false, err
 						}
-						return ackLost
+						return false, ackLost
 					}
 					if err := tx.Commit(); err != nil {
-						return err
+						return false, err
 					}
 					if outcome == "committed" {
 						time.Sleep(1100 * time.Millisecond)
 					}
 					if outcome == "contradictory" {
 						if _, err := db.ExecContext(ctx, `DELETE FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath); err != nil {
-							return err
+							return false, err
 						}
 					}
-					return ackLost
+					return outcome == "acknowledged_cleanup", ackLost
+				}
+				var readback pipelineQueryer = db
+				if outcome == "acknowledged_cleanup" {
+					// Acknowledged COMMIT must not require another successful read.
+					readback = nil
 				}
 				committed, err := commitFanOutChunk(
 					context.Background(), nil, backend == "postgres", run,
 					func(ctx context.Context, claim fanoutobligation.Claim, status fanoutobligation.Status, nextChunk int, lastChunkMS int64, observedAt time.Time) error {
+						if outcome == "acknowledged_cleanup" {
+							return finishFailure
+						}
 						query := `UPDATE fan_out_intents SET next_chunk_size=$1,last_chunk_ms=$2,last_served_at=$3,updated_at=$3,claim_owner=NULL,lease_expires_at=NULL WHERE run_id=$4 AND triggering_delivery_id=$5 AND flow_path=$6 AND declaration_family=$7 AND semantic_path=$8 AND status=$9 AND claim_generation=$10 AND ((status='open' AND claim_owner=$11) OR (status='closed' AND claim_owner IS NULL))`
 						result, updateErr := db.ExecContext(ctx, query, nextChunk, lastChunkMS, observedAt, claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.FlowPath, claim.Key.ElementRef.Family, claim.Key.ElementRef.SemanticPath, string(status), claim.Generation, claim.Owner)
 						if updateErr != nil {
@@ -149,7 +158,7 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 					func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error) {
 						return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("non-terminal chunk must not request completion")
 					},
-					db, command,
+					readback, command,
 				)
 				var cursor, count, nextChunk int
 				var lastChunkMS int64
@@ -160,6 +169,13 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 				case "committed":
 					if err != nil || cursor != 1 || count != 1 || nextChunk != 2 || lastChunkMS < 1000 || committed.Intent.Cursor != 1 || committed.Intent.Status != fanoutobligation.StatusOpen || committed.Intent.NextChunkSize != 2 {
 						t.Fatalf("committed readback = cursor:%d outcomes:%d next:%d last_ms:%d result:%#v err:%v", cursor, count, nextChunk, lastChunkMS, committed.Intent, err)
+					}
+					if !errors.Is(committed.PostCommitFailure, ackLost) {
+						t.Fatalf("reconciled commit lost acknowledgement error: %v", committed.PostCommitFailure)
+					}
+				case "acknowledged_cleanup":
+					if err != nil || cursor != 1 || count != 1 || committed.Intent.Cursor != 1 || !errors.Is(committed.PostCommitFailure, ackLost) || !errors.Is(committed.PostCommitFailure, finishFailure) {
+						t.Fatalf("acknowledged commit lost result or independent errors: result=%+v cursor=%d count=%d err=%v", committed, cursor, count, err)
 					}
 				case "rolled_back":
 					if !errors.Is(err, ackLost) || cursor != 0 || count != 0 || committed.Intent.Cursor != 0 {

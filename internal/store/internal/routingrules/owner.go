@@ -2,6 +2,7 @@ package routingrules
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -29,13 +30,14 @@ func (s *RoutingPostgresOwner) UpsertRoutingRule(ctx context.Context, rule runti
 		return fmt.Errorf("entity_id, event_pattern, subscriber_id, and installed_by are required")
 	}
 	status := normalizeRoutingRuleStatus(rule.Status)
-	flowInstance, err := routingRuleFlowInstance(ctx, s, entityID)
-	if err != nil {
-		return err
-	}
-	isWildcard := strings.Contains(eventPattern, "*")
-	if status == "inactive" {
-		const deactivateQ = `
+	return s.backend.RunTransaction(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		flowInstance, err := routingRuleFlowInstance(sqlCtx, tx, entityID)
+		if err != nil {
+			return err
+		}
+		isWildcard := strings.Contains(eventPattern, "*")
+		if status == "inactive" {
+			const deactivateQ = `
 			UPDATE routing_rules
 			SET status = 'inactive'
 			WHERE event_pattern = $1
@@ -45,18 +47,22 @@ func (s *RoutingPostgresOwner) UpsertRoutingRule(ctx context.Context, rule runti
 			  AND is_materialized = false
 			  AND status <> 'inactive'
 		`
-		res, err := s.backend.ExecContext(ctx, deactivateQ,
-			eventPattern,
-			subscriberID,
-			flowInstance,
-		)
-		if err != nil {
-			return fmt.Errorf("deactivate routing rule: %w", err)
-		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			return nil
-		}
-		const insertDeactivatedQ = `
+			res, err := tx.ExecContext(sqlCtx, deactivateQ,
+				eventPattern,
+				subscriberID,
+				flowInstance,
+			)
+			if err != nil {
+				return fmt.Errorf("deactivate routing rule: %w", err)
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("deactivate routing rule rows: %w", err)
+			}
+			if n > 0 {
+				return nil
+			}
+			const insertDeactivatedQ = `
 			INSERT INTO routing_rules (
 				event_pattern, subscriber_type, subscriber_id, flow_instance,
 				is_wildcard, is_materialized, status, created_at
@@ -64,18 +70,18 @@ func (s *RoutingPostgresOwner) UpsertRoutingRule(ctx context.Context, rule runti
 				$1, 'agent', $2, $3, $4, false, 'inactive', now()
 			)
 		`
-		if _, err := s.backend.ExecContext(ctx, insertDeactivatedQ,
-			eventPattern,
-			subscriberID,
-			flowInstance,
-			isWildcard,
-		); err != nil {
-			return fmt.Errorf("insert deactivated routing rule: %w", err)
+			if _, err := tx.ExecContext(sqlCtx, insertDeactivatedQ,
+				eventPattern,
+				subscriberID,
+				flowInstance,
+				isWildcard,
+			); err != nil {
+				return fmt.Errorf("insert deactivated routing rule: %w", err)
+			}
+			return nil
 		}
-		return nil
-	}
 
-	const q = `
+		const q = `
 		WITH updated AS (
 			UPDATE routing_rules
 			SET status = 'active',
@@ -95,15 +101,16 @@ func (s *RoutingPostgresOwner) UpsertRoutingRule(ctx context.Context, rule runti
 			$1, 'agent', $2, $3, $4, false, 'active', now()
 		WHERE NOT EXISTS (SELECT 1 FROM updated)
 	`
-	if _, err := s.backend.ExecContext(ctx, q,
-		eventPattern,
-		subscriberID,
-		flowInstance,
-		isWildcard,
-	); err != nil {
-		return fmt.Errorf("upsert routing rule: %w", err)
-	}
-	return nil
+		if _, err := tx.ExecContext(sqlCtx, q,
+			eventPattern,
+			subscriberID,
+			flowInstance,
+			isWildcard,
+		); err != nil {
+			return fmt.Errorf("upsert routing rule: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *RoutingPostgresOwner) LoadRoutingRules(ctx context.Context) ([]runtimemanager.PersistedRoutingRule, error) {
@@ -152,13 +159,13 @@ func (s *RoutingPostgresOwner) LoadRoutingRules(ctx context.Context) ([]runtimem
 	return out, nil
 }
 
-func routingRuleFlowInstance(ctx context.Context, s *RoutingPostgresOwner, entityID string) (string, error) {
+func routingRuleFlowInstance(ctx context.Context, tx *sql.Tx, entityID string) (string, error) {
 	identity, err := runtimecurrentstate.RequireIdentity(ctx, entityID)
 	if err != nil {
 		return "", fmt.Errorf("lookup routing rule flow instance: %w", err)
 	}
 	var flowInstance string
-	if err := s.backend.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 		SELECT flow_instance
 		FROM entity_state
 		WHERE run_id = $1::uuid

@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
+	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -71,6 +72,7 @@ type RunForkPostgresOwner struct {
 	events         eventCommitOwner
 	conversations  conversationForkSourceReader
 	durableData    *storedurabledata.Owner
+	apiIdempotency *storeapiidempotency.PostgresOwner
 }
 
 type RunForkSQLiteOwner struct {
@@ -87,6 +89,7 @@ type RunForkSQLiteOwner struct {
 	events         eventCommitOwner
 	conversations  conversationForkSourceReader
 	durableData    *storedurabledata.Owner
+	apiIdempotency *storeapiidempotency.SQLiteOwner
 }
 
 type lifecycleDiagnosticObservations interface {
@@ -119,8 +122,9 @@ func NewPostgres(
 	events eventCommitOwner,
 	conversations conversationForkSourceReader,
 	durableData *storedurabledata.Owner,
+	apiIdempotency *storeapiidempotency.PostgresOwner,
 ) (*RunForkPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil || apiIdempotency == nil {
 		return nil, errors.New("run-fork PostgreSQL owner dependencies are required")
 	}
 	return &RunForkPostgresOwner{
@@ -134,6 +138,7 @@ func NewPostgres(
 		events:                    events,
 		conversations:             conversations,
 		durableData:               durableData,
+		apiIdempotency:            apiIdempotency,
 	}, nil
 }
 
@@ -148,9 +153,10 @@ func NewSQLite(
 	events eventCommitOwner,
 	conversations conversationForkSourceReader,
 	durableData *storedurabledata.Owner,
+	apiIdempotency *storeapiidempotency.SQLiteOwner,
 	now func() time.Time,
 ) (*RunForkSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil || apiIdempotency == nil {
 		return nil, errors.New("run-fork SQLite owner dependencies are required")
 	}
 	if now == nil {
@@ -168,6 +174,7 @@ func NewSQLite(
 		events:                  events,
 		conversations:           conversations,
 		durableData:             durableData,
+		apiIdempotency:          apiIdempotency,
 	}, nil
 }
 

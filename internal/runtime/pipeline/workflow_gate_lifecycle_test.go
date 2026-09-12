@@ -329,9 +329,9 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				cards.continuations[card.CardID] = hostile
 				switch lifecycle.name {
 				case "deferred":
-					_, err = pc.handleDecisionCardDeferredEvent(ctx, parent)
+					_, _, err = pc.handleDecisionCardDeferredEvent(ctx, parent)
 				case "expired":
-					_, err = pc.handleDecisionCardExpiredEvent(ctx, parent)
+					_, _, err = pc.handleDecisionCardExpiredEvent(ctx, parent)
 				}
 				if err == nil {
 					t.Fatal("human-task lifecycle accepted a foreign requester route")
@@ -343,9 +343,9 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				cards.continuations[card.CardID] = hostile
 				switch lifecycle.name {
 				case "deferred":
-					_, err = pc.handleDecisionCardDeferredEvent(ctx, parent)
+					_, _, err = pc.handleDecisionCardDeferredEvent(ctx, parent)
 				case "expired":
-					_, err = pc.handleDecisionCardExpiredEvent(ctx, parent)
+					_, _, err = pc.handleDecisionCardExpiredEvent(ctx, parent)
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -527,7 +527,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 				t.Fatalf("workflowGateOutcomeEvent = %#v, %v", emitted, err)
 			}
 			bus.publishErr = errors.New("planted outcome persistence failure")
-			if err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); !errors.Is(err, bus.publishErr) {
+			if _, err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); !errors.Is(err, bus.publishErr) {
 				t.Fatalf("route failure = %v", err)
 			}
 			assertGateLifecycleState(t, workflowStore, ctx, entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
@@ -536,7 +536,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 				t.Fatalf("rolled-back outcome rows = %d, %v", persisted, err)
 			}
 			bus.publishErr = nil
-			if err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); err != nil {
+			if _, err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); err != nil {
 				t.Fatal(err)
 			}
 			assertGateLifecycleState(t, workflowStore, ctx, entityID, "operating", gateruntime.StatusRouted)
@@ -546,7 +546,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 			if err := workflowStore.testDB().QueryRowContext(ctx, `SELECT COUNT(*) FROM gate_outcome_atomic_probe`).Scan(&persisted); err != nil || persisted != 1 {
 				t.Fatalf("committed outcome rows = %d, %v", persisted, err)
 			}
-			if err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); err != nil {
+			if _, err := pc.routeWorkflowGateDecision(ctx, card, parent, route, emitted); err != nil {
 				t.Fatalf("idempotent route recovery: %v", err)
 			}
 			if len(bus.publishes) != 1 {

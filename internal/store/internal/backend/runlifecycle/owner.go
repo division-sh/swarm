@@ -163,17 +163,27 @@ func (s *RunLifecycleSQLiteOwner) now() time.Time {
 }
 
 func (s *RunLifecyclePostgresOwner) runPostgresRuntimeMutation(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+	_, err := s.runPostgresRuntimeMutationOutcome(ctx, operation)
+	return err
+}
+
+func (s *RunLifecyclePostgresOwner) runPostgresRuntimeMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, operation)
+	return s.backend.RunTransactionOutcome(ctx, operation)
 }
 
 func (s *RunLifecycleSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
+	_, err := s.runRuntimeMutationOutcome(ctx, label, operation)
+	return err
+}
+
+func (s *RunLifecycleSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, label, operation)
+	return s.backend.RunTransactionOutcome(ctx, label, operation)
 }
 
 func (s *RunLifecyclePostgresOwner) runRead(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
@@ -195,7 +205,12 @@ func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutation(
 	effects *privaterunforkrevision.Effects,
 	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error,
 ) error {
-	return s.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, operation)
+	return err
+}
+
+func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+	return s.runPostgresRuntimeMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
@@ -216,7 +231,12 @@ func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutation(
 	effects *privaterunforkrevision.Effects,
 	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error,
 ) error {
-	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, effects, operation)
+	return err
+}
+
+func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+	return s.runRuntimeMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err

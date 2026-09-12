@@ -81,6 +81,7 @@ func pipelineFlowScope(ctx context.Context) string {
 }
 
 type pipelineEmissionPlan struct {
+	committed bool
 	events []events.Event
 }
 

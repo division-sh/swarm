@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
 
@@ -31,8 +33,8 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 	var finalization *runtimeeffects.ProviderDrainFinalization
 	var disposition runtimeeffects.CompletionSettlementDisposition
 	var continuation *runtimeeffects.Attempt
-	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
-		return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+	committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
+		return s.runPrivateAuthorActivityMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 			providerHeadErr = nil
 			spendRecorded = false
 			originSettled = false
@@ -108,7 +110,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 			return nil
 		})
 	})
-	if err != nil {
+	if !committed {
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
 	result := runtimeeffects.CompletionSettlementResult{
@@ -116,13 +118,11 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 		Origin: attempt.Origin, OriginSettled: originSettled, Finalization: finalization,
 	}
 	if continuation != nil {
-		var err error
-		result, err = runtimeeffects.AdmitCommittedCompletionContinuation(result, *continuation)
-		if err != nil {
-			return result, err
-		}
+		var continuationErr error
+		result, continuationErr = runtimeeffects.AdmitCommittedCompletionContinuation(result, *continuation)
+		err = errors.Join(err, continuationErr)
 	}
-	return result, providerHeadErr
+	return result, errors.Join(err, providerHeadErr)
 }
 
 func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
@@ -132,8 +132,8 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 	var finalization *runtimeeffects.ProviderDrainFinalization
 	var disposition runtimeeffects.CompletionSettlementDisposition
 	var continuation *runtimeeffects.Attempt
-	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+	committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
+		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 			providerHeadErr = nil
 			spendRecorded = false
 			originSettled = false
@@ -209,7 +209,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 			return nil
 		})
 	})
-	if err != nil {
+	if !committed {
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
 	result := runtimeeffects.CompletionSettlementResult{
@@ -217,13 +217,11 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 		Origin: attempt.Origin, OriginSettled: originSettled, Finalization: finalization,
 	}
 	if continuation != nil {
-		var err error
-		result, err = runtimeeffects.AdmitCommittedCompletionContinuation(result, *continuation)
-		if err != nil {
-			return result, err
-		}
+		var continuationErr error
+		result, continuationErr = runtimeeffects.AdmitCommittedCompletionContinuation(result, *continuation)
+		err = errors.Join(err, continuationErr)
 	}
-	return result, providerHeadErr
+	return result, errors.Join(err, providerHeadErr)
 }
 
 func completionProviderHeadUncertainty(settlement runtimeeffects.CompletionSettlement, cause error) runtimeeffects.CompletionSettlement {

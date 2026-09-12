@@ -3,6 +3,7 @@ package runlifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -74,7 +75,7 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 	defer handoff.Rollback()
 	var state runtimeruncontrol.State
 	effects := runforkrevision.NewEffects()
-	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite run control transition", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite run control transition", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		state, err = loadSQLiteRunControlState(txctx, tx, runID)
 		if err != nil {
@@ -118,10 +119,11 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 			}
 		}
 		return nil
-	}); err != nil {
+	})
+	if !committed {
 		return runtimeruncontrol.State{}, err
 	}
-	return state, handoff.Commit()
+	return state, errors.Join(err, handoff.Commit())
 }
 
 func loadSQLiteRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtimeruncontrol.State, error) {

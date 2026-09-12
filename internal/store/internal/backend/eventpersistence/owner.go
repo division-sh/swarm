@@ -141,10 +141,15 @@ func (s *EventPostgresOwner) requireCurrentSchema() error { return s.requireCurr
 func (s *EventSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
 
 func (s *EventPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, operation)
+	return err
+}
+
+func (s *EventPostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		effects := privaterunforkrevision.NewEffects()
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
@@ -162,10 +167,15 @@ func (s *EventPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Contex
 }
 
 func (s *EventSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *revisionEffects) error) error {
+	_, err := s.runRuntimeMutationOutcome(ctx, label, operation)
+	return err
+}
+
+func (s *EventSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *revisionEffects) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
 		effects := privaterunforkrevision.NewEffects()
 		if err := operation(txctx, tx, effects); err != nil {
 			return err
@@ -176,7 +186,12 @@ func (s *EventSQLiteOwner) runRuntimeMutation(ctx context.Context, label string,
 }
 
 func (s *EventSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
-	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx, effects *revisionEffects) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, operation)
+	return err
+}
+
+func (s *EventSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) (bool, error) {
+	return s.runRuntimeMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx, effects *revisionEffects) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
@@ -276,8 +291,8 @@ func mustDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapter {
 	return adapter
 }
 
-func withRunLifecycleCandidateHandoffResult[T any](ctx context.Context, operation func(*runLifecycleCandidateHandoffReservation) (T, error)) (T, error) {
-	return storerunhandoff.WithCandidateHandoffResult(ctx, operation)
+func withRunLifecycleCandidateHandoffResult[T any](ctx context.Context, operation func(*runLifecycleCandidateHandoffReservation) (T, bool, error)) (T, error) {
+	return storerunhandoff.WithCandidateHandoffOutcomeResult(ctx, operation)
 }
 
 func (s *EventPostgresOwner) BindRunFork(owner selectedForkLineageOwner) error {
