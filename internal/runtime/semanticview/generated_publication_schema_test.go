@@ -24,6 +24,16 @@ func TestGeneratedPublicationStructuralSchemaPreservesExactOwner(t *testing.T) {
 			}
 			source := Wrap(bundle)
 			for _, local := range []string{"send.succeeded", "send.failed", "send.revision_requested", "send.rejected"} {
+				qualified := local
+				if flow != "." {
+					qualified = flow + "/" + local
+				}
+				t.Run("absent_flow/"+local, func(t *testing.T) {
+					resolution := ResolveEventSchema(source, "absent-flow", qualified)
+					if resolution.HasSchema || resolution.HasCompiled || resolution.HasStructural {
+						t.Fatalf("absent flow borrowed generated schema: key=%q compiled_flow=%q class=%q", resolution.EventKey, resolution.CompiledSchema.FlowPath(), resolution.Classification)
+					}
+				})
 				for _, receiver := range []string{flow, "sink"} {
 					t.Run(receiver+"/"+local, func(t *testing.T) {
 						resolution := ResolveEventSchema(source, receiver, local)
