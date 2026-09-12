@@ -2057,7 +2057,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	}
 }
 
-func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testing.T) {
+func TestEventBusPublishCanonicalInstanceReachesDeclaredInternalCarrier(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("ent-operating")})
 	source := semanticview.Wrap(routedNodeTemplateBundle())
@@ -2071,7 +2071,7 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(),
-		events.EventType("operating/opco.product_initialization_requested"),
+		events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		"",
 		"",
 		[]byte(`{}`),
@@ -2107,7 +2107,7 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 	}
 }
 
-func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBeforeInternalCarrier(t *testing.T) {
+func TestEventBusPublishCanonicalCallbackPersistsSameFlowNodeRouteBeforeInternalCarrier(t *testing.T) {
 	tests := []struct {
 		name      string
 		eventType string
@@ -2146,7 +2146,7 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 			defer unsubscribeTestAgent(eb, "workflow-runtime")
 			evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 				eventID,
-				events.EventType(tc.eventType),
+				events.EventType(concreteEventType),
 				"workflow-runtime",
 				"",
 				[]byte(`{}`),
@@ -2179,8 +2179,8 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 				t.Fatalf("Publish: %v", err)
 			}
 			got := requireBusEvent(t, ch, "runtime callback workflow-runtime carrier delivery")
-			if got.Type() != events.EventType(tc.eventType) || got.FlowInstance() != "repo-scaffold/inst-1" || got.EntityID() != eventtest.UUID("ent-repo") {
-				t.Fatalf("delivered event type=%q flow=%q entity=%q, want callback local event in repo-scaffold/inst-1 ent-repo", got.Type(), got.FlowInstance(), got.EntityID())
+			if got.Type() != events.EventType(concreteEventType) || got.FlowInstance() != "repo-scaffold/inst-1" || got.EntityID() != eventtest.UUID("ent-repo") {
+				t.Fatalf("delivered event type=%q flow=%q entity=%q, want canonical callback in repo-scaffold/inst-1 ent-repo", got.Type(), got.FlowInstance(), got.EntityID())
 			}
 			routes := store.routes[evt.ID()]
 			if len(routes) != 1 || !deliveryRoutesContain(routes, want) {

@@ -258,7 +258,7 @@ func TestDeliveryRouteResolver_ResolvesConcreteFlowInstanceSubscriptionKey(t *te
 	}
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		"",
-		"inbound.github.push",
+		"support/instance-a/inbound.github.push",
 		"",
 		"",
 		nil,
@@ -271,7 +271,7 @@ func TestDeliveryRouteResolver_ResolvesConcreteFlowInstanceSubscriptionKey(t *te
 	)
 
 	result := resolver.Resolve(evt)
-	if got, want := resolvedKeys, []string{"inbound.github.push", "support/instance-a/inbound.github.push"}; !slices.Equal(got, want) {
+	if got, want := resolvedKeys, []string{"support/instance-a/inbound.github.push"}; !slices.Equal(got, want) {
 		t.Fatalf("resolved subscription keys = %#v, want %#v", got, want)
 	}
 	if len(result.Recipients) != 1 || result.Recipients[0].ID != "support-agent" {

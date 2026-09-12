@@ -1,6 +1,7 @@
 package canonicalrouting
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -177,20 +178,33 @@ func CopyRootOutputSingletonArc(t testing.TB) string {
 // routing proof through the compiler's root project view.
 func CopySingletonOutputRootConnect(t testing.TB) string {
 	t.Helper()
+	return copySingletonOutputRootConnect(t, "scout")
+}
+
+func CopyNestedSingletonOutputRootConnect(t testing.TB) string {
+	t.Helper()
+	root := copySingletonOutputRootConnect(t, "left/child/scout")
+	writeClosedVariantFile(t, root, "left/schema.yaml", "name: left\nmode: singleton\n")
+	writeClosedVariantFile(t, root, "left/child/schema.yaml", "name: child\nmode: singleton\n")
+	return root
+}
+
+func copySingletonOutputRootConnect(t testing.TB, scoutPath string) string {
+	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
 	writeClosedVariantFile(t, root, "manifest.yaml", `name: singleton-output-root-connect
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", `name: singleton-output-root-connect
+	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`name: singleton-output-root-connect
 pins:
   inputs:
     events: [scout.completed]
 connect:
   - event: scout.completed
-    from: scout
+    from: %s
     to: .
-`)
+`, scoutPath))
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
   execution_type: system_node
   subscribes_to: [scout.completed]
@@ -200,7 +214,7 @@ connect:
         id: selected_owner
         check: '_entity.id != ""'
 `)
-	writeLegacyInstanceFlow(t, root, "scout", `name: scout
+	writeLegacyInstanceFlow(t, root, scoutPath, `name: scout
 mode: singleton
 pins:
   outputs:
