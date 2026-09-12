@@ -1098,7 +1098,7 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 		Role:          "campaign_coordinator",
 		FlowID:        "campaign-flow",
 		FlowPath:      "campaign-flow/inst-1",
-		EmitEvents:    []string{"campaign-flow/inst-1/scan.requested"},
+		EmitEvents:    []string{"campaign-flow/scan.requested"},
 	}, rt, bundle)
 
 	got, err := agent.BoardStep(agentManagedTestContext(t, agent), testBoardDirective("start a corpus run"))

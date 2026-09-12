@@ -52,6 +52,12 @@ func AdmitAgentExecutionRoutingSource(source semanticview.Source, actor models.A
 	owner := scope.ContractSource()
 	ownerFlowID := strings.TrimSpace(scope.Declaration().OwnerFlowID)
 	route := events.RouteIdentity{EntityID: strings.TrimSpace(entityID)}
+	if ownerFlowID == "." {
+		// A root identity has no instance path; its live run is the selected
+		// execution coordinate even when the agent owns no entity.
+		route.FlowID = ownerFlowID
+		route.FlowInstance = identity.RunID
+	}
 	if instancePath := strings.TrimSpace(identity.Route.Normalize().InstancePath); instancePath != "" {
 		route.FlowID = ownerFlowID
 		route.FlowInstance = instancePath

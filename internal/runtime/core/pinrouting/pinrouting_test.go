@@ -229,6 +229,37 @@ func TestAdmitAgentExecutionRoutingSourceSeparatesFilesystemDeclarationFromRunti
 	}
 }
 
+func TestAdmitAgentExecutionRoutingSourcePreservesSelectedRootRun(t *testing.T) {
+	const owner = "test://root/reader"
+	root := runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"reader": {ID: "reader"}},
+		AgentURIs: map[string]string{"reader": owner},
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree:    runtimecontracts.FlowTree{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root}, ByPath: map[string]*runtimecontracts.FlowContractView{".": &root}},
+		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{owner: {Kind: "agent", FlowID: ".", LocalID: "reader", Full: owner}}},
+	})
+	for _, runID := range []string{eventtest.UUID("first-run"), eventtest.UUID("second-run")} {
+		actor := models.AgentConfig{ID: "reader", FlowID: ".", Identity: agentidentitytest.RootDeclaredForRun(t, runID, "reader", owner)}
+		got, err := AdmitAgentExecutionRoutingSource(source, actor, "")
+		if err != nil {
+			t.Fatalf("entityless root admission: %v", err)
+		}
+		if got.Kind() != events.RoutingSourceStaticFlow || got.Route() != (events.RouteIdentity{FlowID: ".", FlowInstance: runID}) {
+			t.Fatalf("entityless root source = %#v, want exact run %s", got, runID)
+		}
+		owned, err := AdmitAgentExecutionRoutingSource(source, actor, "owned-entity")
+		if err != nil || owned.Kind() != events.RoutingSourceRoot || owned.Route() != (events.RouteIdentity{EntityID: "owned-entity"}) {
+			t.Fatalf("entity-owned root source = %#v, error = %v", owned, err)
+		}
+		actor.FlowID = "unrelated"
+		if _, err := AdmitAgentExecutionRoutingSource(source, actor, ""); err == nil {
+			t.Fatal("contradictory declaration scope accepted")
+		}
+	}
+}
+
 func TestAdmitAgentExecutionRoutingSourceUsesFilesystemDeclarationOwningFlow(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

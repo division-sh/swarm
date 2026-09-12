@@ -256,7 +256,7 @@ rows:
       cannot repair it.
 
   - id: runtime_callback_flow_instance_localization
-    concept: Runtime callback events with unprefixed local names plus concrete flow_instance normalize into same-flow route keys and persist typed workflow-node delivery authority.
+    concept: Runtime callback producers publish canonical concrete names; routing consumes that name unchanged and persists typed workflow-node delivery authority before internal carrier dispatch.
     classification: already_covered_by_existing_proof
     tier: required_pr_smoke
     proof_dimensions: [route_plan_model, persistence_authority, negative_authority, required_pr_smoke]
@@ -276,16 +276,15 @@ rows:
       - {kind: artifact, path: internal/runtime/bus/eventbus_target_routes_test.go}
     proof_refs:
       - {kind: issue, issue: 1301}
-      - {kind: go_test, name: TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerivesConcreteKey}
-      - {kind: go_test, name: TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBeforeInternalCarrier}
+      - {kind: go_test, name: TestRoutedEventKeysForPlanDoesNotRepairCallbackPublicationNames}
+      - {kind: go_test, name: TestEventBusPublishCanonicalCallbackPersistsSameFlowNodeRouteBeforeInternalCarrier}
     notes: >
-      #1301 closes runtime callback flow_instance localization. Runtime-owned
-      artifact callbacks such as repo_scaffold.repo_commit_succeeded and
-      repo_scaffold.repo_commit_failed may carry unprefixed local event names
-      with flow_instance=repo-scaffold/<id>; EventContext route-key derivation
-      normalizes them to repo-scaffold/<id>/<local_event>, RoutePlan produces
-      typed node recipients, and event_deliveries persists node authority
-      before workflow-runtime carrier dispatch or #1293 execution admission.
+      #2423 supersedes #1301's consumer-side name repair. Runtime-owned
+      artifact callbacks construct the canonical name at publication from
+      admitted declaration and source evidence. RoutePlan must not invent
+      a concrete alias for an unprefixed or declaration-qualified business
+      name. Exact same-flow recipients persist before internal carrier
+      dispatch; the carrier is not publication or receiver authority.
 
   - id: route_authority_drift_guardrail_inventory
     concept: The #1364 route-authority drift inventory/matrix is promoted for #1494 as the conformance guardrail owner.

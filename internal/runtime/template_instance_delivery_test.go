@@ -118,7 +118,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	assertRuntimeCommittedReplayScope(t, ctx, db, eventID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM events
-		WHERE event_name = 'operating/opco.ceo_ready'
+		WHERE event_name = 'operating/inst-1/opco.ceo_ready'
 	`, 1)
 }
 
@@ -296,7 +296,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	`, 0, autoEventID, workflowRuntimeNodeID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/component_scaffold.spawn_requested'
+		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/component_scaffold.spawn_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
 }
@@ -593,7 +593,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/component_scaffold.spawn_requested'
+		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/component_scaffold.spawn_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
 }
@@ -703,7 +703,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/component_scaffold.spawn_requested'
+		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/component_scaffold.spawn_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
 }
