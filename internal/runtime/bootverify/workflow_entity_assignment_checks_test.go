@@ -53,7 +53,7 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 					t.Fatalf("supported authoring rejected: errors=%#v warnings=%#v", report.Errors(), report.Warnings())
 				}
 			} else if variant == "naive optional without decision" {
-					if !reportContains(report.Errors(), "emit_field_expression_validation", "presence decision") {
+				if !reportContains(report.Errors(), "emit_field_expression_validation", "presence decision") {
 					t.Fatalf("optional declaration admitted without a decision: %#v", report.Errors())
 				}
 			} else if variant == "retired stage spelling" {

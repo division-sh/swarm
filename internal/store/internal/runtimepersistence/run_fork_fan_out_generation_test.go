@@ -110,7 +110,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						}
 					}
 					seedWorkflowTargetStateForTransition(t, backend.name, fixture.db, runID, runID, runID, "pending", 1, at)
-					if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET entity_type='root' WHERE run_id=$1`, runID); err != nil {
+					if _, err := fixture.db.ExecContext(ctx, `UPDATE entity_state SET entity_type='root', fields='{}' WHERE run_id=$1`, runID); err != nil {
 						t.Fatal(err)
 					}
 					routeID := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID}
@@ -165,6 +165,9 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					barrier := fanoutbarrier.Registration{IntentKey: intent.Key, PlanRef: intent.PlanRef, Handle: handle, Route: intent.Capsule.Route, EntityID: runID, RoutingSource: controlSource, ExecutionMode: trigger.ExecutionMode(), CreatedAt: at}
 					record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "pending", 1, at)
 					record.CurrentState, record.EntityType, record.Mode = "review", "root", "static"
+					// The shared transition fixture's review_item business fields do
+					// not belong to this root contract. Its fields start unassigned.
+					record.Fields = json.RawMessage(`{}`)
 					record.Accumulator = json.RawMessage(forkTestJSON(t, buckets))
 					committed, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
 						State: record, FanOutIntent: &intent, FanOutBarrier: &barrier, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
