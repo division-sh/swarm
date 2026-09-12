@@ -57,6 +57,29 @@ states: [new, waiting, done]
 	return root
 }
 
+// CopyRootIngressServedDecisionControl declares the lifecycle that the mailbox
+// and run-control fixtures materialize, rather than borrowing an unrelated graph.
+func CopyRootIngressServedDecisionControl(t testing.TB) string {
+	t.Helper()
+	root := CopyRootIngressServedFollowUp(t)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `initial_state: new
+terminal_states: [done]
+states: [new, waiting, done]
+`, `stages:
+  awaiting_review:
+    initial: true
+    gate:
+      decision: launch_review
+      outcomes:
+        approve: {advances_to: done}
+        reject: {advances_to: rework}
+  waiting: {}
+  rework: {}
+  done: {terminal: true}
+`)
+	return root
+}
+
 // CopyRootIngressServedExternalEvent derives the fixed externally handled
 // event proof without exposing event-source authority as caller YAML.
 func CopyRootIngressServedExternalEvent(t testing.TB) string {

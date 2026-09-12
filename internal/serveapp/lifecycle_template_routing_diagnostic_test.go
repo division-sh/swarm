@@ -10,8 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-// This diagnostic re-admits the exact source facts recorded by the served v7
-// failure. It does not rewrite or republish an event in the running system.
+// Reproduce the recorded v7 mismatch, then prove publication admission supplies
+// the identity required by that same compiled route. Served execution is separate.
 func TestLifecycleTemplateCompletionConnectAdmissionDiagnostic(t *testing.T) {
 	root := canonicalrouting.CopyLifecycleNestedTemplates(t)
 	repo := canonicalrouting.RepoRoot(t)
@@ -57,18 +57,26 @@ func TestLifecycleTemplateCompletionConnectAdmissionDiagnostic(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			actual, err := pinrouting.AdmitSourceEvent(events.EventType(eventType), routingSource)
+			publication, err := pinrouting.AdmitPublicationIdentity(flow, "work.completed", routingSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if publication != events.EventType(sample.instance+"/work.completed") {
+				t.Fatalf("publication = %s, want exact concrete instance", publication)
+			}
+			actual, err := pinrouting.AdmitSourceEvent(publication, routingSource)
 			if err != nil {
 				t.Fatal(err)
 			}
 			actualPlans := graph.MatchingSourceEvent(actual)
-			// Matcher-only control, not a proposed event rewrite or runtime proof.
-			instanceQualified, err := pinrouting.AdmitSourceEvent(events.EventType(sample.instance+"/work.completed"), routingSource)
+			retired, err := pinrouting.AdmitSourceEvent(events.EventType(eventType), routingSource)
 			if err != nil {
 				t.Fatal(err)
 			}
-			controlPlans := graph.MatchingSourceEvent(instanceQualified)
-			t.Logf("TEMPLATE_CONNECT_APPLICABILITY side=%s recorded_event=%s recorded_route=%#v recorded_matches=%d instance_qualified_control=%s control_matches=%d", sample.side, eventType, routingSource.Route(), len(actualPlans), sample.instance+"/work.completed", len(controlPlans))
+			if oldPlans := graph.MatchingSourceEvent(retired); len(oldPlans) != 0 {
+				t.Fatalf("retired declaration-qualified publication selected %d routes", len(oldPlans))
+			}
+			t.Logf("TEMPLATE_CONNECT_APPLICABILITY side=%s publication=%s route=%#v matches=%d", sample.side, publication, routingSource.Route(), len(actualPlans))
 			if len(actualPlans) != 1 {
 				t.Errorf("admitted gate outcome cannot select its compiled sink/final route: matches=%d", len(actualPlans))
 			}

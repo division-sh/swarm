@@ -2474,10 +2474,10 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 		t.Fatalf("admit grandchild target handler: %v", err)
 	}
 	routes := newRouteTable(source)
-	routes.eventPath["child/grandchild/micro.start"] = struct{}{}
-	routes.routes[routeResolutionKey{eventType: "child/grandchild/micro.start"}] = []Subscriber{{
+	routes.eventPath["child/instance-a/micro.start"] = struct{}{}
+	routes.routes[routeResolutionKey{eventType: "child/instance-a/micro.start"}] = []Subscriber{{
 		Recipient: events.MustNodeDeliveryRecipient(handlerNode), Path: "child/grandchild",
-		MatchPattern: "child/grandchild/micro.start", routeSource: subscriberRouteSourceSubscription,
+		MatchPattern: "child/instance-a/micro.start", routeSource: subscriberRouteSourceSubscription,
 		LocalizedEvent: "micro.start", handlerNode: handlerNode, targetHandler: handler,
 	}}
 	store := newTargetRouteMemoryStore()
@@ -2497,7 +2497,7 @@ func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testi
 		t.Fatalf("concrete child routing source: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
-		uuid.NewString(), events.EventType("child/grandchild/micro.start"), "child-worker", "", []byte(`{}`), 0, "", "",
+		uuid.NewString(), events.EventType("child/instance-a/micro.start"), "child-worker", "", []byte(`{}`), 0, "", "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, currentRoute.EntityID), currentRoute.FlowInstance),
 		routingSource, time.Now().UTC(),
 	)
@@ -2676,6 +2676,22 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutI
 	}
 }
 
+func rootInputInternalPublication(t *testing.T, eventID, runID, sourceEntity string, payload []byte, target events.RouteIdentity) events.Event {
+	t.Helper()
+	event, err := events.NewChildEvent(events.ChildEventInput{
+		Facts: events.EventFacts{
+			ID: eventID, Type: "thing.created", Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: "root-producer"},
+			Payload: payload, CreatedAt: time.Now().UTC(), ExecutionMode: "live",
+			RoutingSource: eventtest.RootRoutingSource(sourceEntity), Envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+		},
+		Lineage: events.EventLineage{RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: "live"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event
+}
+
 func TestEventBusPublish_RootInputFlowRejectsInternalSameNameBeforePersistence(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(events.RouteIdentity{
@@ -2688,14 +2704,7 @@ func TestEventBusPublish_RootInputFlowRejectsInternalSameNameBeforePersistence(t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	runID := uuid.NewString()
-	sourceRoute := events.RouteIdentity{
-		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("internal-root-input-source"),
-	}.Normalized()
-	evt := eventtest.PersistedChildForProducer(
-		uuid.NewString(), events.EventType("thing.created"),
-		eventtest.Producer(events.EventProducerNode, "foreign-node"), "", []byte(`{}`), 0,
-		runID, uuid.NewString(), events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), time.Now().UTC(),
-	)
+	evt := rootInputInternalPublication(t, uuid.NewString(), runID, eventtest.UUID("internal-root-input-source"), []byte(`{}`), events.RouteIdentity{})
 
 	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "root-input") {
 		t.Fatalf("CheckPublishRecipientPlan error = %v, want root-input admission refusal", err)
@@ -2723,16 +2732,7 @@ func TestEventBusPublish_RootInputFlowRejectsExplicitlyTargetedInternalSameNameB
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	runID := uuid.NewString()
-	sourceRoute := events.RouteIdentity{
-		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("targeted-root-input-source"),
-	}.Normalized()
-	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
-	envelope = events.EnvelopeForTargetRoute(envelope, target)
-	evt := eventtest.PersistedChildForProducer(
-		uuid.NewString(), events.EventType("thing.created"),
-		eventtest.Producer(events.EventProducerNode, "foreign-node"), "", []byte(`{}`), 0,
-		runID, uuid.NewString(), envelope, time.Now().UTC(),
-	)
+	evt := rootInputInternalPublication(t, uuid.NewString(), runID, eventtest.UUID("targeted-root-input-source"), []byte(`{}`), target)
 
 	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "root-input") {
 		t.Fatalf("CheckPublishRecipientPlan error = %v, want explicit-target root-input admission refusal", err)
@@ -2761,16 +2761,8 @@ func TestEventBusPublish_ExplicitTargetSelectsOrdinaryFlowWithoutAuthorizingSame
 	if err != nil {
 		t.Fatalf("create duplicate-ID EventBus: %v", err)
 	}
-	sourceRoute := events.RouteIdentity{
-		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("duplicate-id-ordinary-source"),
-	}.Normalized()
-	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
-	envelope = events.EnvelopeForTargetRoute(envelope, ordinaryTarget)
 	eventID := uuid.NewString()
-	event := eventtest.PersistedChildForProducer(
-		eventID, events.EventType("thing.created"), eventtest.Producer(events.EventProducerNode, "foreign-node"), "",
-		[]byte(`{"scope":"ordinary"}`), 0, uuid.NewString(), uuid.NewString(), envelope, time.Now().UTC(),
-	)
+	event := rootInputInternalPublication(t, eventID, uuid.NewString(), eventtest.UUID("duplicate-id-ordinary-source"), []byte(`{"scope":"ordinary"}`), ordinaryTarget)
 
 	plan, err := eventBus.CheckPublishRecipientPlan(context.Background(), event)
 	if err != nil {
@@ -2802,15 +2794,7 @@ func TestEventBusPublish_ExplicitTargetedRootInputSameIDSiblingRejectsBeforeMuta
 	if err != nil {
 		t.Fatalf("create hostile duplicate-ID EventBus: %v", err)
 	}
-	sourceRoute := events.RouteIdentity{
-		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("duplicate-id-hostile-source"),
-	}.Normalized()
-	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
-	envelope = events.EnvelopeForTargetRoute(envelope, rootInputTarget)
-	event := eventtest.PersistedChildForProducer(
-		uuid.NewString(), events.EventType("thing.created"), eventtest.Producer(events.EventProducerNode, "foreign-node"), "",
-		[]byte(`{"scope":"root-input"}`), 0, uuid.NewString(), uuid.NewString(), envelope, time.Now().UTC(),
-	)
+	event := rootInputInternalPublication(t, uuid.NewString(), uuid.NewString(), eventtest.UUID("duplicate-id-hostile-source"), []byte(`{"scope":"root-input"}`), rootInputTarget)
 
 	if _, err := eventBus.CheckPublishRecipientPlan(context.Background(), event); err == nil || !strings.Contains(err.Error(), "root-input") {
 		t.Fatalf("duplicate-ID root-input preflight error = %v, want typed admission refusal", err)

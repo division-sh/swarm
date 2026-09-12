@@ -275,7 +275,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				f := tc.open(t, ctx)
 				runID := uuid.NewString()
 				bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-					ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
+					ContractBundle: completeOperatorReplaySource(t),
 				})
 				if err != nil {
 					t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -325,7 +325,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					json.RawMessage(`{"parent":true}`), 0, runID, "", events.EventEnvelope{}, createdAt.Add(-time.Minute),
 				), "mock")
 				original := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
-					originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
+					originalID, events.EventType("source-flow/instance/scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
 					json.RawMessage("{\n  \"topic\": \"medicine\", \"score\": 1.0, \"task_id\": \"payload-owned-task\"\n}"), 4, runID, parentID, envelope, createdAt,
 				), "mock")
 				originalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity, Target: events.MustExistingEntityTarget(deliveryTarget)}
@@ -746,15 +746,55 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 
 func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorReplayProofStore, bus eventReplayPublisher, now time.Time) *Handler {
 	t.Helper()
+	bus = diagnosingReplayPublisher{eventReplayPublisher: bus, t: t}
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now: func() time.Time { return now }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: owner, Observability: owner, AgentConversations: owner, Idempotency: owner, Events: bus,
-			Source: semanticview.Wrap(runStartTestBundle("scan.requested")),
+			Source: completeOperatorReplaySource(t),
 			Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
 		}),
 	})
+}
+
+func completeOperatorReplaySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	bundle := runStartTestBundle("scan.requested")
+	producer := runtimecontracts.FlowContractView{
+		Path: "source-flow", Paths: runtimecontracts.FlowContractPaths{FlowPath: "source-flow"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
+	}
+	bundle.FlowTree.Root.Children = append(bundle.FlowTree.Root.Children, producer)
+	for i := range bundle.FlowTree.Root.Children {
+		flow := &bundle.FlowTree.Root.Children[i]
+		bundle.FlowTree.ByID[flow.Path] = flow
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+type diagnosingReplayPublisher struct {
+	eventReplayPublisher
+	t *testing.T
+}
+
+func (p diagnosingReplayPublisher) PublishDirectRoutes(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {
+	err := p.eventReplayPublisher.PublishDirectRoutes(ctx, event, routes)
+	if err != nil {
+		p.t.Logf("direct replay publication: %v", err)
+	}
+	return err
+}
+
+func (p diagnosingReplayPublisher) CheckDirectRoutes(ctx context.Context, event events.Event, routes []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error) {
+	status, err := p.eventReplayPublisher.CheckDirectRoutes(ctx, event, routes)
+	if err != nil {
+		p.t.Logf("direct replay admission: %v", err)
+	}
+	return status, err
 }
 
 type operatorReplayDeliverySessionStore interface {

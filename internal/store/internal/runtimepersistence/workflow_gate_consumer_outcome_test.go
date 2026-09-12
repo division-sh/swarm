@@ -58,11 +58,11 @@ func TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores(t *tes
 				if fail {
 					store.injected = injected
 				}
-				bundle := runControlTimerBundle()
-				bundle.Semantics.Timers = nil
-				bundle.Semantics.InitialStage = "awaiting_review"
-				bundle.RootEntities = runtimecontracts.EntityContractsDocument{"default": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}}
-				bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"test.node_emitted": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}}}
+				bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
+					"schema.yaml":   "name: gate-consumer\nstages:\n  awaiting_review:\n    initial: true\n    gate:\n      decision: root_review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: test.node_emitted\n  done: {terminal: true}\n",
+					"entities.yaml": "default: {}\n",
+					"events.yaml":   "test.node_emitted: {}\n",
+				})
 				source := semanticview.Wrap(bundle)
 				bus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {
@@ -77,7 +77,15 @@ func TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores(t *tes
 				}
 				now := time.Now().UTC().Add(-time.Minute)
 				routes := map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done", Emit: runtimecontracts.EmitSpec{Event: "test.node_emitted"}, EmitSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}}
-				frozen, err := gateruntime.FreezeRoutes(routes)
+				graph, found := bundle.WorkflowStageTopology(".")
+				if !found {
+					t.Fatal("gate declaration has no compiled topology")
+				}
+				transition, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{DecisionID: "root_review", Verdict: "approve"}, "awaiting_review", "done")
+				if err != nil {
+					t.Fatal(err)
+				}
+				frozen, err := gateruntime.FreezeRoutes(routes, map[string]runtimecontracts.CompiledTransition{"approve": transition})
 				if err != nil {
 					t.Fatal(err)
 				}

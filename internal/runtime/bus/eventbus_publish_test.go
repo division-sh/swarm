@@ -4294,7 +4294,7 @@ func TestEventBusPublish_RecordsNestedFlowConnectLocalizedEvent(t *testing.T) {
 
 func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "grandchild"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child/grandchild"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 		},
@@ -4321,8 +4321,8 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"child":      &root.Children[0],
-				"grandchild": &root.Children[0].Children[0],
+				"child":            &root.Children[0],
+				"child/grandchild": &root.Children[0].Children[0],
 			},
 		},
 	}
@@ -4340,7 +4340,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
-		FlowID: "grandchild", FlowInstance: "child/grandchild/inst-1", EntityID: eventtest.UUID("ent-grandchild"),
+		FlowID: "child/grandchild", FlowInstance: "child/grandchild/inst-1", EntityID: eventtest.UUID("ent-grandchild"),
 	})
 	if err != nil {
 		t.Fatalf("concrete grandchild routing source: %v", err)

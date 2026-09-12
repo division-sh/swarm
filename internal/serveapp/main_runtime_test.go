@@ -1668,7 +1668,9 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 
 func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
-	rt := startServedControlProofRuntime(t, backend)
+	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
+		return canonicalrouting.CopyRootIngressServedDecisionControl(t)
+	})
 	runServedRunControlLifecycleProof(t, rt)
 }
 
@@ -1820,7 +1822,9 @@ func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedpari
 
 func runServedMailboxDecisionBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
-	rt := startServedControlProofRuntime(t, backend)
+	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
+		return canonicalrouting.CopyRootIngressServedDecisionControl(t)
+	})
 	runServedMailboxDecisionLifecycleProof(t, rt)
 }
 
@@ -3079,7 +3083,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		"approve": {Verdict: "approve", AdvancesTo: "done"},
 		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
 	}
-	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, outcomes))
+	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, rt.Runtime.Pipeline.SemanticSource(), outcomes))
 	if err != nil {
 		t.Fatalf("FreezeRoutes: %v", err)
 	}
@@ -3447,12 +3451,13 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 		t.Fatalf("%s child runtime/replay receipt count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 
-	componentEventID := waitServedEventPublishEventID(t, db, backend, runID, "operating/component_scaffold.spawn_requested")
+	componentEventName := "operating/" + instanceID + "/component_scaffold.spawn_requested"
+	componentEventID := waitServedEventPublishEventID(t, db, backend, runID, componentEventName)
 	assertServedDynamicAutoEmitPayloadProductOnly(t, db, backend, componentEventID)
 	componentEntityID := servedEventPublishEventEntityID(t, db, backend, componentEventID)
 	componentNode := identitytest.FlowNode(t, "operating", "component-scaffold").Key()
-	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, "operating/component_scaffold.spawn_requested", componentNode)
-	requireServedTraceReadback(t, endpoint, runID, componentEventID, "operating/component_scaffold.spawn_requested", componentNode)
+	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, componentEventName, componentNode)
+	requireServedTraceReadback(t, endpoint, runID, componentEventID, componentEventName, componentNode)
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
 	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
@@ -4291,7 +4296,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		"approve": {Verdict: "approve", AdvancesTo: "done"},
 		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
 	}
-	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, outcomes))
+	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, rt.Runtime.Pipeline.SemanticSource(), outcomes))
 	if err != nil {
 		t.Fatalf("freeze %s run.stop gate routes: %v", rt.Backend, err)
 	}

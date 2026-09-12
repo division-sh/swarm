@@ -1678,7 +1678,7 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 	eventID := uuid.NewString()
 	evt := connectRoutePlanConcreteProducerEvent(
 		eventID,
-		events.EventType("root.ready"),
+		events.EventType("child/inst-9/root.ready"),
 		"",
 		"",
 		json.RawMessage(`{"entity_id":"entity-1"}`),

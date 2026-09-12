@@ -46,7 +46,7 @@ func TestExecutorRetainsAcknowledgedIntentsWithIndependentError(t *testing.T) {
 				order := []string{}
 				activity := &orderedActivityDispatcher{order: &order}
 				executor, err := NewExecutor(RuntimeDependencies{
-					Source: sourceWithActivityTool(), StateRepo: stubStateRepo{}, MutationOwner: owner, Locker: stubLocker{},
+					Source: sourceWithFixtureStages(sourceWithActivityTool(), "research", "pending", "pending"), StateRepo: stubStateRepo{}, MutationOwner: owner, Locker: stubLocker{},
 					Dispatcher: orderedDispatcher{order: &order}, ActivityDispatcher: activity,
 				}, nil)
 				if err != nil {

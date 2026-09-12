@@ -277,7 +277,7 @@ func TestPreparedPublishEventRejectsTargetProjectionShapeDrift(t *testing.T) {
 }
 
 func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
-	const eventType = "worker/work.started"
+	const eventType = "worker/inst-1/work.started"
 	target := events.RouteIdentity{
 		FlowID: "worker", FlowInstance: "worker/inst-1", EntityID: uuid.NewString(),
 	}.Normalized()
@@ -287,7 +287,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	routeTable.eventPath[eventType] = struct{}{}
 	routeTable.routes[routeResolutionKey{eventType: eventType}] = []Subscriber{{
 		Recipient:      events.MustNodeDeliveryRecipient(targetNode),
-		Path:           "worker",
+		Path:           "worker/inst-1",
 		LocalizedEvent: "work.started",
 		handlerNode:    targetNode,
 		targetHandler:  targetHandler,

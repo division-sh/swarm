@@ -94,7 +94,7 @@ func TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores(t *testing.T) 
 				}
 				bus := &timerConsumerOutcomeBus{EventBus: eventBus, dispatched: make(chan error, 8)}
 				scheduler := runtimepipeline.NewSchedulerWithWorkOwner(owner)
-				bundle := runControlTimerBundle()
+				bundle := runControlTimerBundle(t)
 				bundle.Semantics.Timers[0].Event = "test.node_emitted"
 				bundle.Semantics.Timers[0].AdvancesTo = ""
 				bundle.Semantics.Timers[0].Recurring = true
