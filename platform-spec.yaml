@@ -36753,7 +36753,10 @@ managed_agent_capability_surface:
     authority_variants: [startup_probe, provider_turn]
     rule: The surface is the sole aggregate owner of planned delivery bindings, observed delivery evidence, and mechanically derived effective visibility/callability for managed agents. Candidate definitions, toolcapabilities decisions, provider policy, and MCP discovery remain upstream owners of their own facts and cannot become parallel aggregate owners.
     candidate_definition_owner:
-      emit_definition_owner: EmitRegistry.GenerateEmitToolsForActor owns actor/flow-aware emit definition generation. GenerateEmitToolsForRole is only its fallback when the actor declares no emit_events.
+      emit_definition_owner: EmitRegistry.GenerateEmitToolsForActor owns actor/flow-aware emit definition generation.
+        Exact admitted declaration/schema permission is required, with no role/global fallback. An actor with no emit_events
+        has no emit tools. Emit authorization consumes the same owner and cannot fall through to generic tools entries,
+        role grants, or a source-less registry. The tool-name presentation is not publication or permission authority.
       live_catalog_owner: Executor.ToolDefinitionsForActorInContext owns the live actor/context-aware candidate catalog, with ToolDefinitionsForActor as the context-free fallback.
       hitl_owner: The bounded platform HITL descriptor contributes notify_human universally and ask_human only under its exact permission. Root, discovered MCP, project, and flow source declarations MUST NOT redefine either managed HITL name under any handler disposition. agent_message and both retired HITL spellings contribute no candidate.
       transport_rule: Normal-runtime and selected-contract-fork transports MUST consume the executor catalog unchanged and preserve executor order and cardinality for the authorized projected subset. Empty, non-canonical, or duplicate canonical definition names fail closed before delivery. Gateways, provider adapters, and test harnesses MUST NOT merge, regenerate, reorder, or fall back to side-channel actor, role, global, hook, or stored definition producers.

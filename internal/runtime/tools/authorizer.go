@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -39,7 +38,7 @@ const (
 func NewToolAuthorizer(bus EventPublisher, classify func(models.AgentConfig, string) toolAuthorizationDecision) *ToolAuthorizer {
 	if classify == nil {
 		classify = func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
-			return classifyToolAuthorization(actor, toolName, runtimeauthority.NoopProvider(), nil)
+			return classifyToolAuthorization(actor, toolName, nil)
 		}
 	}
 	return &ToolAuthorizer{bus: bus, classify: classify}

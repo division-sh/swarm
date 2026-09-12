@@ -15,7 +15,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"gopkg.in/yaml.v3"
@@ -140,12 +139,11 @@ func TestReleaseE2EClaudeLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	if len(actorDefinitions) != 1 {
 		t.Fatalf("release E2E actor definitions = %#v, want one flow-scoped emit definition", actorDefinitions)
 	}
-	roleDefinitions := registry.GenerateEmitToolsForRole("release-worker", nil)
-	if len(roleDefinitions) != 1 {
-		t.Fatalf("release E2E role/global definitions = %#v, want one deliberately different definition", roleDefinitions)
-	}
-	if runtimellm.ToolDefinitionIdentity(roleDefinitions[0]) == runtimellm.ToolDefinitionIdentity(actorDefinitions[0]) {
-		t.Fatalf("release E2E role/global definition unexpectedly equals actor/flow definition: %#v", actorDefinitions[0])
+	if definitions := registry.GenerateEmitToolsForActor(models.AgentConfig{
+		ID: "undeclared", Role: "release-worker", FlowID: "worker", FlowPath: "worker",
+		EmitEvents: []string{"worker/agent.completed"},
+	}, nil); len(definitions) != 0 {
+		t.Fatalf("release E2E role/global authority generated tools without the exact declaration: %#v", definitions)
 	}
 }
 

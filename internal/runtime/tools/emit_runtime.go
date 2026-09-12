@@ -15,10 +15,8 @@ import (
 
 type EmitRegistry struct {
 	source           semanticview.Source
-	provider         runtimeauthority.Provider
 	activeSchemas    map[string]EmitSchema
 	generatedSchemas map[string]struct{}
-	toolToEvent      map[string]string
 }
 
 func NewEmitRegistry(source semanticview.Source, provider runtimeauthority.Provider) *EmitRegistry {
@@ -56,47 +54,11 @@ func NewEmitRegistry(source semanticview.Source, provider runtimeauthority.Provi
 		}
 	}
 
-	toolToEvent := make(map[string]string, len(activeSchemas))
-	for eventType := range activeSchemas {
-		toolToEvent[EmitToolName(eventType)] = eventType
-	}
-	if source != nil {
-		for _, declaration := range semanticview.AgentDeclarations(source) {
-			entry := declaration.Entry
-			for _, eventType := range entry.EmitEvents {
-				eventType = strings.TrimSpace(eventType)
-				if eventType == "" {
-					continue
-				}
-				if resolution := semanticview.ResolveEventSchema(source, declaration.OwnerFlowID, eventType); !resolution.HasSchema {
-					continue
-				}
-				toolToEvent[EmitToolName(eventType)] = eventType
-			}
-		}
-	}
-
 	return &EmitRegistry{
 		source:           source,
-		provider:         provider,
 		activeSchemas:    activeSchemas,
 		generatedSchemas: generatedSchemas,
-		toolToEvent:      toolToEvent,
 	}
-}
-
-func (r *EmitRegistry) GenerateEmitToolsForRole(role string, warn func(string, string, string, ...any)) []llm.ToolDefinition {
-	if r == nil {
-		return nil
-	}
-	return GenerateEmitTools(
-		role,
-		r.provider.ProducerEventsForRole,
-		func(eventType string) (EmitSchema, bool) {
-			return emitSchemaForEventType(r.activeSchemas, eventType)
-		},
-		warn,
-	)
 }
 
 func (r *EmitRegistry) GenerateEmitToolsForActor(actor models.AgentConfig, warn func(string, string, string, ...any)) []llm.ToolDefinition {
@@ -339,22 +301,6 @@ func (r *EmitRegistry) EventSchemaForActorTool(actor models.AgentConfig, toolNam
 	return "", EmitSchema{}, false
 }
 
-func (r *EmitRegistry) IsEmitToolAllowedForRole(role, toolName string) bool {
-	if r == nil {
-		return false
-	}
-	eventType, ok := r.EventTypeFromToolName(toolName)
-	if !ok {
-		return false
-	}
-	for _, evt := range r.provider.ProducerEventsForRole(role) {
-		if emitEventTypesEquivalent(evt, eventType) {
-			return true
-		}
-	}
-	return false
-}
-
 func (r *EmitRegistry) IsEmitToolAllowedForActor(actor models.AgentConfig, toolName string) bool {
 	if r == nil {
 		return false
@@ -369,13 +315,6 @@ func (r *EmitRegistry) IsEmitToolAllowedForActor(actor models.AgentConfig, toolN
 		}
 	}
 	return false
-}
-
-func (r *EmitRegistry) EventTypeFromToolName(toolName string) (string, bool) {
-	if r == nil {
-		return "", false
-	}
-	return EventTypeFromEmitToolName(normalizeNativeToolName(toolName), r.toolToEvent)
 }
 
 func (r *EmitRegistry) SchemaForEventType(eventType string) EmitSchema {

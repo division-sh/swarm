@@ -507,11 +507,7 @@ typed-process-local	callback-type	typed	internal/runtime/tools/dispatcher.go	Too
 typed-process-local	callback-type	typed	internal/runtime/tools/dispatcher.go	ToolDispatcher	field:roleScopedEntityHandler	github.com/division-sh/swarm/internal/runtime/tools.RoleScopedEntityToolHandler
 typed-process-local	callback-type	typed	internal/runtime/tools/dispatcher.go	ToolHandler	named-function-type	func(ctx context.Context, actor github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig, input any) (any, error)
 typed-process-local	callback-type	typed	internal/runtime/tools/dispatcher.go	ToolResolver	named-function-type	func(context.Context, github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig, string) (github.com/division-sh/swarm/internal/runtime/tools.ExecutionTool, bool, error)
-typed-process-local	callback-type	typed	internal/runtime/tools/emit.go	GenerateEmitTools	param:producerEvents	func(string) []string
-typed-process-local	callback-type	typed	internal/runtime/tools/emit.go	GenerateEmitTools	param:schemaFor	func(string) (github.com/division-sh/swarm/internal/runtime/tools.EmitSchema, bool)
-typed-process-local	callback-type	typed	internal/runtime/tools/emit.go	GenerateEmitTools	param:warn	func(string, string, string, ...any)
 typed-process-local	callback-type	typed	internal/runtime/tools/emit_runtime.go	(*github.com/division-sh/swarm/internal/runtime/tools.EmitRegistry).GenerateEmitToolsForActor	param:warn	func(string, string, string, ...any)
-typed-process-local	callback-type	typed	internal/runtime/tools/emit_runtime.go	(*github.com/division-sh/swarm/internal/runtime/tools.EmitRegistry).GenerateEmitToolsForRole	param:warn	func(string, string, string, ...any)
 typed-process-local	callback-type	typed	internal/runtime/tools/emit_runtime.go	missingProducerEventSchemas	param:producerEvents	func(string) []string
 typed-process-local	callback-type	typed	internal/runtime/tools/emit_runtime.go	missingProducerEventSchemas	param:producerRoles	func() []string
 typed-process-local	callback-type	typed	internal/runtime/tools/executor.go	(*github.com/division-sh/swarm/internal/runtime/tools.Executor).AcquireToolDefinitionsForActorInContext	result:#3	func()

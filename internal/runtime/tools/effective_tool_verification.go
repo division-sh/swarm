@@ -75,7 +75,7 @@ func ValidateConfiguredToolFulfillability(source semanticview.Source, discovered
 				})
 				continue
 			}
-			decision := classifyToolAuthorization(actor, name, provider, emits)
+			decision := classifyToolAuthorization(actor, name, emits)
 			if decision.allowed {
 				continue
 			}
