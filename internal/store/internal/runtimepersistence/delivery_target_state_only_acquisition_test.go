@@ -19,7 +19,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -80,13 +79,13 @@ func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *te
 		{"parent-template-child-singleton", "parent", "parent/instance", "parent/child", func(t *testing.T) semanticview.Source {
 			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeSingleton)
 		}},
-		{"nested-template", "child", "parent/child/instance", "parent/instance", func(t *testing.T) semanticview.Source {
+		{"nested-template", "parent/child", "parent/child/instance", "parent/instance", func(t *testing.T) semanticview.Source {
 			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeTemplate)
 		}},
 		{"sibling-prefix", "owner", "owner/instance", "owner-other/instance", func(t *testing.T) semanticview.Source {
 			return stateOnlySiblingAcquisitionSource(t, "owner", runtimecontracts.FlowModeTemplate, "owner-other", runtimecontracts.FlowModeTemplate)
 		}},
-		{"deep-template", "grandchild", "parent/child/grandchild/instance", "parent/instance", func(t *testing.T) semanticview.Source {
+		{"deep-template", "parent/child/grandchild", "parent/child/grandchild/instance", "parent/instance", func(t *testing.T) semanticview.Source {
 			return stateOnlyDeepAcquisitionSource(t, "parent", "child", "grandchild")
 		}},
 		{"root", ".", "", "child", func(t *testing.T) semanticview.Source {
@@ -143,11 +142,12 @@ func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *te
 					if err != nil {
 						t.Fatal(err)
 					}
+					eventType := events.EventType("test.node_emitted." + tc.node)
 					newBus := func() *runtimebus.EventBus {
 						bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
 							ContractBundle: source,
 							RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
-								return []runtimebus.DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance}, Handler: handler.ForEvent("test.node_emitted")}}, nil
+								return []runtimebus.DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance}, Handler: handler.ForEvent(eventType)}}, nil
 							},
 						})
 						if err != nil {
@@ -156,7 +156,7 @@ func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *te
 						return bus
 					}
 					bus := newBus()
-					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted", "", "", []byte(`{"account_id":"same-business-key"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(eventType), "", "", []byte(`{"account_id":"same-business-key"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 					if tc.failure != "" {
 						err := bus.Publish(ctx, evt)
 						if err == nil || !strings.Contains(err.Error(), tc.failure) {
@@ -270,213 +270,79 @@ func stateOnlyAcquisitionSource(t *testing.T, flowID string) semanticview.Source
 }
 
 func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) semanticview.Source {
-	flow := runtimecontracts.FlowContractView{
-		Path: flowID, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Name: flowID, Mode: mode, InitialState: "active",
-			States: []string{"active", "done"}, TerminalStates: []string{"done"},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"test.node_emitted": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"selector": {
-				SubscribesTo:  []string{"test.node_emitted"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
-			},
-			"upserter": {
-				SubscribesTo:  []string{"test.node_emitted"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {CreateEntity: true}},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "state-only-acquisition", Version: "1",
-			FlowInitial:  map[string]string{flowID: "active"},
-			FlowStates:   map[string][]string{flowID: {"active", "done"}},
-			FlowTerminal: map[string][]string{flowID: {"done"}},
-			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-				flowID: runtimecontracts.BuildWorkflowStageTopology(flowID, "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
-			},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: flow.Schema},
-	}
-	return semanticview.Wrap(admitStateOnlyAcquisitionEntityContracts(t, bundle, []string{flowID}))
+	return loadStateOnlyAcquisitionSource(t, "state-only-acquisition", map[string]string{flowID: mode})
 }
 
 func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childID, childMode string) semanticview.Source {
-	flow := func(id, path, mode string) runtimecontracts.FlowContractView {
-		return runtimecontracts.FlowContractView{
-			Path: path, Paths: runtimecontracts.FlowContractPaths{FlowPath: id},
-			Schema: runtimecontracts.FlowSchemaDocument{
-				Name: id, Mode: mode, InitialState: "active",
-				States: []string{"active", "done"}, TerminalStates: []string{"done"},
-			},
-			Events: map[string]runtimecontracts.EventCatalogEntry{"test.node_emitted": {}},
-			Nodes: map[string]runtimecontracts.SystemNodeContract{
-				"selector": {
-					SubscribesTo:  []string{"test.node_emitted"},
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
-				},
-				"upserter": {
-					SubscribesTo:  []string{"test.node_emitted"},
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {CreateEntity: true}},
-				},
-			},
-		}
-	}
-	parent := flow(parentID, parentID, parentMode)
-	child := flow(childID, parentID+"/"+childID, childMode)
-	parent.Children = []runtimecontracts.FlowContractView{child}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{parent}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "state-only-nested-acquisition", Version: "1",
-			FlowInitial:  map[string]string{parentID: "active", childID: "active"},
-			FlowStates:   map[string][]string{parentID: {"active", "done"}, childID: {"active", "done"}},
-			FlowTerminal: map[string][]string{parentID: {"done"}, childID: {"done"}},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				parentID: &root.Children[0],
-				childID:  &root.Children[0].Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			parentID: root.Children[0].Schema,
-			childID:  root.Children[0].Children[0].Schema,
-		},
-	}
-	return semanticview.Wrap(admitStateOnlyAcquisitionEntityContracts(t, bundle, []string{parentID, childID}))
-}
-
-func stateOnlyAcquisitionFlow(flowID, path, mode string) runtimecontracts.FlowContractView {
-	return runtimecontracts.FlowContractView{
-		Path: path, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Name: flowID, Mode: mode, InitialState: "active",
-			States: []string{"active", "done"}, TerminalStates: []string{"done"},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"test.node_emitted": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"selector": {
-				SubscribesTo:  []string{"test.node_emitted"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
-			},
-			"upserter": {
-				SubscribesTo:  []string{"test.node_emitted"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {CreateEntity: true}},
-			},
-		},
-	}
+	return loadStateOnlyAcquisitionSource(t, "state-only-nested-acquisition", map[string]string{
+		parentID: parentMode, parentID + "/" + childID: childMode,
+	})
 }
 
 func stateOnlySiblingAcquisitionSource(t *testing.T, firstID, firstMode, secondID, secondMode string) semanticview.Source {
-	first := stateOnlyAcquisitionFlow(firstID, firstID, firstMode)
-	second := stateOnlyAcquisitionFlow(secondID, secondID, secondMode)
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{first, second}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "state-only-sibling-acquisition", Version: "1",
-			FlowInitial:  map[string]string{firstID: "active", secondID: "active"},
-			FlowStates:   map[string][]string{firstID: {"active", "done"}, secondID: {"active", "done"}},
-			FlowTerminal: map[string][]string{firstID: {"done"}, secondID: {"done"}},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				firstID:  &root.Children[0],
-				secondID: &root.Children[1],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			firstID: root.Children[0].Schema, secondID: root.Children[1].Schema,
-		},
-	}
-	return semanticview.Wrap(admitStateOnlyAcquisitionEntityContracts(t, bundle, []string{firstID, secondID}))
+	return loadStateOnlyAcquisitionSource(t, "state-only-sibling-acquisition", map[string]string{
+		firstID: firstMode, secondID: secondMode,
+	})
 }
 
 func stateOnlyDeepAcquisitionSource(t *testing.T, parentID, childID, grandchildID string) semanticview.Source {
-	parent := stateOnlyAcquisitionFlow(parentID, parentID, runtimecontracts.FlowModeSingleton)
-	child := stateOnlyAcquisitionFlow(childID, parentID+"/"+childID, runtimecontracts.FlowModeSingleton)
-	grandchild := stateOnlyAcquisitionFlow(grandchildID, parentID+"/"+childID+"/"+grandchildID, runtimecontracts.FlowModeTemplate)
-	child.Children = []runtimecontracts.FlowContractView{grandchild}
-	parent.Children = []runtimecontracts.FlowContractView{child}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{parent}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "state-only-deep-acquisition", Version: "1",
-			FlowInitial:  map[string]string{parentID: "active", childID: "active", grandchildID: "active"},
-			FlowStates:   map[string][]string{parentID: {"active", "done"}, childID: {"active", "done"}, grandchildID: {"active", "done"}},
-			FlowTerminal: map[string][]string{parentID: {"done"}, childID: {"done"}, grandchildID: {"done"}},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				parentID:     &root.Children[0],
-				childID:      &root.Children[0].Children[0],
-				grandchildID: &root.Children[0].Children[0].Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			parentID:     root.Children[0].Schema,
-			childID:      root.Children[0].Children[0].Schema,
-			grandchildID: root.Children[0].Children[0].Children[0].Schema,
-		},
-	}
-	return semanticview.Wrap(admitStateOnlyAcquisitionEntityContracts(t, bundle, []string{parentID, childID, grandchildID}))
+	return loadStateOnlyAcquisitionSource(t, "state-only-deep-acquisition", map[string]string{
+		parentID:                 runtimecontracts.FlowModeSingleton,
+		parentID + "/" + childID: runtimecontracts.FlowModeSingleton,
+		parentID + "/" + childID + "/" + grandchildID: runtimecontracts.FlowModeTemplate,
+	})
 }
 
 func stateOnlyRootAcquisitionSource(t *testing.T, workflowName string) semanticview.Source {
-	const rootFlowID = "."
-	root := stateOnlyAcquisitionFlow(rootFlowID, rootFlowID, runtimecontracts.FlowModeStatic)
-	root.Schema.Name = workflowName
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: workflowName, Version: "1",
-			FlowInitial:  map[string]string{rootFlowID: "active"},
-			FlowStates:   map[string][]string{rootFlowID: {"active", "done"}},
-			FlowTerminal: map[string][]string{rootFlowID: {"done"}},
-		},
-		FlowTree:    flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{rootFlowID: &root}},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{rootFlowID: root.Schema},
-	}
-	return semanticview.Wrap(admitStateOnlyAcquisitionEntityContracts(t, bundle, nil))
+	return loadStateOnlyAcquisitionSource(t, workflowName, map[string]string{".": runtimecontracts.FlowModeStatic})
 }
 
-func admitStateOnlyAcquisitionEntityContracts(t *testing.T, base *runtimecontracts.WorkflowContractBundle, flowIDs []string) *runtimecontracts.WorkflowContractBundle {
+func loadStateOnlyAcquisitionSource(t *testing.T, workflowName string, modes map[string]string) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	flowIDs = append([]string(nil), flowIDs...)
-	sort.Strings(flowIDs)
-	var packageFlows strings.Builder
-	for _, flowID := range flowIDs {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			t.Fatal("state-only acquisition contract requires nonblank flow ID")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: "+workflowName+"\n")
+	// The component test supplies the exact receiver blueprint separately from
+	// this root ingress. Its source schema must not be borrowed from that receiver.
+	const eventSchemas = "test.node_emitted.selector:\n  account_id: text\ntest.node_emitted.upserter:\n  account_id: text\n"
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "events.yaml"), eventSchemas)
+	paths := make([]string, 0, len(modes))
+	for path := range modes {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		mode := modes[path]
+		schema := fmt.Sprintf("name: %s\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n", filepath.Base(path))
+		if path == "." {
+			schema = strings.Replace(schema, "name: .", "name: "+workflowName, 1)
+		} else {
+			schema += "mode: " + mode + "\n"
+			if mode == runtimecontracts.FlowModeTemplate {
+				schema += "instance: account_id\n"
+			}
 		}
-		fmt.Fprintf(&packageFlows, "  - id: %s\n    flow: %s\n    mode: template\n", flowID, flowID)
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n", flowID))
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), "review_item: {}\n")
+		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path, "schema.yaml"), schema)
+		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path, "entities.yaml"), "review_item:\n  account_id: text\n  items: \"[json]\"\n")
+		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path, "events.yaml"), eventSchemas)
+		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path, "nodes.yaml"), `selector:
+  execution_type: system_node
+  subscribes_to: [test.node_emitted.selector]
+  event_handlers:
+    test.node_emitted.selector:
+      accumulate: {into: items, from: payload}
+upserter:
+  execution_type: system_node
+  subscribes_to: [test.node_emitted.upserter]
+  event_handlers:
+    test.node_emitted.upserter:
+      create_entity: true
+`)
 	}
-
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-only-acquisition\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "entities.yaml"), "review_item: {}\n")
-	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {
-		t.Fatalf("load state-only acquisition entity contracts: %v", err)
+		t.Fatalf("load state-only acquisition contracts: %v", err)
 	}
-	admitted.Semantics = base.Semantics
-	admitted.FlowTree = base.FlowTree
-	admitted.FlowSchemas = base.FlowSchemas
-	admitted.URIRegistry = base.URIRegistry
-	admitted.Nodes = base.Nodes
-	admitted.Events = base.Events
-	return admitted
+	return semanticview.Wrap(bundle)
 }
 
 func writeStateOnlyAcquisitionFixtureFile(t *testing.T, path, content string) {
