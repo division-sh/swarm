@@ -1983,32 +1983,25 @@ contract_formats:
           status: merge_bearing_source_authority
           owner: platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority.runtime_callback_context
           rule: |
-            Runtime-produced callbacks that carry an unprefixed local event name
-            and a scoped concrete flow_instance MUST be normalized into the
-            same-flow concrete route context before RoutePlan production. For
-            example, event_name=repo_scaffold.repo_commit_succeeded with
-            flow_instance=repo-scaffold/<instance> is planned as the concrete
-            same-flow route context
-            repo-scaffold/<instance>/repo_scaffold.repo_commit_succeeded while
-            preserving the original event name in the delivered event envelope.
-          normalization:
+            Runtime-produced business callbacks MUST construct their final
+            event name through engine.event_identity.business_publication
+            before identity hashing, persistence or RoutePlan production.
+            A template artifact result from repo-scaffold/<instance> publishes
+            repo-scaffold/<instance>/repo_scaffold.repo_commit_succeeded.
+            Candidate lookup consumes that exact stored name; it does not
+            manufacture aliases from local or declaration-qualified names.
+          publication:
             input_shape:
-            - unprefixed runtime/local event_name
-            - scoped concrete flow_instance whose first path segment is the
-              static semantic flow scope
-            - optional entity_id and target context supplied by the producer
-            route_context: The concrete same-flow route context is
-              <flow_instance>/<local_event_name>. Root/run-owned flow_instance
-              values without a semantic scope MUST NOT synthesize a concrete
-              same-flow route key.
-            existing_scoped_events: Runtime events whose event_name already
-              carries the static semantic flow scope continue to normalize to
-              the same concrete <flow_instance>/<local_event_name> route
-              context. Callback-local normalization MUST share this owner
-              rather than introduce an artifact-specific fallback.
+            - exact declaration flow and local event identity
+            - admitted execution RoutingSource, retaining declaration and instance separately
+            - independently admitted receiver context when required
+            route_context: The canonical publication name and its typed source
+              remain unchanged across planning, persistence and replay. Root
+              business names stay local even for entityless selected-run sources.
+              A runtime instance path is never parsed to infer a declaration.
           authority_boundaries:
             route_plan: RoutePlan MUST produce typed workflow-node recipients
-              from the normalized callback route context before dispatch.
+              from canonical callback publication and exact route authority before dispatch.
             persistence: event_deliveries MUST persist the typed node delivery
               row before workflow-node admission may execute the callback
               subscriber.
@@ -2119,7 +2112,7 @@ contract_formats:
           conformance: '#1346 owns the route-authority proof matrix.'
           execution_admission: '#1293 owns workflow-node execution admission against committed delivery authority.'
           wildcard_routes: '#1299 owns wildcard static-service route production.'
-          runtime_callback_routes: '#1301 closed runtime callback flow_instance localization; authoritative semantics are defined in route_plan_authority.runtime_callback_context.'
+          runtime_callback_routes: '#2423 supersedes consumer-side callback name repair with canonical producer publication; authoritative route semantics remain in route_plan_authority.runtime_callback_context.'
   persistence_model:
     description: Agents do not have raw database access. The platform derives agent-facing persistence tools from the
       authoritative flow-owned entity contracts in entities.yaml, agents.yaml entity_writes declarations, and the shared
@@ -4662,6 +4655,7 @@ engine:
       - Protocol/control and external/input constructors retain their own exact identities; callers cannot relabel them as business sources.
       - The projection grants no routing, schema, permission, receiver or protocol authority. Agent schemas and emit permissions require the exact admitted declaration, never a leaf-name or role/global fallback.
       - Action registry entries do not carry implicit emits. Supported explicit artifact action outcomes use this same business projection.
+      - Business history descriptors resolve the declaration through the exact admitted source and must round-trip through the same publication projection. The recorded event name remains unchanged. Generated activity outcomes use their effective declaration catalog; neither leaf-name matching nor duplicate authored schemas may supply missing metadata. Platform protocol and external/input metadata retain their separately owned catalog identities.
     canonical_resolver: 'The platform MUST provide a single resolver module used by all subsystems:
       Localize(flowID, eventName) → local name. Externalize(flowID, eventName) → external name.
       Match(pattern, eventName) → bool. ResolveInputAlias(flowID, eventName) → local handler key.

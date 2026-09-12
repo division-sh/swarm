@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -1765,6 +1766,17 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 	}
 	name := strings.TrimSpace(string(evt.Type()))
 	proof := semanticview.ResolveFlowEventProof(eb.semanticSource, evt.SourceRoute().FlowID, name)
+	_, _, platformProtocol := runtimecontracts.PlatformEventCatalogEntry(eb.semanticSource.PlatformSpec(), name)
+	if !platformProtocol {
+		switch evt.RoutingSource().Kind() {
+		case events.RoutingSourceRoot, events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance:
+			declaration, err := runtimepinrouting.PublicationDeclarationForSourceEvent(evt.Type(), evt.RoutingSource())
+			if err != nil {
+				return ctx, fmt.Errorf("publication metadata: %w", err)
+			}
+			proof = semanticview.ResolveFlowEventProof(eb.semanticSource, declaration.Flow(), declaration.Local())
+		}
+	}
 	if !proof.HasSchema {
 		return ctx, nil
 	}

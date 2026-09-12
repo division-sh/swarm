@@ -1,14 +1,57 @@
 package bus
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func TestPublicationHistoryUsesExactSourceInstance(t *testing.T) {
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyPublicationTextSites(t, "template"))
+	eb := &EventBus{semanticSource: source}
+	scope := authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleHash)
+	ctx := authoractivity.WithScope(context.Background(), scope)
+	routingSource := eventtest.ConcreteTemplateRoutingSource("source", "source/first", eventtest.UUID("owner"))
+	for _, tc := range []struct {
+		name  string
+		valid bool
+	}{
+		{"source/first/result.direct", true},
+		{"source/second/result.direct", false},
+		{"source/result.direct", false},
+		{"result.direct", false},
+		{"sibling/result.direct", false},
+		{"source/first/sibling/result.direct", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID(tc.name), events.EventType(tc.name), "history-test", "", nil, 0, eventtest.UUID("run"), events.EnvelopeForSourceRoute(events.EventEnvelope{}, routingSource.Route()), routingSource, time.Now().UTC())
+			resolved, err := eb.withAuthorActivityEventDescriptor(ctx, event)
+			if !tc.valid {
+				if err == nil {
+					t.Fatal("foreign/noncanonical instance selected declaration metadata")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			descriptor, found, err := authoractivity.ResolvedEventDescriptorFromContext(resolved, scope, tc.name)
+			if err != nil || !found || descriptor.EventType != tc.name || descriptor.Disposition != authoractivity.StoryAuthored {
+				t.Fatalf("descriptor = %#v found=%t err=%v", descriptor, found, err)
+			}
+			if event.Type() != events.EventType(tc.name) || event.RoutingSource() != routingSource {
+				t.Fatal("history projection changed durable facts")
+			}
+		})
+	}
+}
 
 func TestPublicationCandidateKeysNeverInventSourceAliases(t *testing.T) {
 	for _, eventType := range []string{

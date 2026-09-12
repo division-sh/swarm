@@ -53,9 +53,36 @@ func TestBusinessPublicationAdmittedSourceKinds(t *testing.T) {
 			} else if err != nil || string(got) != row.want {
 				t.Fatalf("got %q %v; want %q", got, err, row.want)
 			}
+			if row.want != "" {
+				declaration, err := PublicationDeclarationForSourceEvent(got, row.source)
+				if err != nil || declaration.Flow() != row.flow || declaration.Local() != "work.done" {
+					t.Fatalf("readback declaration = %#v, %v", declaration, err)
+				}
+			}
 			if row.source != before {
 				t.Fatal("projection changed source authority")
 			}
 		})
+	}
+}
+
+func TestPublicationMetadataRejectsForeignAndUnqualifiedNames(t *testing.T) {
+	source, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{FlowID: "outer/child", FlowInstance: "outer/child/first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []events.EventType{
+		"work.done", "outer/child/work.done", "outer/child/second/work.done",
+		"outer/other/first/work.done", "outer/child/first/deeper/work.done",
+		"outer/child/first/outer/child/work.done", "outer/child/first/ work.done",
+	} {
+		if _, err := PublicationDeclarationForSourceEvent(name, source); err == nil {
+			t.Fatalf("foreign/noncanonical publication %q selected metadata", name)
+		}
+	}
+	for _, source := range []events.RoutingSource{events.NoRoutingSource(), events.NewPlatformControlRoutingSource()} {
+		if _, err := PublicationDeclarationForSourceEvent("work.done", source); err == nil {
+			t.Fatal("non-business source selected business metadata")
+		}
 	}
 }

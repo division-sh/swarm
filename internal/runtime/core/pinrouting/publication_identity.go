@@ -2,6 +2,7 @@ package pinrouting
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
@@ -12,6 +13,28 @@ import (
 // Frozen continuations use their recorded declaration, not the current source.
 func AdmitPublicationIdentity(flowID, declaredEvent string, source events.RoutingSource) (events.EventType, error) {
 	return publicationIdentity(flowID, declaredEvent, source.Kind(), source.Route())
+}
+
+// PublicationDeclarationForSourceEvent resolves metadata for a committed
+// business name, without changing that name or searching other flow scopes.
+func PublicationDeclarationForSourceEvent(name events.EventType, source events.RoutingSource) (eventidentity.PublicationDeclaration, error) {
+	route := source.Route()
+	flowID, local := route.FlowID, string(name)
+	if source.Kind() == events.RoutingSourceRoot {
+		flowID = "."
+	}
+	if flowID != "." && route.FlowInstance != "" {
+		local = strings.TrimPrefix(local, route.FlowInstance+"/")
+	}
+	declaration, err := eventidentity.AdmitPublicationDeclaration(flowID, local)
+	if err != nil {
+		return eventidentity.PublicationDeclaration{}, err
+	}
+	expected, err := AdmitPublicationIdentity(flowID, declaration.Local(), source)
+	if err != nil || expected != name {
+		return eventidentity.PublicationDeclaration{}, fmt.Errorf("publication %q does not match its admitted source", name)
+	}
+	return declaration, nil
 }
 
 func publicationIdentity(flowID, declaredEvent string, kind events.RoutingSourceKind, route events.RouteIdentity) (events.EventType, error) {
