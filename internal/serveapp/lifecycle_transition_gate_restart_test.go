@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,11 +18,24 @@ import (
 )
 
 func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
+	proveServedCompiledGateOutcomeRestart(t, false)
+}
+
+func TestServedCompiledGateOutcomeGracefulDrainRestartOnBothStores(t *testing.T) {
+	proveServedCompiledGateOutcomeRestart(t, true)
+}
+
+func proveServedCompiledGateOutcomeRestart(t *testing.T, gracefulDrain bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleGateSharedEvent)
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			reached := make(chan struct{}, 1)
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+			defer releaseHandler()
 			opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, _ string, event events.Event) error {
 				if event.Type() != "work.completed" {
 					return nil
@@ -30,8 +44,12 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 				case reached <- struct{}{}:
 				default:
 				}
-				<-ctx.Done()
-				return ctx.Err()
+				select {
+				case <-release:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "gate-cut-seed"})
@@ -87,17 +105,34 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.completed'`, seed.RunID).Scan(&outcomeID); err != nil {
 				t.Fatal(err)
 			}
+			if gracefulDrain {
+				// Dispatch retains a commit-owned context. Graceful drain releases
+				// this test barrier; it is not a substitute for killing a process.
+				releaseHandler()
+				select {
+				case err := <-requestDone:
+					if err != nil {
+						t.Fatalf("drained verdict response: %v", err)
+					}
+				case <-time.After(15 * time.Second):
+					t.Fatal("released verdict did not complete")
+				}
+				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			}
 			if code := first.stop(); code != 0 {
 				t.Fatalf("pre-consumer stop=%d", code)
 			}
 			cancelRequest()
-			select {
-			case err := <-requestDone:
-				if err != nil {
-					t.Logf("HTTP response interrupted after durable verdict proof: %v", err)
+			if !gracefulDrain {
+				select {
+				case err := <-requestDone:
+					if err != nil {
+						t.Logf("HTTP response interrupted after durable verdict proof: %v", err)
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("interrupted verdict HTTP request did not exit")
 				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("interrupted verdict HTTP request did not exit")
 			}
 			opts.TestWorkflowNodeHandlerStartHook = nil
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
