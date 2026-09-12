@@ -177,6 +177,9 @@ func TestConnectedSchemaReadersCannotRecompileMissingIndex(t *testing.T) {
 	if rows := eventSchemaOwnershipRowsForReceiver(bundle, "consumer"); len(rows) != 0 {
 		t.Fatal("receiver reader recompiled missing ownership from raw connect rows")
 	}
+	if errs := validateCompiledConnectEventSchemaOwnership(bundle); len(errs) != 1 || !strings.Contains(errs[0].Error(), "missing compiled connect schema ownership") {
+		t.Fatalf("missing retained index passed validation: %v", errs)
+	}
 }
 
 func TestCompiledInputNameUsesOnlyAdmittedCoordinates(t *testing.T) {

@@ -2,6 +2,8 @@ package bus
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -9,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -72,7 +73,30 @@ func TestPublicationCandidateKeysNeverInventSourceAliases(t *testing.T) {
 }
 
 func TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity(t *testing.T) {
-	eb := &EventBus{semanticSource: semanticview.Wrap(routedNodeStaticValidationBundle())}
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		path = filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("schema.yaml", "name: publication-diagnostic\n")
+	write("validation/schema.yaml", "name: validation\nmode: template\ninstance: review_id\ninitial_state: active\nstates: [active]\n")
+	write("validation/events.yaml", "thing.reviewed:\n  review_id: text\n")
+	write("validation/nodes.yaml", `entity-writer:
+  execution_type: system_node
+  subscribes_to: [thing.reviewed]
+  event_handlers:
+    thing.reviewed:
+      guard:
+        id: selected_owner
+        check: '_entity.id != ""'
+`)
+	eb := &EventBus{semanticSource: loadConnectRoutePlanCanonicalSource(t, root)}
 	subscriber := Subscriber{
 		Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "validation", "entity-writer")),
 		Path:      "validation", MatchPattern: "validation/thing.reviewed",

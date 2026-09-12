@@ -106,6 +106,9 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 }
 
 func validateCompiledConnectEventSchemaOwnership(bundle *WorkflowContractBundle) []error {
+	if bundle != nil && len(bundle.Semantics.CompositionConnects) != 0 && bundle.eventOwnersByFlow == nil {
+		return []error{fmt.Errorf("%w: missing compiled connect schema ownership; compile the exact source before validation", ErrInvalidField)}
+	}
 	var errs []error
 	rows := effectiveEventSchemaOwnershipRows(bundle)
 	ownersByReceiver := make(map[string]map[string]eventSchemaOwnershipRow)
