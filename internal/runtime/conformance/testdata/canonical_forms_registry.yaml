@@ -41,8 +41,8 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 98
-  custom_unmarshal_reachable: 96
+  custom_unmarshal_total: 97
+  custom_unmarshal_reachable: 95
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
     contracts: 82
@@ -691,7 +691,6 @@ decoder_coverage:
     flow.input_pin_resolution: [FlowInputPinResolution]
     handler.collection_compute: [ComputeSpec]
     flow.other_surface: [FlowVariable]
-    flow.lifecycle: [WorkflowTransitionContract]
   workflow_contract_yaml_handlers.go:
     node.timer: [WorkflowTimerContract]
     unreachable_retired_decoders: [EventEmission]

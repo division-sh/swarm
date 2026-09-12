@@ -82,6 +82,11 @@ func TestStageGateContextPreservesNestedEntityPresence(t *testing.T) {
 		}
 		plan := rc.WorkflowGatePlan{FlowID: ".", Stage: "awaiting_review", Decision: "review", Context: map[string]rc.ExpressionValue{"note": rc.CELExpression(expression)}, Outcomes: map[string]rc.WorkflowGateOutcomePlan{"accept": {AdvancesTo: "complete"}}}
 		bundle := stageGateValidationBundle(plan, nil, nil)
+		bundle.RootSchema = &rc.FlowSchemaDocument{
+			StageDeclarations: rc.FlowStageDeclarations{Declared: true, Entries: []rc.FlowStageDeclaration{
+				{ID: "awaiting_review", Initial: true}, {ID: "complete", Terminal: true},
+			}},
+		}
 		bundle.RootTypes = rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}
 		bundle.RootEntities = rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}}
 		findings := checkStageGateValidation(&checkerContext{source: semanticview.Wrap(bundle)})

@@ -24,13 +24,17 @@ import (
 
 func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {
 	trackerA := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			TerminalStages: []string{"done"},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
+				{ID: "active", Initial: true}, {ID: "done", Terminal: true},
+			}},
 		},
 	}), executionposture.Live)
 	trackerB := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			TerminalStages: []string{"closed"},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
+				{ID: "active", Initial: true}, {ID: "closed", Terminal: true},
+			}},
 		},
 	}), executionposture.Live)
 

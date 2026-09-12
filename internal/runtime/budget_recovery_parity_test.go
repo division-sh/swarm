@@ -96,7 +96,11 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				t.Fatalf("NewEventBus: %v", err)
 			}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				Semantics: runtimecontracts.WorkflowSemanticView{TerminalStages: []string{"done"}},
+				RootSchema: &runtimecontracts.FlowSchemaDocument{
+					StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
+						{ID: "active", Initial: true}, {ID: "done", Terminal: true},
+					}},
+				},
 				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 					"budget_warning_percent":   {Value: 50},
 					"budget_throttle_percent":  {Value: 75},
