@@ -129,8 +129,16 @@ Final classification below is subject to the full qualification status above.
 
 Final whole suite must use `go run ./cmd/swarm-test -- ./... -count=1 -timeout=30m`.
 An explicit `./...` is required when arguments are supplied. Private PostgreSQL
-transport tests require `SWARM_INVESTIGATION_PG_BIN=/usr/lib/postgresql/16/bin`;
+transport tests require `TEST_POSTGRES_BIN=/usr/lib/postgresql/16/bin`;
 the final run supplies it rather than counting skipped cases as proof.
+
+The first integrated whole suite failed. Its investigation-prefixed SWARM env
+export contaminated strict product environment admission; the private test
+fixture now uses TEST_POSTGRES_BIN without weakening product validation. Other
+repairs preserve inline dispatch for direct pipeline calls, count an acknowledged
+fork event even when delivery is refused, and update cancellation barriers and
+authority-repair SQL expectations for admitted drain and E's mutation fence.
+A clean whole-suite rerun remains required; focused passes do not erase that run.
 
 Component receipts: `issue-2444-commit-evidence-proof.md`,
 `issue-2444-runfork-writer-migration.md`, `issue-2444-bounded-writers-proof.md`,

@@ -29,9 +29,9 @@ type contractPostgresServer struct {
 
 func newContractPostgresServer(t *testing.T) *contractPostgresServer {
 	t.Helper()
-	bin := os.Getenv("SWARM_INVESTIGATION_PG_BIN")
+	bin := os.Getenv("TEST_POSTGRES_BIN")
 	if bin == "" {
-		t.Skip("set SWARM_INVESTIGATION_PG_BIN for disposable PostgreSQL server-loss investigation")
+		t.Skip("set TEST_POSTGRES_BIN for disposable PostgreSQL server-loss investigation")
 	}
 	root := t.TempDir()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

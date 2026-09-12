@@ -218,26 +218,28 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				// A bounded retirement call is deterministic with respect to the barrier:
-				// no claim write or commit can occur until this call has returned.
+				// Cancel retirement while the claim holds the fence, then release
+				// the claim so the admitted retirement SQL can drain and roll back.
 				retireCtx, retireCancel := context.WithTimeout(ctx, time.Second)
-				retireErr := grant.Retire(retireCtx)
-				retireCancel()
+				retired := make(chan error, 1)
+				go func() { retired <- grant.Retire(retireCtx) }()
+				<-retireCtx.Done()
 				var durableGrantState string
 				if err := db.QueryRowContext(ctx, `SELECT state FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&durableGrantState); err != nil {
 					t.Fatal(err)
 				}
 				if ordering == "claim_rollback" {
 					cancelClaim()
-				} else {
-					release()
 				}
+				release()
 				var outcome claimOutcome
 				select {
 				case outcome = <-claimed:
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
+				retireErr := <-retired
+				retireCancel()
 				if ordering == "claim_rollback" {
 					if !errors.Is(outcome.err, context.Canceled) {
 						t.Fatalf("cancelled held claim: %v", outcome.err)

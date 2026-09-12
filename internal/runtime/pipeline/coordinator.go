@@ -615,7 +615,7 @@ func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Con
 		return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, emissions)
 	}
 	if emissions == nil {
-		emissions = &pipelineEmissionPlan{}
+		emissions = &pipelineEmissionPlan{dispatchInline: true}
 	}
 	handled, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, emissions)
 	if emissions.committed {
@@ -730,7 +730,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				Event:           application.Event(),
 				HandlerEventKey: handlerEventKey,
 				State:           application.State(),
-			}, false, emissions != nil)
+			}, false, emissions != nil && !emissions.dispatchInline)
 		}()
 		if emissions != nil {
 			emissions.committed = result.Committed

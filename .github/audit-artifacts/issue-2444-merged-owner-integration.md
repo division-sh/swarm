@@ -2,6 +2,15 @@
 
 Agent-g. Qualification **pending**; not a closure or review-ready claim.
 
+Rebased cleanly onto `origin/master` at `2344162f9` after the first qualification.
+That run failed: strict environment admission rejected the test-only SWARM
+export; direct pipeline calls lost dispatch after allocating an emission plan;
+the selected negative fixture dropped acknowledged event evidence; cancellation
+barriers expected SQL interruption instead of admitted drain; and SQL-mock
+expectations lacked E's activity-order fence. The fixes preserve product
+validation and existing owners. Focused pipeline activity and dual-store
+generation/reset/receiver fencing controls now pass. Final rerun remains pending.
+
 ## Baseline and Boundary
 
 - Actual merged master: `0d7513f76bea234a7c153f488c7167847d1d8bd5` (#2445).
@@ -24,7 +33,7 @@ ours/theirs selection. The consumer census includes cleanly merged call sites.
 | Delivery persistence | Both outcome runners include E's receiver-dependent settlement before revision finalization and COMMIT; no independent dependent-settlement writer. |
 | External recovery | Existing handoff/outcome owner, with E's explicit source-scope argument and authority restrictions unchanged. |
 | Fork materialization and activation | Existing transaction runner, plus E's original loop/fan-out carriage, exact source input projection, preparation binding and source-freeze admission. No predecessor-state reconstruction. |
-| Selected container construction | E's builder owns failed claimed-execution settlement, including claim-plus-error. Caller cleanup does not call `Fail` again. Unsettled returned authority prevents discard. |
+| Selected container construction | E's container constructor owns failed claimed-execution settlement, including claim-plus-error. Caller cleanup does not call `Fail` again. Unsettled returned authority prevents discard. |
 | Selected execute and activation consumers | Preserve acknowledged results and cleanup errors separately; retain the existing prepared context when activation committed even if a later close/handoff fails. |
 | Selected stop | New merged-master writer uses the backend outcome runner and existing author-activity/revision finalization. Runtime returns the exact terminal result plus failed post-commit recovery rather than an empty result. |
 | Selected recovery | New merged-master writer uses the same outcome owner; list uses the read runner. Runtime preserves committed earlier/current results and still fences recovery admission on any failure. |

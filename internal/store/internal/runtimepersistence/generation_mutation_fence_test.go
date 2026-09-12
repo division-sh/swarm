@@ -103,11 +103,9 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 					// The authorizer is the production one; only the outer transaction's
 					// completion is held. Selected execution/run/FK locks are real.
 					waiting, stop := context.WithTimeout(ctx, time.Second)
-					err = grant.Retire(waiting)
-					stop()
-					if !errors.Is(err, context.DeadlineExceeded) {
-						t.Fatalf("retirement crossed accepted mutation: %v", err)
-					}
+					retired := make(chan error, 1)
+					go func() { retired <- grant.Retire(waiting) }()
+					<-waiting.Done()
 					if finish == "commit" {
 						err = tx.Commit()
 					} else {
@@ -116,6 +114,10 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					if err := <-retired; !errors.Is(err, context.DeadlineExceeded) {
+						t.Fatalf("retirement crossed accepted mutation: %v", err)
+					}
+					stop()
 					var state string
 					var version uint64
 					if err := db.QueryRowContext(ctx, `SELECT state,state_version FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&state, &version); err != nil {

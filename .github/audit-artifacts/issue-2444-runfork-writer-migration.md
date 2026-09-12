@@ -199,7 +199,7 @@ planner, restart recovery, new production abstraction, or commit was introduced.
   evidence and any acknowledged activation even when later cleanup fails.
 - `ActivateSelectedContractRunFork` in `activation_gate.go` has three branches:
   non-selected delegation to `Store.ActivateRunFork` at line 67; replay-ready
-  selected execution through the same builder/container and selected activation
+selected execution through the same container constructor and selected activation
   at line 308; selected state-only `Store.ActivateRunFork` at line 338. Both
   direct branches already preserve activation-plus-error without retry. The
   replay branch now adopts returned build authority before failure cleanup and
@@ -220,8 +220,8 @@ planner, restart recovery, new production abstraction, or commit was introduced.
 
 | Store result / immediate runtime consumer | Classification and bounded disposition |
 | --- | --- |
-| `IssueRunForkSelectedContractRuntimeExecution` / builder, then both upper runtime callers | Verified loss of returned issuance on error. Builder now preserves execution ID, generation and fingerprints in its returned proof. An issuance error never calls Claim or Publish. Both callers use the existing discard path; real-store controls retain the prepared execution row with a cancelled run tombstone, not executable running authority. |
-| `ClaimRunForkSelectedContractRuntimeExecution` / builder, then both upper runtime callers | Verified loss of acknowledged running authority on error. Builder now returns the exact authority even on error, including later local admission/scope failures. Both callers route a structurally valid returned token only to existing guarded Fail/Close cleanup, never to Publish. Cleanup errors are joined and suppress subsequent discard. |
+| `IssueRunForkSelectedContractRuntimeExecution` / container constructor, then both upper runtime callers | Verified loss of returned issuance on error. Construction now preserves execution ID, generation and fingerprints in its returned proof. An issuance error never calls Claim or Publish. Both callers use the existing discard path; real-store controls retain the prepared execution row with a cancelled run tombstone, not executable running authority. |
+| `ClaimRunForkSelectedContractRuntimeExecution` / container constructor, then both upper runtime callers | Verified loss of acknowledged running authority on error. After E's integration, construction owns guarded Fail settlement exactly once, including claim-plus-error and later local admission failures. Successful settlement clears the cleanup token while retaining the proof. Cleanup errors remain joined and suppress subsequent discard; upper callers do not repeat settlement or Publish. |
 | `MaterializeRunForkForSelectedContractExecution` / `ExecuteSelectedContractRunFork:181` | Already returns the materialization result on error and stops before runtime issuance. Durable paused-fork identity is not a live claimed execution. No materializer retry added. This classification is source tracing, not a newly injected materialization-error test. |
 | `ActivateRunForkForSelectedContractExecution` / both upper runtime callers | Verified unnecessary discard attempt after `Activated=true` plus error. Both callers now close the runtime without discarding an acknowledged activation. The standalone caller also no longer zeros its result when activation succeeds and Close reports an error. One activation call, no reactivation. |
 | `ActivateRunFork` / non-selected and selected state-only activation-gate branches | No defect verified: both already return activation plus independent error. Two exact direct-branch controls confirm retained evidence and one call; production branches unchanged. |
@@ -254,7 +254,7 @@ gap remain parent/store-owner scope, not claimed closed by runtime testing.
 
 `TestSelectedForkRuntimeConsumersSettleReturnedOutcomes` executes 13 cases for
 each combination of `postgres|sqlite` and `execute|activation_gate`: 52 real-store
-cases. Both complete upper runtime functions are exercised, not only the builder
+cases. Both complete upper runtime functions are exercised, not only construction
 or a projection helper. Exact case names:
 
 ```text
