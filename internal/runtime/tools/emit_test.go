@@ -25,7 +25,7 @@ func TestEmitToolName_LocalizesScopedEventTypes(t *testing.T) {
 	}
 }
 
-func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.T) {
+func TestGenerateEmitToolsForActor_RequiresExplicitDeclarationPermission(t *testing.T) {
 	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"campaign-coordinator": {
@@ -51,6 +51,13 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 		Role:          "campaign_coordinator",
 	}
 
+	if tools := registry.GenerateEmitToolsForActor(actor, nil); len(tools) != 0 {
+		t.Fatalf("silent config borrowed role permission: %+v", tools)
+	}
+	if _, _, ok := registry.EventSchemaForActorTool(actor, "emit_scan_requested"); ok {
+		t.Fatal("silent config borrowed role schema")
+	}
+	actor.EmitEvents = []string{"scan.requested"}
 	tools := registry.GenerateEmitToolsForActor(actor, nil)
 	for _, def := range tools {
 		if def.Name == "emit_scan_requested" {
@@ -65,22 +72,22 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 				"entity_id": "scan-1",
 				"extra":     "must fail provider-visible schema",
 			}); err == nil {
-				t.Fatal("role-fallback delivered emit schema accepted undeclared field")
+				t.Fatal("declared emit schema accepted undeclared field")
 			}
 			_, runtimeSchema, ok := registry.EventSchemaForActorTool(actor, "emit_scan_requested")
 			if !ok {
-				t.Fatal("role-fallback runtime schema not found")
+				t.Fatal("declared runtime schema not found")
 			}
 			if err := ValidatePayloadAgainstSchema(runtimeSchema.Schema, map[string]any{
 				"entity_id": "scan-1",
 				"extra":     "must fail runtime schema",
 			}); err == nil {
-				t.Fatal("role-fallback runtime emit schema accepted undeclared field")
+				t.Fatal("declared runtime emit schema accepted undeclared field")
 			}
 			return
 		}
 	}
-	t.Fatalf("expected role-scoped emit tool in %#v", tools)
+	t.Fatalf("expected declaration-scoped emit tool in %#v", tools)
 }
 
 func TestDeclarationDerivedActorRolesUseEffectivePublicName(t *testing.T) {
@@ -252,7 +259,7 @@ func TestGenerateEmitToolsForActor_FailsClosedOnDuplicateLocalToolNames(t *testi
 	}
 }
 
-func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOwningFlowProof(t *testing.T) {
+func TestGenerateEmitToolsForActor_ResolvesTemplateDeclarationThroughOwningFlowProof(t *testing.T) {
 	reviewFlow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: "review",
@@ -279,16 +286,17 @@ func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOw
 			},
 		},
 	}
-	source := semanticview.Wrap(bundle)
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "review-coordinator", "review", "scan.requested")
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 
 	tools := registry.GenerateEmitToolsForActor(models.AgentConfig{
 		ExecutionMode: "live",
-		ID:            "review-coordinator-inst-1",
+		ID:            "review-coordinator",
+		Identity:      toolTestAgentIdentity(t, "review-coordinator", "review", "review/inst-1"),
 		Role:          "review_coordinator",
 		FlowID:        "review",
 		FlowPath:      "review/inst-1",
-		EmitEvents:    []string{"review/inst-1/scan.requested"},
+		EmitEvents:    []string{"scan.requested"},
 	}, nil)
 
 	if len(tools) != 1 {

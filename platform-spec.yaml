@@ -4896,7 +4896,10 @@ engine:
         already-normalized same-scope identity accepted by typed admission. Cross-boundary slash-qualified and full-URI exact
         values are invalid. Wildcard subscriptions are slash-free and flow-local; cross-flow delivery requires pins/connect.
       timer_event_references: Always local exact names. Timers do not resolve qualified or wildcard subscription paths.
-      emit_events: Always local names. The platform externalizes at emission time.
+      emit_events: Always local names. Materialized AgentConfig permissions retain the owning declaration's local event
+        names, never concrete instance-qualified publication spellings. Exact declaration/schema admission remains
+        distinct from subscription routing. The platform projects the final business name only at emission time,
+        using the admitted source and shared publication owner before deriving spelling-dependent event IDs.
       events_yaml: Always local names. Flow-scoped at load time.
       pins: Always local names. Parent connect binds output pins to receiver input pins for topology; same-name pin matching
         is not route or producer authority. Receiver-owned resolution materializes concrete instance recipients after

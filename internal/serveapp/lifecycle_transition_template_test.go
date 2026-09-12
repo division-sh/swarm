@@ -244,7 +244,8 @@ func requireLifecycleTemplateVerdict(t *testing.T, rt servedControlProofRuntime,
 	if gate.CardID != s.gate.CardID || gate.ActivationID != s.gate.ActivationID || gate.RoutesJSON != s.gate.RoutesJSON || gate.DecisionEventID != history[1].TriggerEventID {
 		t.Fatalf("%s gate receipt split activation/history: %#v", s.side, gate)
 	}
-	requireLifecycleEventCount(t, rt, runID, s.flow+"/sink/work.completed", 1)
+	requireLifecycleEventCount(t, rt, runID, s.gateInstance+"/work.completed", 1)
+	requireLifecycleEventCount(t, rt, runID, s.flow+"/sink/work.completed", 0)
 	t.Logf("TEMPLATE_DECIDED run=%s side=%s card=%s event=%s final=%s compiled=%#v", runID, s.side, gate.CardID, gate.DecisionEventID, final, compiled)
 }
 
@@ -294,7 +295,8 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 				t.Fatalf("root plus two template/second-template/final chains: entities=%d", count)
 			}
 			for _, s := range siblings {
-				requireLifecycleEventCount(t, rt, runID, s.flow+"/loop.escaped", 1)
+				requireLifecycleEventCount(t, rt, runID, s.instance+"/loop.escaped", 1)
+				requireLifecycleEventCount(t, rt, runID, s.flow+"/loop.escaped", 0)
 			}
 			before := lifecycleStoredSnapshot(t, rt, runID)
 			for _, s := range siblings {
