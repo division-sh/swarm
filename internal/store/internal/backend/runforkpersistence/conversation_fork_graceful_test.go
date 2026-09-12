@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -238,7 +239,16 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 					if durable != wantDurable {
 						t.Errorf("durable=%d want=%d", durable, wantDurable)
 					}
-					assertForkLockAvailable(t, observer, key, true)
+					if keyed && scenario == "commit_failure" {
+						// Disposal is local; only server acquisition proves remote release.
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						if err := acquireForkLockAfterDisposal(ctx, observer, key); err != nil {
+							t.Fatalf("server acquisition after disposal: %v", err)
+						}
+					} else {
+						assertForkLockAvailable(t, observer, key, true)
+					}
 					probe.afterLock = nil
 					probe.lockHeld = false
 					var afterPID int
@@ -279,4 +289,51 @@ func assertForkLockAvailable(t *testing.T, db *sql.DB, key string, want bool) {
 	if acquired != want {
 		t.Errorf("competing lock acquired=%t want=%t", acquired, want)
 	}
+}
+
+func acquireForkLockAfterDisposal(ctx context.Context, db *sql.DB, key string) (err error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, conn.Close()) }()
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, key); err != nil {
+		return err
+	}
+	var unlocked bool
+	if err := conn.QueryRowContext(ctx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, key).Scan(&unlocked); err != nil {
+		return err
+	}
+	if !unlocked {
+		return errors.New("post-disposal observer did not unlock its exact session")
+	}
+	return nil
+}
+
+func TestForkPostDisposalObservationRejectsHeldLock(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	owner, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	const key = "fork-post-disposal-held-control"
+	if _, err := owner.ExecContext(context.Background(), `SELECT pg_advisory_lock(hashtextextended($1, 0))`, key); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := acquireForkLockAfterDisposal(ctx, db, key); err == nil || ctx.Err() != context.DeadlineExceeded {
+		t.Fatalf("held-lock observation err=%v deadline=%v", err, ctx.Err())
+	}
+	var unlocked bool
+	if err := owner.QueryRowContext(context.Background(), `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, key).Scan(&unlocked); err != nil || !unlocked {
+		t.Fatalf("owner unlock=%t: %v", unlocked, err)
+	}
+	proofCtx, proofCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer proofCancel()
+	if err := acquireForkLockAfterDisposal(proofCtx, db, key); err != nil {
+		t.Fatalf("observation after acknowledged release: %v", err)
+	}
+	assertForkLockAvailable(t, db, key, true)
 }
