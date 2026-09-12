@@ -380,20 +380,10 @@ func validateArtifactRepoActionSpec(source semanticview.Source, flowID, nodeID, 
 			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.files[%d].max_bytes must be non-negative", i)))
 		}
 	}
-	for _, field := range []struct {
-		label string
-		value string
-	}{
-		{"output.repo_url", spec.Output.RepoURL},
-		{"output.current_ref", spec.Output.CurrentRef},
-		{"output.file_manifest", spec.Output.FileManifest},
-		{"output.status", spec.Output.Status},
-		{"output.failure", spec.Output.Failure},
-		{"output.last_request_id", spec.Output.LastRequestID},
-		{"output.last_source_event_id", spec.Output.LastSourceEventID},
-	} {
-		if strings.TrimSpace(field.value) == "" {
-			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo_commit is missing artifact_repo.%s", field.label)))
+	outputs := spec.Output.Fields()
+	for _, name := range sortedSetKeysLocal(outputs) {
+		if strings.TrimSpace(outputs[name]) == "" {
+			findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo_commit is missing artifact_repo.output.%s", name)))
 		}
 	}
 	if spec.Limits.MaxYAMLBytes < 0 || spec.Limits.MaxMarkdownBytes < 0 || spec.Limits.MaxTextBytes < 0 || spec.Limits.MaxRepoBytes < 0 {

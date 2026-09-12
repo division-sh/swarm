@@ -1,6 +1,7 @@
 package entityruntime
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -22,6 +23,22 @@ type Contract struct {
 	EntityType string
 	Entity     runtimecontracts.EntityContract
 	Types      runtimecontracts.TypeCatalogDocument
+}
+
+type FieldValidationError struct {
+	Field string
+	Err   error
+}
+
+func (e *FieldValidationError) Error() string { return e.Err.Error() }
+func (e *FieldValidationError) Unwrap() error { return e.Err }
+
+func ValidationField(err error) string {
+	var field *FieldValidationError
+	if errors.As(err, &field) {
+		return field.Field
+	}
+	return ""
 }
 
 type Field struct {
@@ -344,6 +361,17 @@ func Initialize(contract Contract, provided map[string]any) (map[string]any, err
 }
 
 func NormalizeState(contract Contract, provided map[string]any) (map[string]any, error) {
+	out, err := normalizeAssignedFields(contract, provided)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateEntityFieldEqualities("entity", contract.Entity.Fields, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeAssignedFields(contract Contract, provided map[string]any) (map[string]any, error) {
 	out := make(map[string]any, len(contract.Entity.Fields))
 	for _, name := range FieldNames(contract) {
 		name = strings.TrimSpace(name)
@@ -357,7 +385,7 @@ func NormalizeState(contract Contract, provided map[string]any) (map[string]any,
 			var err error
 			value, err = NormalizeFieldValue(contract, name, value)
 			if err != nil {
-				return nil, err
+				return nil, &FieldValidationError{Field: name, Err: err}
 			}
 		}
 		out[name] = value
@@ -368,11 +396,8 @@ func NormalizeState(contract Contract, provided map[string]any) (map[string]any,
 			continue
 		}
 		if _, ok := contract.Entity.Fields[name]; !ok {
-			return nil, fmt.Errorf("undeclared field %s", name)
+			return nil, &FieldValidationError{Field: name, Err: fmt.Errorf("undeclared field %s", name)}
 		}
-	}
-	if err := validateEntityFieldEqualities("entity", contract.Entity.Fields, out); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
@@ -433,7 +458,7 @@ func EntityWritePath(target string) (string, bool, error) {
 			}
 			return strings.Join(parsed.Segments, "."), true, nil
 		case paths.RootMetadata:
-			return "", false, nil
+			return "", false, fmt.Errorf("metadata entity write alias is retired; use entity.<declared_field>")
 		case paths.RootPlatformEntity:
 			return "", false, fmt.Errorf("%s is read-only platform entity metadata and cannot be used as a write target", paths.RootPlatformEntity.String())
 		default:
@@ -813,6 +838,43 @@ func validateEqualityValue(context, name, target string, values map[string]any) 
 		return fieldTypeError(joinFieldName(context, name), "must equal "+joinFieldName(context, target))
 	}
 	return nil
+}
+
+// FieldPathParticipatesInEquality reports declaration constraints for callers
+// admitting an unknown provider output. It is not an isolated-write ban: known
+// values are validated together by the mutation plan's final candidate.
+func FieldPathParticipatesInEquality(contract Contract, path string) bool {
+	segments := strings.Split(strings.TrimSpace(path), ".")
+	root := segments[0]
+	decl, ok := contract.Entity.Fields[root]
+	if !ok {
+		return false
+	}
+	for name, field := range contract.Entity.Fields {
+		target := strings.TrimSpace(field.Refinements.EqualTo)
+		if target == root || name == root && target != "" {
+			return true
+		}
+	}
+	currentType := decl.Type
+	for _, segment := range segments[1:] {
+		resolved, err := resolveStructuralType(contract, currentType)
+		if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
+			return false
+		}
+		for _, field := range resolved.Fields {
+			target := strings.TrimSpace(field.Refinements.EqualTo)
+			if target == segment || field.Name == segment && target != "" {
+				return true
+			}
+		}
+		field, ok := resolved.Field(segment)
+		if !ok {
+			return false
+		}
+		currentType = field.TypeRef
+	}
+	return false
 }
 
 func resolvedStructuralField(fields []runtimecontracts.ResolvedCatalogField, name string) (runtimecontracts.ResolvedCatalogField, bool) {

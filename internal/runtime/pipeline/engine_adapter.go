@@ -470,20 +470,29 @@ func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.
 }
 
 func verifyPreparedWorkflowEmitPersistence(instance WorkflowInstance, prerequisites runtimeengine.EmitPersistencePrerequisites) error {
+	return verifyWorkflowEmitFieldPersistence(instance.Fields, prerequisites, "prepared")
+}
+
+func verifyWorkflowEmitFieldPersistence(metadata map[string]any, prerequisites runtimeengine.EmitPersistencePrerequisites, phase string) error {
 	missingExpected := make([]string, 0, len(prerequisites.Fields))
 	missingPrepared := make([]string, 0, len(prerequisites.Fields))
 	mismatched := make([]string, 0, len(prerequisites.Fields))
-	metadata := workflowInstancePersistedProjectionMetadata(instance)
 	for _, prerequisite := range prerequisites.Fields {
 		field := strings.TrimSpace(prerequisite.Field)
 		if field == "" {
-			continue
+			return fmt.Errorf("%w: empty field coordinate", runtimeengine.ErrEmitPersistencePrerequisite)
 		}
-		if !prerequisite.HasExpected {
+		if prerequisite.Presence != runtimeengine.EntityFieldPresent && prerequisite.Presence != runtimeengine.EntityFieldAbsent {
 			missingExpected = append(missingExpected, field)
 			continue
 		}
 		actual, ok := workflowMetadataValue(metadata, field)
+		if prerequisite.Presence == runtimeengine.EntityFieldAbsent {
+			if ok {
+				mismatched = append(mismatched, field)
+			}
+			continue
+		}
 		if !ok {
 			missingPrepared = append(missingPrepared, field)
 			continue
@@ -500,10 +509,10 @@ func verifyPreparedWorkflowEmitPersistence(instance WorkflowInstance, prerequisi
 		details = append(details, "missing handler writes="+strings.Join(missingExpected, ","))
 	}
 	if len(missingPrepared) > 0 {
-		details = append(details, "missing prepared fields="+strings.Join(missingPrepared, ","))
+		details = append(details, "missing "+phase+" fields="+strings.Join(missingPrepared, ","))
 	}
 	if len(mismatched) > 0 {
-		details = append(details, "mismatched prepared fields="+strings.Join(mismatched, ","))
+		details = append(details, "mismatched "+phase+" fields="+strings.Join(mismatched, ","))
 	}
 	return fmt.Errorf("%w: %s", runtimeengine.ErrEmitPersistencePrerequisite, strings.Join(details, "; "))
 }
@@ -738,7 +747,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	}
 
 	fromState := strings.TrimSpace(current.CurrentState)
-	if err := applyEngineStateMutation(&current, mutation, workflowEntitySchemaFields(r.coordinator.SemanticSource(), flowID), r.coordinator.SemanticSource(), flowID); err != nil {
+	if err := applyEngineStateMutation(&current, mutation, r.coordinator.SemanticSource(), flowID); err != nil {
 		return preparedWorkflowEngineState{}, err
 	}
 	nextState := strings.TrimSpace(mutation.NextState)
@@ -891,41 +900,7 @@ func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, addr
 	if !ok {
 		return fmt.Errorf("%w: entity_state row missing for %s", runtimeengine.ErrEmitPersistencePrerequisite, entityID.String())
 	}
-	missingExpected := make([]string, 0, len(prerequisites.Fields))
-	missingPersisted := make([]string, 0, len(prerequisites.Fields))
-	mismatched := make([]string, 0, len(prerequisites.Fields))
-	for _, prerequisite := range prerequisites.Fields {
-		field := strings.TrimSpace(prerequisite.Field)
-		if field == "" {
-			continue
-		}
-		if !prerequisite.HasExpected {
-			missingExpected = append(missingExpected, field)
-			continue
-		}
-		actual, ok := workflowMetadataValue(persisted.StateCarrier.Fields, field)
-		if !ok {
-			missingPersisted = append(missingPersisted, field)
-			continue
-		}
-		if !workflowJSONValuesEqual(prerequisite.Expected, actual) {
-			mismatched = append(mismatched, field)
-		}
-	}
-	if len(missingExpected) == 0 && len(missingPersisted) == 0 && len(mismatched) == 0 {
-		return nil
-	}
-	details := make([]string, 0, 3)
-	if len(missingExpected) > 0 {
-		details = append(details, "missing handler writes="+strings.Join(missingExpected, ","))
-	}
-	if len(missingPersisted) > 0 {
-		details = append(details, "missing persisted fields="+strings.Join(missingPersisted, ","))
-	}
-	if len(mismatched) > 0 {
-		details = append(details, "mismatched persisted fields="+strings.Join(mismatched, ","))
-	}
-	return fmt.Errorf("%w: %s", runtimeengine.ErrEmitPersistencePrerequisite, strings.Join(details, "; "))
+	return verifyWorkflowEmitFieldPersistence(persisted.StateCarrier.Fields, prerequisites, "persisted")
 }
 
 func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, address runtimeengine.StateAddress, flowID, runID string) error {
@@ -1403,7 +1378,7 @@ func eventPayloadProperties(entry runtimecontracts.EventCatalogEntry) map[string
 	return allowed
 }
 
-func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine.StateMutation, allowedFields map[string]struct{}, source semanticview.Source, flowID string) error {
+func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine.StateMutation, source semanticview.Source, flowID string) error {
 	if instance == nil {
 		return nil
 	}
@@ -1429,6 +1404,14 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	}
 	if instance.EnteredStageAt.IsZero() {
 		return fmt.Errorf("workflow mutation requires materialized entry time")
+	}
+	nextFields := instance.Fields
+	if mutation.StateCarrier.Fields != nil {
+		nextFields = mutation.StateCarrier.PersistedFields()
+	}
+	fields, err := workflowNormalizeEntityFields(source, flowID, nextFields)
+	if err != nil {
+		return fmt.Errorf("workflow mutation final entity candidate: %w", err)
 	}
 	existingGates := cloneWorkflowGates(instance.Gates)
 	if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
@@ -1457,7 +1440,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		mutation.StateCarrier.Gates = workflowCloneBoolMap(existingGates)
 	}
 	if mutation.StateCarrier.Fields != nil || len(mutation.StateCarrier.Gates) > 0 {
-		instance.Fields = mutation.StateCarrier.PersistedFields()
+		instance.Fields = fields
 		instance.Bookkeeping = mutation.StateCarrier.PersistedBookkeeping()
 		instance.Gates = cloneWorkflowGates(mutation.StateCarrier.Gates)
 	}
@@ -1466,27 +1449,6 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 			return err
 		}
 		instance.StateBuckets = mutation.StateCarrier.PersistedStateBuckets()
-	}
-	if len(allowedFields) == 0 {
-		return nil
-	}
-	entityProjection := workflowMutableStateBucket(instance, workflowStateBucketEntityProjection)
-	if instance.Fields == nil {
-		return nil
-	}
-	for targetField := range allowedFields {
-		targetField = strings.TrimSpace(targetField)
-		if targetField == "" {
-			continue
-		}
-		value, ok := instance.Fields[targetField]
-		if !ok {
-			continue
-		}
-		entityProjection[targetField] = value
-	}
-	if len(entityProjection) > 0 {
-		workflowSetStateBucket(instance, workflowStateBucketEntityProjection, entityProjection)
 	}
 	return nil
 }

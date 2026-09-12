@@ -122,7 +122,10 @@ func TestEntityReloadUsesCompleteStoredCarrier(t *testing.T) {
 		request := ExecutionRequest{EntityID: "entity-1", State: testStateSnapshot("pending",
 			map[string]any{"removed": "stale"}, map[string]bool{"stale_gate": true}, map[string]map[string]any{"stale_bucket": {"count": 1}})}
 		for i := 0; i < 2; i++ {
-			got, err := exec.loadState(context.Background(), request)
+			got, creating, err := exec.loadState(context.Background(), request)
+			if creating {
+				t.Fatal("complete stored snapshot admitted as creation")
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -145,21 +148,39 @@ func TestEntityReloadUsesCompleteStoredCarrier(t *testing.T) {
 func TestEntityReloadNotFoundRequiresCreationOrPreview(t *testing.T) {
 	exec := &Executor{deps: RuntimeDependencies{StateRepo: stubStateRepo{}}}
 	request := ExecutionRequest{EntityID: "entity-1", State: testStateSnapshot("ready", map[string]any{"note": "request"}, nil, nil)}
-	if _, err := exec.loadState(context.Background(), request); err == nil {
+	if _, _, err := exec.loadState(context.Background(), request); err == nil {
 		t.Fatal("existing owner admitted with only request state")
 	}
 	request.Handler.CreateEntity = true
-	if _, err := exec.loadState(context.Background(), request); err != nil {
+	if _, _, err := exec.loadState(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
 	request.Handler.CreateEntity = false
+	request.EntityMaterializationAdmitted = true
+	if _, creating, err := exec.loadState(context.Background(), request); err != nil || !creating {
+		t.Fatalf("admitted first materialization: creating=%t err=%v", creating, err)
+	}
+	request.EntityMaterializationAdmitted = false
 	request.Preview = true
-	if _, err := exec.loadState(context.Background(), request); err != nil {
+	if _, _, err := exec.loadState(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
 	request.Preview = false
 	request.EntityID = ""
-	if _, err := exec.loadState(context.Background(), request); err != nil {
+	if _, _, err := exec.loadState(context.Background(), request); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEntityStepWriteRejectsMetadataAlias(t *testing.T) {
+	exec, frame := sparseMutationFrame()
+	before := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+	for _, target := range []string{"metadata.left", "payload.left", "event.left", "policy.left"} {
+		if err := exec.writeStepValue(frame, target, int64(7)); err == nil {
+			t.Fatalf("raw entity write alias %s accepted", target)
+		}
+		if !reflect.DeepEqual(before, frame.state.State.StateCarrier.Fields) {
+			t.Fatalf("rejected alias %s mutated state", target)
+		}
 	}
 }

@@ -1,1 +1,3 @@
-test_entity: {}
+test_entity:
+  dedup_key: text?
+  accumulated_count: integer?

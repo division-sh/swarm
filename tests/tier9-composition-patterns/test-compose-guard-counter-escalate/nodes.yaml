@@ -6,7 +6,7 @@ retrier:
     retry.requested:
       guard:
         id: under_limit
-        check: "entity.retry_count < policy.max_retries"
+        check: "has(entity.retry_count) && entity.retry_count < policy.max_retries"
         on_fail: "escalate:limit.reached"
       data_accumulation:
         writes:

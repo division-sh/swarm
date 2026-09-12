@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -78,6 +79,8 @@ func BuildWorkflowStageTopology(
 					From:          sourceStage,
 					To:            strings.TrimSpace(carrier.AdvancesTo),
 					Source:        edgeSource,
+					CarrierKind:   carrier.Kind,
+					RuleIndex:     carrier.RuleIndex,
 					Node:          transition.Node,
 					HandlerEvent:  strings.TrimSpace(transition.EventType),
 					EventType:     eventType,
@@ -278,7 +281,7 @@ func joinTimerDelay(transition HandlerTransitionSemantic, carrier HandlerAdvance
 }
 
 func topologyEdgeSortKey(edge WorkflowStageTopologyEdge) string {
-	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.Node.Key(), edge.InternalOwner, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After, edge.DecisionID, edge.Verdict}, "\x00")
+	return strings.Join([]string{edge.From, edge.To, edge.Source, string(edge.CarrierKind), strconv.Itoa(edge.RuleIndex), edge.Node.Key(), edge.InternalOwner, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After, edge.DecisionID, edge.Verdict}, "\x00")
 }
 
 func normalizedStringSet(values []string) map[string]struct{} {

@@ -313,7 +313,8 @@ func seedSelectedRuntimeOutcomeSQLite(t *testing.T, ctx context.Context, selecte
 	})
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	if err := selected.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-		RunID: runID, EntityID: entityID, FlowInstance: "flow-a/1", EntityType: "test_entity", Name: "Selected Execution Entity",
+		Source: loaded.Source,
+		RunID:  runID, EntityID: entityID, FlowInstance: "flow-a/1", EntityType: "test_entity", Name: "Selected Execution Entity",
 		CurrentState: "pending", FieldsJSON: json.RawMessage(`{"name":"Selected Execution Entity"}`), CreatedAt: at.Add(-time.Second),
 		Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "selected-execution-test", HandlerStep: "seed"},
 	}); err != nil {

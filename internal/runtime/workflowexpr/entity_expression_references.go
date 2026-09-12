@@ -16,11 +16,19 @@ type entityExpressionAccess struct {
 // Entity lifecycle checks consume CEL's stock AST, including expanded macro
 // bindings. A nested optional selection never invents a trailing-dot field.
 func entityExpressionAccesses(expression string) []entityExpressionAccess {
+	return entityExpressionAccessesWithFacts(expression, nil)
+}
+
+func entityExpressionAccessesWithFacts(expression string, initialFacts workflowPresenceFacts) []entityExpressionAccess {
+	return entityExpressionAccessesAtStage(expression, initialFacts, nil)
+}
+
+func entityExpressionAccessesAtStage(expression string, initialFacts workflowPresenceFacts, stage *string) []entityExpressionAccess {
 	env, err := cel.NewEnv(cel.OptionalTypes())
 	if err != nil {
 		return nil
 	}
-	parsed, issues := env.Parse(RewriteLoopRoot(RewriteEntityNullPresenceChecks(expression)))
+	parsed, issues := env.Parse(RewriteLoopRoot(expression))
 	if issues != nil && issues.Err() != nil {
 		return nil
 	}
@@ -62,14 +70,21 @@ func entityExpressionAccesses(expression string) []entityExpressionAccess {
 			case "_&&_", "_||_":
 				if len(args) == 2 {
 					visit(args[0], facts, shadowed)
-					visit(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], call.FunctionName() == "_&&_")), shadowed)
+					truth := call.FunctionName() == "_&&_"
+					if stage == nil || stageConditionOutcomes(args[0], *stage)&stageConditionBool(truth) != 0 {
+						visit(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], truth)), shadowed)
+					}
 					return
 				}
 			case "_?_:_":
 				if len(args) == 3 {
 					visit(args[0], facts, shadowed)
-					visit(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], true)), shadowed)
-					visit(args[2], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], false)), shadowed)
+					if stage == nil || stageConditionOutcomes(args[0], *stage)&stageConditionTrue != 0 {
+						visit(args[1], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], true)), shadowed)
+					}
+					if stage == nil || stageConditionOutcomes(args[0], *stage)&stageConditionFalse != 0 {
+						visit(args[2], mergeWorkflowPresenceFacts(facts, a.factsWhen(args[0], false)), shadowed)
+					}
 					return
 				}
 			}
@@ -103,8 +118,59 @@ func entityExpressionAccesses(expression string) []entityExpressionAccess {
 			}
 		}
 	}
-	visit(parsed.NativeRep().Expr(), workflowPresenceFacts{}, false)
+	visit(parsed.NativeRep().Expr(), initialFacts, false)
 	return accesses
+}
+
+// RequiredEntityReferences shares the same stock-CEL scope/presence walk as
+// runtime missing-value admission. Facts are exact paths at this program point.
+func RequiredEntityReferences(expression string, present []string) []string {
+	return requiredEntityReferencesAtStage(expression, present, nil)
+}
+
+// RequiredEntityReferencesAtStage is for checked guards/conditions before any
+// transition. Later readers must not reuse the handler-entry stage as current.
+func RequiredEntityReferencesAtStage(expression string, present []string, stage string) []string {
+	return requiredEntityReferencesAtStage(expression, present, &stage)
+}
+
+func requiredEntityReferencesAtStage(expression string, present []string, stage *string) []string {
+	facts := workflowPresenceFacts{}
+	for _, path := range present {
+		facts[path] = struct{}{}
+	}
+	missing := map[string]struct{}{}
+	for _, access := range entityExpressionAccessesAtStage(expression, facts, stage) {
+		if access.required && access.path != "" {
+			missing[access.path] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(missing))
+	for path := range missing {
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ConditionPresenceFacts exposes only the stock presence analyzer's bounded
+// boolean facts; it does not infer values from arbitrary business predicates.
+func ConditionPresenceFacts(expression string, truth bool) []string {
+	env, err := cel.NewEnv(cel.OptionalTypes())
+	if err != nil {
+		return nil
+	}
+	parsed, issues := env.Parse(RewriteLoopRoot(expression))
+	if issues != nil && issues.Err() != nil || parsed == nil || parsed.NativeRep() == nil {
+		return nil
+	}
+	facts := (workflowOptionalReadAnalyzer{}).factsWhen(parsed.NativeRep().Expr(), truth)
+	out := make([]string, 0, len(facts))
+	for path := range facts {
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func EntityReferences(expression string) []string {

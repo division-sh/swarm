@@ -23,10 +23,11 @@ func TestPlatformSpecSaveEntityFieldDeclaredDottedReplacement(t *testing.T) {
 	assertScalarContains(t, validation, "Values must satisfy the resolved declared type")
 }
 
-func TestPlatformSpecGeneratedEntityUpdatesConsumeSaveEntityFieldPathOwner(t *testing.T) {
+func TestPlatformSpecGeneratedEntityUpdatesConsumeTypedMutationOwner(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	updatePath := mustYAMLPath(t, root, "contract_formats", "persistence_model", "role_scoped_entity_tools", "generated_writes", "update_path")
 
 	assertScalarContains(t, updatePath, "exact declared subpath type")
-	assertScalarContains(t, updatePath, "same declared dotted replacement owner as save_entity_field")
+	assertScalarContains(t, updatePath, "same declared typed mutation plan as handlers")
+	assertScalarContains(t, updatePath, "A missing named parent rejects")
 }

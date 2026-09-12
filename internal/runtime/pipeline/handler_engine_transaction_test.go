@@ -715,7 +715,7 @@ node-a:
 	}
 }
 
-func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIsMissing(t *testing.T) {
+func TestExecuteNodeContractHandlerRejectsMissingWriteSourceBeforeEmit(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -759,8 +759,8 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 			Metadata: map[string]any{},
 		},
 	}, false)
-	if !errors.Is(err, runtimeengine.ErrEmitPersistencePrerequisite) {
-		t.Fatalf("executeNodeContractHandler error = %v, want %v", err, runtimeengine.ErrEmitPersistencePrerequisite)
+	if err == nil || !strings.Contains(err.Error(), "business_brief") || !strings.Contains(err.Error(), "absent") {
+		t.Fatalf("executeNodeContractHandler error = %v, want missing business_brief source rejection", err)
 	}
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("published count = %d, want 0 when persistence prerequisite is missing", got)
@@ -1005,13 +1005,13 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	}
 }
 
-func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpression(t *testing.T) {
+func TestExecuteNodeContractHandlerPersistsExplicitAbsenceDecision(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
-			RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{"kill_reason": {Type: "text"}, "kill_reason_missing": {Type: "boolean"}}}},
+			RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{"kill_reason": {Type: "text"}, "observed_absence": {Type: "boolean"}}}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"node-a": {ExecutionType: "system_node"},
 			},
@@ -1024,7 +1024,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 							Name: "tracking",
 							Fields: []runtimecontracts.EntitySchemaField{
 								{Name: "kill_reason", Type: "text"},
-								{Name: "kill_reason_missing", Type: "boolean"},
+								{Name: "observed_absence", Type: "boolean"},
 							},
 						},
 					},
@@ -1052,7 +1052,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("entity.kill_reason == null")},
+				{TargetField: "observed_absence", Value: runtimecontracts.CELExpression("!has(entity.kill_reason)")},
 			},
 		},
 	}, workflowTriggerContext{
@@ -1070,8 +1070,8 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	if !ok {
 		t.Fatal("workflow instance missing after declarative write")
 	}
-	if got := instance.Fields["kill_reason_missing"]; got != false {
-		t.Fatalf("kill_reason_missing = %#v, want false for materialized text default", got)
+	if got := instance.Fields["observed_absence"]; got != true {
+		t.Fatalf("observed_absence = %#v, want true for an unassigned field", got)
 	}
 }
 
@@ -1128,7 +1128,12 @@ func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
 	bus := &recordingPipelineBus{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootEntities: testEntityContractsForType("test_entity"),
+		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"business_brief": {Type: "BusinessBrief"},
+		}}},
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"BusinessBrief": {Fields: map[string]runtimecontracts.TypeFieldSpec{"summary": {Type: "text"}}},
+		}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ExecutionType: "system_node"},
 		},
@@ -1854,7 +1859,7 @@ states: [queued]
 		"validation/entities.yaml": `
 validation_entity:
   revision_count:
-    type: integer
+    type: integer?
     initial: 0
 `,
 		"validation/nodes.yaml": `
@@ -1884,8 +1889,10 @@ node-a:
 	seedPipelineEventRecord(t, ctx, db, trigger)
 	result, err := pc.executeNodeContractHandler(ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
-		Clear:        &runtimecontracts.ClearSpec{Targets: []string{"entity.revision_count"}},
-		Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+			{Operation: runtimecontracts.WorkflowDataOperationClear, TargetRef: "entity.revision_count"},
+		}},
+		Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: WorkflowState{},
@@ -2120,7 +2127,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 	}
 }
 
-func TestExecuteNodeContractHandlerAppliesEmitFieldsMaterializedFieldPresenceCheck(t *testing.T) {
+func TestExecuteNodeContractHandlerPreservesUnassignedFieldPresenceInEmit(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -2133,7 +2140,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsMaterializedFieldPresenceChe
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
-				"kill_reason_missing": runtimecontracts.CELExpression("entity.kill_reason == null"),
+				"kill_reason_missing": runtimecontracts.CELExpression("!has(entity.kill_reason)"),
 			},
 		},
 	}, workflowTriggerContext{
@@ -2162,8 +2169,8 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsMaterializedFieldPresenceChe
 	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := payload["kill_reason_missing"]; got != false {
-		t.Fatalf("payload.kill_reason_missing = %#v, want false for materialized text default", got)
+	if got := payload["kill_reason_missing"]; got != true {
+		t.Fatalf("payload.kill_reason_missing = %#v, want true for an unassigned field", got)
 	}
 }
 
@@ -2187,6 +2194,10 @@ states: [queued]
 					"scoring/entities.yaml": `
 subject:
   kill_reason: text
+  expected_reason:
+    type: text
+    initial: active
+    equal_to: kill_reason
 `,
 					"scoring/events.yaml": `
 custom.trigger:

@@ -24,6 +24,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -40,6 +41,39 @@ func withActionEmitIntentCollectorForTest(ctx context.Context, intents *[]runtim
 
 func (r pipelineEngineActionRunner) executeAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (bool, error) {
 	result, err := r.ExecuteAction(ctx, action, entry, execCtx)
+	if err != nil {
+		return result.Handled, err
+	}
+	if len(result.EntityMutations) != 0 {
+		// Direct adapter tests commit explicit effects through the same typed
+		// mutation owner used by the executor; an action snapshot is not a write.
+		repo := pipelineEngineStateRepo{coordinator: r.coordinator}
+		current, found, loadErr := repo.LoadState(ctx, execCtx.Request.StateAddress())
+		if loadErr != nil || !found {
+			return result.Handled, errors.Join(loadErr, errors.New("action fixture has no stored entity"))
+		}
+		contract, found := entityruntime.ResolveForFlow(r.coordinator.SemanticSource(), string(execCtx.Request.StateAddress().FlowID))
+		if !found {
+			return result.Handled, errors.New("action fixture has no entity contract")
+		}
+		plan, planErr := entityruntime.NewMutationPlan(contract, current.Fields)
+		if planErr != nil {
+			return result.Handled, planErr
+		}
+		for _, operation := range result.EntityMutations {
+			if err := plan.Append(operation); err != nil {
+				return result.Handled, err
+			}
+		}
+		fields, validateErr := plan.Validate()
+		if validateErr != nil {
+			return result.Handled, validateErr
+		}
+		if result.State == nil {
+			result.State = &runtimeengine.StateMutation{StateCarrier: current.StateCarrier}
+		}
+		result.State.Fields = fields
+	}
 	if result.State != nil && r.coordinator != nil {
 		state := pipelineEngineStateRepo{coordinator: r.coordinator}
 		owner := pipelineEngineMutationOwner{store: r.coordinator.workflowStore, state: state}
@@ -109,7 +143,6 @@ func applyMaterializedEngineStateMutationForTest(
 	t *testing.T,
 	instance *WorkflowInstance,
 	mutation runtimeengine.StateMutation,
-	allowedFields map[string]struct{},
 	source semanticview.Source,
 	flowID string,
 ) {
@@ -117,7 +150,7 @@ func applyMaterializedEngineStateMutationForTest(
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
 	}
-	if err := applyEngineStateMutation(instance, mutation, allowedFields, source, flowID); err != nil {
+	if err := applyEngineStateMutation(instance, mutation, source, flowID); err != nil {
 		t.Fatalf("apply materialized engine state mutation: %v", err)
 	}
 }
@@ -141,7 +174,10 @@ func assertEntityStateField(t *testing.T, db *sql.DB, entityID, field string, wa
 	}
 }
 
-func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
+func TestApplyEngineStateMutationUsesOnlyCanonicalEntityFields(t *testing.T) {
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities["test_entity"].Fields["research_context"] = runtimecontracts.EntityFieldDecl{Type: "json"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"research_context": map[string]any{"summary": "done"}},
 		StateBuckets: map[string]any{},
@@ -159,12 +195,14 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 			{TargetField: "research_context", SourceField: "research_context"},
 		},
 	}
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, map[string]struct{}{"research_context": {}}, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, ".")
 
-	entityProjection, _ := workflowStateBucketObject(*instance, workflowStateBucketEntityProjection)
-	got, ok := entityProjection["research_context"].(map[string]any)
+	got, ok := instance.Fields["research_context"].(map[string]any)
 	if !ok || got["summary"] != "done" {
-		t.Fatalf("entity_projection research_context = %#v", entityProjection["research_context"])
+		t.Fatalf("canonical research_context = %#v", instance.Fields["research_context"])
+	}
+	if _, present := instance.StateBuckets["entity_projection"]; present {
+		t.Fatal("entity mutation created a shadow entity_projection bucket")
 	}
 	if got := instance.Bookkeeping["last_data_accumulation_event"]; got != "research.completed" {
 		t.Fatalf("last_data_accumulation_event = %#v", got)
@@ -180,7 +218,7 @@ func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_c": true}, nil)
 	mutation.SetGate = "g_c"
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, "")
 
 	gates := instance.Gates
 	want := map[string]bool{"g_a": true, "g_b": true, "g_c": true}
@@ -210,7 +248,7 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_validated": true}, nil)
 	mutation.SetGate = "g_validated"
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, source, "child")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, "child")
 
 	gates := instance.Gates
 	if !gates["child/g_validated"] {
@@ -291,6 +329,9 @@ request.received:
 }
 
 func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *testing.T) {
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities["test_entity"].Fields["flow_path"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	instance := &WorkflowInstance{
 		Fields: map[string]any{
 			"flow_path": "child/inst-1",
@@ -300,11 +341,20 @@ func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_ready": true}, nil)
 	mutation.SetGate = "g_ready"
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, ".")
 
-	if !instance.Gates["g_ready"] {
+	if !instance.Gates["./g_ready"] {
 		t.Fatalf("gates = %#v, want g_ready=true", instance.Gates)
 	}
+}
+
+func authoredControlCollisionSource() semanticview.Source {
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	for _, name := range []string{"business_status", "parent_flow_id", "parent_flow_instance", "parent_entity_id"} {
+		bundle.RootEntities["test_entity"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	}
+	return source
 }
 
 func TestApplyEngineStateMutationPreservesTypedControlAcrossAuthoredCollisions(t *testing.T) {
@@ -332,7 +382,7 @@ func TestApplyEngineStateMutationPreservesTypedControlAcrossAuthoredCollisions(t
 		"business_status":      "new",
 	}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
 	if instance.StorageRef != "review/inst-1" || instance.InstanceID != "inst-1" || instance.EntityID != "child-ent" {
 		t.Fatalf("typed identity = %#v, want original identity", instance)
@@ -371,7 +421,7 @@ func TestApplyEngineStateMutationDoesNotPromoteAuthoredParentRouteNames(t *testi
 		"parent_entity_id":     "parent-ent",
 	}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
 	for key, want := range map[string]any{
 		"parent_flow_id": "root", "parent_flow_instance": "root/inst-1", "parent_entity_id": "parent-ent",
@@ -403,7 +453,7 @@ func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) 
 		"parent_entity_id":     "wrong-parent",
 	}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
 	if got := instance.Fields["parent_flow_id"]; got != "root" {
 		t.Fatalf("authored parent_flow_id = %#v, want root", got)
@@ -587,7 +637,7 @@ func TestApplyEngineStateMutationRejectsMissingMaterializedEntryTime(t *testing.
 		},
 	}
 
-	err := applyEngineStateMutation(instance, mutation, map[string]struct{}{"name": {}}, source, "scoring")
+	err := applyEngineStateMutation(instance, mutation, source, "scoring")
 	if err == nil || !strings.Contains(err.Error(), "materialized entry time") {
 		t.Fatalf("applyEngineStateMutation error = %v, want materialized entry time refusal", err)
 	}
@@ -608,7 +658,11 @@ func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
 	}
 }
 
-func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumulation(t *testing.T) {
+func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(t *testing.T) {
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities["test_entity"].Fields["composite_score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	bundle.RootEntities["test_entity"].Fields["scoring_rubric"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"composite_score": 0},
 		Gates:        map[string]bool{"g_ready": true},
@@ -620,17 +674,16 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 		"scoring_rubric":  "corpus_rubric",
 	}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, map[string]struct{}{
-		"composite_score": {},
-		"scoring_rubric":  {},
-	}, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, ".")
 
-	entityProjection, _ := workflowStateBucketObject(*instance, workflowStateBucketEntityProjection)
-	if got := entityProjection["composite_score"]; got != 71 {
-		t.Fatalf("entity_projection composite_score = %#v, want 71", got)
+	if got := instance.Fields["composite_score"]; got != int64(71) {
+		t.Fatalf("canonical composite_score = %#v, want 71", got)
 	}
-	if got := entityProjection["scoring_rubric"]; got != "corpus_rubric" {
-		t.Fatalf("entity_projection scoring_rubric = %#v", got)
+	if got := instance.Fields["scoring_rubric"]; got != "corpus_rubric" {
+		t.Fatalf("canonical scoring_rubric = %#v", got)
+	}
+	if _, present := instance.StateBuckets["entity_projection"]; present {
+		t.Fatal("entity mutation created a shadow entity_projection bucket")
 	}
 	if !instance.Gates["g_ready"] {
 		t.Fatalf("field-only mutation dropped existing gates: %#v", instance.Gates)
@@ -641,7 +694,7 @@ func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.
 	instance := &WorkflowInstance{EntityType: "test_entity"}
 	mutation := testEngineStateMutation(map[string]any{}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, "")
 
 	if got := strings.TrimSpace(asString(instance.Fields["subject_id"])); got != "" {
 		t.Fatalf("metadata subject_id = %q, want removed", got)
@@ -890,10 +943,14 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	store := newPostgresWorkflowInstanceStoreForTest(db)
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities["test_entity"].Fields["score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	bundle.RootEntities["test_entity"].Fields["subject_id"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	repo := pipelineEngineStateRepo{
 		coordinator: &PipelineCoordinator{
 			workflowStore: store,
-			module:        &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("root", "test_entity")},
+			module:        &pipelineFixtureWorkflowModule{source: source},
 		},
 	}
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
@@ -930,7 +987,7 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	if !ok {
 		t.Fatal("expected saved state to load")
 	}
-	if got := loaded.Fields["score"]; got != 91 && got != 91.0 {
+	if got := loaded.Fields["score"]; got != int64(91) {
 		t.Fatalf("loaded metadata score = %#v, want 91", got)
 	}
 	if !loaded.Gates["ready"] {
@@ -2213,14 +2270,24 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitReturnsExplicitResultEvent
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("result emit intents = %d, want 1", len(result.EmitIntents))
 	}
-	if result.State == nil {
-		t.Fatal("artifact action did not return projected state")
+	if result.State != nil && len(result.State.Fields) != 0 {
+		t.Fatal("artifact action returned a writable entity snapshot")
 	}
-	if got := strings.TrimSpace(asString(result.State.StateCarrier.Fields["status"])); got != "committed" {
+	outputs := map[string]any{}
+	for _, operation := range result.EntityMutations {
+		if operation.Operation != "" {
+			t.Fatalf("unexpected artifact operation: %#v", operation)
+		}
+		if _, duplicate := outputs[operation.Target]; duplicate {
+			t.Fatalf("duplicate artifact output: %s", operation.Target)
+		}
+		outputs[operation.Target] = operation.Value
+	}
+	if got := outputs[action.ArtifactRepo.Output.Status]; got != "committed" {
 		t.Fatalf("status = %q, want committed", got)
 	}
-	if _, exists := result.State.StateCarrier.Fields["current_ref"]; !exists {
-		t.Fatal("current_ref was not projected")
+	if ref, ok := outputs[action.ArtifactRepo.Output.CurrentRef].(string); !ok || len(ref) != 40 {
+		t.Fatalf("current_ref was not returned as an explicit operation: %#v", outputs)
 	}
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("fallback published event count = %d, want 0", got)
@@ -2733,7 +2800,7 @@ artifact_repo.commit_failed:
 	})
 }
 
-func testArtifactRepoEntityFields(entityIDs ...string) map[string]any {
+func testArtifactRepoEntityFields(_ ...string) map[string]any {
 	fields := map[string]any{
 		"repo_id":          "11111111-1111-1111-1111-111111111111",
 		"namespace":        "tenant-alpha",
@@ -2741,28 +2808,15 @@ func testArtifactRepoEntityFields(entityIDs ...string) map[string]any {
 		"display_slug":     "Demo Artifact",
 		"source_record_id": "record-123",
 	}
-	if len(entityIDs) > 0 {
-		fields["entity_id"] = strings.TrimSpace(entityIDs[0])
-		fields["flow_path"] = testPipelineRunID
-		fields["instance_id"] = testPipelineRunID
-	}
 	return fields
 }
 
-func testArtifactRepoEntityFieldsForSource(source semanticview.Source, entityID string) map[string]any {
-	fields := testArtifactRepoEntityFields(entityID)
-	if source != nil && semanticview.RootExecutionFlowID(source) == "." {
-		fields["flow_path"] = testPipelineRunID
-		fields["instance_id"] = testPipelineRunID
-	}
-	return fields
+func testArtifactRepoEntityFieldsForSource(_ semanticview.Source, _ string) map[string]any {
+	return testArtifactRepoEntityFields()
 }
 
-func artifactRepoFixtureRoute(entity map[string]any) string {
-	if route := strings.Trim(strings.TrimSpace(asString(entity["flow_path"])), "/"); route != "" {
-		return route
-	}
-	return "artifact-repo"
+func artifactRepoFixtureRoute(_ map[string]any) string {
+	return testPipelineRunID
 }
 
 func requireArtifactRepoFailure(t testing.TB, value any, class runtimefailures.Class, code string) runtimefailures.Envelope {

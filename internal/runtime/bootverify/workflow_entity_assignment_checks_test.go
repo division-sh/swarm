@@ -1,0 +1,268 @@
+package bootverify
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	c "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+)
+
+func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
+	for _, variant := range []string{"ruled", "missing assessment write", "read before write", "retired stage spelling"} {
+		t.Run(variant, func(t *testing.T) {
+			repo := repoRootForBootverifyTest(t)
+			root := t.TempDir()
+			for _, name := range []string{"manifest.yaml", "schema.yaml", "entities.yaml", "events.yaml", "nodes.yaml"} {
+				data, err := os.ReadFile(filepath.Join(repo, "tests", "conformance", "entity-progressive-presence", name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				contents := string(data)
+				if name == "nodes.yaml" {
+					switch variant {
+					case "missing assessment write":
+						contents = strings.Replace(contents, "          - business_brief\n", "", 1)
+					case "read before write":
+						contents = strings.Replace(contents, `check: "_entity.current_state == 'assess'"`, `check: "_entity.current_state == 'assess' && entity.business_brief != ''"`, 1)
+					case "retired stage spelling":
+						contents = strings.ReplaceAll(contents, "_entity.current_state", "_entity.stage")
+					}
+				}
+				writeBootverifyFixtureFile(t, filepath.Join(root, name), contents)
+			}
+			bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if variant == "ruled" {
+				if len(report.Errors()) != 0 || len(report.Warnings()) != 0 {
+					t.Fatalf("supported authoring rejected: errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+				}
+			} else if variant == "retired stage spelling" {
+				if !reportContains(report.Errors(), "expression_field_reference_validation", "_entity.stage is not a supported") {
+					t.Fatalf("unsupported stage alias admitted: %#v", report.Errors())
+				}
+			} else if !reportContains(report.Errors(), "expression_field_reference_validation", "not definitely assigned") {
+				t.Fatalf("missing assignment rejection: %#v", report.Errors())
+			}
+		})
+	}
+}
+
+func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		change      func(*c.SystemNodeEventHandler)
+		wantMissing bool
+	}{
+		{"earlier write", func(h *c.SystemNodeEventHandler) {
+			h.DataAccumulation.Writes = []c.WorkflowDataWrite{
+				{TargetField: "base_score", Value: c.LiteralExpression(7)},
+				{TargetField: "adjusted_score", Value: c.RefExpression("entity.base_score")},
+			}
+		}, false},
+		{"guard before write", func(h *c.SystemNodeEventHandler) {
+			h.Guard = &c.GuardSpec{Check: "entity.base_score > 0"}
+			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(7)}}
+		}, true},
+		{"earlier guard proves later check", func(h *c.SystemNodeEventHandler) {
+			h.Guard = &c.GuardSpec{Checks: []c.GuardCheck{{Check: "has(entity.base_score)"}, {Check: "entity.base_score > 0"}}}
+		}, false},
+		{"later guard cannot prove earlier check", func(h *c.SystemNodeEventHandler) {
+			h.Guard = &c.GuardSpec{Checks: []c.GuardCheck{{Check: "entity.base_score > 0"}, {Check: "has(entity.base_score)"}}}
+		}, true},
+		{"guard OR is not assignment", func(h *c.SystemNodeEventHandler) {
+			h.Guard = &c.GuardSpec{Checks: []c.GuardCheck{{Check: "has(entity.base_score) || payload.score > 0"}, {Check: "entity.base_score > 0"}}}
+		}, true},
+		{"RHS cannot prove itself", func(h *c.SystemNodeEventHandler) {
+			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.CELExpression("entity.base_score + 1")}}
+		}, true},
+		{"branch is not merge proof", func(h *c.SystemNodeEventHandler) {
+			h.Rules = []c.HandlerRuleEntry{{Condition: "payload.score > 0", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(7)}}}}}
+			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "adjusted_score", Value: c.RefExpression("entity.base_score")}}
+		}, true},
+		{"selected branch read", func(h *c.SystemNodeEventHandler) {
+			h.Rules = []c.HandlerRuleEntry{{Condition: "has(entity.base_score)", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "adjusted_score", Value: c.RefExpression("entity.base_score")}}}}}
+		}, false},
+		{"exhaustive branches both write", func(h *c.SystemNodeEventHandler) {
+			h.Rules = []c.HandlerRuleEntry{
+				{Condition: "payload.score > 0", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(7)}}}},
+				{Condition: "else", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(0)}}}},
+			}
+			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "adjusted_score", Value: c.RefExpression("entity.base_score")}}
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadWave1ExpressionFixtureBundle(t)
+			flow, node, event, handler := firstFlowHandlerInFlowView(t, bundle)
+			tc.change(&handler)
+			writeFlowHandler(t, bundle, flow, node, event, handler)
+			checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}
+			findings := checker.expressionFieldReferences()
+			missing := false
+			for _, finding := range findings {
+				if strings.Contains(finding.Message, "not definitely assigned") {
+					missing = true
+				}
+			}
+			if missing != tc.wantMissing {
+				t.Fatalf("missing=%t, want %t: %#v", missing, tc.wantMissing, findings)
+			}
+		})
+	}
+}
+
+func TestEntityDefiniteAssignmentStages(t *testing.T) {
+	for _, variant := range []string{"all paths write", "guard stage then value", "guard short circuit", "bypass", "same destination outcomes", "backedge cannot prove first entry"} {
+		t.Run(variant, func(t *testing.T) {
+			root := t.TempDir()
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: assignment-proof\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `name: child
+stages:
+  idle: {initial: true}
+  assess: {}
+  consume: {}
+  done: {terminal: true}
+`)
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "work:\n  score: {type: integer}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `work.opened: {}
+work.scored:
+  score: integer
+work.consume: {}
+work.bypass: {}
+work.result:
+  score: integer
+`)
+			nodes := `owner:
+  execution_type: system_node
+  subscribes_to: [work.opened, work.scored, work.consume, work.bypass]
+  produces: [work.result]
+  event_handlers:
+    work.opened:
+      create_entity: true
+      advances_to: assess
+    work.scored:
+      guard: {check: "_entity.current_state == 'assess'"}
+      data_accumulation:
+        writes: [score]
+      advances_to: consume
+    work.consume:
+      guard: {check: "_entity.current_state == 'consume'"}
+      emit:
+        event: work.result
+        fields:
+          score: {ref: entity.score}
+      advances_to: done
+`
+			if variant == "bypass" {
+				nodes += "    work.bypass:\n      guard: {check: \"_entity.current_state == 'assess'\"}\n      advances_to: consume\n"
+			}
+			if variant == "guard stage then value" {
+				nodes = strings.Replace(nodes, `guard: {check: "_entity.current_state == 'consume'"}`, `guard:
+        checks:
+          - check: "_entity.current_state == 'consume'"
+          - check: "entity.score > 0"`, 1)
+			}
+			if variant == "guard short circuit" {
+				nodes = strings.Replace(nodes, `guard: {check: "_entity.current_state == 'consume'"}`, `guard: {check: "_entity.current_state == 'consume' && entity.score > 0"}`, 1)
+			}
+			if variant == "same destination outcomes" {
+				nodes = strings.Replace(nodes, "      data_accumulation:\n        writes: [score]\n      advances_to: consume", `      rules:
+        - condition: payload.score >= 0
+          data_accumulation:
+            writes: [score]
+          advances_to: consume
+        - condition: else
+          advances_to: consume`, 1)
+			}
+			if variant == "backedge cannot prove first entry" {
+				nodes = strings.Replace(nodes, "      advances_to: assess", "      advances_to: consume", 1)
+				nodes += "    work.bypass:\n      guard: {check: \"_entity.current_state == 'consume'\"}\n      advances_to: assess\n"
+			}
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), nodes)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, c.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}
+			findings := checker.expressionFieldReferences()
+			missing := false
+			for _, finding := range findings {
+				if strings.Contains(finding.Message, "not definitely assigned") {
+					missing = true
+				}
+			}
+			wantMissing := variant == "bypass" || variant == "same destination outcomes" || variant == "backedge cannot prove first entry"
+			if missing != wantMissing {
+				t.Fatalf("missing=%t, want %t: %#v", missing, wantMissing, findings)
+			}
+		})
+	}
+}
+
+func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
+	for _, tc := range []struct {
+		name, writes string
+		missing      bool
+	}{
+		{"missing named parent", `        - target_field: profile.id
+          value: replacement
+`, true},
+		{"earlier complete parent", `        - target_field: profile
+          value: {id: original}
+        - target_field: profile.id
+          value: replacement
+`, false},
+		{"literal optional member", `        - target_field: profile
+          value: {id: original, note: supplied}
+        - target_field: observed
+          expression: entity.profile.note
+`, false},
+		{"replacement forgets optional member", `        - target_field: profile
+          value: {id: original, note: supplied}
+        - target_field: profile
+          value: {id: replacement}
+        - target_field: observed
+          expression: entity.profile.note
+`, true},
+		{"constructive root append", `        - op: append
+          target: entity.notes
+          value: {literal: supplied}
+        - target_field: observed
+          expression: "string(entity.notes.size())"
+`, false},
+		{"merge cannot construct", `        - op: merge
+          target: entity.by_id
+          key: {literal: one}
+          value: {literal: {id: supplied}}
+`, true},
+		{"clear absent parent is noop", `        - op: clear
+          target: entity.profile.note
+`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: mutation-assignment\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  Profile:\n    id: text\n    note: text?\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "work:\n  profile: Profile\n  observed: text\n  notes: '[text]'\n  by_id: map[text]Profile\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested: {}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `owner:
+  execution_type: system_node
+  subscribes_to: [work.requested]
+  event_handlers:
+    work.requested:
+      data_accumulation:
+        writes:
+`+tc.writes)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, c.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+			checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}
+			findings := checker.expressionFieldReferences()
+			missing := false
+			for _, finding := range findings {
+				missing = missing || strings.Contains(finding.Message, "not definitely assigned")
+			}
+			if missing != tc.missing {
+				t.Fatalf("missing=%t, want %t: %#v", missing, tc.missing, findings)
+			}
+		})
+	}
+}

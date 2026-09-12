@@ -7,9 +7,14 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
-func TestEvalValueExpression_AllowsNullPresenceCheckOnMissingField(t *testing.T) {
+func TestEvalValueExpression_RequiresExplicitPresenceCheckOnMissingField(t *testing.T) {
 	entityType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "kill_reason", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}}}
-	value, err := EvalValueExpressionWithOptions(`entity.kill_reason == null`, ValueContext{
+	for _, expression := range []string{`entity.kill_reason == null`, `null == entity.kill_reason`, `entity.kill_reason != null`, `null != entity.kill_reason`} {
+		if _, err := EvalValueExpressionWithOptions(expression, ValueContext{Entity: map[string]any{}}, ValueExpressionOptions{EntityType: &entityType}); err == nil {
+			t.Fatalf("missing field silently rewritten into null comparison: %s", expression)
+		}
+	}
+	value, err := EvalValueExpressionWithOptions(`!has(entity.kill_reason)`, ValueContext{
 		Entity: map[string]any{},
 	}, ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
@@ -20,7 +25,7 @@ func TestEvalValueExpression_AllowsNullPresenceCheckOnMissingField(t *testing.T)
 		t.Fatalf("EvalValueExpression value = %#v (%T), want bool", value, value)
 	}
 	if !got {
-		t.Fatal("expected sparse field == null presence check to evaluate true")
+		t.Fatal("expected explicit absence check to evaluate true")
 	}
 }
 

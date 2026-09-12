@@ -2192,6 +2192,10 @@ rule:
       Entity state is sparse. A declared field remains unassigned until
       explicit creation initialization or a committed typed mutation assigns
       it. Reading, reloading or reconstructing state never invents a value.
+      A loaded entity snapshot owns its complete field map, including an
+      empty map. Final update candidates are validated before persistence,
+      not deferred until readback. No entity_projection bucket mirrors that
+      state; declared accumulator projections remain a distinct typed owner.
     required_by_default_uniform_with_events: |
       Declared entity fields and event payload fields are bare and
       type-checked by default. Both use exactly one trailing `?` on the
@@ -2206,6 +2210,27 @@ rule:
       and mutation effects establish assignment; prompt prose, tool grants
       and a writer on a different branch do not. Companion fields represent
       domain facts, not a replacement for structural presence.
+    definite_assignment_analysis: |
+      Verification and boot use one entity assignment analysis over the
+      existing compiled stage topology and the executor's ordered steps.
+      Each handler transition preserves its exact carrier kind and rule
+      index, including distinct rule outcomes with the same destination.
+      Stage facts intersect every reaching outcome and converge to a fixed
+      point. The initial entry contributes independently of loop backedges.
+      Supported stage narrowing uses literal _entity.current_state comparisons and
+      boolean composition in the checked expression; event spelling gives
+      no stage information. Unknown business predicates remain uncertain.
+      Read sites retain their selected rule and mutation-list index. Earlier
+      writes can establish a value; the current RHS, later writes, sibling
+      branches and asynchronous callback intentions cannot. Root replacement
+      and clear invalidate descendant facts. A supplied typed record proves
+      its required members, not its omitted optional members or collection
+      entries. Runtime expression admission observes only keys in the current
+      typed draft and recomputes presence after each operation; it never
+      replays static assignment facts over a cleared or absent value.
+      Join membership/window source snapshots and stage-gate context readers
+      consume the committed entry fact for their declared stage. They do not
+      borrow the arrival handler's program point or future outcome writes.
 type_system:
   description: |
     Shared Wave 1 type declarations used by entities, event payloads,
@@ -2296,7 +2321,8 @@ type_system:
       complete type in either terse or verbose form, for example `label: text?`
       or `child: {type: Child?}`. This denotes omission-capable field presence,
       not `Optional<T>` type syntax and not a nullable value. Top-level entity
-      field presence remains governed by entity_contracts until #2397.
+      field presence is governed by entity_contracts: bare roots may be
+      progressively unassigned; supplied named records remain complete.
   restrictions:
     retired:
     - jsonb as an author-declared contract type

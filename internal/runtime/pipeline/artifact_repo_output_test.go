@@ -290,7 +290,7 @@ func TestArtifactRepoOutputContractRejectsBeforeProvider(t *testing.T) {
 			root := t.TempDir()
 			pc := &PipelineCoordinator{workflowStore: store, artifactRoot: root, module: &pipelineFixtureWorkflowModule{source: source}}
 			initial := testArtifactRepoEntityFieldsForSource(source, eventtest.UUID("hostile-artifact-entity"))
-			action, execution := testArtifactRepoActionAndContext(initial["entity_id"].(string), initial, eventtest.UUID("hostile-event"), eventtest.UUID("hostile-request"), "name: Demo\n")
+			action, execution := testArtifactRepoActionAndContext(eventtest.UUID("hostile-artifact-entity"), initial, eventtest.UUID("hostile-event"), eventtest.UUID("hostile-request"), "name: Demo\n")
 			mutate(bundle, action.ArtifactRepo)
 			result, err := pc.commitArtifactRepo(context.Background(), action, execution)
 			failure := failures.Normalize(err, "artifact-repo", "commit")

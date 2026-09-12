@@ -63,10 +63,17 @@ type EntityCollectionReader interface {
 	QueryEntityCollection(ctx context.Context, runID, flowID, entityType string) ([]map[string]any, error)
 }
 
+type EntityFieldPresence string
+
+const (
+	EntityFieldPresent EntityFieldPresence = "present"
+	EntityFieldAbsent  EntityFieldPresence = "absent"
+)
+
 type EmitPersistenceFieldPrerequisite struct {
-	Field       string
-	Expected    any
-	HasExpected bool
+	Field    string
+	Expected any
+	Presence EntityFieldPresence
 }
 
 type EmitPersistencePrerequisites struct {

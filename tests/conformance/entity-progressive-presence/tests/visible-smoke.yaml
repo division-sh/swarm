@@ -1,0 +1,17 @@
+name: progressively assigned entity
+steps:
+  - publish: work.opened
+    payload: {}
+  - publish: work.assessed
+    payload:
+      business_brief: Validated customer need
+expect:
+  events:
+    include:
+      - work.completed
+  entities:
+    - type: work
+      current_state: done
+      fields:
+        business_brief: Validated customer need
+        attempt_count: 1

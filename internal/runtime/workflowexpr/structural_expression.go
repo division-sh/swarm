@@ -33,6 +33,7 @@ type workflowStructuralTypeProvider struct {
 	rootTypes         map[string]*cel.Type
 	rootIdentifiers   map[string]struct{}
 	registrationOrder []*workflowStructuralNode
+	knownPresence     workflowPresenceFacts
 }
 
 func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpressionOptions) (*workflowStructuralTypeProvider, error) {
@@ -41,6 +42,10 @@ func newWorkflowStructuralTypeProvider(base celtypes.Provider, opts ValueExpress
 		nodes:           map[string]*workflowStructuralNode{},
 		rootTypes:       map[string]*cel.Type{},
 		rootIdentifiers: map[string]struct{}{},
+		knownPresence:   workflowPresenceFacts{},
+	}
+	for _, path := range opts.KnownPresence {
+		provider.knownPresence[path] = struct{}{}
 	}
 	loopType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject}
 	for _, name := range []string{"id", "activation_id", "revision_id", "attempt", "max_attempts"} {
@@ -299,7 +304,7 @@ func validateWorkflowOptionalReads(compiled *cel.Ast, provider *workflowStructur
 		return nil
 	}
 	analyzer := workflowOptionalReadAnalyzer{ast: compiled.NativeRep(), provider: provider}
-	return analyzer.validate(compiled.NativeRep().Expr(), workflowPresenceFacts{}, cloneWorkflowStructuralBindings(provider.rootIdentifiers))
+	return analyzer.validate(compiled.NativeRep().Expr(), provider.knownPresence, cloneWorkflowStructuralBindings(provider.rootIdentifiers))
 }
 
 type workflowOptionalReadAnalyzer struct {

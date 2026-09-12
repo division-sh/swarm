@@ -17,7 +17,7 @@ processing-node:
         on_fail: reject
       compute:
         operation: pick_or_average
-        store_as: score
+        store_as: entity.score
         keys:
           numeric_keys:
             - score

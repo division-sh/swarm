@@ -412,9 +412,12 @@ type WorkflowHandlerStageScope struct {
 }
 
 type WorkflowStageTopologyEdge struct {
-	From          string
-	To            string
-	Source        string
+	From   string
+	To     string
+	Source string
+	// Preserve the exact outcome even when multiple rules reach the same stage.
+	CarrierKind   HandlerAdvanceCarrierKind
+	RuleIndex     int
 	Node          runtimeidentity.ExecutableNode
 	InternalOwner string
 	HandlerEvent  string
@@ -928,6 +931,15 @@ type ArtifactRepoOutputSpec struct {
 	Failure           string `yaml:"failure"`
 	LastRequestID     string `yaml:"last_request_id"`
 	LastSourceEventID string `yaml:"last_source_event_id"`
+}
+
+// Fields is the complete declared entity-output mapping for artifact actions.
+func (o ArtifactRepoOutputSpec) Fields() map[string]string {
+	return map[string]string{
+		"repo_url": o.RepoURL, "current_ref": o.CurrentRef, "file_manifest": o.FileManifest,
+		"status": o.Status, "failure": o.Failure, "last_request_id": o.LastRequestID,
+		"last_source_event_id": o.LastSourceEventID,
+	}
 }
 
 type ArtifactRepoLimitsSpec struct {

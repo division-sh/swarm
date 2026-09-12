@@ -29,11 +29,15 @@ type ContextBuilderInput struct {
 }
 
 func BuildBaseContext(input ContextBuilderInput) (BaseContext, error) {
-	base := values.NewContext()
 	materializedFields, err := entityruntime.NormalizeMetadataForFlow(input.Source, input.FlowID, input.State.StateCarrier.Fields)
 	if err != nil {
 		return BaseContext{}, err
 	}
+	return baseContextWithAdmittedFields(input, materializedFields), nil
+}
+
+func baseContextWithAdmittedFields(input ContextBuilderInput, materializedFields map[string]any) BaseContext {
+	base := values.NewContext()
 	materializedState := input.State
 	materializedState.StateCarrier.Fields = materializedFields
 	base.Entity = values.Wrap(materializedState.EntityContext())
@@ -46,7 +50,7 @@ func BuildBaseContext(input ContextBuilderInput) (BaseContext, error) {
 	if input.Source != nil {
 		base.Policy = values.Wrap(policyDocumentToMap(input.Source.ResolvedPolicyForFlow(input.FlowID)))
 	}
-	return base, nil
+	return base
 }
 
 func contextFlowInstance(state StateSnapshot, evt events.Event, fallbackFlowID string) string {

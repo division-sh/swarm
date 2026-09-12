@@ -43,6 +43,11 @@ func (a DeliveryTargetApplication) State() WorkflowState {
 
 func (a DeliveryTargetApplication) previewOnly() bool { return a.preview }
 
+func (a DeliveryTargetApplication) admitsEntityMaterialization() bool {
+	return !a.preview && a.presence == WorkflowTargetPersistenceAbsent &&
+		!a.owner.EntitylessReceiver() && !a.owner.ExistingEntity() && a.entityID != ""
+}
+
 func (a DeliveryTargetApplication) Validate() error {
 	if err := a.owner.Validate(); err != nil {
 		return err

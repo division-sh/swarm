@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -25,6 +26,37 @@ type Mutation struct {
 const MutationClear = "clear"
 
 var ErrImmutableMutation = errors.New("immutable entity field write forbidden")
+
+// ValidateClearTarget is shared by authored-operation admission and execution.
+// Clearability is a declaration/ownership rule, independent of current presence.
+func ValidateClearTarget(contract Contract, target string) error {
+	path, owned, err := EntityWritePath(target)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("clear target %s is not an entity field", target)
+	}
+	field, err := ResolveFieldPath(contract, path)
+	if err != nil {
+		return err
+	}
+	root, _, _ := strings.Cut(path, ".")
+	decl, err := FieldDecl(contract, root)
+	if err != nil {
+		return err
+	}
+	if decl.MaterializeFrom != "" {
+		return fmt.Errorf("field %s is owned by materialize_from %q", root, decl.MaterializeFrom)
+	}
+	if !field.IsOptional {
+		return fmt.Errorf("cannot clear bare entity field %s", path)
+	}
+	if decl.Immutable {
+		return fmt.Errorf("%w: cannot clear %s", ErrImmutableMutation, path)
+	}
+	return nil
+}
 
 // MutationPlan owns a private ordered candidate and structural conflict history.
 // Validate ends one executed operation list; the same plan can then continue to
@@ -49,7 +81,35 @@ func NewMutationPlan(contract Contract, state map[string]any) (*MutationPlan, er
 	return &MutationPlan{contract: contract, draft: normalized}, nil
 }
 
+// NewCreationMutationPlan starts from admitted creation facts, not a stored
+// snapshot. Cross-root equality is checked with the creation binding list's
+// final candidate; supplied records still undergo complete type validation now.
+func NewCreationMutationPlan(contract Contract, initial map[string]any) (*MutationPlan, error) {
+	normalized, err := normalizeAssignedFields(contract, initial)
+	if err != nil {
+		return nil, err
+	}
+	return &MutationPlan{contract: contract, draft: normalized}, nil
+}
+
 func (p *MutationPlan) Draft() map[string]any { return cloneMap(p.draft) }
+
+// TouchedRootFields comes from executed typed operations, never a declaration
+// census or snapshot diff. Whole-root comparison also verifies nested clears
+// and record replacements without mistaking an earlier value for final state.
+func (p *MutationPlan) TouchedRootFields() []string {
+	seen := map[string]bool{}
+	for _, write := range p.writes {
+		root, _, _ := strings.Cut(write.path, ".")
+		seen[root] = true
+	}
+	fields := make([]string, 0, len(seen))
+	for field := range seen {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
+}
 
 func (p *MutationPlan) Append(op Mutation) error {
 	if p.err != nil {
@@ -62,14 +122,40 @@ func (p *MutationPlan) Append(op Mutation) error {
 		return err
 	}
 	clear := op.Operation == MutationClear
-	for _, previous := range p.writes {
-		if clear != previous.clear && pathsOverlap(previous.path, path) {
-			p.err = fmt.Errorf("entity mutation set/clear conflict between %s and %s", previous.path, path)
-			return p.err
-		}
+	if err := p.checkConflict(path, clear); err != nil {
+		p.err = err
+		return err
 	}
 	p.writes = append(p.writes, mutationWrite{path: path, clear: clear})
 	p.draft = next
+	return nil
+}
+
+// CheckAssignmentConflict admits a declared inline-action output before any
+// provider access. It does not assign a value or invent a mutation occurrence.
+func (p *MutationPlan) CheckAssignmentConflict(target string) error {
+	if p.err != nil {
+		return p.err
+	}
+	path, owned, err := EntityWritePath(target)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("action output %s is not an entity field", target)
+	}
+	if _, err := ResolveFieldPath(p.contract, path); err != nil {
+		return err
+	}
+	return p.checkConflict(path, false)
+}
+
+func (p *MutationPlan) checkConflict(path string, clear bool) error {
+	for _, previous := range p.writes {
+		if clear != previous.clear && pathsOverlap(previous.path, path) {
+			return fmt.Errorf("entity mutation set/clear conflict between %s and %s", previous.path, path)
+		}
+	}
 	return nil
 }
 
@@ -122,19 +208,15 @@ func (p *MutationPlan) apply(next map[string]any, op Mutation) (string, error) {
 		if op.HasKey || op.HasIndex {
 			return "", fmt.Errorf("field mutation must not declare key or index")
 		}
-		field, err := ResolveFieldPath(p.contract, path)
-		if err != nil {
+		if _, err := ResolveFieldPath(p.contract, path); err != nil {
 			return "", err
 		}
 		if op.Operation == MutationClear {
 			if op.Value != nil {
 				return "", fmt.Errorf("clear must not carry a value")
 			}
-			if !field.IsOptional {
-				return "", fmt.Errorf("cannot clear bare entity field %s", path)
-			}
-			if decl.Immutable {
-				return "", fmt.Errorf("%w: cannot clear %s", ErrImmutableMutation, path)
+			if err := ValidateClearTarget(p.contract, op.Target); err != nil {
+				return "", err
 			}
 			if err := clearMutationField(next, strings.Split(path, ".")); err != nil {
 				return "", err

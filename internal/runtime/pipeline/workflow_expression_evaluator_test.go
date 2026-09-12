@@ -404,31 +404,36 @@ func TestWorkflowExpressionEvaluator_EvalBoolAllowsHasPresenceCheckOnSparseField
 	}
 }
 
-func TestWorkflowExpressionEvaluator_EvalBoolAllowsNullPresenceChecksOnSparseField(t *testing.T) {
+func TestWorkflowExpressionEvaluator_EvalBoolRequiresExplicitPresenceOnSparseField(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
 	entityType := pipelineExpressionObjectType("test.entity", map[string]runtimecontracts.CatalogTypeKind{"kill_reason": runtimecontracts.CatalogTypeText, "current_state": runtimecontracts.CatalogTypeText})
-	ok, err := eval.EvalBoolWithOptions(`entity.kill_reason == null`, workflowExpressionContext{
+	for _, expression := range []string{`entity.kill_reason == null`, `entity.kill_reason != null`} {
+		if _, err := eval.EvalBoolWithOptions(expression, workflowExpressionContext{Entity: map[string]any{}}, workflowexpr.ValueExpressionOptions{EntityType: &entityType}); err == nil {
+			t.Fatalf("missing field silently accepted as null: %s", expression)
+		}
+	}
+	ok, err := eval.EvalBoolWithOptions(`!has(entity.kill_reason)`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
 	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
-		t.Fatalf("EvalBool == null error = %v", err)
+		t.Fatalf("EvalBool !has error = %v", err)
 	}
 	if !ok {
-		t.Fatal("expected sparse field == null to be true")
+		t.Fatal("expected sparse field absence to be true")
 	}
 
-	ok, err = eval.EvalBoolWithOptions(`entity.kill_reason != null`, workflowExpressionContext{
+	ok, err = eval.EvalBoolWithOptions(`has(entity.kill_reason)`, workflowExpressionContext{
 		Entity:  map[string]any{},
 		Payload: map[string]any{},
 		Policy:  map[string]any{},
 	}, workflowexpr.ValueExpressionOptions{EntityType: &entityType})
 	if err != nil {
-		t.Fatalf("EvalBool != null error = %v", err)
+		t.Fatalf("EvalBool has error = %v", err)
 	}
 	if ok {
-		t.Fatal("expected sparse field != null to be false")
+		t.Fatal("expected sparse field presence to be false")
 	}
 }
 

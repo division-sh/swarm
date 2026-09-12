@@ -16,7 +16,7 @@ func TestLeadReviewEntityNestedOptional(t *testing.T) {
 			bundle.Platform.Platform.Name = "review"
 			bundle.Platform.Platform.Version = "1"
 			entity := bundle.RootEntities["items"]
-			entity.Fields["profile"] = rc.EntityFieldDecl{Type: "WorkItem"}
+			entity.Fields["profile"] = rc.EntityFieldDecl{Type: "WorkItem", Initial: map[string]any{"id": "review", "status": "new", "tags": []any{}}}
 			for name, field := range entity.Fields {
 				field.UnusedReason = "externally populated review fixture"
 				entity.Fields[name] = field

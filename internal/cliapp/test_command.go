@@ -1613,7 +1613,11 @@ func (r scenarioRunner) evaluateScenarioSetupFields(evaluator *scenarioExpressio
 	}
 	normalized, err := entityruntime.NormalizeState(contract, fields)
 	if err != nil {
-		return nil, fmt.Errorf("setup.entities[%s].fields: %w", entity.Alias, err)
+		location := fmt.Sprintf("setup.entities[%s].fields", entity.Alias)
+		if field := entityruntime.ValidationField(err); field != "" {
+			location += "." + field
+		}
+		return nil, fmt.Errorf("%s: %w", location, err)
 	}
 	return normalized, nil
 }

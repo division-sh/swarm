@@ -14,6 +14,8 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -195,12 +197,15 @@ func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, route 
 		policy = workflowTimerPolicy(source, flowID)
 	}
 	entityType, _ := semanticview.ResolveEntityStructuralType(source, flowID)
+	options := workflowexpr.ValueExpressionOptions{EntityType: entityType}
+	if entityType != nil {
+		options.KnownPresence = runtimeengine.EntityAssignmentPresencePaths(entityruntime.ObservedAssignmentFacts(*entityType, instance.Fields))
+	}
 	return workflowexpr.EvalValueExpressionWithOptions(raw, workflowexpr.ValueContext{
 		Entity: instance.Fields,
 		PlatformEntity: map[string]any{
 			"entity_id": entityID.String(), "flow_instance": route.InstancePath, "current_state": instance.CurrentState,
 		},
-		Policy:   policy,
-		Computed: payloadMap(instance.Fields["computed"]),
-	}, workflowexpr.ValueExpressionOptions{EntityType: entityType})
+		Policy: policy,
+	}, options)
 }

@@ -94,7 +94,7 @@ func artifactRepoAdmitProviderRef(contract entityruntime.Contract, field string)
 	}
 	// The provider has not produced a ref yet. Do not use a sample hash to
 	// approve an enum, equality or refinement that can reject the real hash later.
-	if resolved.Kind != contracts.CatalogTypeText || resolved.Name != "" || !decl.Refinements.Empty() {
+	if resolved.Kind != contracts.CatalogTypeText || resolved.Name != "" || !decl.Refinements.Empty() || entityruntime.FieldPathParticipatesInEquality(contract, field) {
 		return fmt.Errorf("artifact provider ref field %s requires unrestricted text", field)
 	}
 	_, err = entityruntime.NormalizeFieldValue(contract, field, "")

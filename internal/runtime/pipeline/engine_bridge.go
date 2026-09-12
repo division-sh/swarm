@@ -284,22 +284,27 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
+	materializationAdmitted := handlerExecutionEntityRequirementForNode(source, node, events.EventType(handlerEventKey), flowID, handler).materializes()
+	if exactDelivery {
+		materializationAdmitted = application.admitsEntityMaterialization()
+	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityID:               identity.NormalizeEntityID(entityID),
-		Node:                   node,
-		ExecutionFlowID:        identity.NormalizeFlowID(flowID),
-		Route:                  stateRoute,
-		Event:                  triggerCtx.Event,
-		ProducerSource:         producerSource,
-		HandlerEventKey:        handlerEventKey,
-		JoinDeclaration:        joinDeclaration,
-		ChainDepth:             triggerCtx.Event.ChainDepth(),
-		Handler:                handler,
-		FanOutPlans:            source.FanOutPlansForHandler(node, handlerEventKey),
-		Preview:                preview,
-		State:                  stateSnapshot,
-		InitialFieldValues:     initialFieldValues,
-		DeferCommittedDispatch: deferCommittedDispatch,
+		EntityMaterializationAdmitted: materializationAdmitted,
+		EntityID:                      identity.NormalizeEntityID(entityID),
+		Node:                          node,
+		ExecutionFlowID:               identity.NormalizeFlowID(flowID),
+		Route:                         stateRoute,
+		Event:                         triggerCtx.Event,
+		ProducerSource:                producerSource,
+		HandlerEventKey:               handlerEventKey,
+		JoinDeclaration:               joinDeclaration,
+		ChainDepth:                    triggerCtx.Event.ChainDepth(),
+		Handler:                       handler,
+		FanOutPlans:                   source.FanOutPlansForHandler(node, handlerEventKey),
+		Preview:                       preview,
+		State:                         stateSnapshot,
+		InitialFieldValues:            initialFieldValues,
+		DeferCommittedDispatch:        deferCommittedDispatch,
 	})
 	if !preview {
 		logComputeModuleReplayEvidence(ctx, pc.bus, node.Key(), triggerCtx.Event, result.ComputeModuleTraces)

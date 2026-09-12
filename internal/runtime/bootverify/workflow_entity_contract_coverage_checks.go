@@ -24,6 +24,7 @@ type wave1WriteTarget struct {
 	Entity        bool
 	WriteIndex    int
 	HasWriteIndex bool
+	Operation     runtimecontracts.WorkflowDataOperation
 }
 
 func (t wave1WriteTarget) flowID() string { return t.Node.FlowPath() }
@@ -153,6 +154,17 @@ func (c *checkerContext) entityWriteTargetCompliance() []Finding {
 		}
 		if ownerFlowID != "" {
 			contract.FlowID = ownerFlowID
+		}
+		if target.Operation == runtimecontracts.WorkflowDataOperationClear {
+			owned, found := entityruntime.ResolveForFlow(c.source, contract.FlowID)
+			if found {
+				if err := entityruntime.ValidateClearTarget(owned, target.Target); err != nil {
+					c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
+						CheckID: "entity_write_target_compliance", Severity: SeverityHardInvalidity,
+						Message: fmt.Sprintf("node %s handler %s clear target %s: %v", target.nodeID(), target.EventType, target.Target, err), Location: target.nodeID(),
+					})
+				}
+			}
 		}
 		if _, ok := contract.Contract.Fields[rootField]; !ok {
 			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
@@ -562,22 +574,23 @@ func wave1ScopedNodeRecords(source semanticview.Source) []runtimecontracts.Scope
 
 func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []wave1WriteTarget {
 	out := make([]wave1WriteTarget, 0)
-	addIndexed := func(kind, target string, writeIndex int, hasWriteIndex bool) {
+	addIndexed := func(kind, target string, writeIndex int, hasWriteIndex bool, operation runtimecontracts.WorkflowDataOperation) {
 		write := wave1ParseWriteTarget(node, eventType, kind, target)
 		if strings.TrimSpace(write.Target) == "" {
 			return
 		}
 		write.WriteIndex = writeIndex
 		write.HasWriteIndex = hasWriteIndex
+		write.Operation = operation
 		out = append(out, write)
 	}
-	add := func(kind, target string) { addIndexed(kind, target, 0, false) }
+	add := func(kind, target string) { addIndexed(kind, target, 0, false, "") }
 	addRuleTargets := func(scope string, rule runtimecontracts.HandlerRuleEntry) {
 		for writeIndex, write := range rule.DataAccumulation.Writes {
 			if write.IsContainedOperation() {
 				continue
 			}
-			addIndexed(scope+".data_accumulation", write.Target(), writeIndex, true)
+			addIndexed(scope+".data_accumulation", write.Target(), writeIndex, true, write.Operation)
 		}
 		if rule.Compute != nil {
 			add(scope+".compute", rule.Compute.StoreAs)
@@ -590,7 +603,7 @@ func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType str
 		if write.IsContainedOperation() {
 			continue
 		}
-		addIndexed("handler.data_accumulation", write.Target(), writeIndex, true)
+		addIndexed("handler.data_accumulation", write.Target(), writeIndex, true, write.Operation)
 	}
 	if handler.Compute != nil {
 		add("handler.compute", handler.Compute.StoreAs)
@@ -626,6 +639,10 @@ func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType str
 		}
 		addRuleTargets(scope, rule)
 	}
+	if handler.Join != nil {
+		addRuleTargets("handler.join.on_complete", handler.Join.OnComplete)
+		addRuleTargets("handler.join.timeout", handler.Join.Timeout.Outcome)
+	}
 	return out
 }
 
@@ -640,28 +657,17 @@ func wave1ParseWriteTarget(node runtimeidentity.ExecutableNode, eventType, kind,
 	if target == "" {
 		return write
 	}
-	if strings.HasPrefix(target, "metadata.") {
-		return write
-	}
-	if target == platformcontext.EntityRoot || strings.HasPrefix(target, platformcontext.EntityRoot+".") {
+	path, owned, err := entityruntime.EntityWritePath(target)
+	if err != nil {
 		write.Entity = true
-		write.Field = platformcontext.EntityRoot
+		write.Field = target
 		return write
 	}
-	if strings.HasPrefix(target, "gates.") || target == "gates" {
-		write.Field = "gates"
-		write.Entity = false
+	if !owned {
 		return write
 	}
-	if strings.HasPrefix(target, "entity.") {
-		write.Entity = true
-		target = strings.TrimSpace(strings.TrimPrefix(target, "entity."))
-	} else if !strings.Contains(target, ".") {
-		write.Entity = true
-	}
-	if !write.Entity {
-		return write
-	}
+	write.Entity = true
+	target = path
 	if idx := strings.IndexByte(target, '.'); idx >= 0 {
 		write.Field = strings.TrimSpace(target[:idx])
 		write.Nested = true

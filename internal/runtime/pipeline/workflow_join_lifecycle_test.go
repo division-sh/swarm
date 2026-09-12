@@ -1152,7 +1152,10 @@ func workflowJoinLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContrac
 			},
 		},
 	}
-	return admitSyntheticEntityContractsForTest(t, base, "test_entity", map[string]string{"orders": "test_entity"})
+	const entity = "test_entity:\n  expected: '[text]'\n"
+	return admitSyntheticEntityContractsForTest(t, base, "test_entity", map[string]string{"orders": "test_entity"}, map[string]string{
+		"entities.yaml": entity, "orders/entities.yaml": entity,
+	})
 }
 
 func workflowJoinActivationKey() string {
