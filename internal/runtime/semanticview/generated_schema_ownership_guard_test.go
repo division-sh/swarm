@@ -1,0 +1,127 @@
+package semanticview_test
+
+import (
+	"go/ast"
+	"go/types"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"golang.org/x/tools/go/packages"
+)
+
+func TestGeneratedSchemaConsumersCannotRestoreGlobalLookup(t *testing.T) {
+	if findings := generatedSchemaFindings(t, nil); len(findings) != 0 {
+		t.Fatalf("competing generated schema ownership: %v", findings)
+	}
+}
+
+func TestGeneratedSchemaGuardRejectsReceiverAliasesAndScopeSearch(t *testing.T) {
+	root := agentNameGuardRepoRoot(t)
+	overlay := map[string][]byte{
+		filepath.Join(root, "internal/runtime/semanticview/hostile_generated_schema.go"): []byte(`package semanticview
+import alternate "github.com/division-sh/swarm/internal/runtime/contracts"
+func hostileGeneratedSchema(unrelated *alternate.WorkflowContractBundle) any {
+    borrowed := unrelated.GeneratedActivityEventEntries
+    return borrowed()
+}
+`),
+	}
+	path := filepath.Join(root, "internal/runtime/semanticview/event_schema.go")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := "func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaResolution {"
+	if strings.Count(string(raw), marker) != 1 {
+		t.Fatal("exact schema owner not found")
+	}
+	overlay[path] = []byte(strings.Replace(string(raw), marker, marker+"\n _ = source.FlowScopes()", 1))
+	compilerPath := filepath.Join(root, "internal/runtime/contracts/compiled_event_schema.go")
+	compilerRaw, err := os.ReadFile(compilerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlay[compilerPath] = append(compilerRaw, []byte(`
+func hostileSchemaRecompile(unrelated *WorkflowContractBundle) any {
+    borrowed := unrelated.compileCurrentEventDeclaration
+    schema, _, _ := borrowed(".", "flow", "events.yaml", "x", "x", EventCatalogEntry{}, TypeCatalogDocument{})
+    return schema
+}
+`)...)
+	findings := generatedSchemaFindings(t, overlay)
+	alias, scope, recompile := false, false, false
+	for _, finding := range findings {
+		alias = alias || strings.Contains(finding, "hostileGeneratedSchema")
+		scope = scope || (strings.Contains(finding, "ResolveEventSchema") && strings.HasSuffix(finding, ":FlowScopes"))
+		recompile = recompile || strings.Contains(finding, "hostileSchemaRecompile")
+	}
+	if len(findings) != 3 || !alias || !scope || !recompile {
+		t.Fatalf("guard missed alias or in-owner scope search: %v", findings)
+	}
+}
+
+func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
+	t.Helper()
+	pkgs, err := packages.Load(&packages.Config{Dir: agentNameGuardRepoRoot(t), Overlay: overlay,
+		Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedCompiledGoFiles},
+		"./internal/runtime/contracts", "./internal/runtime/semanticview", "./internal/runtime/bootverify", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/manager", "./internal/runtime/tools", "./internal/runtime/core/pinrouting", "./internal/runtime/accprojection", "./internal/runtime/scenarioderivation", "./internal/cliapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packages.PrintErrors(pkgs) != 0 {
+		t.Fatal("generated schema guard must typecheck all consumers")
+	}
+	const contracts = "github.com/division-sh/swarm/internal/runtime/contracts"
+	var findings []string
+	for _, pkg := range pkgs {
+		allowed := map[types.Object]bool{}
+		var bindingCompiler types.Object
+		if pkg.PkgPath == contracts {
+			allowed[pkg.Types.Scope().Lookup("EventSchemaRegistryFromBundle")] = true
+			bundle := pkg.Types.Scope().Lookup("WorkflowContractBundle").Type().(*types.Named)
+			for i := 0; i < bundle.NumMethods(); i++ {
+				method := bundle.Method(i)
+				if method.Name() == "EventEntries" || method.Name() == "ResolvedEventCatalog" {
+					allowed[method] = true
+				}
+				if method.Name() == "compileEventSchemaBindings" {
+					bindingCompiler = method
+				}
+			}
+		}
+		for _, file := range pkg.Syntax {
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Body == nil {
+					continue
+				}
+				owner := pkg.TypesInfo.Defs[fn.Name]
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					id, ok := node.(*ast.Ident)
+					if !ok {
+						return true
+					}
+					used, ok := pkg.TypesInfo.Uses[id].(*types.Func)
+					if !ok || used.Pkg() == nil {
+						return true
+					}
+					if used.Pkg().Path() == contracts && (used.Name() == "GeneratedActivityEventEntries" || used.Name() == "GeneratedActivityEventSchemas") && !allowed[owner] {
+						findings = append(findings, owner.String()+":"+used.FullName())
+					}
+					if used.Pkg().Path() == contracts && (used.Name() == "compileCurrentEventDeclaration" || used.Name() == "generatedActivityDeclarationRecords") && owner != bindingCompiler {
+						findings = append(findings, owner.String()+":"+used.FullName())
+					}
+					// These exact functions resolve one supplied flow. Enumeration
+					// there would reintroduce the foreign-sibling rescue.
+					if used.Name() == "FlowScopes" && (owner == pkg.Types.Scope().Lookup("ResolveEventSchema") || owner == pkg.Types.Scope().Lookup("bindCompiledEventSchema")) {
+						findings = append(findings, owner.String()+":FlowScopes")
+					}
+					return true
+				})
+			}
+		}
+	}
+	return findings
+}

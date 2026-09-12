@@ -183,3 +183,72 @@ func TestCompiledPublicationBindingsSurviveRawMapMutation(t *testing.T) {
 		})
 	}
 }
+
+func TestCompiledPublicationBindingsIgnoreUnconnectedSiblingChanges(t *testing.T) {
+	for _, mode := range []string{"root", "static", "template", "nested_template"} {
+		t.Run(mode, func(t *testing.T) {
+			root := canonicalrouting.CopyPublicationActivity(t, mode, "http://127.0.0.1:1/send", true)
+			repo := canonicalrouting.RepoRoot(t)
+			flow := map[string]string{"root": ".", "static": "source", "template": "source", "nested_template": "outer/source"}[mode]
+			load := func() *WorkflowContractBundle {
+				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return bundle
+			}
+			original := load()
+			check := func(bundle *WorkflowContractBundle) {
+				for _, name := range []string{"send.succeeded", "send.failed", "send.revision_requested", "send.rejected"} {
+					for _, receiver := range []string{flow, "sink"} {
+						before, ok, err := original.ResolveEffectiveCompiledFlowEventSchema(receiver, name)
+						if err != nil || !ok {
+							t.Fatalf("original %s/%s: %t %v", receiver, name, ok, err)
+						}
+						after, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(receiver, name)
+						if err != nil || !ok || before.FlowPath() != after.FlowPath() || before.EventName() != after.EventName() || before.Classification() != after.Classification() || !reflect.DeepEqual(before.EventSchema(), after.EventSchema()) {
+							t.Fatalf("unconnected sibling changed %s/%s: found=%t err=%v", receiver, name, ok, err)
+						}
+					}
+				}
+			}
+			// Moving this incompatible declaration first or last in the source
+			// census must not influence the connected source's exact binding.
+			if err := os.Rename(filepath.Join(root, "sibling"), filepath.Join(root, "aaa_sibling")); err != nil {
+				t.Fatal(err)
+			}
+			check(load())
+			if err := os.Rename(filepath.Join(root, "aaa_sibling"), filepath.Join(root, "zzz_sibling")); err != nil {
+				t.Fatal(err)
+			}
+			check(load())
+			if err := os.RemoveAll(filepath.Join(root, "zzz_sibling")); err != nil {
+				t.Fatal(err)
+			}
+			check(load())
+		})
+	}
+}
+
+func TestFailedPublicationSchemaAdmissionCannotRetainOldBindings(t *testing.T) {
+	root := canonicalrouting.CopyPublicationActivity(t, "root", "http://127.0.0.1:1/send", false)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := bundle.FlowTree.Root.Events["activity.requested"]
+	entry.Payload.Properties["message"] = EventFieldSpec{Type: "MissingType"}
+	bundle.FlowTree.Root.Events["activity.requested"] = entry
+	if err := CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "MissingType") {
+		t.Fatalf("readmission error = %v, want invalid type refusal", err)
+	}
+	for _, receiver := range []string{".", "sink"} {
+		if _, ok, _ := bundle.ResolveEffectiveCompiledFlowEventSchema(receiver, "send.succeeded"); ok {
+			t.Fatalf("%s retained a previous compiled binding after rejected admission", receiver)
+		}
+	}
+	if _, err := bundle.CompiledEventSchemas(); err == nil || len(bundle.GeneratedActivityEventSchemas()) != 0 {
+		t.Fatal("rejected admission exposed previous resource or generated schemas")
+	}
+}
