@@ -72,6 +72,21 @@ func TestCanonicalRoutingExamplesLoadAndVerify(t *testing.T) {
 	}
 }
 
+func TestPublicationSitesLoadAndVerify(t *testing.T) {
+	for _, mode := range []string{"root", "static", "template"} {
+		t.Run(mode, func(t *testing.T) {
+			repo := RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, CopyPublicationSites(t, mode), runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if findings := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{}).HardInvalidities(); len(findings) != 0 {
+				t.Fatalf("hard invalidities: %#v", findings)
+			}
+		})
+	}
+}
+
 func TestNodeIdentityFixtureLoadsAndVerifies(t *testing.T) {
 	Prove(t, ArtifactID("internal/releasee2e/testdata/node_identity"))
 	repo := RepoRoot(t)
