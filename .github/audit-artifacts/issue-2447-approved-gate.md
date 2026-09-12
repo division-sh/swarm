@@ -41,3 +41,58 @@ Architecture smell: metrics can reward moving complexity without removing semant
 Watchlist decision: **refine existing nodes** `boundary_owned_decomposition` and `invariant_suite_coverage`. G's published `ff6c80e` was independently verified; reviewer refinement `b62ccb9533ff59add07453987f44206716d97a22` is YAML-validated and published on docs branch `review/2447-gate`, based on G's commit, not claimed merged to docs master. It records the suppression/population/provenance findings and this scope. No new issue, architecture queue or `docs/POTENTIAL_ISSUES.md` entry is necessary; the concrete work remains in #2447.
 
 **G's next work item:** incorporate this gate addendum and the reviewer docs refinement, then implement and qualify the baseline-only PR in one pass. No further pre-audit approval is needed for these specified collector corrections. Stop only if this cannot be delivered with the one existing-purpose tooling owner, requires product semantics/legacy/vendoring, changes the approved metric policy, or would need to weaken runtime tests. Do not start hotspot factoring under this approval.
+
+## Bounded Qualification Amendment: LSF-044
+
+Independent [approval](https://github.com/division-sh/swarm/issues/2447#issuecomment-5648722245)
+amends the existing-test prohibition only for tests that mistake local unsafe
+socket disposal for synchronous remote advisory-lock release. No runtime repair,
+factoring, score-policy change or fresh semantic gate is authorized or needed.
+The governing `platform-spec.yaml` owner is
+`backend_neutral_runtime_mutation_write_boundary`: local connection closure does
+not prove remote SQL completion or advisory possession disappearance.
+
+The fork failed-COMMIT symptom is the entry point, not the boundary. The chosen
+additional class is false synchronous-release/reclaim assertions after unsafe
+disposal. The parent is truthful distributed authority observation; product
+transaction/lifecycle ownership is unchanged. One test-only commit can close the
+identified assertion class without claiming a runtime defect was repaired.
+
+All original `assertIndependentAdvisoryLockAvailable` consumers were classified:
+
+| Consumer | Observation contract / repair |
+| --- | --- |
+| Fork keyed failed commit | After disposal: one bounded real server acquisition and checked unlock on the same independently pinned connection. Preserve SQL23505, one callback/commit, zero durable rows, fresh successor PID. |
+| Fork other scenarios and healthy successor | Immediate try-lock unchanged after acknowledged unlock or the explicitly already-unlocked lost-lock case; error/state/PID assertions unchanged. |
+| Pipeline terminal release (false/error) | After disposal, following stale-claim and lease-retirement assertions. |
+| Pipeline setup issuer/eligibility/hydration, fail-once/persistent | After disposal, following primary plus cleanup error and registry-absence checks. |
+| Pipeline attach/publication poison | After disposal, following exact registry/capacity/scan retirement checks. |
+| Pipeline scan-close failure then ClaimBatch | After disposal, following stale scan/claim checks; server acquisition must succeed before fresh nonblocking reclaim. |
+| Terminal advisory release / ambiguous acquisition | After disposal; retain independent errors and reject SQL through the retired session before server observation. |
+| Borrowed/foreign transaction claims, commit/rollback, retained reference, caller cancellation | Acknowledged unlock: immediate helper unchanged. |
+| Successful unlock followed by session-close failure | Acknowledged unlock: immediate helper unchanged. |
+| Generic-schedule terminal preparation, healthy schedule release, pipeline parent fence | Separate acknowledged-unlock or held-lock control; unchanged. |
+| Transaction outcome / invalid-authority tests | Already bounded real acquisition after disposal; unchanged. |
+| Healthy session monitor / silent monitor fence | Immediate acknowledged release versus remote lock still held under local fencing; unchanged. |
+| API, serve, selected-fork contention, test-server manager | Admission/held-lock barriers, not disposal-release observations; unchanged. |
+
+The old immediate helpers remain authoritative for acknowledged unlock. Only
+named disposal callers use the new test-local observers. These issue one real
+blocking acquisition under a finite safety deadline, then check unlock and
+connection cleanup. Errors/deadlines fail the proof. No polling, sleep, mutation
+retry, pool reset, runtime owner, timeout-policy change or third-party code.
+Both observer variants require a still-held-lock negative control, followed by
+successful acquisition after explicit release. Existing local-fence/remote-held
+controls retain their opposite assertion.
+
+Required execution: complete changed fork/persistence matrix under race detection,
+100-repeat held-lock controls and original keyed commit case, healthy sibling
+controls, dual-store golden restart/SIGKILL/bursts, then fresh integrated managed
+whole suite. Existing failed qualification and unchanged-base receipts remain
+historical failures, not overwritten by targeted passes.
+
+Tracker/watchlist decision: absorb only this test-contract repair in the current
+PR, retain #2353 LSF-044 repair-open through qualification and review, incorporate
+published docs `ca5db26` (`invariant_suite_coverage`). No new issue or architecture
+entry. The broader #2447/#2407 factoring parent stays open with the original tail
+estimate. No spec semantic change: these tests now respect the existing contract.
