@@ -281,6 +281,10 @@ func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle
 }
 
 func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, eventType string) (CompiledFlowInputPin, bool) {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		flowID = "."
+	}
 	requested := eventidentity.Normalize(eventType)
 	for _, pin := range b.FlowInputEventPins(flowID) {
 		local := eventidentity.Normalize(pin.EventType())

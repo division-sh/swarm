@@ -199,6 +199,43 @@ func TestCompiledInputNameUsesOnlyAdmittedCoordinates(t *testing.T) {
 	}
 }
 
+func TestConnectedRootInputUsesExactBindingForBothRootCoordinates(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"schema.yaml":          "name: root-input\npins:\n  inputs:\n    events: [work.ready]\nconnect:\n  - {event: work.ready, from: producer, to: .}\n",
+		"producer/schema.yaml": "name: producer\nmode: static\npins:\n  outputs:\n    events: [work.ready]\n",
+		"producer/events.yaml": "work.ready:\n  value: text\n",
+	}
+	for name, body := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := repoRootForContractsTest(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer, ok, err := bundle.ResolveCompiledFlowEventSchema("producer", "work.ready")
+	if err != nil || !ok {
+		t.Fatalf("missing producer binding: %t %v", ok, err)
+	}
+	for _, flow := range []string{".", ""} {
+		got, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(flow, "work.ready")
+		if err != nil || !ok || got.value != producer.value {
+			t.Errorf("root %q lost exact connected binding: %t %v", flow, ok, err)
+		}
+		entry, name, ok := bundle.ResolveFlowEventCatalogEntry(flow, "work.ready")
+		if !ok || name != producer.EventName() || entry.Payload.Properties["value"].Type != "text" {
+			t.Errorf("root %q lost producer catalog evidence: %q %t %+v", flow, name, ok, entry)
+		}
+	}
+}
+
 func TestIntrinsicProjectionKeepsProducerAndReceiverSchemasDistinct(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	bundle, err := LoadWorkflowContractBundleWithOverrides(

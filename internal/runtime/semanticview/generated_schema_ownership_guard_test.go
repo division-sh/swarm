@@ -55,6 +55,11 @@ func hostileSchemaRecompile(unrelated *WorkflowContractBundle) any {
 	if err != nil {
 		t.Fatal(err)
 	}
+	readerMarker := "func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, eventType string) (CompiledFlowInputPin, bool) {"
+	if strings.Count(string(connectRaw), readerMarker) != 1 {
+		t.Fatal("exact input binding reader not found")
+	}
+	connectRaw = []byte(strings.Replace(string(connectRaw), readerMarker, readerMarker+"\n _ = b.ResolveFlowEventReference", 1))
 	overlay[connectPath] = append(connectRaw, []byte(`
 func hostileConnectRecompile(unrelated *WorkflowContractBundle) any {
     borrowed := compileEventSchemaOwnershipRows
@@ -72,15 +77,16 @@ func hostileConnectRecompile(unrelated *WorkflowContractBundle) any {
 	}
 	overlay[subscriptionPath] = []byte(strings.Replace(string(subscriptionRaw), subscriptionMarker, subscriptionMarker+"\n _ = runtimecontracts.ActivitySitesForNode", 1))
 	findings := generatedSchemaFindings(t, overlay)
-	alias, scope, recompile, subscription, connect := false, false, false, false, false
+	alias, scope, recompile, subscription, connect, receiver := false, false, false, false, false, false
 	for _, finding := range findings {
 		alias = alias || strings.Contains(finding, "hostileGeneratedSchema")
 		scope = scope || (strings.Contains(finding, "ResolveEventSchema") && strings.HasSuffix(finding, ":FlowScopes"))
 		recompile = recompile || strings.Contains(finding, "hostileSchemaRecompile")
 		subscription = subscription || strings.Contains(finding, "fillAuthoredSubscriptionScope")
 		connect = connect || strings.Contains(finding, "hostileConnectRecompile")
+		receiver = receiver || strings.Contains(finding, "flowInputEventPinForResolvedEvent")
 	}
-	if len(findings) != 5 || !alias || !scope || !recompile || !subscription || !connect {
+	if len(findings) != 6 || !alias || !scope || !recompile || !subscription || !connect || !receiver {
 		t.Fatalf("guard missed alias or in-owner scope search: %v", findings)
 	}
 }
@@ -100,8 +106,12 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 	var findings []string
 	for _, pkg := range pkgs {
 		allowed := map[types.Object]bool{}
+		retainedReceiverReaders := map[types.Object]bool{}
 		var bindingCompiler types.Object
 		if pkg.PkgPath == contracts {
+			for _, name := range []string{"connectedEventSchemaOwnershipRow", "eventSchemaReceiverOwnerKey", "validateCompiledConnectEventSchemaOwnership"} {
+				retainedReceiverReaders[pkg.Types.Scope().Lookup(name)] = true
+			}
 			allowed[pkg.Types.Scope().Lookup("EventSchemaRegistryFromBundle")] = true
 			bundle := pkg.Types.Scope().Lookup("WorkflowContractBundle").Type().(*types.Named)
 			for i := 0; i < bundle.NumMethods(); i++ {
@@ -111,6 +121,9 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 				}
 				if method.Name() == "compileEventSchemaBindings" {
 					bindingCompiler = method
+				}
+				if method.Name() == "flowInputEventPinForResolvedEvent" {
+					retainedReceiverReaders[method] = true
 				}
 			}
 		}
@@ -137,6 +150,9 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 						findings = append(findings, owner.String()+":"+used.FullName())
 					}
 					if used.Pkg().Path() == contracts && used.Name() == "compileEventSchemaOwnershipRows" && owner != pkg.Types.Scope().Lookup("populateEventSchemaOwnershipIndex") {
+						findings = append(findings, owner.String()+":"+used.FullName())
+					}
+					if used.Pkg().Path() == contracts && retainedReceiverReaders[owner] && (used.Name() == "ResolveFlowEventReference" || used.Name() == "FlowPath" || used.Name() == "FlowScopes") {
 						findings = append(findings, owner.String()+":"+used.FullName())
 					}
 					if used.Pkg().Path() == contracts && (used.Name() == "ActivitySitesForNode" || used.Name() == "ActivityResultEventsForSite") && owner == pkg.Types.Scope().Lookup("fillAuthoredSubscriptionScope") {
