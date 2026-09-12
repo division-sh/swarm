@@ -1,6 +1,9 @@
 # Post-Implementation Proof Audit: #2447 R1.4
 
-Agent-g. **LSF-044 test repair implemented; integrated qualification pending.**
+Agent-g. **LSF-044 repair passes full-load packages; qualification blocked by
+separate #2353 LSF-045/046. Not review-ready.**
+Final integrated executable candidate: `0e21ee7f1`, including separate test-only
+repair `054b888e5`. This outcome update changes documentation only.
 Executable checker/test Go head: `3ba8c5678`; inventory-metadata heads: `ac3d00dde`
 and `6019a729f` (plus this artifact's exact classification entry);
 base: `27a9f1b8c` (current master integration,
@@ -99,7 +102,7 @@ unit controls; workflow assertions are not the only proof.
 | Artifact output / local-CI owner divergence | execution-proven through the same corrected path | Exact command `-head HEAD -base origin/master -evidence ...` and real event-driven `run`, strict baseline check; workflow invokes that same executable. Actual hosted CI remains a separate merge check. |
 | New artifact references unclassified by route-authority text census | reproduced and fixed | `TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified`, `TestRouteAuthorityDriftInventoryCoversRepoWideSearchDimensions`, and `TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit` pass unchanged after exact metadata-path classification. No runtime routing or search bypass added. |
 | New artifact references unclassified by retirement census | reproduced and fixed | `TestRetiredBuilderSemanticReferencesStayExplicit`: exact-count classification additions only; all existing search and refusal assertions retained. |
-| Unchanged supported runtime workload | execution-proven through the same corrected path | Default full-suite releasee2e package PASS (636.150s, includes smoke); explicit full-profile dual-store restart/SIGKILL and burst iterations 1/2 PASS (330.937s). The whole suite did NOT pass; see the separate fork finding. |
+| Unchanged supported runtime workload | execution-proven through the same corrected path | Earlier default releasee2e package PASS636.150s includes smoke; final explicit dual-store restart/SIGKILL and burst iterations 1/2 PASS317.294s. Final full releasee2e failed six nested builds from inode exhaustion, not the golden assertions. No whole-suite pass claimed. |
 | PostgreSQL failed-commit immediate competing-lock assertion | reproduced and fixed | #2353 LSF-044 bounded test-only approval; commit `054b888e5` replaces the false post-disposal timing requirement with actual server acquisition. Detailed sibling table and pending integrated qualification below. |
 | Later factoring, runtime ownership and monthly publication | split / escalated as separate class | #2447 later family gate; #2443/#2250 and R4-R7; #2407 R1.3/R1.5. No closure credit assigned. |
 
@@ -183,11 +186,50 @@ No passing sibling is misrepresented as an independently reproduced failure.
 
 Original full-suite and unchanged-base failures above remain valid historical
 receipts. The repair removes an invalid distributed timing guarantee, not a
-production cleanup bug. Achieved test-class closure is pending integrated suite
-and review; #2353 LSF-044 stays repair-open. Architecture tracking remains in
-existing nodes, docs `ca5db26` incorporated by fast-forward. Effort/ROI: one small
+production cleanup bug. The repaired assertion class passes its full-load
+packages; independent review and overall qualification remain outstanding, so
+#2353 LSF-044 stays repair-open. Architecture tracking remains in existing nodes,
+docs `ca5db26` incorporated by fast-forward and qualification refinement `4a395cc`
+published. Effort/ROI: one small
 test-only patch removes a false full-load failure without runtime machinery.
 No new issue, platform behavior, compatibility or factoring is introduced.
+
+### Final Candidate Receipts and Separate Failures
+
+Candidate `0e21ee7f1` on unchanged `origin/master@27a9f1b8c`:
+
+- Complete fork matrix race x3: PASS32.458s; affected persistence release/setup/poison/scan, acknowledged-unlock and cancellation matrix race x3: PASS119.286s.
+- Transaction-outcome, healthy-monitor and local-fence/remote-held controls race x3: PASS29.729s; generic terminal-preparation control PASS26.562s.
+- Both actual held-lock negative controls count100: PASS (fork43.137s, persistence42.001s). Original exact keyed failed-COMMIT count100: PASS29.561s. The negative-control command does not receive credit for the separately selected keyed subtest.
+- Final terminal/ambiguous retained-session SQL rejection controls race x3: PASS17.646s. Generic claim grace/unsafe fencing and pipeline parent-fence controls race x3: PASS12.292s/16.779s.
+- Fresh managed full-profile dual-store golden restart/SIGKILL and both burst iterations: PASS317.294s. Restart32.86s; burst1 PostgreSQL74.23s/SQLite126.54s; burst2 PostgreSQL83.31s/SQLite132.07s. Surface H only.
+- Final exact-snapshot complexity command PASS; measured head is byte-identical to the checked-in baseline. Immediate retirement census PASS9.636s; YAML and diff checks pass.
+- Fresh integrated `TEST_POSTGRES_BIN=/usr/lib/postgresql/16/bin go run ./cmd/swarm-test -- ./... -count=1 -timeout=30m`: **FAIL**, after59m37s shared queueing. Completed, not interrupted or retried unchanged.
+- Within that full run: checker PASS18.356s; PostgreSQL backend PASS38.120s; full fork package PASS56.299s; full runtime persistence PASS891.916s; conformance PASS190.233s; catalog lifecycle PASS594.727s. These are package receipts, not whole-suite approval.
+
+| Separate manifestation | Status | Exact evidence / disposition |
+| --- | --- | --- |
+| API continuation teardown reports SQL57014 from run-origin read | split / escalated as separate class | #2353 LSF-045: `TestSuccessfulFusedRunRequiresExactSourceCommitAggregateAcrossSelectedStores/postgres`; fixture lines266/282 report `load pipeline recovery run origin: pq: canceling statement due to user request (57014)`. Full apiv1 package FAIL210.205s. Untouched master exact PostgreSQL case count20 PASS7.449s, then count100 FAIL38.711s with one occurrence using disk-backed TMPDIR. The pass does not erase reproduction. |
+| Six retained-lifecycle build shards and private PostgreSQL setup fail before execution | split / escalated as separate class | #2353 LSF-046: `TestDurableDataInvocationInvarianceSQLitePostgresShard[1-6]` cannot create Go build directories; `TestServePostgresLostCommitResponseRecoversDurablePublication`, `TestServePostgresRemotePossessionOutlivesLocalLoss`, `TestServePostgresSilentMonitorWithdrawsReadinessAndJoins`, and both connection/server cases of `TestServePostgresLossAndRestartFromDurableState` fail initdb with ENOSPC. Host /tmp inode use1047930/1048576 (100%) with12GiB free bytes. releasee2e FAIL308.088s; serveapp FAIL1037.355s. No inferred lifecycle repair. |
+
+LSF-045 trace is the existing `bus/sweeper.go -> RunOrigins.LoadRunOrigin ->
+RunPostgres.LoadRunHeader -> backend.QueryRowContext` path. Matching historical
+SQLSTATE signatures does not establish identical causes. Independent classification
+and repair/qualification disposition are requested; no cancellation filtering,
+runtime repair, closed-issue reopening, factoring or new issue is authorized.
+LSF-046 can be addressed for future execution with private disk-backed temporary
+storage without changing the canonical shared admission root or slots. No foreign
+files/processes were removed, and no changed environment rerun is claimed yet.
+
+Final full log `/tmp/agent-g-2447-repaired-suite.log` SHA256
+`b58cf0e9c2d2ed482b37fe27af19cff0413125bb62e7350456e6a4a2859f2df5`;
+fresh golden log `/tmp/agent-g-2447-golden-repaired.log` SHA256
+`806f52bfee7aaef657764c392a62b749b573814c04c17f979232c917c8586b2c`;
+unchanged-base API count100 `/tmp/agent-g-2447-base-fused-100.log` SHA256
+`3ec35793283930dce739ade6dd78de607179a28780602d71b17d56c153238434`.
+The issue and canonical #2353 body record both new findings. The original
+complexity and LSF-044 approvals remain valid; no further implementation beyond
+their boundary is started and no normal review-ready PR is claimed.
 
 Architecture feedback is tracked in existing #2447/#2407 and #2443/#2250. Scores
 can reward relocating complexity without repairing semantic ownership; keep
