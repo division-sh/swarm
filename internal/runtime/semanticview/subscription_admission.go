@@ -84,6 +84,26 @@ func (a AuthoredSubscriptionAdmission) RoutePatterns() []string {
 	return append([]string(nil), a.routePatterns...)
 }
 
+// RoutePatternsAt projects an admitted declaration onto an already selected
+// execution path. This is receiver subscription materialization, not publication
+// renaming or admission of an otherwise unknown execution path.
+func (a AuthoredSubscriptionAdmission) RoutePatternsAt(flowPath string) []string {
+	if !a.Admitted() {
+		return nil
+	}
+	local := a.localEvent
+	if a.Pattern() {
+		local = a.authored
+	}
+	if local == "" {
+		return nil
+	}
+	if path := eventidentity.Normalize(flowPath); path != "" {
+		return []string{path + "/" + local}
+	}
+	return []string{local}
+}
+
 func (a AuthoredSubscriptionAdmission) Class() AuthoredSubscriptionAdmissionClass {
 	return a.class
 }

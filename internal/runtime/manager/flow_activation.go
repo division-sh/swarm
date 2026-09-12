@@ -1229,12 +1229,7 @@ func buildFlowAgentBlueprint(
 		if !admission.Admitted() {
 			return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s: %s", key, admission.Message())
 		}
-		if admission.Class() == semanticview.AuthoredSubscriptionSameScopeAgentExact {
-			subscription = eventidentity.Normalize(strings.Trim(flowPath, "/") + "/" + admission.LocalEvent())
-		} else if _, ok := localEvents[subscription]; ok {
-			subscription = eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), subscription)
-		}
-		rendered = append(rendered, subscription)
+		rendered = append(rendered, admission.RoutePatternsAt(flowPath)...)
 	}
 	rendered = dedupeStrings(rendered)
 
@@ -1444,8 +1439,18 @@ func buildStaticFlowAgentBlueprint(
 		if subscription == "" {
 			continue
 		}
-		subscription = eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), subscription)
-		rendered = append(rendered, subscription)
+		admission := semanticview.ClassifyAuthoredSubscription(source, semanticview.AuthoredSubscriptionRequest{
+			ConsumerKind: semanticview.AuthoredSubscriptionConsumerAgent,
+			ConsumerID:   agentID,
+			FlowID:       flowID,
+			FlowPath:     flowPath,
+			LocalEvents:  localEvents,
+			Authored:     subscription,
+		})
+		if !admission.Admitted() {
+			return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s: %s", logicalID, admission.Message())
+		}
+		rendered = append(rendered, admission.RoutePatternsAt(flowPath)...)
 	}
 	rendered = dedupeStrings(rendered)
 
@@ -1519,20 +1524,6 @@ func declaredAgentEmitEvents(events []string, vars map[string]string, flowID str
 		out = append(out, declaration.Local())
 	}
 	return dedupeStrings(out), nil
-}
-
-func localEventList(localEvents map[string]struct{}) []string {
-	if len(localEvents) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(localEvents))
-	for eventType := range localEvents {
-		if strings.TrimSpace(eventType) != "" {
-			out = append(out, strings.TrimSpace(eventType))
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 func staticFlowLocalEventSetForDeclarations(declarations []semanticview.AgentDeclaration) map[string]struct{} {

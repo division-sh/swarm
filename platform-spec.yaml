@@ -4631,6 +4631,11 @@ engine:
       bus_always_external: 'The event bus stores the final publication name and exact admitted source.
         Producers and business applicability matchers consume the same business_publication owner;
         they MUST NOT accept a second logical spelling for a concrete template publication.'
+      subscription_materialization: 'AuthoredSubscriptionAdmission owns projection of an admitted local subscription
+        onto its selected execution route. Node routing and agent materialization consume that projection, including
+        lawful same-scope qualified agent subscriptions. Consumers do not rebase raw authored strings or infer a
+        declaration from an instance path. Candidate lookup retains the actual publication name. Typed target-input
+        and already-routed internal carrier localization do not rename the event or grant producer authority.'
       handler_lookup_localizes: 'When the runtime delivers an external event to a node, it MUST
         localize the event name before looking up the handler. Localization matches against the target
         node''s declared local interface — input pins, subscribes_to entries, and handler keys. This

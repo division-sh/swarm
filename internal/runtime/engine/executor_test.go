@@ -2586,8 +2586,8 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 	if got := len(result.EmitIntents); got != 1 {
 		t.Fatalf("emit intents = %d, want 1", got)
 	}
-	if got := string(result.EmitIntents[0].Event.Type()); got != "bundle.rendered" {
-		t.Fatalf("emit event = %q, want bundle.rendered", got)
+	if got := string(result.EmitIntents[0].Event.Type()); got != "render/bundle.rendered" {
+		t.Fatalf("emit event = %q, want render/bundle.rendered", got)
 	}
 	if _, ok := result.StateMutation.Fields["rendered_bundle"]; ok {
 		t.Fatalf("module result leaked into state mutation metadata: %#v", result.StateMutation.Fields)
@@ -4250,8 +4250,8 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 			if got := len(result.EmitIntents); got != 1 {
 				t.Fatalf("EmitIntents len = %d, want 1", got)
 			}
-			if got := string(result.EmitIntents[0].Event.Type()); got != "account.bucketed" {
-				t.Fatalf("emit event = %q, want account.bucketed", got)
+			if got := string(result.EmitIntents[0].Event.Type()); got != "flow-1/account.bucketed" {
+				t.Fatalf("emit event = %q, want flow-1/account.bucketed", got)
 			}
 			payload := eventPayloadMap(t, result.EmitIntents[0].Event)
 			if got := payload["account_id"]; got != "acct-1" {
@@ -4407,7 +4407,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 	if got := len(result.EmitIntents); got != 2 {
 		t.Fatalf("EmitIntents len = %d, want 2", got)
 	}
-	if got := []string{string(result.EmitIntents[0].Event.Type()), string(result.EmitIntents[1].Event.Type())}; !reflect.DeepEqual(got, []string{"rule.emitted", "handler.succeeded"}) {
+	if got := []string{string(result.EmitIntents[0].Event.Type()), string(result.EmitIntents[1].Event.Type())}; !reflect.DeepEqual(got, []string{"flow-1/rule.emitted", "flow-1/handler.succeeded"}) {
 		t.Fatalf("emit order = %#v", got)
 	}
 	if got := len(publications.intents); got != 2 {
@@ -4500,8 +4500,8 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 	if got := len(result.EmitIntents); got != 1 {
 		t.Fatalf("EmitIntents len = %d, want 1", got)
 	}
-	if got := string(result.EmitIntents[0].Event.Type()); got != "handler.succeeded" {
-		t.Fatalf("emit event = %q, want handler.succeeded", got)
+	if got := string(result.EmitIntents[0].Event.Type()); got != "flow-1/handler.succeeded" {
+		t.Fatalf("emit event = %q, want flow-1/handler.succeeded", got)
 	}
 	if got := len(publications.intents); got != 1 {
 		t.Fatalf("publications intents len = %d, want 1", got)
@@ -4583,7 +4583,7 @@ func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
 func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *testing.T) {
 	stateRepo := &recordingStateRepo{}
 	publications := &recordingPublicationCommitter{}
-	shaper := &eventErrPayloadShaper{failEvent: "handler.succeeded"}
+	shaper := &eventErrPayloadShaper{failEvent: "flow-1/handler.succeeded"}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending", "done"),
 		StateRepo:     stateRepo,
@@ -4616,7 +4616,7 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 	if err == nil || !strings.Contains(err.Error(), "payload shape failed") {
 		t.Fatalf("Execute error = %v, want payload shape failed", err)
 	}
-	if got := shaper.shaped; !reflect.DeepEqual(got, []string{"rule.emitted", "handler.succeeded"}) {
+	if got := shaper.shaped; !reflect.DeepEqual(got, []string{"flow-1/rule.emitted", "flow-1/handler.succeeded"}) {
 		t.Fatalf("payload shaper order = %#v", got)
 	}
 	if got := len(publications.intents); got != 0 {
@@ -5664,8 +5664,9 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 			}, nil, map[string]map[string]any{})
 			state.EntityID = identity.NormalizeEntityID(targetEntityID)
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-				EntityID: targetEntityID,
-				Node:     testFlowExecutableNode(t, "validation", "validation-router"),
+				EntityID:       targetEntityID,
+				Node:           testFlowExecutableNode(t, "validation", "validation-router"),
+				ProducerSource: eventtest.ConcreteTemplateRoutingSource("validation", targetFlowInstance, targetEntityID),
 				Event: eventtest.RunCreatingRootIngress(
 					"evt-1",
 					"scoring/vertical.resumed",
@@ -5789,7 +5790,7 @@ func TestExecutor_EmitIntentUsesExplicitProducerSourceWhenStateFlowPathNormalize
 	}
 
 	producerSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
-		FlowID: "root", FlowInstance: "source/inst-1", EntityID: "entity-1",
+		FlowID: "root", FlowInstance: "root/inst-1", EntityID: "entity-1",
 	})
 	if err != nil {
 		t.Fatalf("NewConcreteTemplateInstanceRoutingSource: %v", err)
@@ -5824,8 +5825,8 @@ func TestExecutor_EmitIntentUsesExplicitProducerSourceWhenStateFlowPathNormalize
 	if got := len(result.EmitIntents); got != 1 {
 		t.Fatalf("EmitIntents count = %d, want 1", got)
 	}
-	if got := result.EmitIntents[0].Event.FlowInstance(); got != "source/inst-1" {
-		t.Fatalf("emitted flow_instance = %q, want explicit producer source/inst-1", got)
+	if got := result.EmitIntents[0].Event.FlowInstance(); got != "root/inst-1" {
+		t.Fatalf("emitted flow_instance = %q, want explicit producer root/inst-1", got)
 	}
 }
 
@@ -6010,8 +6011,9 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 	state.EntityID = identity.NormalizeEntityID("child-ent")
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "child-ent",
-		Node:     testFlowExecutableNode(t, "child", "child-node"),
+		EntityID:       "child-ent",
+		Node:           testFlowExecutableNode(t, "child", "child-node"),
+		ProducerSource: eventtest.ConcreteTemplateRoutingSource("child", "child/inst-1", "child-ent"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"child/requested",
@@ -6077,7 +6079,7 @@ func TestExecutor_LoweredConnectEmissionRemainsTargetlessBeforeEventBus(t *testi
 		EntityID: "child-source", Node: testFlowExecutableNode(t, "child", "child-node"), ProducerSource: producerSource,
 		Event: eventtest.RunCreatingRootIngress("evt-connect", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "",
 			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: "inbound-owner"}), time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child/inst-1/child.done"}}, State: state,
+		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -6105,7 +6107,7 @@ func TestExecutor_NestedStaticOutputUsesExactCurrentDeliveryTarget(t *testing.T)
 	currentOwner := events.RouteIdentity{FlowID: "root", FlowInstance: "root/run-1", EntityID: "current-owner"}
 	inboundOwner := events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: "inbound-owner"}
 	producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
-		FlowID: "child", FlowInstance: "root/child", EntityID: "source-owner",
+		FlowID: "root/child", FlowInstance: "root/child", EntityID: "source-owner",
 	})
 	if err != nil {
 		t.Fatalf("producer source: %v", err)
@@ -6113,10 +6115,10 @@ func TestExecutor_NestedStaticOutputUsesExactCurrentDeliveryTarget(t *testing.T)
 	state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, nil, map[string]map[string]any{})
 	state.EntityID = identity.NormalizeEntityID(currentOwner.EntityID)
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "child", "child-node")), Target: events.MustExistingEntityTarget(currentOwner),
+		Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "root/child", "child-node")), Target: events.MustExistingEntityTarget(currentOwner),
 	})
 	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{
-		EntityID: identity.NormalizeEntityID(currentOwner.EntityID), Node: testFlowExecutableNode(t, "child", "child-node"), ProducerSource: producerSource,
+		EntityID: identity.NormalizeEntityID(currentOwner.EntityID), Node: testFlowExecutableNode(t, "root/child", "child-node"), ProducerSource: producerSource,
 		Event: eventtest.RunCreatingRootIngress("evt-static", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "",
 			events.EnvelopeForTargetRoute(events.EventEnvelope{}, inboundOwner), time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
@@ -6142,7 +6144,7 @@ func TestExecutor_NestedStaticOutputRejectsMissingOrEntitylessCurrentDelivery(t 
 	}{
 		{name: "missing", ctx: context.Background()},
 		{name: "entityless", ctx: runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "child", "child-node")),
+			Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "root/child", "child-node")),
 			Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "root", FlowInstance: "root/run-1"}),
 		})},
 	} {
@@ -6153,14 +6155,14 @@ func TestExecutor_NestedStaticOutputRejectsMissingOrEntitylessCurrentDelivery(t 
 			if err != nil {
 				t.Fatalf("NewExecutor error: %v", err)
 			}
-			producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "child", FlowInstance: "root/child", EntityID: "source-owner"})
+			producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "root/child", FlowInstance: "root/child", EntityID: "source-owner"})
 			if err != nil {
 				t.Fatalf("producer source: %v", err)
 			}
 			state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, nil, map[string]map[string]any{})
 			state.EntityID = identity.NormalizeEntityID("state-owner")
 			result, err := exec.ExecuteSemanticFixture(tc.ctx, ExecutionRequest{
-				EntityID: "state-owner", Node: testFlowExecutableNode(t, "child", "child-node"), ProducerSource: producerSource,
+				EntityID: "state-owner", Node: testFlowExecutableNode(t, "root/child", "child-node"), ProducerSource: producerSource,
 				Event:   eventtest.RunCreatingRootIngress("evt-static-hostile", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
 			})
@@ -6187,8 +6189,9 @@ func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T)
 	state.EntityID = identity.NormalizeEntityID("child-ent")
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "child-ent", Node: testFlowExecutableNode(t, "child", "child-node"),
-		Event:   eventtest.RunCreatingRootIngress("evt-partial-parent", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
+		ProducerSource: eventtest.ConcreteTemplateRoutingSource("child", "child/inst-1", "child-ent"),
+		Event:          eventtest.RunCreatingRootIngress("evt-partial-parent", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler:        runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
 	})
 	if err == nil || !strings.Contains(err.Error(), "parent_route_incomplete") {
 		t.Fatalf("Execute error = %v, want parent_route_incomplete", err)
@@ -6204,6 +6207,7 @@ func sourceWithChildOutputPin() semanticview.Source {
 			FlowPath: "child",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode:         runtimecontracts.FlowModeTemplate,
 			InitialState: "running", States: []string{"running"},
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
@@ -6234,7 +6238,7 @@ func sourceWithChildOutputPin() semanticview.Source {
 
 func sourceWithNestedStaticOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "root/child"},
 		Schema: runtimecontracts.FlowSchemaDocument{InitialState: "running", States: []string{"running"}, Mode: runtimecontracts.FlowModeStatic, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
 			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
@@ -6243,10 +6247,10 @@ func sourceWithNestedStaticOutputPin() semanticview.Source {
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"root/child": child.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{child}},
-			ByID: map[string]*runtimecontracts.FlowContractView{"child": &child},
+			ByID: map[string]*runtimecontracts.FlowContractView{"root/child": &child},
 		},
 	}
 	return mustCompileEngineSource(bundle)

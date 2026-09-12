@@ -1445,30 +1445,14 @@ func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberK
 		}
 	}
 	out := make([]routeResolvedPattern, 0, len(admission.RoutePatterns()))
-	for _, pattern := range admission.RoutePatterns() {
+	for _, pattern := range admission.RoutePatternsAt(routePath) {
 		out = append(out, routeResolvedPattern{
-			EventPattern:   rebaseAdmittedSubscriptionPattern(pattern, authorityPath, routePath),
+			EventPattern:   pattern,
 			routeSource:    subscriberRouteSourceSubscription,
 			LocalizedEvent: admission.LocalEvent(),
 		})
 	}
 	return out, nil
-}
-
-func rebaseAdmittedSubscriptionPattern(pattern, authorityPath, routePath string) string {
-	pattern = eventidentity.Normalize(pattern)
-	authorityPath = eventidentity.Normalize(authorityPath)
-	routePath = eventidentity.Normalize(routePath)
-	if pattern == "" || authorityPath == routePath || authorityPath == "" {
-		return pattern
-	}
-	if pattern == authorityPath {
-		return routePath
-	}
-	if strings.HasPrefix(pattern, authorityPath+"/") {
-		return eventidentity.Normalize(routePath + strings.TrimPrefix(pattern, authorityPath))
-	}
-	return pattern
 }
 
 func routeClassifyAuthoredSubscription(source semanticview.Source, kind subscriberKind, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) semanticview.AuthoredSubscriptionAdmission {

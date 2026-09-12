@@ -978,7 +978,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 func TestRoutedNodeInternalSubscriptionAliases_NestedSemanticScopeDoesNotLeakParentConcreteRoute(t *testing.T) {
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		"",
-		events.EventType("child/grandchild/micro.started"),
+		events.EventType("child/grandchild/inst-1/micro.started"),
 		"",
 		"",
 		nil,
@@ -986,11 +986,11 @@ func TestRoutedNodeInternalSubscriptionAliases_NestedSemanticScopeDoesNotLeakPar
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "child/grandchild/inst-1"),
-		eventtest.ConcreteTemplateRoutingSource("grandchild", "child/grandchild/inst-1", eventtest.UUID("grandchild-source")),
+		eventtest.ConcreteTemplateRoutingSource("child/grandchild", "child/grandchild/inst-1", eventtest.UUID("grandchild-source")),
 		time.Time{},
 	)
 
-	aliases := routedNodeInternalSubscriptionAliases(evt, []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "grandchild", "grandchild-worker")), Path: "child/grandchild"}})
+	aliases := routedNodeInternalSubscriptionAliases(evt, []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child/grandchild", "grandchild-worker")), Path: "child/grandchild/inst-1"}})
 
 	for _, alias := range aliases {
 		if alias == "child/inst-1/micro.started" {
@@ -1348,13 +1348,13 @@ func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *test
 		{
 			name:             "static_uses_declared_receiver_scope",
 			mode:             runtimecontracts.FlowModeStatic,
-			routingSource:    eventtest.StaticFlowRoutingSource("validation", "validation/instance-a", eventtest.UUID("static-source")),
+			routingSource:    eventtest.StaticFlowRoutingSource("validation", "validation", eventtest.UUID("static-source")),
 			wantFlowInstance: "validation",
 		},
 		{
 			name:             "singleton_uses_declared_receiver_scope",
 			mode:             runtimecontracts.FlowModeSingleton,
-			routingSource:    eventtest.StaticFlowRoutingSource("validation", "validation/instance-a", eventtest.UUID("singleton-source")),
+			routingSource:    eventtest.StaticFlowRoutingSource("validation", "validation", eventtest.UUID("singleton-source")),
 			wantFlowInstance: "validation",
 		},
 	}
@@ -1374,14 +1374,14 @@ func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *test
 				},
 			})
 			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
-				uuid.NewString(), "validation/thing.reviewed", "validator", "", nil, 0, uuid.NewString(),
-				events.EnvelopeForFlowInstance(events.EventEnvelope{}, "validation/instance-a"),
+				uuid.NewString(), events.EventType(tt.wantFlowInstance+"/thing.reviewed"), "validator", "", nil, 0, uuid.NewString(),
+				events.EnvelopeForFlowInstance(events.EventEnvelope{}, tt.wantFlowInstance),
 				tt.routingSource, time.Now().UTC(),
 			)
 			subscriber := Subscriber{
 				Recipient:    events.MustNodeDeliveryRecipient(testFlowNode(t, "validation", "entity-writer")),
-				Path:         "validation",
-				MatchPattern: "validation/thing.reviewed",
+				Path:         tt.wantFlowInstance,
+				MatchPattern: tt.wantFlowInstance + "/thing.reviewed",
 				routeSource:  subscriberRouteSourceSubscription,
 			}
 

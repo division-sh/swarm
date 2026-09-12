@@ -18,6 +18,7 @@ func TestProposedEffectOutcomeEventRoutesExactTypedVerdicts(t *testing.T) {
 	parent := eventtest.RuntimeControl(uuid.NewString(), workflowGateDecisionEventType, "platform", "", []byte(`{"card_id":"card-1"}`), 0,
 		uuid.NewString(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), now)
 	continuation := decisioncard.ProposedEffectContinuation{
+		FlowID:     ".",
 		ActivityID: "send_support_reply", Tool: "telegram.send_message", EffectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 		EffectContentHash: "sha256:effect", SourceTaskID: "task-1",
 		EntityID: parent.EntityID(), FlowInstance: "root",

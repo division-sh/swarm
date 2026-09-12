@@ -1878,7 +1878,7 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 		0,
 		busInternalTestRunID,
 		"",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("ent-operating")}),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("ent-operating")}),
 		time.Now().UTC(),
 	)
 
@@ -2209,8 +2209,8 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		0,
 		"",
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-validation")), "validation/inst-1"),
-		eventtest.ConcreteTemplateRoutingSource("validation", "validation/inst-1", eventtest.UUID("ent-validation")),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-validation")), "validation"),
+		eventtest.StaticFlowRoutingSource("validation", "validation", eventtest.UUID("ent-validation")),
 		time.Now().UTC(),
 	)
 
@@ -2266,8 +2266,8 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		0,
 		"",
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-validation")), "validation/inst-1"),
-		eventtest.ConcreteTemplateRoutingSource("validation", "validation/inst-1", eventtest.UUID("ent-validation")),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-validation")), "validation"),
+		eventtest.StaticFlowRoutingSource("validation", "validation", eventtest.UUID("ent-validation")),
 		time.Now().UTC(),
 	)
 

@@ -753,35 +753,18 @@ func targetedConcreteEventKeysForPlan(evt events.Event) []string {
 		if flowInstance == "" {
 			continue
 		}
-		staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
+		staticScope := target.FlowID
 		if staticScope == "" {
 			continue
 		}
-		localEvent := eventContextLocalEventForFlowInstance(eventType, staticScope)
-		if localEvent == "" {
+		localEvent := eventidentity.LocalizeForFlow(staticScope, nil, eventType)
+		if localEvent == "" || strings.Contains(localEvent, "/") {
 			continue
 		}
 		out = append(out, flowInstance+"/"+localEvent)
 		out = append(out, localEvent)
 	}
 	return uniqueStrings(out)
-}
-
-func concreteFlowInstanceEventKey(evt events.Event) string {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	flowInstance := exactEventFlowInstance(evt)
-	if eventType == "" || flowInstance == "" {
-		return ""
-	}
-	staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
-	if staticScope == "" {
-		return ""
-	}
-	localEvent := eventContextLocalEventForFlowInstance(eventType, staticScope)
-	if localEvent == "" {
-		return ""
-	}
-	return flowInstance + "/" + localEvent
 }
 
 func exactEventFlowInstance(evt events.Event) string {
@@ -792,25 +775,6 @@ func exactEventFlowInstance(evt events.Event) string {
 	default:
 		return ""
 	}
-}
-
-func eventContextLocalEventForFlowInstance(eventType, staticScope string) string {
-	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
-	staticScope = strings.Trim(strings.TrimSpace(staticScope), "/")
-	if eventType == "" || staticScope == "" {
-		return ""
-	}
-	if strings.HasPrefix(eventType, staticScope+"/") {
-		localEvent := strings.TrimPrefix(eventType, staticScope+"/")
-		if localEvent == "" || strings.Contains(localEvent, "/") {
-			return ""
-		}
-		return localEvent
-	}
-	if strings.Contains(eventType, "/") {
-		return ""
-	}
-	return eventType
 }
 
 func deliveryRecipientIDs(in []deliveryRecipientCandidate) []string {
@@ -1331,9 +1295,6 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 		return nil
 	}
 	out := []string{eventType}
-	if concrete := concreteFlowInstanceEventKey(evt); concrete != "" {
-		out = append(out, concrete)
-	}
 	for _, subscriber := range routed {
 		if localized := eventidentity.Normalize(subscriber.LocalizedEvent); localized != "" {
 			out = append(out, localized)
@@ -1344,14 +1305,17 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
-		eventType := routedNodeConcreteEventKey(evt, subscriber)
-		instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-		flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-		if instancePath == "" || instancePath != flowInstance || !strings.HasPrefix(eventType, instancePath+"/") {
-			continue
+		localEvent := eventidentity.Normalize(subscriber.LocalizedEvent)
+		if localEvent == "" {
+			// A wildcard match has no single declaration-local event. Localize
+			// only the exact, already routed execution prefix for its carrier.
+			localEvent, _ = strings.CutPrefix(eventType, subscriber.Path+"/")
+			if localEvent == eventType {
+				continue
+			}
 		}
-		localEvent := strings.TrimPrefix(eventType, instancePath+"/")
-		staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(instancePath)
+		node, _ := subscriber.Recipient.Node()
+		staticScope := node.FlowPath()
 		if localEvent == "" || staticScope == "" {
 			continue
 		}
@@ -1361,29 +1325,10 @@ func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber
 }
 
 func routedNodeMatchesConcreteFlowInstanceEvent(evt events.Event, subscriber Subscriber) bool {
-	return routedNodeConcreteEventKey(evt, subscriber) != ""
-}
-
-func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string {
-	if !subscriber.Recipient.IsNode() {
-		return ""
-	}
-	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	flowInstance := exactEventFlowInstance(evt)
-	if instancePath == "" || flowInstance == "" || instancePath != flowInstance {
-		staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)
-		if staticScope == "" || instancePath != staticScope {
-			return ""
-		}
-	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	if eventType != "" && strings.HasPrefix(eventType, flowInstance+"/") {
-		if instancePath == flowInstance {
-			return eventType
-		}
-		return ""
-	}
-	return concreteFlowInstanceEventKey(evt)
+	node, ok := subscriber.Recipient.Node()
+	return ok && exactEventFlowInstance(evt) != "" &&
+		subscriber.Path == exactEventFlowInstance(evt) &&
+		node.FlowPath() == evt.RoutingSource().Route().FlowID
 }
 
 func uniqueRouteIdentities(in []events.RouteIdentity) []events.RouteIdentity {

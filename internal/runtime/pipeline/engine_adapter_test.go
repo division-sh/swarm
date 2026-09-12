@@ -2844,11 +2844,12 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 		}, runtimeengine.ExecutionContext{
 			Base: base,
 			Request: runtimeengine.ExecutionRequest{
-				EntityID:       identity.NormalizeEntityID(entityID),
-				Node:           mustPipelineNode("", "artifact-node"),
-				Route:          runtimeflowidentity.RouteForInstancePath(route),
-				Event:          evt,
-				ProducerSource: mustRootExecutionRoutingSource(entityID),
+				ExecutionFlowID: identity.NormalizeFlowID("."),
+				EntityID:        identity.NormalizeEntityID(entityID),
+				Node:            mustPipelineNode("", "artifact-node"),
+				Route:           runtimeflowidentity.RouteForInstancePath(route),
+				Event:           evt,
+				ProducerSource:  mustRootExecutionRoutingSource(entityID),
 				State: runtimeengine.StateSnapshot{
 					EntityID:        identity.NormalizeEntityID(entityID),
 					WorkflowName:    ".",

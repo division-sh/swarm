@@ -2096,26 +2096,13 @@ func (eb *EventBus) localizedSubscriberEvent(eventType string, subscriber Subscr
 	if localized := eventidentity.Normalize(subscriber.LocalizedEvent); localized != "" {
 		return localized
 	}
-	candidates := []string{eventType, subscriber.MatchPattern}
-	if eb != nil && eb.semanticSource != nil {
-		flowID := strings.TrimSpace(routeFlowIDForPath(eb.semanticSource, subscriber.Path))
-		if flowID != "" {
-			scope := eventidentity.Scope{
-				Path:        strings.Trim(strings.TrimSpace(subscriber.Path), "/"),
-				InputEvents: append([]string{}, eb.semanticSource.FlowInputEvents(flowID)...),
-			}
-			for _, candidate := range candidates {
-				if localized := scope.LocalizeInput(candidate); localized != "" && localized != eventidentity.Normalize(candidate) {
-					return localized
-				}
-			}
-		}
+	if eb == nil || eb.semanticSource == nil {
+		return ""
 	}
-	for _, candidate := range candidates {
-		normalized := eventidentity.Normalize(candidate)
-		if leaf := eventidentity.LeafName(normalized); leaf != "" && leaf != normalized {
-			return leaf
-		}
+	node, _ := subscriber.Recipient.Node()
+	localized := eventidentity.LocalizeForFlow(subscriber.Path, nil, eventType)
+	if resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(eb.semanticSource, node, localized); resolved.Matched {
+		return localized
 	}
 	return ""
 }

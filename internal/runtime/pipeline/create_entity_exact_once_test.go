@@ -278,7 +278,7 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(pc.SemanticSource())) && strings.TrimSpace(evt.RunID()) != "" {
 		flowInstance = strings.Trim(strings.TrimSpace(evt.RunID()), "/")
 	}
-	if concrete := evt.FlowInstance(); concrete == scope.Path || (scope.Mode == "template" && strings.HasPrefix(concrete, scope.Path+"/")) {
+	if concrete := evt.FlowInstance(); concrete != "" && (concrete == scope.Path || (scope.Mode == "template" && strings.HasPrefix(concrete, scope.Path+"/"))) {
 		flowInstance = concrete
 	}
 	if flowInstance == "" && strings.TrimSpace(flowID) == "" {

@@ -763,10 +763,10 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 		t.Fatalf("published activity result contexts = %#v, want %q", bus.publishContexts, intent.Context.ReplyContextID())
 	}
 	evt := bus.publishes[0]
-	if got := evt.Type(); got != events.EventType("research.scanner_source_scrape.succeeded") {
+	if got := evt.Type(); got != events.EventType("research/entity-1/research.scanner_source_scrape.succeeded") {
 		t.Fatalf("event type = %q", got)
 	}
-	if got, want := evt.ID(), activityResultEventID(intent, intent.SuccessEvent); got != want {
+	if got, want := evt.ID(), activityResultEventID(intent, "research/entity-1/research.scanner_source_scrape.succeeded"); got != want {
 		t.Fatalf("result event id = %q, want deterministic %q", got, want)
 	}
 	if got := evt.ParentEventID(); got != "evt-1" {
@@ -879,7 +879,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 		t.Fatalf("published events = %d, want 1 failure event", len(bus.publishes))
 	}
 	evt := bus.publishes[0]
-	if got := evt.Type(); got != events.EventType("research.scanner_source_scrape.failed") {
+	if got := evt.Type(); got != events.EventType("research/entity-1/research.scanner_source_scrape.failed") {
 		t.Fatalf("event type = %q, want failure", got)
 	}
 	var payload map[string]any
@@ -947,7 +947,7 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 		t.Fatalf("published events = %d, want 1", len(bus.publishes))
 	}
 	evt := bus.publishes[0]
-	if got := evt.Type(); got != events.EventType(intent.SuccessEvent) {
+	if got := evt.Type(); got != events.EventType("research/entity-1/"+intent.SuccessEvent) {
 		t.Fatalf("event type = %q, want success", got)
 	}
 	var payload map[string]any
@@ -1447,8 +1447,8 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 		t.Fatalf("published events = %d, want one generated activity result", len(bus.publishes))
 	}
 	resultEvent := bus.publishes[0]
-	if resultEvent.Type() != events.EventType(intent.SuccessEvent) {
-		t.Fatalf("result event type = %q, want %q", resultEvent.Type(), intent.SuccessEvent)
+	if resultEvent.Type() != events.EventType("research/entity-1/"+intent.SuccessEvent) {
+		t.Fatalf("result event type = %q, want %q", resultEvent.Type(), "research/entity-1/"+intent.SuccessEvent)
 	}
 	if resultEvent.ParentEventID() != inboundEvent.ID() {
 		t.Fatalf("result parent event id = %q, want inbound event id %q", resultEvent.ParentEventID(), inboundEvent.ID())
@@ -1519,7 +1519,7 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("server calls = %d, want no automatic retry for non-idempotent write", calls)
 	}
-	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
+	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType("research/entity-1/"+intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
 	}
 	rec, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
@@ -1566,7 +1566,7 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 	if calls != 1 {
 		t.Fatalf("transport calls = %d, want one post-start dispatch attempt", calls)
 	}
-	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
+	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType("research/entity-1/"+intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
 	}
 	var payload map[string]any
@@ -1824,7 +1824,7 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 	if !ok || rec.Status != ActivityAttemptStatusSucceeded {
 		t.Fatalf("journal after release = (%v, %q), want succeeded", ok, rec.Status)
 	}
-	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.SuccessEvent) {
+	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType("research/entity-1/"+intent.SuccessEvent) {
 		t.Fatalf("publishes after release = %#v, want one success event", bus.publishes)
 	}
 }
@@ -1876,7 +1876,7 @@ func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t
 	} else if !ok || rec.Status != ActivityAttemptStatusFailed {
 		t.Fatalf("activity attempt = %#v found=%v, want journaled failed claim", rec, ok)
 	}
-	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
+	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType("research/entity-1/"+intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
 	}
 	failure := requireActivityEventFailure(t, bus.publishes[0])
@@ -1933,7 +1933,7 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBefo
 	} else if !ok || rec.Status != ActivityAttemptStatusFailed {
 		t.Fatalf("activity attempt = %#v found=%v, want journaled failed claim", rec, ok)
 	}
-	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
+	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType("research/entity-1/"+intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
 	}
 	failure := requireActivityEventFailure(t, bus.publishes[0])
