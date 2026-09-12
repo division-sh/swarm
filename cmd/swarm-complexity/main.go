@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -89,8 +90,51 @@ func run(ctx context.Context, o options, out io.Writer) error {
 }
 
 func encode(v any) ([]byte, error) {
+	if b, ok := v.(baseline); ok {
+		return encodeBaseline(b)
+	}
 	b, err := json.MarshalIndent(v, "", "  ")
 	return append(b, '\n'), err
+}
+
+// Keep the checked-in inventory diffable without ten lines of indentation per score.
+func encodeBaseline(b baseline) ([]byte, error) {
+	var out bytes.Buffer
+	p, err := json.Marshal(b.Policy)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(&out, "{\n  \"policy\": %s,\n  \"files\": [\n", p)
+	for i, f := range b.Files {
+		r, err := json.Marshal(f)
+		if err != nil {
+			return nil, err
+		}
+		if i > 0 {
+			out.WriteString(",\n")
+		}
+		fmt.Fprintf(&out, "    %s", r)
+	}
+	out.WriteString("\n  ],\n  \"metrics\": {\n")
+	for i, metric := range []string{"cyclo", "cognit"} {
+		if i > 0 {
+			out.WriteString(",\n")
+		}
+		fmt.Fprintf(&out, "    %q: [\n", metric)
+		for j, row := range b.Metrics[metric] {
+			r, err := json.Marshal(row)
+			if err != nil {
+				return nil, err
+			}
+			if j > 0 {
+				out.WriteString(",\n")
+			}
+			fmt.Fprintf(&out, "      %s", r)
+		}
+		out.WriteString("\n    ]")
+	}
+	out.WriteString("\n  }\n}\n")
+	return out.Bytes(), nil
 }
 
 func writeFile(path string, data []byte) error {

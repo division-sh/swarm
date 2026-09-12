@@ -229,7 +229,7 @@ func TestGitBaselineAndPolicyAdmission(t *testing.T) {
 	}
 	valid := measured(t, repo, head)
 	data, _ := encode(valid)
-	put(t, repo, baselinePath, strings.Replace(string(data), `"value": 1`, `"value": 999`, 1))
+	put(t, repo, baselinePath, strings.Replace(string(data), `"value":1`, `"value":999`, 1))
 	inflated := commit(t, repo)
 	if err := run(ctx, options{repo: repo, head: inflated, base: base}, io.Discard); err == nil {
 		t.Fatal("self bump passed")
