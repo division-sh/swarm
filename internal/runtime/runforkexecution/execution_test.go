@@ -3704,12 +3704,18 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 
 	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
+	entityID := sourceRunID
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002600, 0).UTC()
-	seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
+	historicalTarget := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID}
+	historicalRoute := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
+	historicalRoute.Target = events.MustExistingEntityTarget(historicalTarget)
+	seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
 		"test_entity",
-		selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "flow-a/1"), nil, loaded.SourceArtifactFact)
+		historicalRoute, nil, events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), loaded.SourceArtifactFact)
+	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $2::uuid AND entity_id = $3::uuid`, sourceRunID, sourceRunID, entityID); err != nil {
+		t.Fatalf("bind historical root agent receiver: %v", err)
+	}
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
