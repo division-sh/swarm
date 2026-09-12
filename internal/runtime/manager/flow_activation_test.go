@@ -3928,27 +3928,17 @@ func TestValidateAutoEmitPayload_AllowsNamedTypeThroughCanonicalSchema(t *testin
 	}
 }
 
-func TestNormalizedStaticFlowEmitEvents_ExternalizesLocalEvents(t *testing.T) {
-	got := normalizedStaticFlowEmitEvents(
-		[]string{"analysis.done", "shared.event"},
-		nil,
-		map[string]struct{}{"analysis.done": {}},
-		"analyzer-flow",
-	)
-	if len(got) != 2 || got[0] != "analyzer-flow/analysis.done" || got[1] != "shared.event" {
-		t.Fatalf("normalizedStaticFlowEmitEvents = %#v", got)
-	}
-}
-
-func TestNormalizedFlowAgentEmitEvents_ExternalizesInstanceLocalEvents(t *testing.T) {
-	got := normalizedFlowAgentEmitEvents(
-		[]string{"task.started", "shared.event"},
-		nil,
-		map[string]struct{}{"task.started": {}},
-		"parent/review/inst-1",
-	)
-	if len(got) != 2 || got[0] != "parent/review/inst-1/task.started" || got[1] != "shared.event" {
-		t.Fatalf("normalizedFlowAgentEmitEvents = %#v", got)
+func TestDeclaredAgentEmitEventsKeepPermissionIndependentOfInstance(t *testing.T) {
+	for _, flow := range []string{".", "analyzer-flow", "parent/review"} {
+		t.Run(flow, func(t *testing.T) {
+			got, err := declaredAgentEmitEvents([]string{"task.started", "shared.event", "task.started"}, nil, flow)
+			if err != nil || !reflect.DeepEqual(got, []string{"task.started", "shared.event"}) {
+				t.Fatalf("declaration permissions = %#v err=%v", got, err)
+			}
+			if got, err := declaredAgentEmitEvents([]string{"foreign/task.started"}, nil, flow); err == nil || got != nil {
+				t.Fatalf("foreign declaration acquired permission: %#v %v", got, err)
+			}
+		})
 	}
 }
 
@@ -4222,7 +4212,7 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 	}
 }
 
-func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsAndEmitEventsFromExactFlowPath(t *testing.T) {
+func TestBuildFlowAgentConfig_SeparatesSubscriptionRouteFromEmitDeclaration(t *testing.T) {
 	source := semanticview.Wrap(testNestedFlowBundle(t))
 	cfg, err := buildFlowAgentConfig(managerIdentityTestRunID,
 		source,
@@ -4249,8 +4239,8 @@ func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsAndEmitEventsFromExa
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "child/grandchild/inst-1/micro.started" {
 		t.Fatalf("subscriptions = %#v, want [child/grandchild/inst-1/micro.started]", cfg.Subscriptions)
 	}
-	if len(cfg.EmitEvents) != 1 || cfg.EmitEvents[0] != "child/grandchild/inst-1/micro.started" {
-		t.Fatalf("emit_events = %#v, want [child/grandchild/inst-1/micro.started]", cfg.EmitEvents)
+	if len(cfg.EmitEvents) != 1 || cfg.EmitEvents[0] != "micro.started" {
+		t.Fatalf("emit_events = %#v, want [micro.started]", cfg.EmitEvents)
 	}
 }
 
@@ -4357,8 +4347,8 @@ func TestStaticFlowRequiredAgentMaterializationRegistersSubscriptions(t *testing
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "analyzer-flow/analysis.requested" {
 		t.Fatalf("subscriptions = %#v, want [analyzer-flow/analysis.requested]", cfg.Subscriptions)
 	}
-	if got := cfg.EmitEvents; len(got) != 1 || got[0] != "analyzer-flow/analysis.done" {
-		t.Fatalf("emit_events = %#v, want [analyzer-flow/analysis.done]", got)
+	if got := cfg.EmitEvents; len(got) != 1 || got[0] != "analysis.done" {
+		t.Fatalf("emit_events = %#v, want [analysis.done]", got)
 	}
 }
 
@@ -4814,8 +4804,8 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	if got := cfg.Tools; len(got) != 2 || got[0] != "check_status" || got[1] != "schedule" {
 		t.Fatalf("tools = %#v, want [check_status schedule]", got)
 	}
-	if got := cfg.EmitEvents; len(got) != 2 || got[0] != "review/inst-1/review.failed" || got[1] != "review/inst-1/task.completed" {
-		t.Fatalf("emit_events = %#v, want [review/inst-1/review.failed review/inst-1/task.completed]", got)
+	if got := cfg.EmitEvents; len(got) != 2 || got[0] != "review.failed" || got[1] != "task.completed" {
+		t.Fatalf("emit_events = %#v, want [review.failed task.completed]", got)
 	}
 	if !cfg.NativeTools.Bash || !cfg.NativeTools.FileIO {
 		t.Fatalf("native_tools = %#v, want bash/file_io true", cfg.NativeTools)

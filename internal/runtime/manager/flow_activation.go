@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -645,7 +646,17 @@ func buildDynamicFlowRuntimeCreationEventPlan(
 	if strings.TrimSpace(lineage.RunID) == "" || strings.TrimSpace(lineage.ParentEventID) == "" {
 		return nil, fmt.Errorf("auto-emit %s requires exact trigger run_id and parent_event_id", autoEmit)
 	}
-	eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
+	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: templateID, FlowInstance: flowPath, EntityID: flowEntityID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("auto-emit %s source: %w", autoEmit, err)
+	}
+	publication, err := runtimepinrouting.AdmitPublicationIdentity(templateID, autoEmit, routingSource)
+	if err != nil {
+		return nil, fmt.Errorf("auto-emit %s identity: %w", autoEmit, err)
+	}
+	eventType := string(publication)
 	payload := map[string]any{}
 	for key, value := range config {
 		key = strings.TrimSpace(key)
@@ -1249,6 +1260,10 @@ func buildFlowAgentBlueprint(
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s permissions: %w", key, err)
 	}
+	emitEvents, err := declaredAgentEmitEvents(entry.EmitEvents, vars, templateID)
+	if err != nil {
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s emit declarations: %w", key, err)
+	}
 
 	cfg := models.AgentConfig{
 		ID:              agentID,
@@ -1264,7 +1279,7 @@ func buildFlowAgentBlueprint(
 		Prompt:          prompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
 		Subscriptions:   rendered,
-		EmitEvents:      normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/")),
+		EmitEvents:      emitEvents,
 		Tools:           normalizedConfiguredToolList(entry.ConfiguredTools()),
 		Permissions:     permissions,
 		NativeTools:     nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
@@ -1446,6 +1461,10 @@ func buildStaticFlowAgentBlueprint(
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s permissions: %w", logicalID, err)
 	}
+	emitEvents, err := declaredAgentEmitEvents(entry.EmitEvents, vars, flowID)
+	if err != nil {
+		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s emit declarations: %w", logicalID, err)
+	}
 	cfg := models.AgentConfig{
 		ID:              agentID,
 		Type:            strings.TrimSpace(entry.Type),
@@ -1459,7 +1478,7 @@ func buildStaticFlowAgentBlueprint(
 		Prompt:          prompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
 		Subscriptions:   rendered,
-		EmitEvents:      normalizedStaticFlowEmitEvents(entry.EmitEvents, vars, localEvents, flowPath),
+		EmitEvents:      emitEvents,
 		Tools:           normalizedConfiguredToolList(entry.ConfiguredTools()),
 		Permissions:     permissions,
 		NativeTools:     nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
@@ -1484,29 +1503,22 @@ func assembleResolvedAgentPrompt(source semanticview.Source, flowID string, entr
 	return runtimecontracts.AssembleAgentPrompt(bundle, flowID, entry, nil)
 }
 
-func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath string) []string {
+// Emit permissions retain declaration identity. Concrete specialization belongs
+// to publication, after the exact producer source is admitted.
+func declaredAgentEmitEvents(events []string, vars map[string]string, flowID string) ([]string, error) {
 	rendered := normalizedConfiguredEventList(events, vars)
 	if len(rendered) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]string, 0, len(rendered))
 	for _, eventType := range rendered {
-		out = append(out, eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), eventType))
+		declaration, err := eventidentity.AdmitPublicationDeclaration(flowID, eventType)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, declaration.Local())
 	}
-	return dedupeStrings(out)
-}
-
-func normalizedStaticFlowEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath string) []string {
-	rendered := normalizedConfiguredEventList(events, vars)
-	if len(rendered) == 0 {
-		return nil
-	}
-	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
-	out := make([]string, 0, len(rendered))
-	for _, eventType := range rendered {
-		out = append(out, eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), eventType))
-	}
-	return dedupeStrings(out)
+	return dedupeStrings(out), nil
 }
 
 func localEventList(localEvents map[string]struct{}) []string {
