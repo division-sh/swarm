@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -325,5 +326,108 @@ func TestEventAdmission(t *testing.T) {
 		if err := applyEvent(&o); err == nil {
 			t.Fatal("invalid options admitted", o)
 		}
+	}
+}
+
+func TestCollectorFailuresAndCanonicalOrder(t *testing.T) {
+	ctx := context.Background()
+	t.Run("tool-failure", func(t *testing.T) {
+		repo := fixtureRepo(t, map[string]string{"p.go": "package p\nfunc F(){}"})
+		_, err := measure(ctx, repo, "HEAD", func(context.Context, string, string) ([]byte, error) { return nil, fmt.Errorf("tool failed") })
+		if err == nil || !strings.Contains(err.Error(), "tool failed") {
+			t.Fatal(err)
+		}
+	})
+	t.Run("missing-executable", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		if _, err := upstream(ctx, t.TempDir(), "cyclo"); err == nil {
+			t.Fatal("missing go executable accepted")
+		}
+	})
+	t.Run("pinned-invocation-and-diagnostic", func(t *testing.T) {
+		dir := t.TempDir()
+		// This is an invocation/failure control, not a substitute complexity scorer.
+		put(t, dir, "go", "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ARGS_PATH\"\nprintf 'analyzer skipped a file\\n' >&2\n")
+		if err := os.Chmod(filepath.Join(dir, "go"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir)
+		argsFile := filepath.Join(dir, "args")
+		t.Setenv("ARGS_PATH", argsFile)
+		for _, metric := range []string{"cyclo", "cognit"} {
+			if _, err := upstream(ctx, dir, metric); err == nil {
+				t.Fatal("diagnostic ignored")
+			}
+			args, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "run\n" + toolModules[metric] + "\n"
+			if metric == "cognit" {
+				want += "-over=-1\n"
+			}
+			want += dir + "\n"
+			if string(args) != want {
+				t.Fatalf("unpinned invocation %q", args)
+			}
+		}
+	})
+	t.Run("order-path-and-receiver", func(t *testing.T) {
+		expected := population{
+			"/tmp/a.go:2:1": {identity{"a.go", "p", "declaration", "(T).F", 1}, "(T).F", "p"},
+			"/tmp/b.go:2:1": {identity{"b.go", "p", "declaration", "(*T).F", 1}, "(*T).F", "p"},
+		}
+		a, b := "1 p (T).F /tmp/a.go:2:1", "2 p (*T).F /tmp/b.go:2:1"
+		forward, err := normalize("cyclo", []byte(a+"\n"+b), expected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reverse, err := normalize("cyclo", []byte(b+"\n"+a), expected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(forward, reverse) || forward[0].Identity == forward[1].Identity {
+			t.Fatal("identity/order collision")
+		}
+	})
+}
+
+func TestMalformedSnapshotAndArtifactFacts(t *testing.T) {
+	for _, data := range []string{"", "bad header\n", strings.Repeat("a", 40) + " blob 4\nabc", strings.Repeat("a", 40) + " blob -1\n"} {
+		if _, err := readBlob(bufio.NewReader(strings.NewReader(data)), strings.Repeat("a", 40)); err == nil {
+			t.Fatalf("accepted %q", data)
+		}
+	}
+	ctx := context.Background()
+	repo := fixtureRepo(t, map[string]string{"p.go": "package p\nfunc F(){}"})
+	if _, err := revision(ctx, repo, ""); err == nil {
+		t.Fatal("empty revision")
+	}
+	if _, err := measure(ctx, repo, "absent", upstream); err == nil {
+		t.Fatal("absent snapshot")
+	}
+	b := measured(t, repo, "HEAD")
+	expected, _ := encode(b)
+	for name, mutate := range map[string]func(baseline) baseline{
+		"missing": func(b baseline) baseline { b.Metrics["cyclo"] = nil; return b },
+		"duplicate": func(b baseline) baseline {
+			b.Metrics["cyclo"] = append(b.Metrics["cyclo"], b.Metrics["cyclo"][0])
+			return b
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fresh := measured(t, repo, "HEAD")
+			bad, _ := encode(mutate(fresh))
+			put(t, repo, baselinePath, string(bad))
+			sha := commit(t, repo)
+			if err := checkBaseline(ctx, repo, sha, expected); err == nil {
+				t.Fatal("invalid artifact passed")
+			}
+		})
+	}
+	put(t, repo, baselinePath, strings.Replace(string(expected), `"schema":1`, `"schema":1,"unknown":true`, 1))
+	sha := commit(t, repo)
+	if err := checkBasePolicy(ctx, repo, sha, measured(t, repo, sha)); err == nil {
+		t.Fatal("unknown policy accepted")
 	}
 }
