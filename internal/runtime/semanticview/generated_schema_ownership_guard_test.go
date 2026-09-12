@@ -95,7 +95,7 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 	t.Helper()
 	pkgs, err := packages.Load(&packages.Config{Dir: agentNameGuardRepoRoot(t), Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedCompiledGoFiles},
-		"./internal/runtime/contracts", "./internal/runtime/semanticview", "./internal/runtime/bootverify", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/manager", "./internal/runtime/tools", "./internal/runtime/bus", "./internal/runtime/core/pinrouting", "./internal/runtime/accprojection", "./internal/runtime/scenarioderivation", "./internal/cliapp")
+		"./internal/runtime/contracts", "./internal/runtime/semanticview", "./internal/runtime/bootverify", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/manager", "./internal/runtime/tools", "./internal/runtime/bus", "./internal/runtime/core/pinrouting", "./internal/runtime/accprojection", "./internal/runtime/scenarioderivation", "./internal/cliapp", "./internal/store/internal/backend/decisionpersistence")
 	if err != nil {
 		t.Fatal(err)
 	}

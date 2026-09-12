@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -384,6 +385,15 @@ func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeE
 		default:
 			return decisioncard.ProposedEffectContinuation{}, false, fmt.Errorf("proposed-effect verdict %q has no route operation", current.Verdict)
 		}
+		source, err := card.Anchor.ExecutionRoutingSource()
+		if err != nil {
+			return decisioncard.ProposedEffectContinuation{}, false, fmt.Errorf("proposed-effect outcome source: %w", err)
+		}
+		publication, err := runtimepinrouting.AdmitPublicationIdentity(current.FlowID, expected.eventName, source)
+		if err != nil {
+			return decisioncard.ProposedEffectContinuation{}, false, fmt.Errorf("proposed-effect outcome publication: %w", err)
+		}
+		expected.eventName = string(publication)
 	}
 	if current.RouteEventID != "" && current.RouteEventID != current.DecisionEventID {
 		return decisioncard.ProposedEffectContinuation{}, false, fmt.Errorf("proposed-effect continuation has inconsistent route identity")

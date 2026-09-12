@@ -535,7 +535,7 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 		SuccessEvent: "support_reply.succeeded", FailureEvent: "support_reply.failed",
 		RevisionEvent: "support_reply.revision_requested", RejectedEvent: "support_reply.rejected",
 		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-		EntityID: entityID, NodeID: owner.Key(), FlowID: "", FlowInstance: "root",
+		EntityID: entityID, NodeID: owner.Key(), FlowID: ".", FlowInstance: "root",
 		HandlerEventKey: "support.drafted", SourceEventID: uuid.NewString(), SourceRunID: runID,
 		Generation: generation, ExecutionMode: "live", ReplyContextID: "reply-context-source", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()

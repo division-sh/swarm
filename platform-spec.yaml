@@ -4214,7 +4214,10 @@ handler_specification:
           required request or generated outcome event MUST already be visible in the active private workflow mutation,
           route_event_id MUST equal decision_event_id, and standalone or identity-inconsistent completion fails closed. A replay validates an already-completed
           request_released or outcome_dispatched route before checking the current bundle because no contract interpretation
-          remains. Revise and reject restore the continuation's opaque delivery context on the typed outcome. A started or
+          remains. For generated outcomes, transaction-local completion validates the same canonical publication identity
+          as the emitter, projecting the frozen declaration through the anchor's exact admitted execution source.
+          A local declaration spelling or another instance's name cannot satisfy that check; current source lookup and
+          suffix matching are forbidden. Revise and reject restore the continuation's opaque delivery context on the typed outcome. A started or
           uncertain attempt never redispatches.
         supersession: >
           Run termination and replacement of the owning loop generation may supersede a pending proposal through one CAS
