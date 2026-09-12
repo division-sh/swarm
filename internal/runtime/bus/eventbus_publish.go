@@ -1353,9 +1353,20 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	defer func() { err = errors.Join(err, closeDispatch()) }()
 
 	interception, err := eb.runInterceptorsForDeliveryRoutes(workCtx, evt, inboundPlan.DeliveryRoutes())
-	if err != nil {
+	drainDeferred := func() error {
+		var drainErr error
+		for _, d := range interception.Deferred {
+			drainErr = errors.Join(drainErr, eb.publishDeferred(workCtx, d))
+		}
+		interception.Deferred = nil
+		return drainErr
+	}
+	defer func() { err = errors.Join(err, drainDeferred()) }()
+	if err != nil && !interception.Outcome.Committed && interception.Outcome.ContinueDispatch() {
 		return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_dispatch_failed", eventBusFailure(err, "dispatch_committed_publish"))))
 	}
+	postCommitErr := err
+	defer func() { err = errors.Join(postCommitErr, err) }()
 	if _, retry := interception.Outcome.RetryRelease(); retry {
 		return nil
 	}
@@ -1399,10 +1410,8 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	}
 	eb.logPublished(ctx, evt, 0)
 
-	for _, d := range interception.Deferred {
-		if err := eb.publishDeferred(workCtx, d); err != nil {
-			return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_deferred_publish_failed", eventBusFailure(err, "publish_deferred"))))
-		}
+	if deferredErr := drainDeferred(); deferredErr != nil {
+		return errors.Join(deferredErr, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_deferred_publish_failed", eventBusFailure(deferredErr, "publish_deferred"))))
 	}
 	if evt.Type() == events.EventType("mailbox.card_decided") {
 		if err := publicationClaim.MarkDecisionProcessed(ctx); err != nil {
@@ -1482,8 +1491,8 @@ func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt ev
 	}
 	eventInterceptors, routeInterceptors := splitDeliveryRouteInterceptors(interceptors)
 	passthrough, deferred, outcome, err := eb.runInterceptorSet(ctx, evt, eventInterceptors)
-	if err != nil {
-		return deliveryRouteInterception{}, err
+	if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
+		return deliveryRouteInterception{EventPassthrough: passthrough, NodePassthrough: passthrough, Deferred: deferred, Outcome: outcome}, err
 	}
 	if !outcome.ContinueDispatch() {
 		return deliveryRouteInterception{
@@ -1491,21 +1500,24 @@ func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt ev
 			NodePassthrough:  passthrough,
 			Deferred:         deferred,
 			Outcome:          outcome,
-		}, nil
+		}, err
 	}
-	routePassthrough, routeDeferred, routeOutcome, err := eb.runNodeDeliveryRouteInterceptors(ctx, evt, nodeRoutes, routeInterceptors)
-	if err != nil {
-		return deliveryRouteInterception{}, err
+	routePassthrough, routeDeferred, routeOutcome, routeErr := eb.runNodeDeliveryRouteInterceptors(ctx, evt, nodeRoutes, routeInterceptors)
+	if routeErr != nil && !routeOutcome.Committed {
+		return deliveryRouteInterception{EventPassthrough: passthrough, NodePassthrough: routePassthrough, Deferred: append(deferred, routeDeferred...), Outcome: routeOutcome}, errors.Join(err, routeErr)
 	}
 	if len(routeDeferred) > 0 {
 		deferred = append(deferred, routeDeferred...)
+	}
+	if routeOutcome.ContinueDispatch() {
+		routeOutcome.Committed = routeOutcome.Committed || outcome.Committed
 	}
 	return deliveryRouteInterception{
 		EventPassthrough: passthrough,
 		NodePassthrough:  routePassthrough,
 		Deferred:         deferred,
 		Outcome:          routeOutcome,
-	}, nil
+	}, errors.Join(err, routeErr)
 }
 
 func nodeDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
@@ -1618,6 +1630,8 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 	}
 	passthrough := true
 	deferred := make([]events.Event, 0)
+	result := runtimepipelineobligation.Continue()
+	var postCommitErr error
 	type nodeDeliveryRouteKey struct {
 		recipient      events.DeliveryRecipient
 		target         events.RouteIdentity
@@ -1637,7 +1651,7 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 		seen[key] = struct{}{}
 		projected, err := projectEventForDeliveryRoute(evt, route)
 		if err != nil {
-			return passthrough, nil, runtimepipelineobligation.Continue(), err
+			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, err)
 		}
 		routeCtx := events.WithDeliveryContext(ctx, route.Context)
 		routeCtx = runtimedelivery.WithRoute(routeCtx, route)
@@ -1656,23 +1670,25 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 		}
 		for _, it := range interceptors {
 			pass, out, outcome, err := it.InterceptDeliveryRoute(routeCtx, projected, route)
-			if err != nil {
-				return passthrough, nil, runtimepipelineobligation.Continue(), err
+			if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
+				return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, err)
 			}
-			if !outcome.ContinueDispatch() {
-				return passthrough, deferred, outcome, nil
-			}
+			postCommitErr = errors.Join(postCommitErr, err)
+			result.Committed = result.Committed || outcome.Committed
 			if !pass {
 				passthrough = false
 			}
 			admitted, err := eb.admitDeferredEvents(routeCtx, out)
 			if err != nil {
-				return passthrough, nil, runtimepipelineobligation.Continue(), err
+				return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, err)
 			}
 			deferred = append(deferred, admitted...)
+			if !outcome.ContinueDispatch() {
+				return passthrough, deferred, outcome, postCommitErr
+			}
 		}
 	}
-	return passthrough, deferred, runtimepipelineobligation.Continue(), nil
+	return passthrough, deferred, result, postCommitErr
 }
 
 func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) (events.DeliveryEvent, error) {
@@ -1788,26 +1804,30 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 	}
 	passthrough := true
 	deferred := make([]events.Event, 0, 4)
+	result := runtimepipelineobligation.Continue()
+	var postCommitErr error
 	for _, it := range interceptors {
 		pass, out, outcome, err := it.Intercept(ctx, evt)
-		if err != nil {
-			return true, nil, runtimepipelineobligation.Continue(), runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
+		if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
+			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
 				"event_id": evt.ID(), "event_type": string(evt.Type()),
-			}, err)
+			}, err))
 		}
-		if !outcome.ContinueDispatch() {
-			return pass, deferred, outcome, nil
-		}
+		postCommitErr = errors.Join(postCommitErr, err)
+		result.Committed = result.Committed || outcome.Committed
 		if !pass {
 			passthrough = false
 		}
 		admitted, err := eb.admitDeferredEvents(ctx, out)
 		if err != nil {
-			return true, nil, runtimepipelineobligation.Continue(), err
+			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, err)
 		}
 		deferred = append(deferred, admitted...)
+		if !outcome.ContinueDispatch() {
+			return passthrough, deferred, outcome, postCommitErr
+		}
 	}
-	return passthrough, deferred, runtimepipelineobligation.Continue(), nil
+	return passthrough, deferred, result, postCommitErr
 }
 
 func (eb *EventBus) admitDeferredEvents(ctx context.Context, out []events.Event) ([]events.Event, error) {
@@ -2418,29 +2438,28 @@ func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, work runtimepi
 	return eb.publishClaimedPipeline(ctx, work.Event, work.Scope, recipients, dispatchRecipients)
 }
 
-func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, dispatchRecipients bool) (runtimepipelineobligation.ExecutionOutcome, error) {
-	var err error
+func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, dispatchRecipients bool) (result runtimepipelineobligation.ExecutionOutcome, err error) {
 	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
-		return runtimepipelineobligation.Continue(), err
+		return result, err
 	}
 	if err := eb.clearPendingOutboxOperation(ctx, evt.ID()); err != nil {
-		return runtimepipelineobligation.Continue(), err
+		return result, err
 	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return runtimepipelineobligation.Continue(), err
+		return result, err
 	}
 	recipients = uniqueStrings(recipients)
 	if evt.Type() == "" {
-		return runtimepipelineobligation.Continue(), errors.New("event type is required")
+		return result, errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return runtimepipelineobligation.Continue(), fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
+		return result, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	admitted, err := events.RevalidatePersistedEvent(evt)
 	if err != nil {
-		return runtimepipelineobligation.Continue(), err
+		return result, err
 	}
 	evt = admitted.Event()
 	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
@@ -2448,17 +2467,19 @@ func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event
 		ctx = runtimecorrelation.WithRunID(ctx, runID)
 	}
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
-		return runtimepipelineobligation.Continue(), err
+		return result, err
 	} else if reason != "" {
 		if reason == dispatchQueueRuntimeIngress {
-			return runtimepipelineobligation.Continue(), ErrRuntimeIngressPaused
+			return result, ErrRuntimeIngressPaused
 		}
-		return runtimepipelineobligation.Continue(), ErrRunDispatchBlocked
+		return result, ErrRunDispatchBlocked
 	}
 	return eb.publishPersistedRecipientsWithScope(ctx, evt, scope, recipients, true, dispatchRecipients)
 }
 
 func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, replayInterceptors, dispatchRecipients bool) (result runtimepipelineobligation.ExecutionOutcome, err error) {
+	var postCommitErr error
+	defer func() { err = errors.Join(postCommitErr, err) }()
 	if _, err := runtimepipelineobligation.ParseCommittedScope(string(scope)); err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}
@@ -2501,10 +2522,17 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 			eventPassthrough, deferred, outcome, err = eb.runInterceptorSet(ctx, evt, eventInterceptors)
 			nodePassthrough = eventPassthrough
 		}
-		if err != nil {
+		if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
+			for _, d := range deferred {
+				err = errors.Join(err, eb.publishDeferred(ctx, d))
+			}
 			return runtimepipelineobligation.Continue(), err
 		}
+		result, postCommitErr = outcome, err
 		if !outcome.ContinueDispatch() {
+			for _, d := range deferred {
+				postCommitErr = errors.Join(postCommitErr, eb.publishDeferred(ctx, d))
+			}
 			return outcome, nil
 		}
 	}
@@ -2517,19 +2545,24 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	if dispatchRecipients && eventPassthrough && len(liveRecipients) > 0 {
 		dispatch, err = eb.deliverToRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes)
 		if err != nil {
+			for _, d := range deferred {
+				err = errors.Join(err, eb.publishDeferred(ctx, d))
+			}
 			return runtimepipelineobligation.Continue(), err
 		}
 	}
+	var deferredErr error
 	for _, d := range deferred {
-		if err := eb.publishDeferred(ctx, d); err != nil {
-			return runtimepipelineobligation.Continue(), err
-		}
+		deferredErr = errors.Join(deferredErr, eb.publishDeferred(ctx, d))
+	}
+	if deferredErr != nil {
+		return runtimepipelineobligation.Continue(), deferredErr
 	}
 	if !dispatchRecipients {
-		return runtimepipelineobligation.Continue(), nil
+		return result, nil
 	}
 	if !eventPassthrough || len(dispatch.delivered) == 0 {
-		return runtimepipelineobligation.Continue(), nil
+		return result, nil
 	}
 	owner := "event_deliveries"
 	if scope == runtimepipelineobligation.ScopeSubscribed {
@@ -2547,7 +2580,7 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 		"internal_recipients":        append([]string(nil), internalRecipients...),
 		"replay_scope":               string(scope),
 	}, nil, 0)
-	return runtimepipelineobligation.Continue(), nil
+	return result, nil
 }
 
 func (eb *EventBus) preparedEventForReplay(ctx context.Context, eventID string) (PreparedPublishEvent, error) {

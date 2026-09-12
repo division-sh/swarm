@@ -930,7 +930,7 @@ type runtimeCompositionRequest struct {
 
 // buildRuntimeComposition owns the common acquisition/start/ready/close path for
 // live serving and private test execution. Existing owners retain all semantics.
-func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) int {
+func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) (exitCode int) {
 	repo, opts, cfgResult := req.Repo, req.Options, req.Config
 	publicListener := opts.PublicWebhookListener
 	defer func() {
@@ -988,6 +988,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		if err := storeLifetime.CloseUnactivated(); err != nil {
 			presenter.cleanupFailure("store shutdown", err)
+			if exitCode == 0 {
+				exitCode = 1
+			}
 		}
 	}()
 	preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
@@ -1072,7 +1075,11 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			shutdownErr = cleanupLoadedSourceArtifacts()
 		}
 		cancelOwnershipWatch()
-		presenter.shutdown(selectedLifecycle.Finalize(shutdownCtx, shutdownErr))
+		finalErr := selectedLifecycle.Finalize(shutdownCtx, shutdownErr)
+		presenter.shutdown(finalErr)
+		if finalErr != nil && exitCode == 0 {
+			exitCode = 1
+		}
 	}()
 	processCapability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,

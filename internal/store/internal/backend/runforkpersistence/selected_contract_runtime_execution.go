@@ -20,27 +20,30 @@ func (s *RunForkPostgresOwner) IssueRunForkSelectedContractRuntimeExecution(ctx 
 	if s == nil || s.backend == nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("begin selected-contract runtime issuance: %w", err)
-	}
-	defer tx.Rollback()
-	issued, err := issueSelectedContractRuntimeExecution(ctx, tx, postgresDialect{}, req)
-	if err != nil {
+	var issued runfork.SelectedContractRuntimeExecution
+	committed, err := s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		issued, err = issueSelectedContractRuntimeExecution(ctx, tx, postgresDialect{}, req)
+		return err
+	})
+	if !committed {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("commit selected-contract runtime issuance: %w", err)
-	}
-	return issued, nil
+	return issued, err
 }
 
 func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (issued runfork.SelectedContractRuntimeExecution, err error) {
-	err = s.runRuntimeMutation(ctx, "sqlite selected-contract runtime issuance", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
+	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract runtime issuance", func(txctx context.Context, tx *sql.Tx) error {
 		var issueErr error
 		issued, issueErr = issueSelectedContractRuntimeExecution(txctx, tx, sqliteDialect{}, req)
 		return issueErr
 	})
+	if !committed {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
 	return issued, err
 }
 
@@ -220,30 +223,33 @@ func (s *RunForkPostgresOwner) ClaimRunForkSelectedContractRuntimeExecution(ctx 
 }
 
 func (s *RunForkSQLiteOwner) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (authority runtimeeffects.Authority, err error) {
-	err = s.runRuntimeMutation(ctx, "sqlite selected-contract runtime claim", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimeeffects.Authority{}, err
+	}
+	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract runtime claim", func(txctx context.Context, tx *sql.Tx) error {
 		var claimErr error
 		authority, claimErr = claimSelectedContractRuntimeExecutionTx(txctx, tx, true, issued, owner, lease)
 		return claimErr
 	})
+	if !committed {
+		return runtimeeffects.Authority{}, err
+	}
 	return authority, err
 }
 
 func claimSelectedContractRuntimeExecutionPostgres(ctx context.Context, db interface {
-	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	RunTransactionOutcome(context.Context, func(context.Context, *sql.Tx) error) (bool, error)
 }, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
+	var authority runtimeeffects.Authority
+	committed, err := db.RunTransactionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		authority, err = claimSelectedContractRuntimeExecutionTx(ctx, tx, false, issued, owner, lease)
+		return err
+	})
+	if !committed {
 		return runtimeeffects.Authority{}, err
 	}
-	defer tx.Rollback()
-	authority, err := claimSelectedContractRuntimeExecutionTx(ctx, tx, false, issued, owner, lease)
-	if err != nil {
-		return runtimeeffects.Authority{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return runtimeeffects.Authority{}, err
-	}
-	return authority, nil
+	return authority, err
 }
 
 func claimSelectedContractRuntimeExecutionTx(ctx context.Context, tx *sql.Tx, sqlite bool, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
@@ -335,24 +341,21 @@ func (s *RunForkPostgresOwner) HeartbeatRunForkSelectedContractRuntimeExecution(
 	if lease <= 0 {
 		lease = selectedContractRuntimeExecutionLease
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("heartbeat selected-contract runtime begin: %w", err)
-	}
-	defer tx.Rollback()
-	if err := s.EffectPostgresOwner.RequireExternalEffectAuthorityTx(ctx, tx, authority, false); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	res, err := tx.ExecContext(ctx, `
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := s.EffectPostgresOwner.RequireExternalEffectAuthorityTx(ctx, tx, authority, false); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		res, err := tx.ExecContext(ctx, `
 		UPDATE run_fork_selected_contract_runtime_executions
 		SET lease_expires_at=$2,updated_at=$3
 		WHERE execution_id=$1::uuid AND state='running'
 	`, authority.ID, now.Add(lease), now)
-	if err := requireExactlyOneMutation(res, err, "heartbeat selected-contract runtime execution"); err != nil {
-		return err
-	}
-	return tx.Commit()
+		if err := requireExactlyOneMutation(res, err, "heartbeat selected-contract runtime execution"); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (s *RunForkSQLiteOwner) HeartbeatRunForkSelectedContractRuntimeExecution(ctx context.Context, authority runtimeeffects.Authority, lease time.Duration) error {
@@ -377,23 +380,20 @@ func (s *RunForkPostgresOwner) QuiesceRunForkSelectedContractRuntimeExecution(ct
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := s.EffectPostgresOwner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
-		return err
-	}
-	if err := requireSelectedRuntimeNoLiveAttempts(ctx, tx, s.EffectPostgresOwner, authority.ID); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='quiesced',lease_expires_at=NULL,terminal_at=$2,updated_at=$2 WHERE execution_id=$1::uuid AND state='running'`, authority.ID, now)
-	if err := requireExactlyOneMutation(res, err, "quiesce selected-contract runtime execution"); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := s.EffectPostgresOwner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
+			return err
+		}
+		if err := requireSelectedRuntimeNoLiveAttempts(ctx, tx, s.EffectPostgresOwner, authority.ID); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='quiesced',lease_expires_at=NULL,terminal_at=$2,updated_at=$2 WHERE execution_id=$1::uuid AND state='running'`, authority.ID, now)
+		if err := requireExactlyOneMutation(res, err, "quiesce selected-contract runtime execution"); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (s *RunForkSQLiteOwner) QuiesceRunForkSelectedContractRuntimeExecution(ctx context.Context, authority runtimeeffects.Authority) error {
@@ -423,17 +423,14 @@ func (s *RunForkPostgresOwner) CloseRunForkSelectedContractRuntimeExecution(ctx 
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("close selected-contract runtime begin: %w", err)
-	}
-	defer tx.Rollback()
-	now := time.Now().UTC()
-	res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='closed',lease_expires_at=NULL,terminal_at=COALESCE(terminal_at,$2),updated_at=$2 WHERE execution_id=$1::uuid AND state IN ('quiesced','failed')`, executionID, now)
-	if err := requireExactlyOneMutation(res, err, "close selected-contract runtime execution"); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		now := time.Now().UTC()
+		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='closed',lease_expires_at=NULL,terminal_at=COALESCE(terminal_at,$2),updated_at=$2 WHERE execution_id=$1::uuid AND state IN ('quiesced','failed')`, executionID, now)
+		if err := requireExactlyOneMutation(res, err, "close selected-contract runtime execution"); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (s *RunForkSQLiteOwner) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
@@ -448,23 +445,20 @@ func (s *RunForkPostgresOwner) FailRunForkSelectedContractRuntimeExecution(ctx c
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("postgres store is required")
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := s.EffectPostgresOwner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
-		return err
-	}
-	if err := requireSelectedRuntimeNoLiveAttempts(ctx, tx, s.EffectPostgresOwner, authority.ID); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='failed',lease_expires_at=NULL,failure=$2::jsonb,terminal_at=$3,updated_at=$3 WHERE execution_id=$1::uuid AND state IN ('prepared','running') AND fence_generation=$4`, authority.ID, nullableJSON(failure), now, authority.FenceGeneration)
-	if err := requireExactlyOneMutation(res, err, "fail selected-contract runtime execution"); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := s.EffectPostgresOwner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
+			return err
+		}
+		if err := requireSelectedRuntimeNoLiveAttempts(ctx, tx, s.EffectPostgresOwner, authority.ID); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='failed',lease_expires_at=NULL,failure=$2::jsonb,terminal_at=$3,updated_at=$3 WHERE execution_id=$1::uuid AND state IN ('prepared','running') AND fence_generation=$4`, authority.ID, nullableJSON(failure), now, authority.FenceGeneration)
+		if err := requireExactlyOneMutation(res, err, "fail selected-contract runtime execution"); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (s *RunForkSQLiteOwner) FailRunForkSelectedContractRuntimeExecution(ctx context.Context, authority runtimeeffects.Authority, failure json.RawMessage) error {

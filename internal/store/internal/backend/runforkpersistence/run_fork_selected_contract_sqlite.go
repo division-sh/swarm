@@ -81,7 +81,10 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	err = s.runRuntimeMutation(ctx, "sqlite selected-contract source event preparation", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract source event preparation", func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
@@ -152,6 +155,9 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 		}
 		return nil
 	})
+	if !committed {
+		return nil, err
+	}
 	return out, err
 }
 

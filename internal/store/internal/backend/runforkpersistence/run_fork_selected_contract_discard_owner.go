@@ -153,28 +153,13 @@ func postgresRunForkSelectedContractDiscardPort(s *RunForkPostgresOwner) runFork
 	return runForkSelectedContractDiscardPort{
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
 		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error {
-			tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-			if err != nil {
-				return fmt.Errorf("begin selected-contract fork discard: %w", err)
-			}
-			committed := false
-			defer func() {
-				if !committed {
-					_ = tx.Rollback()
+			return s.backend.RunTransactionWithOptions(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable}, func(ctx context.Context, tx *sql.Tx) error {
+				story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
+				if err != nil {
+					return err
 				}
-			}()
-			story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-			if err != nil {
-				return err
-			}
-			if err := operation(ctx, tx, story, runforkrevision.NewEffects()); err != nil {
-				return err
-			}
-			if err := tx.Commit(); err != nil {
-				return fmt.Errorf("commit selected-contract fork discard: %w", err)
-			}
-			committed = true
-			return nil
+				return operation(ctx, tx, story, runforkrevision.NewEffects())
+			})
 		},
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)

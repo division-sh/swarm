@@ -3,6 +3,7 @@ package genericschedule
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,7 +17,7 @@ func claimKey(wakeup runtimegenericschedule.Wakeup) string {
 	return claimNamespace + wakeup.ActivationID()
 }
 
-func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (bool, error) {
+func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (claimed bool, err error) {
 	if err := o.requireSchema(); err != nil {
 		return false, err
 	}
@@ -26,6 +27,25 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
 	key := claimKey(wakeup)
 	o.claims.mu.Lock()
 	defer o.claims.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	admissionCtx := ctx
+	// One claim admission owns its complete SQL sequence and resulting lock.
+	ctx = context.WithoutCancel(ctx)
+	defer func() {
+		if err != nil && o.claims.conn != nil {
+			valid := false
+			checkErr := o.claims.conn.Raw(func(raw any) error {
+				validator, ok := raw.(driver.Validator)
+				valid = ok && validator.IsValid()
+				return nil
+			})
+			if checkErr != nil || !valid {
+				err = errors.Join(err, o.discardClaimConn())
+			}
+		}
+	}()
 	if _, ok := o.claims.keys[key]; ok {
 		if o.claims.conn == nil {
 			delete(o.claims.keys, key)
@@ -43,7 +63,7 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
 			delete(o.claims.keys, key)
 		}
 	}
-	conn, err := o.ensureClaimConn(ctx)
+	conn, err := o.ensureClaimConn(admissionCtx)
 	if err != nil {
 		return false, err
 	}
@@ -56,7 +76,10 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
 	}
 	active, err := activeWakeupOnConn(ctx, conn, wakeup)
 	if err != nil || !active {
-		_, _ = conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key)
+		_, unlockErr := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key)
+		if unlockErr != nil {
+			return false, errors.Join(err, unlockErr, o.discardClaimConn())
+		}
 		return false, err
 	}
 	if o.claims.keys == nil {
@@ -90,6 +113,7 @@ func (o *PostgresOwner) ReleaseGenericScheduleWakeup(ctx context.Context, wakeup
 	key := claimKey(wakeup)
 	o.claims.mu.Lock()
 	defer o.claims.mu.Unlock()
+	ctx = context.WithoutCancel(ctx)
 	if _, ok := o.claims.keys[key]; !ok {
 		return nil
 	}
@@ -98,7 +122,7 @@ func (o *PostgresOwner) ReleaseGenericScheduleWakeup(ctx context.Context, wakeup
 		return nil
 	}
 	if _, err := o.claims.conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key); err != nil {
-		return err
+		return errors.Join(err, o.discardClaimConn())
 	}
 	delete(o.claims.keys, key)
 	if len(o.claims.keys) == 0 {
@@ -135,6 +159,9 @@ func (o *PostgresOwner) ensureClaimConn(ctx context.Context) (*sql.Conn, error) 
 }
 
 func (o *PostgresOwner) closeClaimConn() error {
+	if len(o.claims.keys) != 0 {
+		return o.discardClaimConn()
+	}
 	conn := o.claims.conn
 	o.claims.conn = nil
 	o.claims.keys = nil
@@ -142,6 +169,24 @@ func (o *PostgresOwner) closeClaimConn() error {
 		return nil
 	}
 	return conn.Close()
+}
+
+func (o *PostgresOwner) discardClaimConn() error {
+	conn := o.claims.conn
+	o.claims.conn = nil
+	o.claims.keys = nil
+	if conn == nil {
+		return nil
+	}
+	err := conn.Raw(func(any) error { return driver.ErrBadConn })
+	if err == driver.ErrBadConn || err == sql.ErrConnDone {
+		err = nil
+	}
+	closeErr := conn.Close()
+	if closeErr == sql.ErrConnDone {
+		closeErr = nil
+	}
+	return errors.Join(err, closeErr)
 }
 
 func activeWakeupOnConn(ctx context.Context, conn *sql.Conn, wakeup runtimegenericschedule.Wakeup) (bool, error) {

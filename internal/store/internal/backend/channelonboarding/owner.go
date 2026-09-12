@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -88,17 +87,7 @@ func (r postgresRunner) require() error   { return r.owner.requireCurrent() }
 func (r postgresRunner) query() queryer   { return r.owner.backend }
 func (r postgresRunner) dialect() dialect { return dialectPostgres }
 func (r postgresRunner) mutate(ctx context.Context, _ string, fn func(context.Context, *sql.Tx) error) error {
-	tx, err := r.owner.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(ctx, tx); err != nil {
-		return errors.Join(err, rollback(tx))
-	}
-	if err := tx.Commit(); err != nil {
-		return errors.Join(err, rollback(tx))
-	}
-	return nil
+	return r.owner.backend.RunTransaction(ctx, fn)
 }
 
 type sqliteRunner struct{ owner *SQLiteOwner }
@@ -108,14 +97,6 @@ func (r sqliteRunner) query() queryer   { return r.owner.backend }
 func (r sqliteRunner) dialect() dialect { return dialectSQLite }
 func (r sqliteRunner) mutate(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
 	return r.owner.backend.RunTransaction(ctx, label, fn)
-}
-
-func rollback(tx *sql.Tx) error {
-	err := tx.Rollback()
-	if errors.Is(err, sql.ErrTxDone) {
-		return nil
-	}
-	return err
 }
 
 func (s *PostgresOwner) ReserveChannelOnboarding(ctx context.Context, req domain.StartRequest) (domain.Operation, error) {

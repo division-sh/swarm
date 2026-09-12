@@ -85,10 +85,13 @@ func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt st
 	}
 	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
+		if lease != nil {
+			err = errors.Join(err, r.sessions.Release(context.WithoutCancel(ctx), lease))
+		}
 		return nil, err
 	}
 	if resolved.Enabled() {
-		if err := r.sessions.Release(ctx, lease); err != nil {
+		if err := r.sessions.Release(context.WithoutCancel(ctx), lease); err != nil {
 			return nil, err
 		}
 	}
@@ -135,7 +138,7 @@ func (r *MockRuntime) ContinueForkChatSession(ctx context.Context, session *Sess
 	return r.continueSession(ctx, session, message, nil)
 }
 
-func (r *MockRuntime) continueSession(ctx context.Context, session *Session, message Message, managed *managedProviderCall) (*Response, error) {
+func (r *MockRuntime) continueSession(ctx context.Context, session *Session, message Message, managed *managedProviderCall) (result *Response, retErr error) {
 	if session == nil {
 		return nil, errors.New("nil session")
 	}
@@ -146,10 +149,13 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	entityID := actor.EffectiveEntityID()
 	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, session, r.lockOwner)
 	if err != nil {
+		if lease != nil {
+			err = errors.Join(err, r.sessions.Release(context.WithoutCancel(ctx), lease))
+		}
 		return nil, sessionAcquireFailure(err, session.AgentID)
 	}
 	if resolved.Enabled() {
-		defer func() { _ = r.sessions.Release(ctx, lease) }()
+		defer func() { retErr = errors.Join(retErr, r.sessions.Release(context.WithoutCancel(ctx), lease)) }()
 		stopHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the mock session lease heartbeat failed", session.AgentID, session.ID, entityID, nil, heartbeatErr)
 		})

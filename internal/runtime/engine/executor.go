@@ -516,6 +516,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		result          ExecutionResult
 		intents         []EmitIntent
 		activityIntents []ActivityIntent
+		postCommitErr   error
 	)
 	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
 		loaded, err := e.loadState(lockCtx, req)
@@ -551,6 +552,15 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		result = frame.result
 		committed, err := e.persist(lockCtx, frame)
 		result = frame.result
+		result.Committed = committed.Committed
+		if err != nil && !committed.Committed {
+			result.EmitIntents = nil
+			result.ActivityIntents = nil
+			return err
+		}
+		postCommitErr = err
+		intents = append([]EmitIntent(nil), committed.EmitIntents...)
+		activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
 		if committed.SettledDeliveryClaim != nil {
 			if claimErr := committed.SettledDeliveryClaim.Validate(); claimErr != nil {
 				return fmt.Errorf("committed engine delivery settlement: %w", claimErr)
@@ -558,14 +568,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			claim := *committed.SettledDeliveryClaim
 			result.SettledDeliveryClaim = &claim
 		}
-		if err != nil {
-			return err
-		}
-		intents = append([]EmitIntent(nil), committed.EmitIntents...)
-		activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
 		return nil
 	})
-	if err != nil {
+	if err != nil && !result.Committed {
 		if errors.Is(err, ErrEmitPersistencePrerequisite) || errors.Is(err, ErrEmitPayloadContractViolation) {
 			result.Status = OutcomeRejected
 		}
@@ -577,29 +582,30 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		}
 		return result, err
 	}
+	postCommitErr = errors.Join(postCommitErr, err)
 	result.EmitIntents = append([]EmitIntent(nil), intents...)
 	result.ActivityIntents = append([]ActivityIntent(nil), activityIntents...)
 	if req.DeferCommittedDispatch {
-		return result, nil
+		return result, postCommitErr
 	}
 	if len(intents) > 0 {
 		if err := e.deps.Dispatcher.DispatchPostCommit(ctx, intents); err != nil {
 			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_post_commit")
-			return result, err
+			postCommitErr = errors.Join(postCommitErr, err)
 		}
 	}
 	if len(activityIntents) > 0 {
 		if e.deps.ActivityDispatcher == nil {
 			err := fmt.Errorf("%w: activity dispatcher is required when handler declares activity", ErrInvalidConfig)
 			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_activity")
-			return result, err
+			return result, errors.Join(postCommitErr, err)
 		}
 		if err := e.deps.ActivityDispatcher.DispatchActivities(ctx, activityIntents); err != nil {
 			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_activity")
-			return result, err
+			return result, errors.Join(postCommitErr, err)
 		}
 	}
-	return result, nil
+	return result, postCommitErr
 }
 
 func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSnapshot, error) {

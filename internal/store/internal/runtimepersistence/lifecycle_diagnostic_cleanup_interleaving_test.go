@@ -52,9 +52,6 @@ type diagnosticSQLConn struct {
 	begin     func()
 }
 
-func (c diagnosticSQLConn) BindOperationScope(scope *pq.OperationScope) error {
-	return pq.BindOperationScope(c.Conn, scope)
-}
 func (c diagnosticSQLConn) ResetSession(ctx context.Context) error {
 	if resetter, ok := c.Conn.(driver.SessionResetter); ok {
 		return resetter.ResetSession(ctx)

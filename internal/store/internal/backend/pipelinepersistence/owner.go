@@ -104,10 +104,6 @@ func requireSQLiteRunActive(ctx context.Context, tx *sql.Tx, runID string) error
 	return storerunstate.RequireSQLiteActiveTx(ctx, tx, runID)
 }
 
-func withRunLifecycleCandidateHandoff(ctx context.Context, operation func(*runLifecycleCandidateHandoffReservation) error) error {
-	return runhandoff.WithCandidateHandoff(ctx, operation)
-}
-
 func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCandidateHandoffReservation, error) {
 	return runhandoff.ReserveCandidateHandoff(ctx)
 }
@@ -298,10 +294,15 @@ func (s *PipelineSQLiteOwner) now() time.Time {
 }
 
 func (s *PipelineSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx) error) error {
+	_, err := s.runRuntimeMutationOutcome(ctx, label, effects, operation)
+	return err
+}
+
+func (s *PipelineSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
 		if err := operation(txctx, tx); err != nil {
 			return err
 		}
@@ -311,10 +312,15 @@ func (s *PipelineSQLiteOwner) runRuntimeMutation(ctx context.Context, label stri
 }
 
 func (s *PipelinePostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, operation)
+	return err
+}
+
+func (s *PipelinePostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
@@ -331,7 +337,12 @@ func (s *PipelinePostgresOwner) runPrivateAuthorActivityMutation(ctx context.Con
 }
 
 func (s *PipelineSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	return s.runRuntimeMutation(ctx, label, effects, func(txctx context.Context, tx *sql.Tx) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, effects, operation)
+	return err
+}
+
+func (s *PipelineSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+	return s.runRuntimeMutationOutcome(ctx, label, effects, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err

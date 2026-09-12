@@ -25,8 +25,9 @@ func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCand
 	return runhandoff.ReserveCandidateHandoff(ctx)
 }
 
-func withRunLifecycleCandidateHandoff(ctx context.Context, fn func(*runLifecycleCandidateHandoffReservation) error) error {
-	return runhandoff.WithCandidateHandoff(ctx, fn)
+func withRunLifecycleCandidateHandoffOutcome(ctx context.Context, fn func(*runLifecycleCandidateHandoffReservation) (bool, error)) error {
+	_, err := runhandoff.WithCandidateHandoffOutcome(ctx, fn)
+	return err
 }
 
 func requirePostgresRunActiveQuery(ctx context.Context, queryer runstate.RowQueryer, runID string) error {

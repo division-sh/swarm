@@ -29,8 +29,12 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 	intent, claim, found, err := owner.ClaimFanOutIntent(ctx, FanOutClaimRequest{
 		Owner: pc.fanOutOwnerID, BundleHash: pc.sourceArtifactFact.BundleHash(), Now: now.UTC(), Lease: fanOutClaimLease,
 	})
-	if err != nil || !found {
+	if !found {
 		return false, err
+	}
+	if err != nil {
+		// A returned claim is acknowledged ownership even when cleanup failed.
+		return false, errors.Join(err, owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim))
 	}
 	turnStarted := time.Now()
 	release := true

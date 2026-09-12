@@ -8,8 +8,13 @@ import (
 	"time"
 )
 
-func TestSessionAuthorityBeginTxRetainsNativeCancellationWithoutSQLAutoRollback(t *testing.T) {
-	authority := newSessionAuthority(&sql.Conn{})
+func TestSessionAuthorityBeginTxFailureFencesWithoutSQLAutoRollback(t *testing.T) {
+	backend, _ := newExitProbe(t)
+	conn, err := backend.db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := newSessionAuthority(conn)
 	beginEntered := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -43,9 +48,12 @@ func TestSessionAuthorityBeginTxRetainsNativeCancellationWithoutSQLAutoRollback(
 	case <-time.After(time.Second):
 		t.Fatal("caller cancellation did not interrupt transaction start")
 	}
-	endOperation, err := authority.beginOperation()
-	if err != nil {
-		t.Fatalf("operation serialization remained held after canceled transaction start: %v", err)
+	if endOperation, err := authority.beginOperation(); err == nil {
+		endOperation()
+		t.Fatal("failed transaction start retained reusable authority")
 	}
-	endOperation()
+	if !authority.operationMu.TryLock() {
+		t.Fatal("operation serialization remained held after failed transaction start")
+	}
+	authority.operationMu.Unlock()
 }

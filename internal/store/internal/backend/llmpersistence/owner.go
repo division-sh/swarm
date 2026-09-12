@@ -85,10 +85,15 @@ func (s *LLMPostgresOwner) runPostgresRuntimeMutation(ctx context.Context, effec
 }
 
 func (s *LLMSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, effects *runforkrevision.Effects, fn func(context.Context, *sql.Tx) error) error {
+	_, err := s.runRuntimeMutationOutcome(ctx, label, effects, fn)
+	return err
+}
+
+func (s *LLMSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, effects *runforkrevision.Effects, fn func(context.Context, *sql.Tx) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
 		if err := fn(txctx, tx); err != nil {
 			return err
 		}
@@ -191,11 +196,4 @@ func (s *LLMSQLiteOwner) SetSessionLockTTL(ttl time.Duration) {
 		ttl = 120 * time.Second
 	}
 	s.sessionLockTTL = ttl
-}
-
-func finalizePostgresRunForkRevisionTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects) error {
-	if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
-		return err
-	}
-	return tx.Commit()
 }

@@ -52,17 +52,7 @@ type transactionRunner interface {
 type postgresRunner struct{ owner *PostgresOwner }
 
 func (r postgresRunner) mutate(ctx context.Context, _ string, fn func(context.Context, *sql.Tx) error) error {
-	tx, err := r.owner.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := fn(ctx, tx); err != nil {
-		return errors.Join(err, rollback(tx))
-	}
-	if err := tx.Commit(); err != nil {
-		return errors.Join(err, rollback(tx))
-	}
-	return nil
+	return r.owner.backend.RunTransaction(ctx, fn)
 }
 func (r postgresRunner) query() queryer   { return r.owner.backend }
 func (r postgresRunner) dialect() dialect { return dialectPostgres }
@@ -105,17 +95,6 @@ func (d dialect) bind(query string) string {
 type queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-func rollback(tx *sql.Tx) error {
-	if tx == nil {
-		return nil
-	}
-	err := tx.Rollback()
-	if errors.Is(err, sql.ErrTxDone) {
-		return nil
-	}
-	return err
 }
 
 func (s *PostgresOwner) EnsureOperatorPrincipal(ctx context.Context, now time.Time) (domain.Principal, error) {

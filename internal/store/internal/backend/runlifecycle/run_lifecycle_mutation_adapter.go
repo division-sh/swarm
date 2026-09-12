@@ -136,17 +136,17 @@ func runPostgresLifecycleOperation[T any](
 	store *RunLifecyclePostgresOwner,
 	fn func(context.Context, postgresRunLifecycleMutation) (T, error),
 ) (T, error) {
-	return WithCandidateHandoffResult(ctx, func(handoff *CandidateHandoff) (T, error) {
+	return WithCandidateHandoffOutcomeResult(ctx, func(handoff *CandidateHandoff) (T, bool, error) {
 		var result T
 		effects := privaterunforkrevision.NewEffects()
-		err := store.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		committed, err := store.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
 			result, err = fn(txctx, postgresRunLifecycleMutation{
 				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), effects: effects, handoff: handoff,
 			})
 			return err
 		})
-		return result, err
+		return result, committed, err
 	})
 }
 
@@ -155,17 +155,17 @@ func runSQLiteLifecycleOperation[T any](
 	store *RunLifecycleSQLiteOwner,
 	fn func(context.Context, sqliteRunLifecycleMutation) (T, error),
 ) (T, error) {
-	return WithCandidateHandoffResult(ctx, func(handoff *CandidateHandoff) (T, error) {
+	return WithCandidateHandoffOutcomeResult(ctx, func(handoff *CandidateHandoff) (T, bool, error) {
 		var result T
 		effects := privaterunforkrevision.NewEffects()
-		err := store.runPrivateAuthorActivityMutation(ctx, "sqlite run lifecycle operation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		committed, err := store.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite run lifecycle operation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
 			result, err = fn(txctx, sqliteRunLifecycleMutation{
 				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), effects: effects, handoff: handoff,
 			})
 			return err
 		})
-		return result, err
+		return result, committed, err
 	})
 }
 

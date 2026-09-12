@@ -33,7 +33,7 @@ func (a transientLiveSessionAcquirer) AcquireLiveSession(ctx context.Context, id
 	}
 	lease, err := a.registry.Acquire(ctx, identity, lockOwner)
 	if err != nil {
-		return nil, ConversationRecord{}, err
+		return lease, ConversationRecord{}, err
 	}
 	return lease, ConversationRecord{
 		SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),

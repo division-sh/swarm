@@ -96,7 +96,7 @@ func (p *processCapability) IssueSelectedForkGenerationGrant(ctx context.Context
 		SelectedFork: &binding,
 	}
 	if err := p.session.RecordGenerationGrantTransition(ctx, nil, evidence); err != nil {
-		p.retireOnPossessionFailure(err)
+		err = p.retireOnPossessionFailure(err)
 		return nil, fmt.Errorf("record selected-fork generation grant: %w", err)
 	}
 	g := &generationGrant{owner: p, evidence: evidence, done: make(chan struct{})}
@@ -120,7 +120,11 @@ func (e GrantEvidence) clone() GrantEvidence {
 
 func (g *generationGrant) requireExecutionAuthorityLocked(ctx context.Context, evidence GrantEvidence) error {
 	if evidence.SelectedFork != nil {
-		return g.owner.session.ProveSelectedForkGenerationGrant(ctx, evidence)
+		err := g.owner.session.ProveSelectedForkGenerationGrant(ctx, evidence)
+		if err != nil {
+			err = g.owner.retireOnPossessionFailure(err)
+		}
+		return errors.Join(err, g.owner.requireLive())
 	}
 	_, err := g.requireCurrentSourceSetLocked(ctx, evidence)
 	return err

@@ -50,13 +50,6 @@ func TestRetiredManagedTurnOwnersAreAbsentFromProduction(t *testing.T) {
 		if relErr != nil {
 			return relErr
 		}
-		// These pinned upstream references advance SCRAM authentication, not an agent turn.
-		switch filepath.ToSlash(relative) {
-		case "third_party/pq/conn.go":
-			source = strings.ReplaceAll(source, "sc.Step(", "sc.SCRAMStep(")
-		case "third_party/pq/scram/scram.go":
-			source = strings.ReplaceAll(source, "//\tfor client.Step(in) {", "")
-		}
 		for token, owner := range forbidden {
 			if strings.Contains(source, token) {
 				violations = append(violations, relative+": "+owner+" still contains "+token)

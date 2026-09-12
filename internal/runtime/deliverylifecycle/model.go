@@ -370,6 +370,30 @@ type Snapshot struct {
 func (s Snapshot) Terminal() bool { return s.Status.Terminal() }
 func (s Snapshot) State() State   { return StateFromStatus(s.Status, s.ActiveSessionID) }
 
+// MatchesSettlementClaim validates the exact claim identity and settled state
+// returned by SettleSuccess/SettleFailure. Only those outcome-bearing owner
+// responses guarantee acknowledgement; matching arbitrary readback does not
+// prove COMMIT or validate the opaque claim token checked by the store.
+func (s Snapshot) MatchesSettlementClaim(claim Claim) bool {
+	if claim.Validate() != nil || s.DeliveryID != claim.DeliveryID() ||
+		s.RunID != claim.RunID() || s.ClaimVersion != claim.Version() ||
+		s.SubscriberClass != claim.SubscriberClass() || s.SubscriberID != claim.SubscriberID() ||
+		events.EncodeDeliveryRouteIdentity(s.RouteIdentity) != claim.RouteIdentity() ||
+		(s.Status != StatusFailed && !s.Terminal()) {
+		return false
+	}
+	routeIdentity, err := s.Route.Identity()
+	if err != nil || routeIdentity != s.RouteIdentity {
+		return false
+	}
+	recipient, err := deliveryRecipientForClass(s.SubscriberClass, s.SubscriberID)
+	if err != nil || recipient != s.Route.Recipient {
+		return false
+	}
+	deliveryID, err := DeliveryID(s.EventID, s.Route)
+	return err == nil && deliveryID == s.DeliveryID
+}
+
 type SnapshotPage struct {
 	Snapshots []Snapshot
 	HasMore   bool

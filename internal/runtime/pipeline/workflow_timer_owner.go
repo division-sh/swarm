@@ -371,16 +371,16 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		committed, err = store.timerActivations.CommitWorkflowTimerReconciliation(ctx, WorkflowTimerReconciliationCommand{
 			RunID: runID, Route: route, EntityID: entityID.String(), Plan: plan,
 		})
-		if err != nil {
-			return err
+		if !committed.Committed {
+			return errors.Join(err, errors.New("workflow timer reconciliation returned no acknowledged result"))
 		}
 	}
 	for _, ref := range append(append(unchanged, committed.Wakeups...), committed.Cancellations...) {
-		if err := l.queueWakeupReconcile(ctx, ref); err != nil {
-			return err
+		if reconcileErr := l.queueWakeupReconcile(ctx, ref); reconcileErr != nil {
+			err = errors.Join(err, reconcileErr)
 		}
 	}
-	return nil
+	return err
 }
 
 func initialWorkflowTimerExecutionMode(ctx context.Context, readinessMode executionmode.Mode, active []WorkflowTimerActivation) (executionmode.Mode, error) {
@@ -817,8 +817,8 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		FiredAt:     firedAt,
 		Publication: plans[0],
 	})
-	if err != nil {
-		err = errors.Join(err, l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+	if committed.Outcome == "" {
+		err = errors.Join(err, fmt.Errorf("workflow timer occurrence has no acknowledged result"), committed.Validate(), l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 		recoveryCtx := ctx
 		if registerErr := l.reconcileWakeupImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
@@ -828,21 +828,18 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		return WorkflowTimerFireRetry, false, err
 	}
 	if committed.Outcome == WorkflowTimerOccurrenceTerminal {
-		if err := l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans); err != nil {
-			return WorkflowTimerFireRetry, false, err
-		}
-		return WorkflowTimerFireTerminal, false, nil
+		return WorkflowTimerFireTerminal, false, errors.Join(err, l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
-	if err := l.publication.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); err != nil {
-		return WorkflowTimerFireRetry, false, err
+	if validationErr := committed.Validate(); validationErr != nil {
+		return WorkflowTimerFireTerminal, false, errors.Join(err, validationErr, l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
-	if err := l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
-		return WorkflowTimerFireRetry, false, err
+	if finalizeErr := l.publication.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); finalizeErr != nil {
+		err = errors.Join(err, finalizeErr)
 	}
-	if committed.Next.Status != workflowTimerStatusActive {
-		return WorkflowTimerFireCommitted, false, nil
+	if dispatchErr := l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); dispatchErr != nil {
+		err = errors.Join(err, dispatchErr)
 	}
-	return WorkflowTimerFireCommitted, true, nil
+	return WorkflowTimerFireCommitted, committed.Next.Status == workflowTimerStatusActive, err
 }
 
 func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt events.Event) (WorkflowTimerActivation, timeridentity.WorkflowTimerOccurrenceRef, bool, error) {

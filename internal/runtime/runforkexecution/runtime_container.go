@@ -212,42 +212,47 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		Admission:       req.Admission, ContainerPlanFingerprint: containerFingerprint,
 		ActorCensusFingerprint: actorFingerprint, EffectiveConfigFingerprint: configFingerprint, ExecutionMode: mode,
 	})
-	if err != nil {
-		return selectedContractForkLocalRuntimeContainer{}, err
-	}
-	authorityOwner := executionOwner + ":" + uuid.NewString()
-	authority, err := ports.runtimeExecution.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, authorityOwner, 2*time.Minute)
-	if err != nil {
-		return selectedContractForkLocalRuntimeContainer{}, err
-	}
-	defer func() {
-		if finalErr != nil {
-			failed := selectedContractForkLocalRuntimeContainer{ports: ports, authority: authority}
-			finalErr = errors.Join(finalErr, failed.Fail(ctx, finalErr))
-		}
-	}()
 	proof.RuntimeExecutionID = issued.ExecutionID
 	proof.RuntimeGeneration = issued.Generation
-	proof.AuthorityExecutionOwner = authorityOwner
 	proof.AdmissionFingerprint = issued.AdmissionFingerprint
 	proof.ContainerPlanFingerprint = issued.ContainerPlanFingerprint
 	proof.ActorCensusFingerprint = issued.ActorCensusFingerprint
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
+	container := selectedContractForkLocalRuntimeContainer{proof: proof, req: req, ports: ports}
+	if err != nil {
+		return container, err
+	}
+	authorityOwner := executionOwner + ":" + uuid.NewString()
+	authority, err := ports.runtimeExecution.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, authorityOwner, 2*time.Minute)
+	// The builder owns failure settlement, including acknowledged claims with errors.
+	container.authority = authority
+	container.proof.AuthorityExecutionOwner = authority.ExecutionOwner
+	defer func() {
+		if finalErr != nil && out.authority.Valid() {
+			if cleanupErr := out.Fail(ctx, finalErr); cleanupErr != nil {
+				finalErr = errors.Join(finalErr, cleanupErr)
+			} else {
+				out.authority = runtimeeffects.Authority{}
+			}
+		}
+	}()
+	if err != nil {
+		return container, err
+	}
 	admission, err := managedexecution.New(managedexecution.KindSelectedContractFork, authority.SelectedFork.ExecutionID,
 		authority.SelectedFork.Generation, authority.SelectedFork.ForkRunID, issued.ActorCensusFingerprint,
 		bundleHash, preparation.SurfaceIDs())
 	if err != nil {
-		return selectedContractForkLocalRuntimeContainer{}, err
+		return container, err
 	}
 	if err := req.Operation.Bind(worklifetime.SelectedForkIdentity{
 		ExecutionID: issued.ExecutionID, RunID: forkRunID, Generation: issued.Generation,
 	}); err != nil {
-		return selectedContractForkLocalRuntimeContainer{}, err
+		return container, err
 	}
-	return selectedContractForkLocalRuntimeContainer{
-		proof: proof, req: req, ports: ports, authority: authority, admission: admission,
-		runtimeInstanceID: strings.TrimSpace(scope.RuntimeInstanceID),
-	}, nil
+	container.admission = admission
+	container.runtimeInstanceID = strings.TrimSpace(scope.RuntimeInstanceID)
+	return container, nil
 }
 
 func validateSelectedContractAgentExecutionSelections(profile llmselection.Profile, records []runtimemanager.PersistedAgent) error {
@@ -454,26 +459,36 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			SelectionAuthority: c.proof.ExecutionOwner,
 			CreatedAt:          prepared.Event.CreatedAt(),
 		}
-		committed, err := c.ports.replay.CommitSelectedForkEvent(eventCtx, prepared.SelectedForkCommitRequest(lineage))
-		if err != nil {
-			return out, errors.Join(err, bus.AbandonPreparedPublish(eventCtx, prepared))
+		committed, commitErr := c.ports.replay.CommitSelectedForkEvent(eventCtx, prepared.SelectedForkCommitRequest(lineage))
+		if committed.AppendOutcome == 0 && commitErr != nil {
+			return out, errors.Join(commitErr, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		if err := committed.Validate(); err != nil {
-			return out, errors.Join(err, bus.AbandonPreparedPublish(eventCtx, prepared))
+			return out, errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		committedPrepared, err := prepared.WithCommitOutcome(committed.AppendOutcome)
 		if err != nil {
-			return out, errors.Join(err, bus.AbandonPreparedPublish(eventCtx, prepared))
+			return out, errors.Join(commitErr, err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
 		committedPrepared = committedPrepared.WithCommittedDeliveryHandoffs(committed.DeliveryHandoffs)
 		prepared = committedPrepared
+		// The producer returns this evidence only after acknowledged COMMIT.
+		// Complete its exact handoff once, even if transaction cleanup failed.
+		out = append(out, SelectedContractExecutionForkEvent{
+			SourceEventID: sourceEvent.SourceEventID,
+			ForkEventID:   forkEventID,
+			EventName:     sourceEvent.EventName,
+		})
 		if err := bus.DispatchPreparedPublishAndWait(eventCtx, prepared); err != nil {
-			return out, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
+			return out, errors.Join(commitErr, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
 				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 				sourceEvent.SourceEventID,
 				forkEventID,
 				err,
-			)
+			))
+		}
+		if commitErr != nil {
+			return out, commitErr
 		}
 		if err := runtimepkg.NewRuntimeLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture, payloadAdmitter).Log(eventCtx, runtimepkg.RuntimeLogEntry{
 			Level:     diaglog.LevelInfo,
@@ -494,11 +509,6 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 				err,
 			)
 		}
-		out = append(out, SelectedContractExecutionForkEvent{
-			SourceEventID: sourceEvent.SourceEventID,
-			ForkEventID:   forkEventID,
-			EventName:     sourceEvent.EventName,
-		})
 	}
 	if agentRuntime != nil {
 		stopHeartbeatWork()

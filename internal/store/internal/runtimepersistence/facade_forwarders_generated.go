@@ -297,6 +297,10 @@ func (s *PostgresStore) CountWorkflowEntities(ctx context.Context, request entit
 	return s.pipelinePostgresOwner.CountWorkflowEntities(ctx, request)
 }
 
+func (s *PostgresStore) CreateAPIConversationFork(ctx context.Context, req runfork.APIConversationForkCreateRequest) (runfork.ConversationForkCreateResult, error) {
+	return s.runForkPostgresOwner.CreateAPIConversationFork(ctx, req)
+}
+
 func (s *PostgresStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
 	return s.decisionPostgresOwner.CreateDecisionCard(ctx, card)
 }
@@ -1543,6 +1547,10 @@ func (s *SQLiteRuntimeStore) CountUnreadInformationalNotices(ctx context.Context
 
 func (s *SQLiteRuntimeStore) CountWorkflowEntities(ctx context.Context, request entityquery.Request) (int, error) {
 	return s.pipelineSQLiteOwner.CountWorkflowEntities(ctx, request)
+}
+
+func (s *SQLiteRuntimeStore) CreateAPIConversationFork(ctx context.Context, req runfork.APIConversationForkCreateRequest) (runfork.ConversationForkCreateResult, error) {
+	return s.runForkSQLiteOwner.CreateAPIConversationFork(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {

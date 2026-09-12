@@ -229,7 +229,7 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 			ProofTokens: []string{"run_stop", "stopDecisionCardRun", "assertTerminalDecisionCardStateChangeOnly"},
 		},
 		{
-			Path: "internal/store/internal/backend/runlifecycle/active_run_quiescence.go", Writer: "applyActiveRunQuiescence",
+			Path: "internal/store/internal/backend/runlifecycle/active_run_quiescence.go", Writer: "applyActiveRunQuiescenceTx",
 			WriterTokens: []string{"effects := runforkrevision.NewEffects()", "TerminalizeRunDeliveriesTx", "TerminalizeRunTx", "FinalizePostgres"},
 			ProofPath:    "internal/store/internal/runtimepersistence/active_run_quiescence_delivery_readback_test.go", Proof: "TestActiveRunDeliveryQuiescenceReadbackParity",
 			ProofTokens: []string{"ApplyActiveRunQuiescence", "requireCompleteRunForkRevision"},
@@ -254,7 +254,7 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 		},
 		{
 			Path: "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_activation_owner.go", Writer: "postgresRunForkSelectedContractActivationPort",
-			WriterTokens: []string{"effects := runforkrevision.NewEffects()", "applyRunForkSourceFreeze", "commitRunForkAuthorActivityTransaction"},
+			WriterTokens: []string{"effects := runforkrevision.NewEffects()", "applyRunForkSourceFreeze", "finalizeRunForkAuthorActivityTransaction", "RunTransactionWithOptionsOutcome"},
 			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_selected_contract_execution_mutation_test.go", Proof: "TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation",
 			ProofTokens: []string{"ActivateRunForkForSelectedContractExecution", "ValidateCompletePostgres"},
 		},

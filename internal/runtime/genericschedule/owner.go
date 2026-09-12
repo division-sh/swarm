@@ -333,8 +333,15 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 	if err != nil {
 		l.log(callbackCtx, "fire", wakeup.ActivationID(), err)
 	}
-	if err != nil || result.Outcome == CommitRetry {
+	if result.Outcome == CommitRetry {
 		l.startRecovery(wakeup.ActivationID())
+		return
+	}
+	if result.Validate() != nil {
+		if retireErr := l.retireExactWakeup(context.WithoutCancel(callbackCtx), wakeup); retireErr != nil {
+			l.log(callbackCtx, "retire_invalid_committed_wakeup", wakeup.ActivationID(), retireErr)
+			l.startTerminalRetirementRecovery(wakeup)
+		}
 		return
 	}
 	if result.Next.ID != "" {
@@ -412,27 +419,27 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (CommitResult, erro
 	result, err := l.store.CommitGenericScheduleOccurrence(ctx, CommitCommand{
 		Activation: activation, Occurrence: occurrence, Publication: plans[0],
 	})
-	if err != nil {
-		return CommitResult{Outcome: CommitRetry}, errors.Join(err, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+	if result.Outcome == "" || result.Outcome == CommitRetry {
+		return CommitResult{Outcome: CommitRetry}, errors.Join(err, fmt.Errorf("generic schedule occurrence has no acknowledged result"), result.Validate(), l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
-	if err := result.Validate(); err != nil {
-		return CommitResult{Outcome: CommitRetry}, errors.Join(err, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+	if validationErr := result.Validate(); validationErr != nil {
+		return result, errors.Join(err, validationErr, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
 	if result.Outcome != CommitCommitted {
-		return result, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		return result, errors.Join(err, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
 	if result.PublicationAlreadyCommitted {
-		return result, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		return result, errors.Join(err, l.planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
 	// Publication is already durable. Finalization/dispatch failures are logged
 	// for downstream recovery and never cause a synchronous occurrence resend.
-	if err := l.planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{result.Publication}); err != nil {
-		l.log(ctx, "finalize_committed_publication", activation.ID, err)
+	if finalizeErr := l.planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{result.Publication}); finalizeErr != nil {
+		err = errors.Join(err, finalizeErr)
 	}
-	if err := l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
-		l.log(ctx, "dispatch_committed_publication", activation.ID, err)
+	if dispatchErr := l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); dispatchErr != nil {
+		err = errors.Join(err, dispatchErr)
 	}
-	return result, nil
+	return result, err
 }
 
 func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byte) (events.Event, error) {

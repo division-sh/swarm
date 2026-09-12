@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -48,10 +49,11 @@ func (s *MailboxPostgresOwner) InsertMailboxItem(ctx context.Context, item runti
 	if strings.TrimSpace(item.ReplyContextID) == "" {
 		item.ReplyContextID = events.DeliveryContextFromContext(ctx).ReplyContextID()
 	}
-	if err := s.insertMailboxItemSpec(ctx, item); err != nil {
+	committed, err := s.insertMailboxItemSpec(ctx, item)
+	if !committed {
 		return "", err
 	}
-	return item.ID, nil
+	return item.ID, err
 }
 
 func validateGenericMailboxNotice(itemType string, raw []byte) error {
@@ -184,7 +186,7 @@ func (s *MailboxPostgresOwner) MarkMailboxItemNotified(ctx context.Context, id s
 	return s.markMailboxItemNotifiedSpec(ctx, id)
 }
 
-func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item runtimetools.MailboxItem) error {
+func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item runtimetools.MailboxItem) (bool, error) {
 	scope := "global"
 	if entityID := coalesceMailboxEntityID(item); entityID != "" {
 		scope = "entity"
@@ -194,7 +196,8 @@ func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item r
 	if !item.TimeoutAt.IsZero() {
 		expiresAt = item.TimeoutAt
 	}
-	_, err := s.backend.ExecContext(ctx, `
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(sqlCtx, `
 		INSERT INTO mailbox (
 			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
 			from_agent, severity, summary, payload, status, decision, decision_notes,
@@ -206,10 +209,12 @@ func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item r
 			NULLIF($13,''), $14, $15, NULLIF($16,''), now()
 		)
 	`, item.ID, coalesceMailboxEntityID(item), strings.Trim(strings.TrimSpace(item.FlowInstance), "/"), scope, item.Type, item.EventID, item.FromAgent, normalizeMailboxSeverity(item.Priority), item.Summary, string(item.Context), status, decision, item.DecisionNotes, item.Notified, expiresAt, strings.TrimSpace(item.ReplyContextID))
+		return err
+	})
 	if err != nil {
-		return fmt.Errorf("insert mailbox item: %w", err)
+		return committed, fmt.Errorf("insert mailbox item: %w", err)
 	}
-	return nil
+	return committed, nil
 }
 
 func (s *MailboxPostgresOwner) listMailboxItemsSpec(ctx context.Context, status string, limit int) ([]runtimetools.MailboxItem, error) {
@@ -287,7 +292,9 @@ func (s *MailboxPostgresOwner) getMailboxItemSpec(ctx context.Context, id string
 }
 
 func (s *MailboxPostgresOwner) expireMailboxItemsSpec(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	rows, err := s.backend.QueryContext(ctx, `
+	var items []runtimetools.MailboxItem
+	committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(sqlCtx, `
 		WITH due AS (
 			SELECT item_id
 			FROM mailbox
@@ -321,11 +328,17 @@ func (s *MailboxPostgresOwner) expireMailboxItemsSpec(ctx context.Context, limit
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.reply_context_id, '')
 	`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("expire mailbox items: %w", err)
+		if err != nil {
+			return fmt.Errorf("expire mailbox items: %w", err)
+		}
+		defer rows.Close()
+		items, err = scanSpecMailboxItems(rows)
+		return errors.Join(err, rows.Close())
+	})
+	if !committed {
+		return nil, err
 	}
-	defer rows.Close()
-	return scanSpecMailboxItems(rows)
+	return items, err
 }
 
 func (s *MailboxPostgresOwner) listUnnotifiedCriticalMailboxItemsSpec(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
@@ -361,20 +374,22 @@ func (s *MailboxPostgresOwner) listUnnotifiedCriticalMailboxItemsSpec(ctx contex
 }
 
 func (s *MailboxPostgresOwner) markMailboxItemNotifiedSpec(ctx context.Context, id string) error {
-	result, err := s.backend.ExecContext(ctx, `
+	return s.backend.RunTransaction(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		result, err := tx.ExecContext(sqlCtx, `
 		UPDATE mailbox
 		SET notified = true
 		WHERE item_id = $1::uuid
 	`, id)
-	if err != nil {
-		return fmt.Errorf("mark mailbox item notified: %w", err)
-	}
-	if rows, err := result.RowsAffected(); err != nil {
-		return err
-	} else if rows == 0 {
-		return mailboxcontract.ErrV1NotFound
-	}
-	return nil
+		if err != nil {
+			return fmt.Errorf("mark mailbox item notified: %w", err)
+		}
+		if rows, err := result.RowsAffected(); err != nil {
+			return err
+		} else if rows == 0 {
+			return mailboxcontract.ErrV1NotFound
+		}
+		return nil
+	})
 }
 
 func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {

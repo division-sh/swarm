@@ -506,21 +506,44 @@ func (c *Coordinator) stoppedError() error {
 	return errors.New("delivery continuation coordinator stopped without a result")
 }
 
+// The existing worker lease joins admitted SQL reads. The mutex check is their
+// admission point against Retire; no lock is held during I/O or dispatch.
+func (c *Coordinator) scanStopError(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.retired {
+		return errCoordinatorRetired
+	}
+	return ctx.Err()
+}
+
 func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 	var cursor runtimedelivery.ContinuationCursor
 	var next time.Duration
 	var wake bool
 	for {
+		if err := c.scanStopError(ctx); err != nil {
+			return 0, false, err
+		}
 		beforeScan := c.heldEntries()
-		page, err := c.store.ScanDeliveryContinuations(ctx, c.authority, cursor, scanPageSize)
+		page, err := c.store.ScanDeliveryContinuations(context.WithoutCancel(ctx), c.authority, cursor, scanPageSize)
 		if err != nil {
 			return 0, false, err
 		}
+		if err := c.scanStopError(ctx); err != nil {
+			return 0, false, err
+		}
 		for _, item := range page.Items {
+			if err := c.scanStopError(ctx); err != nil {
+				return 0, false, err
+			}
 			if item.Snapshot.RunID != "" && item.Disposition != runtimedelivery.ClaimAbsent && item.Disposition != runtimedelivery.ClaimInvariantInvalid {
-				disposition, err := c.restarts.StandingRunRestartDisposition(ctx, item.Snapshot.RunID)
+				disposition, err := c.restarts.StandingRunRestartDisposition(context.WithoutCancel(ctx), item.Snapshot.RunID)
 				if err != nil {
 					return 0, false, fmt.Errorf("classify delivery continuation %s standing disposition: %w", item.DeliveryID, err)
+				}
+				if err := c.scanStopError(ctx); err != nil {
+					return 0, false, err
 				}
 				if disposition.ExactCurrent() && !disposition.Executable() {
 					continue
@@ -536,6 +559,9 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 				}
 				c.reclaimAttempt(item.DeliveryID, beforeScan[item.DeliveryID])
 				{
+					if err := c.scanStopError(ctx); err != nil {
+						return 0, false, err
+					}
 					result := c.dispatcher.DispatchDeliveryContinuation(ctx, item.Event, item.Snapshot.Route)
 					if err := result.Validate(); err != nil {
 						return 0, false, fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", item.DeliveryID, err)
@@ -639,8 +665,14 @@ func (c *Coordinator) reconcileHeld(ctx context.Context) (time.Duration, bool, e
 	var next time.Duration
 	var wake bool
 	for deliveryID, observed := range c.heldEntries() {
-		observation, err := c.store.ObserveDeliveryContinuation(ctx, c.authority, deliveryID)
+		if err := c.scanStopError(ctx); err != nil {
+			return 0, false, err
+		}
+		observation, err := c.store.ObserveDeliveryContinuation(context.WithoutCancel(ctx), c.authority, deliveryID)
 		if err != nil {
+			return 0, false, err
+		}
+		if err := c.scanStopError(ctx); err != nil {
 			return 0, false, err
 		}
 		if after, ok := observation.Wake.After(); ok {

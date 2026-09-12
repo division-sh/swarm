@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -62,6 +64,16 @@ type ConversationForkCreateRequest struct {
 	ForkPoint       ConversationForkPointSelector
 	CreatedBy       string
 	Now             time.Time
+}
+
+type APIConversationForkCreateRequest struct {
+	Creation    ConversationForkCreateRequest
+	Idempotency apiidempotency.Request
+}
+
+type ConversationForkCreateResult struct {
+	Fork                OperatorConversationForkSession `json:"fork"`
+	IdempotencyReplayed bool                            `json:"idempotency_replayed"`
 }
 
 // ConversationForkSource is the exact persisted conversation identity needed

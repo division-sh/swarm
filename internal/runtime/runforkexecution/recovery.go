@@ -54,24 +54,26 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 	for _, entry := range entries {
 		availability, err := ports.fork.LoadRunBundleAvailability(ctx, entry.Binding.ForkRunID)
 		if err != nil {
-			return nil, err
+			return results, err
 		}
 		if availability.DataIntegrityError() || availability.BundleHash != entry.BundleHash {
-			return nil, fmt.Errorf("selected recovery source integrity: %s", availability.DetailString())
+			return results, fmt.Errorf("selected recovery source integrity: %s", availability.DetailString())
 		}
 		fact, err := correlation.NewSourceArtifactFact(entry.BundleHash)
 		if err != nil {
-			return nil, err
+			return results, err
 		}
 		runCtx := authoractivity.WithScope(correlation.WithSourceArtifactFact(ctx, fact), authoractivity.BundleScope(process.RuntimeInstanceID, entry.BundleHash))
 		result, err := ports.fork.RecoverSelectedFork(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process, Effects: req})
+		if result.RunID != "" {
+			results = append(results, result)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("recover selected fork %s: %w", entry.Binding.ForkRunID, err)
+			return results, fmt.Errorf("recover selected fork %s: %w", entry.Binding.ForkRunID, err)
 		}
 		if result.Disposition == runfork.SelectedForkRecoveryCurrent {
-			return nil, fmt.Errorf("selected startup encountered unregistered current-process execution")
+			return results, fmt.Errorf("selected startup encountered unregistered current-process execution")
 		}
-		results = append(results, result)
 	}
 	contexts.recovered = true
 	return results, nil

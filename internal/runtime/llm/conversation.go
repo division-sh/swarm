@@ -209,7 +209,7 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 		resp, err = c.continueManagedOnce(ctx, draft)
 	}
 	if err != nil {
-		return nil, err
+		return resp, err
 	}
 	if resp == nil {
 		return nil, nil
@@ -261,7 +261,7 @@ func (c *Conversation) stepForkChat(ctx context.Context, msg Message) (*Response
 	}
 	resp, err := c.continueForkChatOnce(ctx, msg)
 	if err != nil {
-		return nil, err
+		return resp, err
 	}
 	if resp == nil {
 		return nil, nil
@@ -331,7 +331,8 @@ func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe
 	}
 	resp, err := runtime.ContinueManagedSession(turnCtx, c.Session, call)
 	if err != nil {
-		return nil, err
+		// Retain settled evidence without consuming tools or admitting another turn.
+		return resp, err
 	}
 	if resp == nil {
 		return nil, nil
@@ -371,7 +372,7 @@ func (c *Conversation) continueForkChatOnce(ctx context.Context, msg Message) (*
 	}
 	resp, err := runtime.ContinueForkChatSession(ctx, c.Session, call)
 	if err != nil {
-		return nil, err
+		return resp, err
 	}
 	if resp == nil {
 		return nil, nil
@@ -456,7 +457,7 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 			next, err = c.continueForkChatOnce(ctx, toolMsg)
 		}
 		if err != nil {
-			return nil, err
+			return next, err
 		}
 		if next == nil {
 			return nil, nil

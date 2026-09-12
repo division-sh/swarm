@@ -120,11 +120,16 @@ func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, life
 }
 
 func (s *EffectPostgresOwner) runRuntimeMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) error {
+	_, err := s.runRuntimeMutationOutcome(ctx, operation)
+	return err
+}
+
+func (s *EffectPostgresOwner) runRuntimeMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) (bool, error) {
 	if err := s.requireCurrent(); err != nil {
-		return err
+		return false, err
 	}
 	effects := privaterunforkrevision.NewEffects()
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if err := operation(txctx, tx, effects); err != nil {
 			return err
 		}
@@ -134,11 +139,16 @@ func (s *EffectPostgresOwner) runRuntimeMutation(ctx context.Context, operation 
 }
 
 func (s *EffectSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) error {
+	_, err := s.runRuntimeMutationOutcome(ctx, label, operation)
+	return err
+}
+
+func (s *EffectSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) (bool, error) {
 	if err := s.requireCurrent(); err != nil {
-		return err
+		return false, err
 	}
 	effects := privaterunforkrevision.NewEffects()
-	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
 		if err := operation(txctx, tx, effects); err != nil {
 			return err
 		}
@@ -148,7 +158,12 @@ func (s *EffectSQLiteOwner) runRuntimeMutation(ctx context.Context, label string
 }
 
 func (s *EffectPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) error {
-	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, operation)
+	return err
+}
+
+func (s *EffectPostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) (bool, error) {
+	return s.runRuntimeMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
@@ -161,7 +176,12 @@ func (s *EffectPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Conte
 }
 
 func (s *EffectSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) error {
-	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
+	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, operation)
+	return err
+}
+
+func (s *EffectSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) (bool, error) {
+	return s.runRuntimeMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
@@ -188,10 +208,6 @@ const conversationForkChatExecutionLease = 2 * time.Minute
 var agentIdentityFields = storeagent.IdentityFields
 
 type runLifecycleCandidateHandoffReservation = storerunhandoff.CandidateHandoff
-
-func withRunLifecycleCandidateHandoff(ctx context.Context, operation func(*runLifecycleCandidateHandoffReservation) error) error {
-	return storerunhandoff.WithCandidateHandoff(ctx, operation)
-}
 
 func nullUUIDString(raw string) any {
 	raw = strings.TrimSpace(raw)
