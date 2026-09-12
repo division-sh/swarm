@@ -15037,7 +15037,7 @@ platform_tables:
       possession_loss_contract:
         operation_error_recheck: >-
           A selected-store operation error is not itself ownership loss. The existing process capability performs an
-          independent possession proof. Its configured budget starts only after that serialized proof owns the session,
+          independent possession proof. Its configured monitor deadline starts only after that serialized proof owns the session,
           not while waiting behind healthy admitted work. Failure to complete proof within budget irreversibly fences
           local execution admission and generation grants as ownership_unprovable without waiting on stalled SQL or an
           operation/grant mutex held across it. This is a local permission decision, not proof of physical database loss,
