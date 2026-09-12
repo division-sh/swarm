@@ -162,7 +162,7 @@ func TestPostgresPipelineClaimReleaseFailureIsTerminalAndReclaimable(t *testing.
 			if got := db.Stats().MaxOpenConnections; got != 2 {
 				t.Fatalf("capacity after terminal release = %d, want 2", got)
 			}
-			assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
+			assertIndependentAdvisoryLockAcquiredAfterDisposal(t, dsn, replayClaimLockKey(eventID))
 
 			reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
 			if err != nil {
@@ -240,7 +240,7 @@ func TestPostgresPipelineClaimSetupFailuresTerminallyReleaseAndReclaim(t *testin
 				if got := db.Stats().MaxOpenConnections; got != 2 {
 					t.Fatalf("capacity after failed claim setup = %d, want 2", got)
 				}
-				assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
+				assertIndependentAdvisoryLockAcquiredAfterDisposal(t, dsn, replayClaimLockKey(eventID))
 
 				registry.SetHooksForTest(nil, nil, nil)
 				reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
@@ -309,7 +309,7 @@ func TestPostgresPipelineScanCloseFailureIsTerminalAndReclaimable(t *testing.T) 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
+			dsn, db, _ := testutil.StartPostgres(t)
 			selected := newTestPostgresStore(t, db)
 			fixture := authorActivityReceiptFixture{
 				store:   selected,
@@ -348,6 +348,7 @@ func TestPostgresPipelineScanCloseFailureIsTerminalAndReclaimable(t *testing.T) 
 			if _, err := selected.pipelinePostgresOwner.PostgresPipelineClaimStateForTest(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
 				t.Fatalf("claim after failed close = %v, want ErrStaleClaim", err)
 			}
+			assertIndependentAdvisoryLockAcquiredAfterDisposal(t, dsn, replayClaimLockKey(eventID))
 
 			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(executionposture.Live))
 			if err != nil {
@@ -499,7 +500,7 @@ func TestPostgresPipelineClaimPoisonBetweenLeaseAttachAndRegistryPublicationIsTe
 	if got := db.Stats().MaxOpenConnections; got != 2 {
 		t.Fatalf("capacity after poisoned attach/publication boundary = %d, want 2", got)
 	}
-	assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
+	assertIndependentAdvisoryLockAcquiredAfterDisposal(t, dsn, replayClaimLockKey(eventID))
 
 	registry.SetHooksForTest(nil, nil, nil)
 	reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
@@ -632,6 +633,7 @@ func TestPostgresTerminalAdvisoryReleaseFailureDiscardsExactSession(t *testing.T
 	if err != nil || !acquired || lease == nil {
 		t.Fatalf("acquire terminal advisory lease=%#v acquired=%v err=%v", lease, acquired, err)
 	}
+	session := lease.Session()
 	lease.SetUnlockForTest(func(context.Context, *postgresbackend.SessionAuthority, string) (bool, error) {
 		return false, nil
 	})
@@ -639,7 +641,13 @@ func TestPostgresTerminalAdvisoryReleaseFailureDiscardsExactSession(t *testing.T
 		!strings.Contains(err.Error(), "did not own the lock") {
 		t.Fatalf("terminal release error = %v, want checked false-unlock evidence", err)
 	}
-	assertIndependentAdvisoryLockAvailable(t, dsn, lockKey)
+	if lease.Current() {
+		t.Fatal("failed unlock retained local execution authority")
+	}
+	if _, err := session.ExecContext(ctx, `SELECT 1`); err == nil {
+		t.Fatal("discarded session still admitted SQL")
+	}
+	assertIndependentAdvisoryLockAcquiredAfterDisposal(t, dsn, lockKey)
 }
 
 func TestPostgresAmbiguousAdvisoryAcquireDiscardsBorrowedSessionAfterTransaction(t *testing.T) {
@@ -648,6 +656,7 @@ func TestPostgresAmbiguousAdvisoryAcquireDiscardsBorrowedSessionAfterTransaction
 	ctx := testAuthorActivityContext()
 	lockKey := "test:ambiguous-advisory-acquire:" + uuid.NewString()
 	injected := errors.New("injected result scan failure after server acquisition")
+	var discarded *postgresbackend.SessionAuthority
 
 	err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
 		_, _, acquireErr := postgresbackend.AcquireAdvisoryLockLeaseWith(
@@ -655,6 +664,7 @@ func TestPostgresAmbiguousAdvisoryAcquireDiscardsBorrowedSessionAfterTransaction
 			db,
 			lockKey,
 			func(ctx context.Context, authority *postgresbackend.SessionAuthority, key string) (bool, error) {
+				discarded = authority
 				var acquired bool
 				if err := authority.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, key).Scan(&acquired); err != nil {
 					return false, err
@@ -670,6 +680,74 @@ func TestPostgresAmbiguousAdvisoryAcquireDiscardsBorrowedSessionAfterTransaction
 	if !errors.Is(err, injected) {
 		t.Fatalf("ambiguous acquire error = %v, want injected scan failure", err)
 	}
+	if discarded == nil {
+		t.Fatal("ambiguous acquisition did not enter the session")
+	}
+	if _, err := discarded.ExecContext(ctx, `SELECT 1`); err == nil {
+		t.Fatal("ambiguous acquisition left an executable session")
+	}
+	assertIndependentAdvisoryLockAcquiredAfterDisposal(t, dsn, lockKey)
+}
+
+func assertIndependentAdvisoryLockAcquiredAfterDisposal(t *testing.T, dsn, lockKey string) {
+	t.Helper()
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close post-disposal observer: %v", err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := acquireIndependentAdvisoryLockAfterDisposal(ctx, db, lockKey); err != nil {
+		t.Fatalf("server acquisition after disposal: %v", err)
+	}
+}
+
+// Local socket disposal does not acknowledge server-side lock release.
+func acquireIndependentAdvisoryLockAfterDisposal(ctx context.Context, db *sql.DB, lockKey string) (err error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, conn.Close()) }()
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, lockKey); err != nil {
+		return err
+	}
+	var released bool
+	if err := conn.QueryRowContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, lockKey).Scan(&released); err != nil {
+		return err
+	}
+	if !released {
+		return errors.New("post-disposal observer did not unlock its exact session")
+	}
+	return nil
+}
+
+func TestPostgresPostDisposalObservationRejectsHeldLock(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	owner, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	lockKey := "post-disposal-held-control:" + uuid.NewString()
+	if _, err := owner.ExecContext(context.Background(), `SELECT pg_advisory_lock(hashtext($1))`, lockKey); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := acquireIndependentAdvisoryLockAfterDisposal(ctx, db, lockKey); err == nil || ctx.Err() != context.DeadlineExceeded {
+		t.Fatalf("held-lock observation err=%v deadline=%v", err, ctx.Err())
+	}
+	var released bool
+	if err := owner.QueryRowContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, lockKey).Scan(&released); err != nil || !released {
+		t.Fatalf("owner unlock=%t: %v", released, err)
+	}
+	assertIndependentAdvisoryLockAcquiredAfterDisposal(t, dsn, lockKey)
 	assertIndependentAdvisoryLockAvailable(t, dsn, lockKey)
 }
 
