@@ -34,9 +34,11 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type dynamicFlowCreationAtomicityStore interface {
+	sourceartifactfixture.Writer
 	externalStoreTestDurableEventBusStore
 	runtimepipeline.WorkflowPersistenceOwner
 	runtimerunlifecycle.OperationOwner
@@ -51,6 +53,7 @@ type dynamicFlowCreationAtomicityStore interface {
 }
 
 type dynamicFlowCreationAtomicityFixture struct {
+	selected dynamicFlowCreationAtomicityStore
 	db       *sql.DB
 	workflow *runtimepipeline.PipelineCoordinator
 	bus      *runtimebus.EventBus
@@ -243,7 +246,8 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		t.Fatalf("mark topology ready: %v", err)
 	}
 	return dynamicFlowCreationAtomicityFixture{
-		db: db, workflow: workflow, bus: eventBus, ctx: ctx,
+		selected: selected,
+		db:       db, workflow: workflow, bus: eventBus, ctx: ctx,
 		runID: runID, plan: plan, event: event, sqlite: sqlite,
 	}
 }
