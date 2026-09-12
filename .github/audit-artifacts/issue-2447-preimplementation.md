@@ -13,6 +13,13 @@ concept in the existing inventory; no search exclusion or test assertion changes
 The unchanged inventory guards and narrow/stale-audit negative controls prove this
 classification. The score/CI gate boundary is unchanged.
 
+The same exact-artifact disposition applies to the retired-transport text census:
+its embedded classification table records the baseline's 75 measured-name/path
+references. No search exclusion or assertion is removed. The separate PostgreSQL
+fork immediate-lock-release failure is reproduced on unchanged master and recorded
+as #2353 LSF-044; it is not permission to change runtime or fork-test semantics in
+this baseline-only workstream.
+
 Agent-g. Analysis baseline: `origin/master@90809b1cb55a4bb97655a199292dda338e722bf5`
 (merged #2446). Docs baseline: `fc0eb9500fb5a0c63603dabdc6efad23971e1a53`.
 Status: **independent gate requested, not approved; no implementation started**.
