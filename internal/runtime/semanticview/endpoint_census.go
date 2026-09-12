@@ -868,7 +868,7 @@ func endpointMatchesProof(source Source, endpoint AuthoredEventEndpoint, proof F
 		if flowPath == "" {
 			flowPath = eventidentity.Normalize(source.FlowPath(endpoint.FlowID))
 		}
-		_, inputEvents := authoredSubscriptionFlowEvents(source, endpoint.FlowID)
+		inputEvents := authoredSubscriptionInputEvents(source, endpoint.FlowID)
 		return admission.MatchesReceiverInput(proof.EventKey(), flowPath, inputEvents)
 	}
 	return flowEventMatchesWithoutTopology(source, endpoint.FlowID, endpoint.Event.Authored, proof.EventKey()) ||
@@ -898,14 +898,11 @@ func endpointSubscriptionAdmission(source Source, endpoint AuthoredEventEndpoint
 	if flowPath == "" && strings.TrimSpace(endpoint.FlowID) != "." {
 		flowPath = eventidentity.Normalize(endpoint.FlowPath)
 	}
-	localEvents, inputEvents := authoredSubscriptionFlowEvents(source, endpoint.FlowID)
 	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
 		ConsumerKind: consumerKind,
 		ConsumerID:   consumerID,
 		FlowID:       endpoint.FlowID,
 		FlowPath:     flowPath,
-		LocalEvents:  localEvents,
-		InputEvents:  inputEvents,
 		Authored:     endpoint.Event.Authored,
 	}), true
 }

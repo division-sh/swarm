@@ -198,7 +198,7 @@ func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 		return canonical
 	}
 	localNames := flowScopeEventNamesForProof(scope)
-	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical, localNames); local != "" {
+	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical); local != "" {
 		return local
 	}
 	return runtimeeventidentity.LocalizeForFlow(scope.Path, localNames, canonical)
@@ -210,7 +210,7 @@ func localizeExecutableNodeEventForProof(source Source, scope FlowScope, canonic
 		return ""
 	}
 	localNames := flowScopeEventNamesForProof(scope)
-	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical, localNames); local != "" {
+	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical); local != "" {
 		return local
 	}
 	return runtimeeventidentity.LocalizeForFlow(scope.Path, localNames, canonical)
@@ -234,7 +234,7 @@ func flowScopeEventNamesForProof(scope FlowScope) []string {
 	return localNames
 }
 
-func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, canonical string, _ []string) string {
+func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, canonical string) string {
 	bundle, ok := Bundle(source)
 	if !ok || scope.Mode != "template" {
 		return ""

@@ -312,6 +312,16 @@ func receiverDeclaresSubscriptionEvent(source Source, req AuthoredSubscriptionRe
 	if runtimecontracts.IsIntrinsicWorkflowRuntimeEvent(localEvent) {
 		return true
 	}
+	if source != nil {
+		if bundle, ok := Bundle(source); ok {
+			if _, found, err := bundle.ResolveEffectiveCompiledFlowEventSchema(req.FlowID, localEvent); err == nil && found {
+				return true
+			}
+		}
+		return runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), localEvent)
+	}
+	// Source-free grammar classification accepts the caller's declaration set.
+	// An admitted runtime source above never takes authority from these maps.
 	for eventType := range req.LocalEvents {
 		if eventidentity.Normalize(eventType) == localEvent {
 			return true
@@ -321,9 +331,6 @@ func receiverDeclaresSubscriptionEvent(source Source, req AuthoredSubscriptionRe
 		if eventidentity.Normalize(eventType) == localEvent {
 			return true
 		}
-	}
-	if source != nil && runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), localEvent) {
-		return true
 	}
 	return false
 }
@@ -345,37 +352,29 @@ func ClassifyExecutableNodeSubscription(source Source, node runtimeidentity.Exec
 		return AuthoredSubscriptionAdmission{}
 	}
 	flowPath := ""
-	localEvents := map[string]struct{}{}
-	var inputEvents []string
 	semanticScope, scopeErr := ResolveExecutableNodeSemanticScope(source, node)
 	if scopeErr != nil {
 		return failedAuthoredSubscription(AuthoredSubscriptionAdmission{}, AuthoredSubscriptionFailureSemanticScopeInvalid,
 			fmt.Sprintf("node %q semantic scope is invalid: %v", node.Key(), scopeErr))
 	}
-	if scope, ok := semanticScope.OwningFlow(); ok {
+	if _, ok := semanticScope.OwningFlow(); ok {
 		flowPath = sourceFlowPath(source, node.FlowPath())
-		localEvents, inputEvents = authoredSubscriptionScopeEvents(scope)
 	}
 	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
 		ConsumerKind: AuthoredSubscriptionConsumerNode,
 		ConsumerID:   node.Key(),
 		FlowID:       node.FlowPath(),
 		FlowPath:     flowPath,
-		LocalEvents:  localEvents,
-		InputEvents:  inputEvents,
 		Authored:     authored,
 	})
 }
 
 func ClassifyTimerSubscription(source Source, timerID, flowID, authored string) AuthoredSubscriptionAdmission {
-	localEvents, inputEvents := authoredSubscriptionFlowEvents(source, flowID)
 	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
 		ConsumerKind: AuthoredSubscriptionConsumerTimer,
 		ConsumerID:   strings.TrimSpace(timerID),
 		FlowID:       strings.TrimSpace(flowID),
 		FlowPath:     sourceFlowPath(source, flowID),
-		LocalEvents:  localEvents,
-		InputEvents:  inputEvents,
 		Authored:     authored,
 	})
 }
@@ -421,9 +420,9 @@ func ResolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 	flowPath := ""
 	var inputEvents []string
 	if semanticScope, err := ResolveExecutableNodeSemanticScope(source, node); err == nil {
-		if scope, ok := semanticScope.OwningFlow(); ok {
+		if _, ok := semanticScope.OwningFlow(); ok {
 			flowPath = sourceFlowPath(source, node.FlowPath())
-			inputEvents = append([]string(nil), scope.InputEvents...)
+			inputEvents = authoredSubscriptionInputEvents(source, node.FlowPath())
 		}
 	}
 	for _, candidate := range append(exact, patterns...) {
@@ -454,74 +453,18 @@ func fillAuthoredSubscriptionScope(source Source, req *AuthoredSubscriptionReque
 	if req.FlowPath == "" && strings.TrimSpace(req.FlowID) != "." {
 		req.FlowPath = eventidentity.Normalize(source.FlowPath(req.FlowID))
 	}
-	if scope, ok := source.FlowScopeByID(req.FlowID); ok {
-		if len(req.LocalEvents) == 0 || len(req.InputEvents) == 0 {
-			localEvents, inputEvents := authoredSubscriptionScopeEvents(scope)
-			if len(req.LocalEvents) == 0 {
-				req.LocalEvents = localEvents
-			}
-			if len(req.InputEvents) == 0 {
-				req.InputEvents = inputEvents
-			}
-		}
-	}
-	for _, record := range source.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err != nil || strings.TrimSpace(node.FlowPath()) != strings.TrimSpace(req.FlowID) {
-			continue
-		}
-		for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
-			if req.LocalEvents == nil {
-				req.LocalEvents = map[string]struct{}{}
-			}
-			result := runtimecontracts.ActivityResultEventsForSite(site)
-			eventTypes := []string{result.SuccessEvent, result.FailureEvent}
-			if site.Spec.Approval != nil {
-				eventTypes = append(eventTypes, result.RevisionRequested, result.Rejected)
-			}
-			for _, eventType := range eventTypes {
-				if local := eventidentity.LeafName(eventType); local != "" {
-					req.LocalEvents[local] = struct{}{}
-				}
-			}
-		}
-	}
 }
 
-func authoredSubscriptionFlowEvents(source Source, flowID string) (map[string]struct{}, []string) {
+func authoredSubscriptionInputEvents(source Source, flowID string) []string {
 	if source == nil {
-		return nil, nil
+		return nil
 	}
-	if scope, ok := source.FlowScopeByID(strings.TrimSpace(flowID)); ok {
-		return authoredSubscriptionScopeEvents(scope)
+	pins := source.FlowInputEventPins(strings.TrimSpace(flowID))
+	inputs := make([]string, 0, len(pins))
+	for _, pin := range pins {
+		inputs = append(inputs, pin.EventType())
 	}
-	local := map[string]struct{}{}
-	for eventType := range source.AuthoredEventEntries() {
-		if eventType = eventidentity.Normalize(eventType); eventType != "" {
-			local[eventType] = struct{}{}
-		}
-	}
-	return local, nil
-}
-
-func authoredSubscriptionScopeEvents(scope FlowScope) (map[string]struct{}, []string) {
-	local := make(map[string]struct{}, len(scope.Events)+len(scope.InputEvents)+len(scope.OutputEvents)+1)
-	for eventType := range scope.Events {
-		if eventType = eventidentity.Normalize(eventType); eventType != "" {
-			local[eventType] = struct{}{}
-		}
-	}
-	for _, events := range [][]string{scope.InputEvents, scope.OutputEvents} {
-		for _, eventType := range events {
-			if eventType = eventidentity.Normalize(eventType); eventType != "" {
-				local[eventType] = struct{}{}
-			}
-		}
-	}
-	if eventType := eventidentity.Normalize(scope.AutoEmitEvent); eventType != "" {
-		local[eventType] = struct{}{}
-	}
-	return local, append([]string(nil), scope.InputEvents...)
+	return inputs
 }
 
 func sourceFlowPath(source Source, flowID string) string {

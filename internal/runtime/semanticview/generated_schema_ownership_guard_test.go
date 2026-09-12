@@ -50,14 +50,25 @@ func hostileSchemaRecompile(unrelated *WorkflowContractBundle) any {
     return schema
 }
 `)...)
+	subscriptionPath := filepath.Join(root, "internal/runtime/semanticview/subscription_admission.go")
+	subscriptionRaw, err := os.ReadFile(subscriptionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscriptionMarker := "func fillAuthoredSubscriptionScope(source Source, req *AuthoredSubscriptionRequest) {"
+	if strings.Count(string(subscriptionRaw), subscriptionMarker) != 1 {
+		t.Fatal("subscription scope owner not found")
+	}
+	overlay[subscriptionPath] = []byte(strings.Replace(string(subscriptionRaw), subscriptionMarker, subscriptionMarker+"\n _ = runtimecontracts.ActivitySitesForNode", 1))
 	findings := generatedSchemaFindings(t, overlay)
-	alias, scope, recompile := false, false, false
+	alias, scope, recompile, subscription := false, false, false, false
 	for _, finding := range findings {
 		alias = alias || strings.Contains(finding, "hostileGeneratedSchema")
 		scope = scope || (strings.Contains(finding, "ResolveEventSchema") && strings.HasSuffix(finding, ":FlowScopes"))
 		recompile = recompile || strings.Contains(finding, "hostileSchemaRecompile")
+		subscription = subscription || strings.Contains(finding, "fillAuthoredSubscriptionScope")
 	}
-	if len(findings) != 3 || !alias || !scope || !recompile {
+	if len(findings) != 4 || !alias || !scope || !recompile || !subscription {
 		t.Fatalf("guard missed alias or in-owner scope search: %v", findings)
 	}
 }
@@ -66,7 +77,7 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 	t.Helper()
 	pkgs, err := packages.Load(&packages.Config{Dir: agentNameGuardRepoRoot(t), Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedCompiledGoFiles},
-		"./internal/runtime/contracts", "./internal/runtime/semanticview", "./internal/runtime/bootverify", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/manager", "./internal/runtime/tools", "./internal/runtime/core/pinrouting", "./internal/runtime/accprojection", "./internal/runtime/scenarioderivation", "./internal/cliapp")
+		"./internal/runtime/contracts", "./internal/runtime/semanticview", "./internal/runtime/bootverify", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/manager", "./internal/runtime/tools", "./internal/runtime/bus", "./internal/runtime/core/pinrouting", "./internal/runtime/accprojection", "./internal/runtime/scenarioderivation", "./internal/cliapp")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +122,9 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 						findings = append(findings, owner.String()+":"+used.FullName())
 					}
 					if used.Pkg().Path() == contracts && (used.Name() == "compileCurrentEventDeclaration" || used.Name() == "generatedActivityDeclarationRecords") && owner != bindingCompiler {
+						findings = append(findings, owner.String()+":"+used.FullName())
+					}
+					if used.Pkg().Path() == contracts && (used.Name() == "ActivitySitesForNode" || used.Name() == "ActivityResultEventsForSite") && owner == pkg.Types.Scope().Lookup("fillAuthoredSubscriptionScope") {
 						findings = append(findings, owner.String()+":"+used.FullName())
 					}
 					// These exact functions resolve one supplied flow. Enumeration
