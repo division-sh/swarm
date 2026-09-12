@@ -381,6 +381,8 @@ func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
 }
 
 func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureReturn(t *testing.T) {
+	// This payload-only compute failure has no entity owner. Keep real failure
+	// logging enabled without inventing an existing entity in a no-store fixture.
 	source := pipelineSourceWithStructuredRendererModule(t, map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
@@ -427,14 +429,9 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 			0,
 			testPipelineRunID,
 			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+			events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}),
 			time.Time{},
 		),
-		State: WorkflowState{
-			EntityID: "ent-1",
-			Stage:    WorkflowStateID("pending"),
-			Metadata: map[string]any{},
-		},
 	}, false)
 	if err == nil {
 		t.Fatal("executeNodeContractHandler error = nil, want output-schema failure")

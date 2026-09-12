@@ -375,7 +375,7 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "drafting", EnteredStageAt: now,
-				Fields:     map[string]any{"entity_id": entityID, "run_id": runtimeRunID(ctx)},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			})
 			if err := workflowStore.upsert(ctx, instance); err != nil {
@@ -423,7 +423,7 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			entityID := uuid.NewString()
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "drafting", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "run_id": runID},
+				CurrentState: "drafting", EnteredStageAt: now, Fields: map[string]any{},
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)
@@ -473,7 +473,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 			entityID := uuid.NewString()
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
-				CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "run_id": runID},
+				CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{},
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)
@@ -565,7 +565,7 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 				entityID := uuid.NewString()
-				if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "run_id": runID},
+				if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{},
 					EntityType: "test_entity"})); err != nil {
 					t.Fatal(err)
 				}
@@ -598,7 +598,7 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 			ensurePipelineTestRun(t, workflowStore, runID)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "run_id": runID},
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
@@ -641,7 +641,7 @@ func TestInitialStageLifecycleArmsStandingGateOnBothStores(t *testing.T) {
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "run_id": runID, "activation": "standing"},
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
@@ -666,7 +666,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "run_id": runID},
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
@@ -700,7 +700,7 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "run_id": runID},
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1", CurrentState: "drafting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}

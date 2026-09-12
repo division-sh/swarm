@@ -21,10 +21,9 @@ type workflowStructuralField struct {
 }
 
 type workflowStructuralNode struct {
-	name       string
-	typeValue  runtimecontracts.ResolvedCatalogType
-	fields     map[string]workflowStructuralField
-	entityRoot bool
+	name      string
+	typeValue runtimecontracts.ResolvedCatalogType
+	fields    map[string]workflowStructuralField
 }
 
 type workflowStructuralTypeProvider struct {
@@ -153,30 +152,21 @@ func (p *workflowStructuralTypeProvider) register(root, path string, resolved ru
 		}
 		return cel.MapType(key, value), nil
 	case runtimecontracts.CatalogTypeObject:
-		entityRoot := root == "entity" && path == "entity"
 		// Names and traversal paths are diagnostics, not type identities. Only
 		// exact structural equality permits reuse of a provider-local handle.
 		for _, node := range p.registrationOrder {
-			if node.entityRoot == entityRoot && runtimecontracts.StructuralCatalogTypesEqual(node.typeValue, resolved) {
+			if runtimecontracts.StructuralCatalogTypesEqual(node.typeValue, resolved) {
 				return cel.ObjectType(node.name), nil
 			}
 		}
 		typeName := fmt.Sprintf("%srecord%d", workflowStructuralTypePrefix, len(p.registrationOrder))
-		node := &workflowStructuralNode{name: typeName, typeValue: resolved.Clone(), fields: map[string]workflowStructuralField{}, entityRoot: entityRoot}
+		node := &workflowStructuralNode{name: typeName, typeValue: resolved.Clone(), fields: map[string]workflowStructuralField{}}
 		p.nodes[typeName] = node
 		p.registrationOrder = append(p.registrationOrder, node)
 		for _, field := range resolved.Fields {
 			fieldType, err := p.register(root, path+"_"+field.Name, field.Type)
 			if err != nil {
 				return nil, fmt.Errorf("field %s: %w", field.Name, err)
-			}
-			// Top-level entity null comparisons are an existing contract (not T?).
-			// Keep scalar types exact while allowing comparisons with materialized null.
-			if root == "entity" && path == "entity" {
-				switch field.Type.Kind {
-				case runtimecontracts.CatalogTypeText, runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeNumber, runtimecontracts.CatalogTypeBoolean:
-					fieldType = cel.NullableType(fieldType)
-				}
 			}
 			node.fields[field.Name] = workflowStructuralField{
 				name: field.Name, typeValue: field.Type.Clone(), celType: fieldType, isOptional: field.IsOptional,

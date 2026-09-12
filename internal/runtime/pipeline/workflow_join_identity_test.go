@@ -621,7 +621,10 @@ func TestSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothStores(t *
 					bundle.FlowTree.ByID["a"], bundle.FlowTree.ByID["b"] = bundle.FlowTree.ByID["b"], bundle.FlowTree.ByID["a"]
 				}
 				bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{"a": orders.Schema, "b": orders.Schema}
-				bundle = admitSyntheticEntityContractsForTest(t, bundle, "test_entity", map[string]string{"a": "test_entity", "b": "test_entity"})
+				bundle = admitSyntheticEntityContractsForTest(t, bundle, "test_entity", map[string]string{"a": "test_entity", "b": "test_entity"}, map[string]string{
+					"a/entities.yaml": "test_entity:\n  expected: '[text]'\n",
+					"b/entities.yaml": "test_entity:\n  expected: '[text]'\n",
+				})
 				source := exactWorkflowJoinSource{Source: semanticview.Wrap(bundle), plans: plans}
 				schedules := &recordingGenericScheduleWakeupOwner{}
 				newCoordinator := func() *PipelineCoordinator {

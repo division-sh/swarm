@@ -114,6 +114,15 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				if got := waitForPresenceEntity(t, process, runID, "done", completed); got != entityID {
 					t.Fatalf("completed restart changed owner: %s != %s", got, entityID)
 				}
+				read := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
+					"entity", "view", entityID, "--run-id", runID, "--json", "--config", config,
+					"--api-server", process.apiBase, "--api-token-file", token)
+				var visible struct {
+					Fields map[string]any `json:"fields"`
+				}
+				if err := json.Unmarshal([]byte(read.output), &visible); read.err != nil || err != nil || !reflect.DeepEqual(visible.Fields, completed) {
+					t.Fatalf("CLI entity JSON changed sparse fields: command=%v decode=%v\n%s", read.err, err, read.output)
+				}
 				waitForGoldenTerminalRun(t, process, store, runID, 30*time.Second)
 				// The frontier was published after clear committed. Fork reconstructs
 				// that history and executes the real completed handler in a new run.

@@ -83,7 +83,7 @@ func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
 			entityID := FlowInstanceEntityID(path)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
-				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{"a"}},
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)
@@ -130,7 +130,7 @@ func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T
 			enteredAt := time.Now().UTC()
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
-				CurrentState: "dispatching", EnteredStageAt: enteredAt, Fields: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
+				CurrentState: "dispatching", EnteredStageAt: enteredAt, Fields: map[string]any{"expected": []any{"a"}},
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)
@@ -191,7 +191,7 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 			ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "order-1", StorageRef: "orders/order-1", WorkflowName: "orders", WorkflowVersion: "1.0.0",
-				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": tc.members},
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": tc.members},
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)
@@ -252,7 +252,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			pc := &PipelineCoordinator{module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(workflowJoinLifecycleBundle(t))}, workflowStore: store, genericSchedules: schedules}
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": tc.members},
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": tc.members},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
@@ -305,7 +305,7 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 			entityID := FlowInstanceEntityID(path)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
-				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{}},
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{}},
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)
@@ -363,7 +363,7 @@ func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T)
 	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "order-typed", StorageRef: "orders/order-typed", WorkflowName: "orders", WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{}},
+		CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{}},
 		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatal(err)
@@ -409,7 +409,7 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			entityID := FlowInstanceEntityID(path)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
-				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{"a"}},
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)
@@ -593,7 +593,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "expected": []any{"a"}}, StateBuckets: carrier.PersistedStateBuckets(),
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: now, Fields: map[string]any{"expected": []any{"a"}}, StateBuckets: carrier.PersistedStateBuckets(),
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
@@ -683,7 +683,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			pc := newWorkflowJoinPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{"a", "b"}},
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{"a", "b"}},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
@@ -769,7 +769,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{"a", "b"}},
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{"a", "b"}},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
@@ -868,7 +868,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{}},
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{}},
 				EntityType: "test_entity"})); err != nil {
 				t.Fatal(err)
 			}
@@ -966,7 +966,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			entityID := FlowInstanceEntityID(path)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
-				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{}},
+				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{}},
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)
@@ -1031,7 +1031,7 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 	configurePipelineTestDeliveryOwner(t, pc)
 	path := "orders/" + uuid.NewString()
 	entityID := FlowInstanceEntityID(path)
-	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
+	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"expected": []any{"a"}},
 		EntityType: "test_entity"})); err != nil {
 		t.Fatal(err)
 	}

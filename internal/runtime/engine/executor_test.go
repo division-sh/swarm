@@ -3777,7 +3777,10 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 }
 
 func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
-	repo := &orderedStateRepo{order: &[]string{}}
+	stored := testStateSnapshot("pending", map[string]any{
+		"items": []any{map[string]any{"score": 7}, map[string]any{"score": 3}},
+	}, nil, map[string]map[string]any{})
+	repo := &orderedStateRepo{order: &[]string{}, snapshot: &stored}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        entityCollectionExpressionSource(),
 		StateRepo:     repo,
