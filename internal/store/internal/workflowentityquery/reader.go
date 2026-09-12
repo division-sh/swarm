@@ -91,7 +91,7 @@ func count(request entityquery.Request, query func(string) (rowIterator, error))
 		if err != nil {
 			return 0, err
 		}
-		materialized, err := entityruntime.Materialize(request.Contract, entityruntime.DeclaredValues(request.Contract, fields))
+		materialized, err := entityruntime.NormalizeState(request.Contract, entityruntime.DeclaredValues(request.Contract, fields))
 		if err != nil {
 			return 0, err
 		}

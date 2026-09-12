@@ -646,8 +646,9 @@ contract_formats:
         Entity contracts use a flat form: underscore-prefixed keys are
         entity metadata, non-underscored keys are field declarations.
         Field types come from the Wave 1 type system. Every declared
-        field is always readable with a type-valid value; `initial:` is
-        the explicit authored create-time override when needed.
+        bare field requires definite assignment before a value read; a
+        trailing `?` permits omission. Explicit `initial:` values apply
+        only at creation. Reads never materialize defaults.
     authoritative_section: See top-level `entity_contracts` and `type_system`.
   event_schema:
     description: |
@@ -2179,20 +2180,23 @@ rule:
       platform-visible reader must resolve through declared contract fields.
       Writer-only or reader-only proof is incomplete.
     universal_presence: |
-      Every declared entity field is always readable with a type-valid
-      value. Explicit `initial:` or the type default provides the value
-      when no writer has populated the field yet.
+      Entity state is sparse. A declared field remains unassigned until
+      explicit creation initialization or a committed typed mutation assigns
+      it. Reading, reloading or reconstructing state never invents a value.
     required_by_default_uniform_with_events: |
-      Declared entity fields and event payload fields are required and
-      type-checked by default. Event payload fields use exactly one trailing
-      `?` on the authored type as their explicit optional form. Readers and
-      writers must not infer optionality from
+      Declared entity fields and event payload fields are bare and
+      type-checked by default. Both use exactly one trailing `?` on the
+      authored type as their explicit optional form. A supplied event or
+      named record must contain its required members. An entity root may
+      remain unassigned, but bare reads require prior definite assignment.
+      Readers and writers must not infer optionality from
       sparse runtime rows, absent historical writes, or prompt prose.
     lifecycle_vs_field_presence: |
-      The state machine is the authority for entity lifecycle. It is not
-      the authority for field-level "was this written yet" semantics;
-      companion fields are the explicit answer when that distinction
-      matters.
+      The compiled state machine and executed handler provenance determine
+      definite assignment at each program point. Only committed creation
+      and mutation effects establish assignment; prompt prose, tool grants
+      and a writer on a different branch do not. Companion fields represent
+      domain facts, not a replacement for structural presence.
 type_system:
   description: |
     Shared Wave 1 type declarations used by entities, event payloads,
@@ -2309,18 +2313,13 @@ type_system:
       flow_instance: text
   defaults:
     description: |
-      Entity field defaults materialize when no explicit `initial:` is
-      declared and no writer has set the field.
-    values:
-      text: '""'
-      integer: '0'
-      numeric: '0'
-      boolean: 'false'
-      list: '[]'
-      named_type: empty instance with each field at its own default
-      enum: the enum's declared default member unless initial overrides it
-      timestamp: 'null'
-      uuid: 'null'
+      Entity fields have no implicit type defaults. Only explicit initial
+      values participate in creation, overlaid by explicit creation inputs
+      and validated as one candidate. Zero, false and empty collections are
+      values only when explicitly supplied. Null is not omission. Enum
+      default declarations do not assign an entity field. Stored reads do
+      not reapply initial values. Supplied named records must be complete
+      for their required members; missing parents are never synthesized.
 entity_contracts:
   description: |
     Entity contracts are declared in entities.yaml owned by a single
@@ -2368,6 +2367,18 @@ entity_contracts:
       It does not make that field receiver-routing authority. Template receiver selection consumes only the
       flow''s declared scalar instance identity; arbitrary business-field descriptor routing is retired.'
     - 'A `materialize_from` field is runtime-owned and not agent-writable.'
+    - 'A trailing ? marks an optional field edge, not a nullable value. Bare entity roots may remain progressively
+      unassigned until a proven write; supplied named records still require every bare member.'
+    - 'Explicit initial values apply once at creation and never during reads, reload, retry, replay or fork hydration.
+      Creation inputs overlay explicit initial values before complete candidate validation. Null initial values reject.'
+  sparse_refinements: |
+    Entity-root equal_to pairs may both remain unassigned, establishing no assignment fact.
+    Exactly one present participant rejects. Two present participants must satisfy the existing typed equality.
+    A supplied named record retains required-member completeness and its structural equality refinements.
+    Ordered paired writes or optional paired clears validate equality at the end of EACH executed mutation list.
+    No intermediate invalid pair escapes to a read phase, emitted event or committed state. An isolated same-value
+    write may preserve an existing pair; it is not prohibited merely because the field participates in equality.
+    Bare fields cannot be cleared; mixed bare/optional pairs can restrict otherwise optional clears.
   routing_indexes:
     status: non_routing_query_evidence
     retired_routing_slice: '#1479/#2087'
@@ -3026,23 +3037,21 @@ state_machine_authority:
       The state machine answers lifecycle questions, not field-write
       status questions.
 companion_field_pattern:
+  status: retired_for_structural_presence
   description: |
-    Wave 1 does not use Optional<T>. When a consumer must distinguish
-    "unwritten" from "written with the type default value," the contract
-    declares an explicit boolean companion field.
+    Presence-companion booleans are not a structural presence mechanism.
+    Use a bare progressively assigned field when verified lifecycle ordering
+    proves its read, or T? when omission is an intended state. Genuine domain
+    booleans remain valid and must not be mechanically removed or repurposed.
   example: |
-    score: numeric
-    has_scored:
-      type: boolean
-      initial: false
+    score: numeric?
   guidance:
     use_when: |
-      Use a companion boolean only when downstream behavior depends on
-      distinguishing "not yet written" from a legitimate default value.
+      Use stock has(entity.score) or entity.?score for an intentional optional
+      value. A proven bare field uses ordinary entity.score without unwraps.
     do_not_use_when: |
-      Do not add companion fields when the type default is already a
-      semantically sufficient baseline or when the state machine already
-      gates consumers naturally.
+      Do not invent has_score/is_assigned booleans, null sentinels or zero
+      initializers solely to disguise an unassigned field.
 design_principles:
   description: Durable Wave 1 principles for future DSL work.
   declaration_is_authority_everything_else_is_secondary:
@@ -3300,7 +3309,15 @@ handler_specification:
         source_event: 'string — which event the payload comes from (default: current trigger event).
           CANONICAL field name — use source_event, not "source".'
       write_item_forms:
-        description: 'Each item in writes is one of five forms. No other forms are accepted.'
+        description: 'Each item in writes is one of the six forms below. No other forms are accepted.'
+        clear:
+          shape: '{op: clear, target: entity.<declared_optional_field>}'
+          meaning: Remove the field key. Omission is not null or a default value.
+          constraints: |
+            Target must be optional, non-immutable and author-writable. Required nested members reject even
+            when their parent is absent. A missing leaf or optional parent is an idempotent no-op, but a
+            malformed-present parent rejects. No value, expression, key, index, source or target alias is allowed.
+            Dynamic map/list members are not field-clear positions; map entry removal uses op: delete.
         direct:
           shape: 'field_name (bare string)'
           meaning: 'payload.field_name → entity.field_name. Direct name match.'
@@ -3326,7 +3343,7 @@ handler_specification:
             for dynamic computation. Do not use expression for simple constants — use value instead.'
         contained_operation:
           promoted_by: '#1548'
-          canonical_code_owner: internal/runtime/contracts.WorkflowDataWrite.Operation + internal/runtime/entityruntime.ResolveContainedOperationTarget
+          canonical_code_owner: internal/runtime/contracts.WorkflowDataWrite.Operation + internal/runtime/entityruntime.MutationPlan
           shape: '{op: set|merge|delete|append|update, target: entity.<map_or_list_field>[.<declared_nested_field>], key?: expression, index?: expression, value?: expression}'
           meaning: >
             Apply a deterministic typed update to a list/map contained inside the
@@ -3939,16 +3956,50 @@ handler_specification:
         store_as: string — entity field for count
       execution_position: After reduce, before compute. Counts items (optionally matching a condition). Stores result in entity
         field.
+    entity_mutation_contract:
+      owner: internal/runtime/entityruntime.MutationPlan
+      rule: |
+        Direct, mapped, literal, computed and contained writes plus field clear lower to one ordered typed
+        entity mutation plan. Handler writes, generated singleton saves, inline action effects, derived
+        projections and backend application consume this owner; backend JSON path operations do not define
+        a second mutation algebra. No new bulk, clear or CEL agent tool capability is implied.
+      inputs: |
+        Missing direct/mapped sources reject the atomic list instead of silently skipping. Ref/CEL operands
+        must resolve an admissible non-null value. Entity operands read the current private draft immediately
+        before their operation. Captured payload/event/policy and prior computed/join/fan-out facts remain
+        immutable. A successful optional-source read must have exact program-point presence evidence.
+      construction: |
+        A whole-field assignment can create a declared root. Nested assignment requires existing typed named
+        parents; it cannot synthesize them. Root map set and list append can construct their missing collection.
+        Append can also construct a missing list leaf under existing named parents. Map-held lists require the
+        existing entry and list. Merge/delete/update require their existing object/key/index. Present malformed
+        values are never mistaken for missing collections. Replacing a root discards omitted descendants.
+      atomicity: |
+        Validate path, ownership, immutable constraints, value types and local refinements for each operation.
+        Validate sibling equality at the final candidate of each executed list before later phases read it.
+        The whole handler transaction remains all-or-none. Repeated sets are ordered and clear/clear is
+        idempotent. A clear and a value-producing effect at an overlapping ancestor/descendant path conflict
+        across ALL executed lists, inline actions and projections, not across mutually exclusive branches.
+        No partial mutation or emitted effect may commit after rejection. Omitted action output is unchanged;
+        action snapshots and stale baseline diffs are not entity mutation evidence.
     clear:
       field: clear
       type: object
-      purpose: Bulk reset state tables.
+      purpose: Reset private accumulator or evaluation state, not entity fields.
       sub_fields:
-        targets: list of state store names to clear
+        targets: 'Private accumulator_state or computed.*, accumulated.*, fan_out.* evaluation targets only.'
       retired_fields:
         target: RETIRED — use targets, including a one-item list for a single clear target.
-      execution_position: After action or activity intent persistence. Last step. Resets accumulator state or specific entity
-        field buckets. Distinct from clear_gates which runs before guard.
+        pending_dedup: RETIRED — has no private effect; use typed entity mutations for optional business fields.
+        entity_fields: RETIRED — use data_accumulation op clear, not standalone clear.targets or metadata aliases.
+      execution_position: |
+        After action or activity intent persistence, as the last handler step. accumulator_state resets only
+        the current node's private accumulator buckets. All declared accprojection bindings in that node's
+        reset scope, not merely the active handler, project the empty result through the typed mutation owner.
+        The projection is a present [] for bare and optional list targets and must satisfy immutable/refinement
+        rules. No hard-coded accumulated_count, accumulated_total, received_items or dedup_key field deletion.
+        Emitted payloads observe pre-reset state; committed state and next-stage reads observe post-reset state.
+        A pure private reset establishes no entity assignment fact. Distinct from clear_gates before guard.
     action:
       field: action
       type: string or object
@@ -4270,20 +4321,20 @@ handler_specification:
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
       rules.condition, data_accumulation.expression, query.filter, and filter.condition. Each namespace resolves to a specific
-      data source. Declared entity fields are universally readable at a type-valid value; undeclared field references
-      are contract errors.'
+      data source. Declared bare entity values require program-point definite assignment; optional values require
+      a presence decision. Undeclared field references are contract errors.'
     namespaces:
       entity:
         resolves_to: 'Declared business fields for the current entity. entity.X reads entity_state.fields->>X
           only when X is declared by the active entity contract.'
-        populated_by: 'data_accumulation writes, compute.store_as, sets_gate, advances_to, save_entity_field
-          (agent tool), and create_entity (initial field population).'
+        populated_by: 'Committed typed mutation operations, declared accumulator projections and explicit creation
+          initialization. sets_gate and advances_to do not assign entity fields by themselves.'
         read_model:
-          declared_fields: Every declared entity field is readable with either an explicit initial value or the field's type default.
+          declared_fields: A bare field read requires prior assignment at its exact program point. T? permits intentional omission, without reader-time initialization.
           undeclared_fields: Referencing an undeclared entity field is a contract error. Legacy platform metadata reads such as entity.current_state, entity.gates, entity.entity_id, entity.flow_instance, entity.revision, entity.created_at, entity.updated_at, entity.entity_type, entity.workflow_name, and entity.workflow_version are invalid unless the field name is declared as business data; use _entity for supported platform metadata.
-          presence_checks: has(entity.X) and == null / != null comparisons are valid, but they are not required for declared fields.
+          presence_checks: Stock CEL has and optional selection distinguish absent keys from explicit zero, false or empty values. Null is not absence.
           structural_binding: The declared primary entity contract supplies the same recursive structural type to verification and execution, including guards, rules, executable values, sinks, collections, activity inputs, stage-gate context, and join outcomes. Missing entity type evidence must not grant dynamic field access.
-          nested_records: Top-level fields retain materialized default-present semantics. Inside a named record, optional edges keep their declared presence meaning; direct nested reads require a dominating presence decision just as payload/item and join result reads do. This does not add top-level sparse storage or clear semantics.
+          nested_records: Entity roots are progressively assigned; supplied named records retain required-member completeness. Optional edges keep their structural presence meaning. A nested write certifies its exact path, not absent siblings or parents. Direct optional reads require a dominating presence decision as for payload/item and join results.
           reference_owner: Field-reference and lifecycle checks consume the stock CEL AST, including optional selectors and lexical macro bindings, after the existing condition-dialect normalization. String/regex extraction must not invent paths or count a shadowed entity identifier as the current entity.
         does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
           collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
@@ -4376,8 +4427,8 @@ handler_specification:
           expression roots.'
     boot_validation:
       description: 'The platform MUST validate entity field references at boot against the declared entity contract.
-        Declared entity fields are always readable; the boot check is declaration and type resolution, not sparse-field
-        initializer proof.'
+        The check includes exact declaration/type resolution and definite assignment at the current program point.
+        A writer elsewhere, a prompt statement or a tool grant is not assignment evidence.'
       checks:
         declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
         nested_type_resolution: Nested paths must resolve through named types to a declared field.
@@ -7637,12 +7688,11 @@ engine:
     presence_semantics:
       has_function:
         signature: has(entity.X) -> boolean
-        meaning: Returns true for declared entity fields. Remains useful for dynamic maps and rare non-contract objects, but is
-          redundant for declared entity fields under universal presence semantics.
+        meaning: Tests key presence through the stock typed CEL owner. A declaration alone does not make this true.
       null_comparison:
-        meaning: 'entity.X == null and entity.X != null compare against the materialized value. Timestamp and uuid fields may
-          legitimately read null when unwritten; most other declared fields read their non-null type defaults.'
-      missing_field_rule: Declared entity fields read as their explicit initial or type default. Undeclared fields are contract errors.
+        meaning: 'Null is not an entity absence representation. Use stock presence/optional operations, not null comparisons,
+          to distinguish omission. Timestamp and uuid fields do not acquire null when unassigned.'
+      missing_field_rule: Unassigned bare value reads reject; optional reads use declared presence semantics. No default filling, and undeclared fields remain contract errors.
     examples:
     - entity.retry_count <= policy.max_retries
     - payload.category == "billing"
@@ -8729,8 +8779,8 @@ tool_model:
           entity_id: string — the created entity's ID
           current_state: string — the entity's initial state from the owning flow state machine
           created_at: string — ISO 8601
-        validation: The caller does not supply entity_id, entity_type, or envelope fields. Missing declared fields materialize
-          from explicit initial values or type defaults.
+        validation: The caller does not supply entity_id, entity_type, or envelope fields. Only explicit creation initializers
+          and supplied fields assign values, validated together as one candidate. Other entity roots remain unassigned.
       get_entity:
         description: Read an entity by ID. Returns the full entity state from entity_state table.
         input:
@@ -16391,9 +16441,17 @@ platform_tables:
     runtime_store_metadata:
       description: 'Immutable creation-origin evidence for a selected runtime store. The stored versions explain which Swarm
         build and exact platform specification created the store; they never decide whether a later build may open it.
-        Products never read or write this table.'
-      ddl: "CREATE TABLE runtime_store_metadata (\n    id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n    swarm_version\
-        \     TEXT NOT NULL,\n    platform_version  TEXT NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL\n);"
+        Products never read or write this table. The entity_presence_model marker is semantic admission authority:
+        fresh bootstrap explicitly stamps sparse-v1 atomically, and admission checks both exact DDL shape and the id=1
+        marker value before entity reads. Missing, predecessor, wrong or partial stores are rejected, never migrated.'
+      ddl: |-
+        CREATE TABLE runtime_store_metadata (
+            id                    INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+            swarm_version         TEXT NOT NULL,
+            platform_version      TEXT NOT NULL,
+            created_at            TIMESTAMPTZ NOT NULL,
+            entity_presence_model TEXT NOT NULL CHECK (entity_presence_model = 'sparse-v1')
+        );
     source_artifacts:
       description: Immutable admitted-source owner. Each row binds the canonical bundle-v2 hash to the exact logical source blob from immutable source admission. Parsed projections are not persisted source authority. Rows are ensured before any durable runtime or run may reference the hash and have no per-artifact mutation or deletion surface.
       ddl: |-

@@ -79,7 +79,7 @@ func materializeEntityStateRow(source semanticview.Source, row map[string]any) (
 		return projected, nil
 	}
 	fields := entityRowFieldMap(projected)
-	materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
+	materialized, err := entityruntime.NormalizeState(contract, entityruntime.DeclaredValues(contract, fields))
 	if err != nil {
 		return nil, err
 	}

@@ -445,7 +445,11 @@ func prepareHandlerMaterializationStateAtNode(source semanticview.Source, node i
 	if !route.Valid() {
 		return fmt.Errorf("materializing handler requires an exact workflow instance route")
 	}
-	state.Metadata = workflowMaterializeEntityFields(source, flowID, state.Metadata)
+	fields, err := workflowNormalizeEntityFields(source, flowID, state.Metadata)
+	if err != nil {
+		return err
+	}
+	state.Metadata = fields
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
 	}

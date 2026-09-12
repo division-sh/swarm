@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -155,9 +156,10 @@ type ActionRegistry interface {
 }
 
 type ActionExecution struct {
-	Handled     bool
-	EmitIntents []EmitIntent
-	State       *StateMutation
+	Handled         bool
+	EmitIntents     []EmitIntent
+	State           *StateMutation
+	EntityMutations []entityruntime.Mutation
 }
 
 type ActionRunner interface {

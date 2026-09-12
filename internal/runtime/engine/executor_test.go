@@ -6636,49 +6636,39 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	}
 }
 
-func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSourceWithRootEntityContract(),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
+func TestExecutor_PrivateResetPreservesBusinessFields(t *testing.T) {
+	node := testRootExecutableNode(t, "node-1")
+	other := testRootExecutableNode(t, "other-node")
+	fields := map[string]any{
+		"dedup_key": "dup-1", "accumulated_count": 3,
+		"accumulated_total": 5, "received_items": []any{"a"},
 	}
-	node := testFlowExecutableNode(t, "root", "node-1")
-	initial := testStateSnapshot("pending", map[string]any{
-		"dedup_key":         "dup-1",
-		"accumulated_total": 5,
-		"received_items":    []any{"a"},
-	}, nil, map[string]map[string]any{
-		node.Key(): {
-			handlerAccumulatorBucketKey: map[string]any{"items": []any{"a"}},
-		},
+	frame := &executionFrame{req: ExecutionRequest{Node: node, Handler: runtimecontracts.SystemNodeEventHandler{
+		Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}},
+	}}}
+	frame.state.State = testStateSnapshot("pending", fields, nil, map[string]map[string]any{
+		node.Key():  {handlerAccumulatorBucketKey: map[string]any{"items": []any{"a"}}},
+		other.Key(): {handlerAccumulatorBucketKey: map[string]any{"items": []any{"b"}}},
 	})
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     node,
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup", "accumulator_state"}},
-		},
-		State: initial,
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
+	exec := &Executor{deps: RuntimeDependencies{Source: stubSourceWithRootEntityContract()}}
+	if err := exec.stepClear(frame); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := result.StateMutation.Fields["dedup_key"]; ok {
-		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", result.StateMutation.Fields)
+	if !reflect.DeepEqual(frame.state.State.StateCarrier.Fields, fields) {
+		t.Fatalf("private reset changed business fields: %#v", frame.state.State.StateCarrier.Fields)
 	}
-	if _, ok := result.StateMutation.Fields["received_items"]; ok {
-		t.Fatalf("expected received_items to be cleared, metadata=%#v", result.StateMutation.Fields)
+	if _, exists := frame.state.State.StateCarrier.StateBuckets[node.Key()][handlerAccumulatorBucketKey]; exists {
+		t.Fatal("current node accumulator survived reset")
 	}
-	if nodeBucket, ok := result.StateMutation.StateBuckets[node.Key()]; ok {
-		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
-			t.Fatalf("expected accumulator bucket to be cleared, state_buckets=%#v", result.StateMutation.StateBuckets)
-		}
+	if _, exists := frame.state.State.StateCarrier.StateBuckets[other.Key()][handlerAccumulatorBucketKey]; !exists {
+		t.Fatal("reset crossed node ownership")
+	}
+	if err := exec.stepClear(frame); err != nil {
+		t.Fatal(err)
+	}
+	frame.req.Handler.Clear.Targets = []string{"pending_dedup"}
+	if err := exec.stepClear(frame); err == nil {
+		t.Fatal("retired success-shaped reset alias accepted")
 	}
 }
 
@@ -7295,7 +7285,12 @@ func TestExecutor_MergeActionStatePreservesInMemoryWrites(t *testing.T) {
 	projected.StateCarrier.Bookkeeping = map[string]any{
 		"action_output": "persisted-output",
 	}
-	exec := &Executor{}
+	projected.StateCarrier.Fields = nil
+	exec := &Executor{deps: RuntimeDependencies{Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"work": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"same": {Type: "text"}, "in_memory_only": {Type: "text"}, "action_output": {Type: "text"},
+		}}},
+	})}}
 	frame := &executionFrame{
 		ctx: context.Background(),
 		req: ExecutionRequest{EntityID: entityID},
@@ -7305,7 +7300,7 @@ func TestExecutor_MergeActionStatePreservesInMemoryWrites(t *testing.T) {
 	}
 
 	mutation := StateMutation{StateCarrier: projected.StateCarrier}
-	if err := exec.mergeActionState(frame, baseline, &mutation); err != nil {
+	if err := exec.mergeActionState(frame, baseline, ActionExecution{State: &mutation, EntityMutations: actionFieldMutations("action_output", "persisted-output")}); err != nil {
 		t.Fatalf("mergeActionState: %v", err)
 	}
 

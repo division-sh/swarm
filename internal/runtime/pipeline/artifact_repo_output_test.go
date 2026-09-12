@@ -76,7 +76,7 @@ func TestArtifactRepoOutputReadbackRecoveryBothStores(t *testing.T) {
 					if err != nil || !found {
 						t.Fatalf("canonical artifact state readback: found=%v err=%v", found, err)
 					}
-					if _, err := entityruntime.MaterializeMetadataForFlow(source, ".", instance.Fields); err != nil {
+					if _, err := entityruntime.NormalizeMetadataForFlow(source, ".", instance.Fields); err != nil {
 						t.Fatalf("artifact result is not readable receiver state: %v", err)
 					}
 					return instance.Fields

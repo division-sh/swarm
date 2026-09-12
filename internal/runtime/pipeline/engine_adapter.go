@@ -559,7 +559,7 @@ func (r pipelineEngineEntityCollectionReader) QueryEntityCollection(ctx context.
 				return nil, fmt.Errorf("decode workflow entity collection row %s: %w", record.EntityID, err)
 			}
 		}
-		materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
+		materialized, err := entityruntime.NormalizeState(contract, entityruntime.DeclaredValues(contract, fields))
 		if err != nil {
 			return nil, fmt.Errorf("materialize workflow entity collection row %s: %w", record.EntityID, err)
 		}
@@ -712,6 +712,10 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		if carried := strings.TrimSpace(mutation.StateCarrier.Control.EntityType); carried != entityType {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization carried entity_type %q disagrees with canonical contract %q", carried, entityType)
 		}
+		fields, err := workflowNormalizeEntityFields(source, flowID, mutation.StateCarrier.PersistedFields())
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
 		current = WorkflowInstance{
 			InstanceID: flowOwner.Route.InstanceID, StorageRef: flowOwner.Route.InstancePath, EntityID: entityID.String(),
 			WorkflowName: workflowName, WorkflowVersion: workflowVersion, Mode: mode, Status: "active", CurrentState: initialState,
@@ -719,7 +723,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 			InstanceKind: mutation.StateCarrier.Control.InstanceKind, TemplateVersion: mutation.StateCarrier.Control.TemplateVersion,
 			ParentFlowID: mutation.StateCarrier.Control.ParentFlowID, ParentFlowInstance: mutation.StateCarrier.Control.ParentFlowInstance,
 			ParentEntityID: mutation.StateCarrier.Control.ParentEntityID,
-			Fields:         workflowMaterializeEntityFields(source, flowID, mutation.StateCarrier.PersistedFields()),
+			Fields:         fields,
 			Bookkeeping:    mutation.StateCarrier.PersistedBookkeeping(), Gates: cloneWorkflowGates(mutation.StateCarrier.Gates),
 			StateBuckets: mutation.StateCarrier.PersistedStateBuckets(), InitialFieldValues: cloneStringAnyMap(mutation.InitialFieldValues),
 			EnteredStageAt: mutation.TriggeredAt.UTC(), CreatedAt: mutation.TriggeredAt.UTC(), UpdatedAt: mutation.TriggeredAt.UTC(),
@@ -823,7 +827,11 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 	if strings.TrimSpace(string(state.Stage)) == "" && len(state.Metadata) == 0 {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityFields(r.coordinator.SemanticSource(), flowID, state.Metadata), nil, nil, nil)
+	fields, err := workflowNormalizeEntityFields(r.coordinator.SemanticSource(), flowID, state.Metadata)
+	if err != nil {
+		return runtimeengine.StateSnapshot{}, false, err
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(fields, nil, nil, nil)
 	if err != nil {
 		return runtimeengine.StateSnapshot{}, false, err
 	}
@@ -845,6 +853,11 @@ func workflowInstanceEngineStateSnapshot(
 	if err != nil {
 		return runtimeengine.StateSnapshot{}, false, err
 	}
+	fields, err := workflowNormalizeEntityFields(source, flowID, carrier.Fields)
+	if err != nil {
+		return runtimeengine.StateSnapshot{}, false, err
+	}
+	carrier.Fields = fields
 	carrier.Gates = workflowStateGatesForScope(source, flowID, carrier.Gates)
 	return runtimeengine.StateSnapshot{
 		EntityID:        entityID,

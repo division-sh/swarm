@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 )
 
 func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) (err error) {
@@ -62,7 +63,7 @@ func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapReq
 		if err := executeSQLitePlans(ctx, conn, request.PlatformPlans); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at) VALUES (1, ?, ?, ?)`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at, entity_presence_model) VALUES (1, ?, ?, ?, ?)`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt.UTC().Format(time.RFC3339Nano), platformschema.EntityPresenceModel); err != nil {
 			return fmt.Errorf("stamp fresh sqlite store origin: %w", err)
 		}
 	case schemaStateCompatible:

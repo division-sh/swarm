@@ -30,7 +30,7 @@ type ContextBuilderInput struct {
 
 func BuildBaseContext(input ContextBuilderInput) (BaseContext, error) {
 	base := values.NewContext()
-	materializedFields, err := entityruntime.MaterializeMetadataForFlow(input.Source, input.FlowID, input.State.StateCarrier.Fields)
+	materializedFields, err := entityruntime.NormalizeMetadataForFlow(input.Source, input.FlowID, input.State.StateCarrier.Fields)
 	if err != nil {
 		return BaseContext{}, err
 	}

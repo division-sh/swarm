@@ -54,7 +54,6 @@ func (pc *PipelineCoordinator) projectWorkflowEvidence(execCtx runtimeengine.Exe
 	}
 	route := execCtx.Request.StateAddress().FlowInstance.Route
 	entityID := strings.TrimSpace(execCtx.Request.EntityID.String())
-	flowID := execCtx.Request.Node.FlowPath()
 	bucketID = strings.TrimSpace(bucketID)
 	if entityID == "" || bucketID == "" {
 		return nil, fmt.Errorf("record_evidence requires exact entity and evidence target")
@@ -66,7 +65,6 @@ func (pc *PipelineCoordinator) projectWorkflowEvidence(execCtx runtimeengine.Exe
 	if strings.TrimSpace(event.ID()) == "" || event.CreatedAt().IsZero() {
 		return nil, fmt.Errorf("record_evidence requires exact accepted event identity")
 	}
-	metadata := workflowMaterializeEntityFields(pc.SemanticSource(), flowID, execCtx.Request.State.StateCarrier.Fields)
 	buckets := make(map[string]map[string]any, len(execCtx.Request.State.StateCarrier.StateBuckets)+1)
 	for key, bucket := range execCtx.Request.State.StateCarrier.StateBuckets {
 		buckets[key] = cloneStringAnyMap(bucket)
@@ -79,7 +77,7 @@ func (pc *PipelineCoordinator) projectWorkflowEvidence(execCtx runtimeengine.Exe
 	buckets["evidence"] = evidence
 	mutation := &runtimeengine.StateMutation{
 		StateCarrier: runtimeengine.NewStateCarrierWithOwners(
-			metadata,
+			nil,
 			execCtx.Request.State.StateCarrier.Bookkeeping,
 			execCtx.Request.State.StateCarrier.Control,
 			execCtx.Request.State.StateCarrier.Gates,

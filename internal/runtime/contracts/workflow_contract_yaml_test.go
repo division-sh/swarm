@@ -1774,13 +1774,13 @@ clear:
 	}
 }
 
-func TestSystemNodeEventHandlerDecode_PreservesCanonicalClearTargets(t *testing.T) {
+func TestSystemNodeEventHandlerDecode_PreservesPrivateClearTargets(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 clear:
   targets:
-    - entity.summary
-    - pending_dedup
+    - computed.summary
+    - accumulator_state
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}

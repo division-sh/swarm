@@ -371,6 +371,14 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		Key:           aux.Key,
 		Index:         aux.Index,
 	}
+	if w.Operation == WorkflowDataOperationClear {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			if key != "op" && key != "target" {
+				return fmt.Errorf("workflow data write op clear must not declare %s, including null", key)
+			}
+		}
+	}
 	switch aux.Value.Kind {
 	case 0:
 		switch {
@@ -714,7 +722,7 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 
 func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 	switch w.Operation {
-	case WorkflowDataOperationSet, WorkflowDataOperationMerge, WorkflowDataOperationDelete, WorkflowDataOperationAppend, WorkflowDataOperationUpdate:
+	case WorkflowDataOperationSet, WorkflowDataOperationMerge, WorkflowDataOperationDelete, WorkflowDataOperationAppend, WorkflowDataOperationUpdate, WorkflowDataOperationClear:
 	default:
 		return fmt.Errorf("unsupported workflow data write op %q", strings.TrimSpace(string(w.Operation)))
 	}
@@ -728,6 +736,10 @@ func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 		return fmt.Errorf("workflow data write op %q target %q must use entity scope", w.Operation, w.TargetRef)
 	}
 	switch w.Operation {
+	case WorkflowDataOperationClear:
+		if !w.Value.IsZero() || !w.Key.IsZero() || !w.Index.IsZero() {
+			return fmt.Errorf("workflow data write op clear must not declare value, key or index")
+		}
 	case WorkflowDataOperationSet, WorkflowDataOperationMerge, WorkflowDataOperationAppend:
 		if w.Value.IsZero() {
 			return fmt.Errorf("workflow data write op %q requires value", w.Operation)

@@ -66,7 +66,7 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", map[string]any{"field": fieldName}, err)
 	}
 	if field.FieldDecl.Immutable {
-		materializedCurrent, currentErr := entityruntime.Materialize(schema.Contract, entityruntime.DeclaredValues(schema.Contract, currentFields))
+		materializedCurrent, currentErr := entityruntime.NormalizeState(schema.Contract, entityruntime.DeclaredValues(schema.Contract, currentFields))
 		if currentErr != nil {
 			return nil, failures.Wrap(failures.ClassInternalFailure, "immutable_field_current_value_unavailable", "tool-executor", "exec_save_entity_field.field", map[string]any{"field": fieldName}, currentErr)
 		}
@@ -248,7 +248,7 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 			return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.fields", nil, err)
 		}
 	}
-	normalizedFields, err := entityruntime.Materialize(contract, fieldsPayload)
+	normalizedFields, err := entityruntime.Initialize(contract, fieldsPayload)
 	if err != nil {
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.fields", nil, err)
 	}

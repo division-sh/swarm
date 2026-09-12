@@ -1008,6 +1008,7 @@ const (
 	WorkflowDataOperationDelete WorkflowDataOperation = "delete"
 	WorkflowDataOperationAppend WorkflowDataOperation = "append"
 	WorkflowDataOperationUpdate WorkflowDataOperation = "update"
+	WorkflowDataOperationClear  WorkflowDataOperation = "clear"
 )
 
 type ExpressionValue struct {
@@ -1199,6 +1200,7 @@ type EntityContract struct {
 
 type EntityFieldDecl struct {
 	Type               string            `yaml:"type"`
+	IsOptional         bool              `yaml:"-"`
 	Initial            any               `yaml:"initial"`
 	Indexed            bool              `yaml:"indexed"`
 	Immutable          bool              `yaml:"immutable"`
@@ -1571,10 +1573,28 @@ func (w WorkflowDataWrite) HasLiteralValue() bool {
 }
 
 func (w WorkflowDataWrite) IsContainedOperation() bool {
-	return strings.TrimSpace(string(w.Operation)) != ""
+	return strings.TrimSpace(string(w.Operation)) != "" && w.Operation != WorkflowDataOperationClear
+}
+
+func ValidatePrivateClearTarget(target string) error {
+	target = strings.TrimSpace(target)
+	if target == "accumulator_state" {
+		return nil
+	}
+	parsed := paths.Parse(target)
+	switch parsed.Root {
+	case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut:
+		if len(parsed.Segments) != 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("RETIRED: clear.targets %q is not private evaluation or accumulator state; use data_accumulation op: clear for declared optional entity fields", target)
 }
 
 func (w WorkflowDataWrite) SourceExpression() ExpressionValue {
+	if w.Operation == WorkflowDataOperationClear {
+		return ExpressionValue{}
+	}
 	if !w.Value.IsZero() {
 		return w.Value
 	}

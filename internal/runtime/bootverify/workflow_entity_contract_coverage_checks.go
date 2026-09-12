@@ -37,7 +37,7 @@ type wave1ScopedAgentRecord struct {
 
 func wave1SpecialClearTarget(target string) bool {
 	switch strings.TrimSpace(target) {
-	case "accumulator_state", "pending_dedup":
+	case "accumulator_state":
 		return true
 	default:
 		return false
