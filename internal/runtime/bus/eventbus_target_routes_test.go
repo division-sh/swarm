@@ -2678,18 +2678,9 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutI
 
 func rootInputInternalPublication(t *testing.T, eventID, runID, sourceEntity string, payload []byte, target events.RouteIdentity) events.Event {
 	t.Helper()
-	event, err := events.NewChildEvent(events.ChildEventInput{
-		Facts: events.EventFacts{
-			ID: eventID, Type: "thing.created", Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: "root-producer"},
-			Payload: payload, CreatedAt: time.Now().UTC(), ExecutionMode: "live",
-			RoutingSource: eventtest.RootRoutingSource(sourceEntity), Envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
-		},
-		Lineage: events.EventLineage{RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: "live"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return event
+	return eventtest.ChildForProducerWithRoutingSource(eventID, "thing.created", eventtest.Producer(events.EventProducerNode, "root-producer"), "", payload, 0,
+		events.EventLineage{RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: "live"},
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), eventtest.RootRoutingSource(sourceEntity), time.Now().UTC())
 }
 
 func TestEventBusPublish_RootInputFlowRejectsInternalSameNameBeforePersistence(t *testing.T) {

@@ -427,6 +427,8 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 		name           string
 		fixture        string
 		eventName      string
+		inputFlow      string
+		inputPayload   string
 		stateOnly      bool
 		fanOutBarrier  bool
 		wantCapability string
@@ -449,7 +451,9 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 		{
 			name:           "delivery replay workflow join timeout",
 			fixture:        "examples/routing/fan-in/barrier",
-			eventName:      "portfolio.setup",
+			eventName:      "portfolio/portfolio.setup",
+			inputFlow:      "portfolio",
+			inputPayload:   `{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}`,
 			wantCapability: selectedContractDeferredWorkWorkflowJoinTimeout,
 		},
 		{
@@ -462,13 +466,17 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 		{
 			name:           "delivery replay dynamic flow creation",
 			fixture:        "examples/routing/template-create-minted-key",
-			eventName:      "validation.triggered",
+			eventName:      "producer/validation.triggered",
+			inputFlow:      "producer",
+			inputPayload:   `{"candidate":"candidate-1"}`,
 			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
 		},
 		{
 			name:           "delivery replay select or create missing dynamic flow",
 			fixture:        "examples/routing/template-select-or-create",
 			eventName:      "producer/account.requested",
+			inputFlow:      "producer",
+			inputPayload:   `{"account_id":"account-1"}`,
 			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
 		},
 		{
@@ -521,7 +529,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					t.Fatalf("seed declared root receiver metadata: %v", err)
 				}
 			} else {
-				seedSelectedExecutionSourceRunWithPrimaryRoute(
+				seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 					t,
 					db,
 					sourceRunID,
@@ -530,8 +538,10 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					test.eventName,
 					at,
 					"test_entity",
+					executionmode.Live,
 					selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "flow-a/1"),
 					nil,
+					events.NoRoutingSource(), events.EventEnvelope{}, selectedExecutionInputFixture{flow: test.inputFlow, payload: []byte(test.inputPayload)},
 					loaded.SourceArtifactFact,
 				)
 			}
@@ -729,7 +739,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		"test_entity",
 		executionmode.Mock,
 		events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(historicalNode), Target: events.MustExistingEntityTarget(historicalTarget)}, nil,
-		events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), loaded.SourceArtifactFact)
+		events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), selectedExecutionInputFixture{}, loaded.SourceArtifactFact)
 	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $2::uuid AND entity_id = $3::uuid`, sourceRunID, sourceRunID, entityID); err != nil {
 		t.Fatalf("bind historical root receiver: %v", err)
 	}
@@ -3820,13 +3830,19 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 
 	sourceRunID := uuid.NewString()
-	entityID := uuid.NewString()
+	entityID := sourceRunID
 	sourceEventID := uuid.NewString()
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700002605, 0).UTC()
-	seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
+	historicalTarget := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID}
+	historicalRoute := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
+	historicalRoute.Target = events.MustExistingEntityTarget(historicalTarget)
+	seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
 		"test_entity",
-		selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "flow-a/1"), nil, loaded.SourceArtifactFact)
+		historicalRoute, nil, events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), loaded.SourceArtifactFact)
+	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $1::uuid AND entity_id = $1::uuid`, sourceRunID); err != nil {
+		t.Fatalf("bind historical root agent receiver: %v", err)
+	}
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -3840,11 +3856,12 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	)
 
 	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-		ForkRunID:      materialized.ForkRunID,
-		Store:          pg,
-		ExecutionOwner: selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:   loader,
-		AgentRuntime:   SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AllowSourceFreeze: true,
+		ForkRunID:         materialized.ForkRunID,
+		Store:             pg,
+		ExecutionOwner:    selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader:      loader,
+		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
 	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
 		t.Fatalf("ActivateSelectedContractRunFork error = %v, want post-T marker blocker", err)
@@ -5403,7 +5420,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	envelope := events.EventEnvelope{}
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
-		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
+		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
 	)
 }
 
@@ -5422,7 +5439,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(
 	envelope := events.EventEnvelope{}
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
-		mode, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
+		mode, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
 	)
 }
 
@@ -5440,8 +5457,13 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 ) events.Event {
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
-		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
+		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
 	)
+}
+
+type selectedExecutionInputFixture struct {
+	flow    string
+	payload json.RawMessage
 }
 
 func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
@@ -5455,6 +5477,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	extraRoutes []events.DeliveryRoute,
 	routingSource events.RoutingSource,
 	envelope events.EventEnvelope,
+	input selectedExecutionInputFixture,
 	sourceFacts ...runtimecorrelation.SourceArtifactFact,
 ) events.Event {
 	t.Helper()
@@ -5474,11 +5497,21 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	)
 	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
+	if len(input.payload) != 0 {
+		payload = input.payload
+	}
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Source: sourceFact,
 	})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(sourceEventID, events.EventType(eventName), "source-runtime", "", payload, 0, sourceRunID,
 		envelope, routingSource, at, mode)
+	if input.flow != "" {
+		var err error
+		event, err = eventtest.AdmitPayload(event, input.flow, eventName)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	routes := append([]events.DeliveryRoute{primaryRoute}, extraRoutes...)
 	commitRunForkTestEvent(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event, routes)
 	if _, err := db.ExecContext(ctx, `

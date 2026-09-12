@@ -307,9 +307,11 @@ func commitSemanticEventWithInitialFacts(
 ) runtimebus.EventAppendOutcome {
 	t.Helper()
 	var err error
-	event, err = eventfixture.BindPayload(event)
-	if err != nil {
-		t.Fatalf("bind event payload fixture: %v", err)
+	if _, bound := event.PayloadAdmission(); !bound {
+		event, err = eventfixture.BindPayload(event)
+		if err != nil {
+			t.Fatalf("bind event payload fixture: %v", err)
+		}
 	}
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {

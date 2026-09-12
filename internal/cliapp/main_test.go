@@ -3460,7 +3460,7 @@ func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootF
 		t.Fatalf("runVerifyCommand --json exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
 	result := decodeOutputJSON[verifyCommandResult](t, stdout.String())
-	if result.OK || len(result.Errors) != 1 || result.Errors[0].CheckID != "workflow_contract_validation" || !strings.Contains(result.Errors[0].Message, "emit schema strict mode enabled") {
+	if result.OK || len(result.Errors) != 1 || result.Errors[0].CheckID != "generated_tool_schema_closure" || !strings.Contains(result.Errors[0].Message, "agent strict-schema-agent emit missing.event has no exact schema in child") {
 		t.Fatalf("verify --json lost strict emit schema failure: %#v", result)
 	}
 	if stderr.Len() != 0 {
@@ -4083,7 +4083,7 @@ func TestExecutionValidation_AgreesWithRuntimeValidationOnTouchedToolAndEventCla
 				addTestAgentOwners(bundle)
 				return bundle
 			}(),
-			errContains: "'missing.event' emitted but no schema in events.yaml",
+			errContains: "agent agent-1 emit missing.event has no exact schema in .",
 			wantErr:     true,
 		},
 		{

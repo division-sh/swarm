@@ -98,7 +98,7 @@ func TestStructuralReadersRetainPostBootInvalidity(t *testing.T) {
 			}
 			found := false
 			for _, finding := range findings {
-				if finding.CheckID == "workflow_contract_validation" && finding.Severity == "hard_invalidity" && strings.Contains(finding.Message, "emit schema strict mode enabled") {
+				if finding.CheckID == "generated_tool_schema_closure" && finding.Severity == "hard_invalidity" && strings.Contains(finding.Message, "agent strict-schema-agent emit missing.event has no exact schema in child") {
 					found = true
 				}
 			}

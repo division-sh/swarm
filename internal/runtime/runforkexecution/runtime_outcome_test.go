@@ -209,7 +209,7 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					route.Target = events.MustExistingEntityTarget(historicalTarget)
 				}
 				if backend == "postgres" {
-					seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(t, db, sourceID, entityID, eventID, "item.received", at, "test_entity", executionmode.Mock, route, nil, events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), loaded.SourceArtifactFact)
+					seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(t, db, sourceID, entityID, eventID, "item.received", at, "test_entity", executionmode.Mock, route, nil, events.NoRoutingSource(), events.EnvelopeForTargetRoute(events.EventEnvelope{}, historicalTarget), selectedExecutionInputFixture{}, loaded.SourceArtifactFact)
 					if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance=$1 WHERE run_id=$2::uuid AND entity_id=$3::uuid`, sourceID, sourceID, entityID); err != nil {
 						t.Fatal(err)
 					}
