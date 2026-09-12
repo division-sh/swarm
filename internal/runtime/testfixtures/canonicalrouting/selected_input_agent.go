@@ -32,3 +32,13 @@ func CopySelectedRouteRecoveryInput(t testing.TB) string {
 	writeClosedVariantFile(t, root, "agents.yaml", "safe-agent:\n  id: safe-agent\n  model: regular\n  intent:\n    inline: Complete the selected input.\n  subscriptions: [fork.cli.activate]\n")
 	return root
 }
+
+// CopyUnresolvedSelectedForkInput admits the event's schema but deliberately
+// supplies no receiver. This tests frontier refusal, not unknown-event admission.
+func CopyUnresolvedSelectedForkInput(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	copyTree(t, filepath.Join(RepoRoot(t), "tests/tier1-primitives/test-emits-multiple"), root)
+	ApplyOverlay(t, root, "events.yaml", "ghost.event: {}\n")
+	return root
+}
