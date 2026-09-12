@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/apiv1"
 )
 
 func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T) {
@@ -18,86 +20,169 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, releaseRoot)
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			root := filepath.Join(releaseRoot, backend)
-			contracts := filepath.Join(root, "contracts")
-			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/conformance/entity-progressive-presence"), contracts)
-			store := goldenSQLiteStore(root)
-			if backend == "postgres" {
-				store = goldenPostgresStore(t, dsn)
-			}
-			config := filepath.Join(root, "swarm.yaml")
-			writeReleaseFile(t, config, goldenRuntimeConfig(store))
-			token := filepath.Join(root, "api-token")
-			writeReleaseFile(t, token, goldenAPIToken+"\n")
-			env := goldenProcessEnv(t, root, store.passwordEnv, 0)
-			verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--json")
-			var verified struct {
-				OK bool `json:"ok"`
-			}
-			if err := json.Unmarshal([]byte(verify.output), &verified); verify.err != nil || err != nil || !verified.OK {
-				t.Fatalf("verify: %v, decode: %v\n%s", verify.err, err, verify.output)
-			}
-			start := func() *releaseServeProcess {
-				// Public live serve, not the mock lifecycle binary. No agents or
-				// external providers are needed by this deterministic workload.
-				process := startReleaseServe(t, releaseProcessSpec{
-					BinaryPath: binary, WorkingDir: root, Source: contracts, ConfigPath: config,
-					Store: backend, APIPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env,
-				})
-				ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
-				defer cancel()
-				if err := process.waitReady(ctx); err != nil {
+	for _, variant := range []string{"progressive", "last-field"} {
+		for _, backend := range []string{"sqlite", "postgres"} {
+			t.Run(variant+"/"+backend, func(t *testing.T) {
+				root := filepath.Join(releaseRoot, variant, backend)
+				contracts := filepath.Join(root, "contracts")
+				copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "tests/conformance/entity-progressive-presence"), contracts)
+				if variant == "last-field" {
+					writePresenceLastFieldFixture(t, contracts)
+				}
+				store := goldenSQLiteStore(root)
+				if backend == "postgres" {
+					store = goldenPostgresStore(t, dsn)
+				}
+				config := filepath.Join(root, "swarm.yaml")
+				writeReleaseFile(t, config, goldenRuntimeConfig(store))
+				token := filepath.Join(root, "api-token")
+				writeReleaseFile(t, token, goldenAPIToken+"\n")
+				env := goldenProcessEnv(t, root, store.passwordEnv, 0)
+				verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary, "verify", contracts, "--config", config, "--json")
+				var verified struct {
+					OK bool `json:"ok"`
+				}
+				if err := json.Unmarshal([]byte(verify.output), &verified); verify.err != nil || err != nil || !verified.OK {
+					t.Fatalf("verify: %v, decode: %v\n%s", verify.err, err, verify.output)
+				}
+				start := func() *releaseServeProcess {
+					// Public live serve, not the mock lifecycle binary. No agents or
+					// external providers are needed by this deterministic workload.
+					process := startReleaseServe(t, releaseProcessSpec{
+						BinaryPath: binary, WorkingDir: root, Source: contracts, ConfigPath: config,
+						Store: backend, APIPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env,
+					})
+					ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+					defer cancel()
+					if err := process.waitReady(ctx); err != nil {
+						t.Fatal(err)
+					}
+					goldenServedBundleHash(t, process.rpc, "live")
+					return process
+				}
+				process := start()
+				hash := goldenServedBundleHash(t, process.rpc, "live")
+				runID := publishPresenceEvent(t, process.rpc, hash, "", "work.opened", map[string]any{})
+				initial := map[string]any{"attempt_count": float64(0)}
+				if variant == "last-field" {
+					initial = map[string]any{"review_note": "seeded"}
+				}
+				entityID := waitForPresenceEntity(t, process, runID, "assess", initial)
+				publishPresenceEvent(t, process.rpc, hash, runID, "work.annotated", map[string]any{"review_note": ""})
+				emptyNote := map[string]any{"attempt_count": float64(0), "review_note": ""}
+				if variant == "last-field" {
+					emptyNote = map[string]any{"review_note": ""}
+				}
+				if got := waitForPresenceEntity(t, process, runID, "assess", emptyNote); got != entityID {
+					t.Fatalf("annotation changed owner: %s != %s", got, entityID)
+				}
+				if err := process.killAndWait(5 * time.Second); err != nil {
 					t.Fatal(err)
 				}
-				goldenServedBundleHash(t, process.rpc, "live")
-				return process
-			}
-			process := start()
-			hash := goldenServedBundleHash(t, process.rpc, "live")
-			runID := publishPresenceEvent(t, process.rpc, hash, "", "work.opened", map[string]any{})
-			initial := map[string]any{"attempt_count": float64(0)}
-			entityID := waitForPresenceEntity(t, process, runID, "assess", initial)
-			publishPresenceEvent(t, process.rpc, hash, runID, "work.annotated", map[string]any{"review_note": ""})
-			emptyNote := map[string]any{"attempt_count": float64(0), "review_note": ""}
-			if got := waitForPresenceEntity(t, process, runID, "assess", emptyNote); got != entityID {
-				t.Fatalf("annotation changed owner: %s != %s", got, entityID)
-			}
-			if err := process.killAndWait(5 * time.Second); err != nil {
-				t.Fatal(err)
-			}
-			process = start()
-			if got := waitForPresenceEntity(t, process, runID, "assess", emptyNote); got != entityID {
-				t.Fatalf("restart changed owner: %s != %s", got, entityID)
-			}
-			publishPresenceEvent(t, process.rpc, hash, runID, "work.assessed", map[string]any{"business_brief": "An assessed brief"})
-			completed := map[string]any{"attempt_count": float64(1), "business_brief": "An assessed brief"}
-			if got := waitForPresenceEntity(t, process, runID, "done", completed); got != entityID {
-				t.Fatalf("completion changed owner: %s != %s", got, entityID)
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			events, err := listGoldenEvents(ctx, process.rpc, runID)
-			cancel()
-			if err != nil {
-				t.Fatal(err)
-			}
-			done := goldenSingleNamedEvent(t, events, "work.completed")
-			assertGoldenExactPayload(t, done, map[string]any{
-				"business_brief": "An assessed brief", "attempt_count": float64(1), "note_supplied": false,
+				process = start()
+				if got := waitForPresenceEntity(t, process, runID, "assess", emptyNote); got != entityID {
+					t.Fatalf("restart changed owner: %s != %s", got, entityID)
+				}
+				// Retry the same public ingress after restart. It must not create a
+				// second occurrence or reinitialize the current entity.
+				publishPresenceEvent(t, process.rpc, hash, runID, "work.annotated", map[string]any{"review_note": ""})
+				publishPresenceEvent(t, process.rpc, hash, runID, "work.assessed", map[string]any{"business_brief": "An assessed brief"})
+				completed := map[string]any{"attempt_count": float64(1), "business_brief": "An assessed brief"}
+				if variant == "last-field" {
+					completed = map[string]any{}
+				}
+				if got := waitForPresenceEntity(t, process, runID, "done", completed); got != entityID {
+					t.Fatalf("completion changed owner: %s != %s", got, entityID)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				events, err := listGoldenEvents(ctx, process.rpc, runID)
+				cancel()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if countGoldenEvents(events, "work.annotated") != 1 {
+					t.Fatal("idempotent ingress retry created another annotation")
+				}
+				done := goldenSingleNamedEvent(t, events, "work.completed")
+				assertGoldenExactPayload(t, done, map[string]any{
+					"business_brief": "An assessed brief", "attempt_count": float64(1), "note_supplied": false,
+				})
+				if err := process.stopAndWait(10 * time.Second); err != nil {
+					t.Fatal(err)
+				}
+				process = start()
+				if got := waitForPresenceEntity(t, process, runID, "done", completed); got != entityID {
+					t.Fatalf("completed restart changed owner: %s != %s", got, entityID)
+				}
+				waitForGoldenTerminalRun(t, process, store, runID, 30*time.Second)
+				// The frontier was published after clear committed. Fork reconstructs
+				// that history and executes the real completed handler in a new run.
+				params := map[string]any{"source_run_id": runID, "fork_event_id": done.EventID, "allow_source_freeze": true, "idempotency_key": "presence-fork"}
+				var fork apiv1.RunForkExecutionResult
+				ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+				err = process.rpc.call(ctx, "run.fork", params, &fork)
+				cancel()
+				if err != nil || fork.ForkRunID == "" || fork.ForkRunID == runID || fork.ExecutedEventCount < 1 {
+					t.Fatalf("reconstruct and execute fork: result=%+v err=%v", fork, err)
+				}
+				waitForPresenceEntity(t, process, fork.ForkRunID, "done", completed)
+				var retried apiv1.RunForkExecutionResult
+				ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+				err = process.rpc.call(ctx, "run.fork", params, &retried)
+				cancel()
+				if err != nil || !reflect.DeepEqual(fork, retried) {
+					t.Fatalf("fork retry changed outcome: first=%+v retry=%+v err=%v", fork, retried, err)
+				}
+				waitForPresenceEntity(t, process, runID, "done", completed)
+				if err := process.stopAndWait(10 * time.Second); err != nil {
+					t.Fatal(err)
+				}
+				process = start()
+				waitForPresenceEntity(t, process, fork.ForkRunID, "done", completed)
+				waitForPresenceEntity(t, process, runID, "done", completed)
+				if err := process.stopAndWait(10 * time.Second); err != nil {
+					t.Fatal(err)
+				}
 			})
-			if err := process.stopAndWait(10 * time.Second); err != nil {
-				t.Fatal(err)
-			}
-			process = start()
-			if got := waitForPresenceEntity(t, process, runID, "done", completed); got != entityID {
-				t.Fatalf("completed restart changed owner: %s != %s", got, entityID)
-			}
-			if err := process.stopAndWait(10 * time.Second); err != nil {
-				t.Fatal(err)
-			}
-		})
+		}
 	}
+}
+
+func writePresenceLastFieldFixture(t *testing.T, root string) {
+	t.Helper()
+	writeReleaseFile(t, filepath.Join(root, "entities.yaml"), "work:\n  review_note:\n    type: text?\n    initial: seeded\n")
+	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), `owner:
+  execution_type: system_node
+  subscribes_to: [work.opened, work.annotated, work.assessed, work.consume, work.completed]
+  produces: [work.consume, work.completed]
+  event_handlers:
+    work.opened:
+      create_entity: true
+      advances_to: assess
+    work.annotated:
+      guard: {check: "_entity.current_state == 'assess'"}
+      data_accumulation:
+        writes: [review_note]
+    work.assessed:
+      guard: {check: "_entity.current_state == 'assess'"}
+      advances_to: consume
+      emit: {event: work.consume}
+    work.consume:
+      guard: {check: "_entity.current_state == 'consume'"}
+      data_accumulation:
+        writes:
+          - op: clear
+            target: entity.review_note
+      emit:
+        event: work.completed
+        fields:
+          business_brief: "'An assessed brief'"
+          attempt_count: "1"
+          note_supplied: has(entity.review_note)
+    work.completed:
+      guard: {check: "_entity.current_state == 'consume' && !payload.note_supplied && !has(entity.review_note)"}
+      advances_to: done
+`)
 }
 
 func publishPresenceEvent(t *testing.T, rpc *releaseRPCClient, hash, runID, name string, payload map[string]any) string {

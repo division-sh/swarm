@@ -115,6 +115,43 @@ type workflowEntityQueryOwner interface {
 	CountWorkflowEntities(context.Context, entityquery.Request) (int, error)
 }
 
+func TestEntitySparseQueryPredicatesBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			owner, db, ctx, runID := openWorkflowEntityQueryBackend(t, backend)
+			seedWorkflowEntityQueryRow(t, backend, db, runID, "child/absent", map[string]any{})
+			seedWorkflowEntityQueryRow(t, backend, db, runID, "child/zero", map[string]any{"score": 0, "label": "", "enabled": false})
+			seedWorkflowEntityQueryRow(t, backend, db, runID, "child/positive", map[string]any{"score": 2, "label": "yes", "enabled": true})
+			request := entityquery.Request{
+				RunID: runID, Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+				Contract: entityruntime.Contract{FlowID: "child", EntityType: "child_entity", Entity: runtimecontracts.EntityContract{
+					Fields: map[string]runtimecontracts.EntityFieldDecl{"score": {Type: "integer"}, "label": {Type: "text"}, "enabled": {Type: "boolean"}},
+				}},
+			}
+			for _, predicate := range []entityquery.Predicate{
+				{Field: "score", Op: ">", Value: 0},
+				{Field: "score", Op: ">=", Value: 2},
+				{Field: "score", Op: "<", Value: 2},
+				{Field: "score", Op: "<=", Value: 0},
+				{Field: "score", Op: "==", Value: 0},
+				{Field: "score", Op: "!=", Value: 0},
+				{Field: "label", Op: "==", Value: ""},
+				{Field: "enabled", Op: "==", Value: false},
+			} {
+				request.Predicate = predicate
+				count, err := owner.CountWorkflowEntities(ctx, request)
+				if err != nil || count != 1 {
+					t.Fatalf("predicate %+v: count=%d err=%v; want only the assigned matching row", predicate, count, err)
+				}
+			}
+			request.Predicate = entityquery.Predicate{Field: "score", Op: "=="}
+			if _, err := owner.CountWorkflowEntities(ctx, request); err == nil {
+				t.Fatal("query accepted a null operand")
+			}
+		})
+	}
+}
+
 func openWorkflowEntityQueryBackend(t *testing.T, backend string) (workflowEntityQueryOwner, *sql.DB, context.Context, string) {
 	t.Helper()
 	runID := uuid.NewString()

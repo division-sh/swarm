@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	c "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
@@ -46,6 +48,54 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 				}
 			} else if !reportContains(report.Errors(), "expression_field_reference_validation", "not definitely assigned") {
 				t.Fatalf("missing assignment rejection: %#v", report.Errors())
+			}
+		})
+	}
+}
+
+func TestEntityDefiniteAssignmentLoops(t *testing.T) {
+	for _, variant := range []string{"start assignment", "backedge only", "admitted callback assignment"} {
+		t.Run(variant, func(t *testing.T) {
+			root := canonicalrouting.CopyForkLoopGenerationNotice(t)
+			writeBootverifyFixtureFile(t, filepath.Join(root, "review", "entities.yaml"), "work:\n  brief: text\n")
+			path := filepath.Join(root, "review", "nodes.yaml")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			nodes := strings.Replace(string(data), "summary: {literal: review processed}", "summary: {ref: entity.brief}", 1)
+			writer := "    work.started:\n"
+			switch variant {
+			case "backedge only":
+				writer = "    review.retry:\n"
+			case "admitted callback assignment":
+				writer = "    review.requested:\n"
+			}
+			nodes = strings.Replace(nodes, writer, writer+"      data_accumulation:\n        writes:\n          - {source_field: token, target_field: brief}\n", 1)
+			writeBootverifyFixtureFile(t, path, nodes)
+			repo := repoRootForBootverifyTest(t)
+			bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
+			source := semanticview.Wrap(bundle)
+			checker := &checkerContext{ctx: context.Background(), source: source}
+			findings := checker.expressionFieldReferences()
+			missing := false
+			for _, finding := range findings {
+				missing = missing || strings.Contains(finding.Message, "entity.brief") && strings.Contains(finding.Message, "not definitely assigned")
+			}
+			if missing != (variant == "backedge only") {
+				t.Fatalf("variant %s: findings=%#v", variant, findings)
+			}
+			analysis, err := engine.BuildEntityAssignmentAnalysis(source, "review")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := analysis.StageFacts("working").Has("brief"); got != (variant == "start assignment") {
+				t.Fatalf("first/repeated entry brief assigned=%v for %s", got, variant)
+			}
+			// Escape is a distinct outcome before a repeat's writes. It cannot
+			// borrow the value that only the successful backedge would write.
+			if got := analysis.StageFacts("exhausted").Has("brief"); got != (variant != "backedge only") {
+				t.Fatalf("escape brief assigned=%v for %s", got, variant)
 			}
 		})
 	}

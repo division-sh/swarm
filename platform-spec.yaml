@@ -3007,8 +3007,9 @@ runtime_enforcement:
       `entity_id` or `entity_type`; the runtime derives the canonical
       receiving-flow primary identity from flow-instance/run context
       and infers the contract from flow context. Envelope field names
-      are rejected as caller input. Missing declared fields receive
-      explicit `initial:` or the type default.
+      are rejected as caller input. Only explicit `initial:` values and
+      admitted bindings are materialized. Other root fields remain absent;
+      supplied named records must satisfy their required-field declarations.
   save_entity_field:
     rule: |
       save_entity_field targets only declared non-envelope top-level fields
@@ -3017,13 +3018,15 @@ runtime_enforcement:
       named types; the operation is whole-value replacement at the resolved
       field path, not keyed or indexed contained-state mutation. Bracket,
       index, and dynamic path writes are rejected. Immutable fields reject
-      post-create writes. Materialized/runtime-owned fields are rejected.
-      Values must satisfy the resolved declared type.
+      post-create value changes. Materialized/runtime-owned fields are rejected.
+      Values and the final candidate must satisfy the shared entity contract,
+      including sparse equality; no tool-local mutation interpretation exists.
   get_entity:
     rule: |
-      get_entity returns the full entity object with every declared
-      field present at a type-valid value plus the envelope fields.
-      Declared fields are never omitted from the response.
+      get_entity returns the complete stored entity object plus its envelope.
+      Unassigned root fields remain omitted. Explicit zero, empty text, false,
+      and empty collections remain present; reads never initialize fields or
+      reconstruct cleared values from request snapshots.
   query_entities:
     rule: |
       query_entities validates filter paths against the inferred entity
@@ -3033,6 +3036,10 @@ runtime_enforcement:
       declared field paths must resolve to declared scalar or enum leaves.
       `entity.*` is not accepted as a filter selector root on this projection
       surface. Composite whole-value comparison is not part of Wave 1.
+      Concrete-value predicates require a non-null operand. A row with an
+      absent selected leaf does not match any concrete-value comparison,
+      including inequality; absence is never compared as nil, zero or text.
+      Explicit absence-aware collection filters use stock CEL presence operations.
     handler_expression_rule: |
       `query_entities(...).count` used inside handler boolean expressions
       (guards, rules/on_complete conditions, and join completion
@@ -3174,8 +3181,8 @@ handler_specification:
         entity_id: Canonical receiving-flow primary entity identity derived from flow-instance/run context, not caller payload identity
         initial_state: From the flow's schema.yaml initial_state
         flow_instance: Current flow instance path
-        fields: Declared entity fields materialized at create_entity time. Explicit `initial:` values apply where declared;
-          otherwise the type default is materialized so every declared field is readable immediately.
+        fields: Only explicit `initial:` values and admitted bindings materialize root fields at create_entity time.
+          Other roots remain absent; declaration alone is not assignment evidence.
       interactions:
         with_accumulate: 'PROHIBITED. create_entity establishes the canonical receiving-flow lifecycle entity for this handler.
           Accumulate waits across multiple arrivals and must not be combined with same-handler lifecycle materialization.
@@ -3183,8 +3190,8 @@ handler_specification:
         with_fan_out: 'ALLOWED. create_entity materializes ONE canonical entity, then fan_out commits one durable obligation
           whose later ordinary publications all carry that entity_id. Fan-out ordinals share the canonical entity.'
         with_guard: 'ALLOWED. Guards evaluate against the materialized canonical entity state after schema initial values materialize.
-          Guards may read any declared entity field directly. Declared fields are universally present with either their
-          explicit initial or their type default.'
+          Direct bare-field reads require assignment proof at this program point. Optional reads require an explicit
+          presence decision; a declaration alone does not prove a readable value.'
         with_on_complete: 'ALLOWED. on_complete conditions evaluate according to the handler dependency graph. They may rely on
           schema initial values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
         with_rules: 'ALLOWED. rule conditions evaluate according to the handler dependency graph. They may rely on schema initial
@@ -4475,9 +4482,9 @@ handler_specification:
         executable_collection_rule: Every executable query, filter, standalone group_by, reduce, and count collection source is admitted at boot through one immutable handler collection-dataflow owner, whether or not a condition reads `item`. The owner distinguishes direct payload/entity paths, query entity-table inputs, and explicit or canonical-default query/filter intermediate outputs; preserves exact recursive item type through selection; and rejects root-only, missing, dynamic, cyclic, aggregate, unsupported, or temporally unavailable ancestry. The fixed producer/consumer order is query, filter, standalone group_by, reduce, then count. A consumer may read only direct inputs or a collection output produced by an earlier phase; query therefore cannot read a same-handler filter output. Boot and runtime consume the same plan and runtime must not restore a dyn item fallback.
         collection_output_ownership_rule: Every effective query, filter, standalone group_by, reduce, and count store_as target has exactly one producer in a handler. Exact duplicate and ancestor/descendant target paths are hard invalidity before any read or write, including collisions between collection and aggregate outputs. Sequential overwrite is not compatibility behavior.
         collection_selector_rule: query.group_by, query.select, and standalone group_by.key are schema-bound item-field selectors, not executable expressions. Group keys must be required top-level scalar fields. Selection fields must exist; optional selections preserve omission per item, while a missing required selected field fails closed. Unknown, nested, wrong-kind, or undecided optional group keys are hard invalidity.
-      rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
-        presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
-        relevant for business meaning, but not for raw field readability.'
+      rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract and assigned at
+        the exact program point. Explicit initials and admitted earlier writes provide assignment evidence, not
+        declaration alone or a writer elsewhere. Optional values require a stock CEL presence decision.'
       severity: error (boot fails)
       example_violation: 'A guard references entity.build_complexity, but the inferred entity contract does not declare
         build_complexity. Correct usage is to declare the field on the entity contract or stop reading it.'
@@ -20120,8 +20127,8 @@ static_analyzer:
     - handler_specification.dependency_graph
     scope:
       description: 'For handlers with create_entity: true, every entity.X value read must resolve against the inferred
-        entity contract. Wave 1 universal presence semantics make declared fields readable at explicit initial or
-        type-default values from create time.
+        entity contract and the current program-point assignment. Only explicit initials and admitted bindings
+        provide creation-time assignment; other root fields remain absent.
         '
       applies_to:
       - 'create_entity: true handlers only'
@@ -20132,15 +20139,19 @@ static_analyzer:
       - declared event/timer dead-surface drift
     proof_carriers:
       declared_entity_field:
-        valid_for: all create_entity read positions
+        valid_for: declaration/type resolution only, not assignment proof
       nested_declared_path:
-        valid_for: all create_entity read positions when the path resolves through named types to a declared leaf
+        valid_for: type resolution when the path resolves through named types; its root and required ancestors still need assignment proof
+      explicit_initial_or_admitted_binding:
+        valid_for: creation-time assignment, subject to exact path/type validation
+      earlier_executed_write:
+        valid_for: assignment only at subsequent program points reached through the existing normalized topology
       undeclared_field_reference:
         invalid: true
-    rule: A create_entity handler value read of entity.X is invalid only when X is undeclared on the inferred entity contract
-      (or the nested path does not resolve). Missing initializer proof is not a Wave 1 failure class.
+    rule: A create_entity handler value read of entity.X is invalid when its declaration/path is unresolved or its bare
+      value lacks definite assignment at that exact program point. Optional reads require an explicit presence decision.
     authority_notes:
-      hard_invalidity: Undeclared field/path usage is error-level semantic invalidity on the verify surface.
+      hard_invalidity: Undeclared paths, unassigned bare reads and undecided optional reads are error-level semantic invalidity on verify and boot.
   slice_2_emitted_event_payload_completeness:
     id: semantic_drift_payload_completeness
     domain: semantic_drift
