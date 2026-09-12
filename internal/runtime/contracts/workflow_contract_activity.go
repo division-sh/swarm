@@ -324,8 +324,12 @@ func (b *WorkflowContractBundle) GeneratedActivityEventEntries() map[string]Even
 		return nil
 	}
 	out := map[string]EventCatalogEntry{}
-	for _, record := range b.generatedActivityDeclarationRecords() {
-		out[record.qualifiedName] = record.entry
+	for _, scope := range b.compiledEventSchemas {
+		for key, schema := range scope.bindings {
+			if key == schema.EventName() && schema.Classification() == CompiledEventSchemaGenerated {
+				out[key] = cloneEventCatalogEntry(schema.value.declaration)
+			}
+		}
 	}
 	return out
 }
@@ -363,38 +367,17 @@ func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() []current
 				field.ExactSchema = &exact
 				entry.Payload.Properties[fieldName] = field
 			}
-			out = append(out, currentEventDeclarationRecord{flowPath: site.Node.FlowPath(), qualifiedName: name, entry: entry})
+			file := ""
+			if view, ok := b.exactFlowEventDeclarationView(site.Node.FlowPath()); ok {
+				file = view.Paths.NodesFile
+			}
+			out = append(out, currentEventDeclarationRecord{
+				flowPath: site.Node.FlowPath(), layer: "generated_activity", sourceFile: file,
+				localName: eventidentity.LeafName(name), qualifiedName: name, entry: entry,
+			})
 		}
 	}
 	return out
-}
-
-func (b *WorkflowContractBundle) generatedActivityDeclaration(flowID, eventType string) (EventCatalogEntry, string, bool) {
-	if flowID == "" {
-		flowID = "."
-	}
-	flow, err := runtimeidentity.AdmitFlowIdentity(flowID)
-	if err != nil {
-		return EventCatalogEntry{}, "", false
-	}
-	requested := eventidentity.Normalize(eventType)
-	var selected currentEventDeclarationRecord
-	found := false
-	for _, record := range b.generatedActivityDeclarationRecords() {
-		owner, err := runtimeidentity.AdmitFlowIdentity(record.flowPath)
-		if err != nil || owner != flow {
-			continue
-		}
-		local := eventidentity.LeafName(record.qualifiedName)
-		if requested != record.qualifiedName && requested != local {
-			continue
-		}
-		if found {
-			return EventCatalogEntry{}, "", false
-		}
-		selected, found = record, true
-	}
-	return selected.entry, selected.qualifiedName, found
 }
 
 func (b *WorkflowContractBundle) GeneratedActivityEventSchemas() map[string]EventSchema {
@@ -402,8 +385,12 @@ func (b *WorkflowContractBundle) GeneratedActivityEventSchemas() map[string]Even
 		return nil
 	}
 	out := map[string]EventSchema{}
-	for _, record := range b.generatedActivityDeclarationRecords() {
-		out[record.qualifiedName] = eventSchemaFromCatalogEntry(record.qualifiedName, record.entry, TypeCatalogDocument{})
+	for _, scope := range b.compiledEventSchemas {
+		for key, schema := range scope.bindings {
+			if key == schema.EventName() && schema.Classification() == CompiledEventSchemaGenerated {
+				out[key] = schema.EventSchema()
+			}
+		}
 	}
 	return out
 }

@@ -404,7 +404,7 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 			},
 		},
 	}
-	registry := EventSchemaRegistryFromBundle(&WorkflowContractBundle{
+	bundle := &WorkflowContractBundle{
 		RootTypes: TypeCatalogDocument{
 			Scalars: map[string]ScalarTypeDecl{
 				"URL": {Base: "text"},
@@ -457,7 +457,13 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 				},
 			},
 		},
-	})
+	}
+	bundle.FlowTree.Root.Paths.FlowPath = "."
+	bundle.FlowTree.ByID["."] = bundle.FlowTree.Root
+	if err := bundle.compileEventSchemaBindings(); err != nil {
+		t.Fatal(err)
+	}
+	registry := EventSchemaRegistryFromBundle(bundle)
 
 	rootSchema, ok := registry["scan.completed"]
 	if !ok {
@@ -512,8 +518,9 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 
 func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *testing.T) {
 	reviewFlow := FlowContractView{
-		Paths: FlowContractPaths{FlowPath: "review"},
-		Path:  "review",
+		Paths:  FlowContractPaths{FlowPath: "review"},
+		Path:   "review",
+		Schema: FlowSchemaDocument{Mode: "template"},
 		Events: map[string]EventCatalogEntry{
 			"task.requested": {
 				Payload: EventPayloadSpec{
@@ -557,6 +564,11 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 		},
 	}
 
+	bundle.FlowTree.Root.Paths.FlowPath = "."
+	bundle.FlowTree.ByID["."] = bundle.FlowTree.Root
+	if err := bundle.compileEventSchemaBindings(); err != nil {
+		t.Fatal(err)
+	}
 	rootSchema, rootKey, ok := EventSchemaForFlowEvent(bundle, "", "task.requested")
 	if !ok {
 		t.Fatal("missing root event schema")

@@ -12098,6 +12098,12 @@ flow_model:
       Downstream compilers never inspect events.yaml, EventCatalogEntry maps, retired required lists, route aliases,
       or generated-event registries to reconstruct that evidence. Tool descriptions/citations remain mutation-isolated
       readback metadata and do not enter acceptance-schema identity.
+    binding_lifetime: >-
+      Compilation binds authored and generated declarations before pin and connect admission. Exact scope-local
+      indexes return these retained immutable references, never recompile from mutable authored or generated maps.
+      Producer bindings and explicit receiver projections remain distinct. Retained-source readers rebuild bindings
+      only by admitting that exact source artifact, never against the ambient current bundle. Flow instance spellings
+      may project an admitted template declaration for readback; they do not establish execution ownership or eligibility.
     resource_enumeration: >-
       CompiledEventSchemas enumerates only exact authored resource-eligible declarations in canonical
       (flow_path, qualified_event_name) order. Runtime generated-schema availability never makes a generated,

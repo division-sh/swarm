@@ -204,19 +204,12 @@ func connectEndpointEventDeclaration(bundle *WorkflowContractBundle, flowID, eve
 	if bundle == nil || eventName == "" {
 		return EventCatalogEntry{}, "", false
 	}
-	viewID := flowID
-	if viewID == "" {
-		viewID = "."
-	}
-	view, ok := bundle.FlowTree.ByID[viewID]
-	if !ok || view == nil {
+	localName := packageEndpointLocalEvent(bundle, flowID, eventName, input)
+	compiled, ok, err := bundle.ResolveCompiledFlowEventSchema(flowID, localName)
+	if err != nil || !ok {
 		return EventCatalogEntry{}, "", false
 	}
-	localName := packageEndpointLocalEvent(bundle, flowID, eventName, input)
-	if entry, key, ok := eventDeclarationByCandidates(view.Events, localName, eventName); ok {
-		return entry, key, true
-	}
-	return bundle.generatedActivityDeclaration(flowID, localName)
+	return cloneEventCatalogEntry(compiled.value.declaration), compiled.EventName(), true
 }
 
 func normalizedConnectOwnerFlowPath(raw string) string {
@@ -292,39 +285,22 @@ func effectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowI
 
 func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool, bool) {
 	flowID = strings.TrimSpace(flowID)
-	var entry EventCatalogEntry
-	var key string
-	var types TypeCatalogDocument
-	connected := false
-	var ok bool
-	if row, found, ambiguous := connectedEventSchemaOwnershipRow(bundle, flowID, eventType); ambiguous {
+	_, connected, ambiguous := connectedEventSchemaOwnershipRow(bundle, flowID, eventType)
+	if ambiguous {
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, true, false
-	} else if found {
-		entry = row.producer
-		key = row.producerName
-		types = bundle.RootTypeCatalog()
-		if row.producerFlowID != "" {
-			types = bundle.ResolvedTypeCatalogForFlow(row.producerFlowID)
-		}
-		connected = true
-		ok = true
 	}
-	if !ok {
-		entry, key, types, ok = eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
-	}
-	if ok && bundle != nil {
-		if pin, found := bundle.flowInputEventPinForResolvedEvent(flowID, eventType); found {
-			if projection, projected := pin.Projection(); projected {
-				entry = cloneEventCatalogEntry(entry)
-				if entry.Payload.Properties == nil {
-					entry.Payload.Properties = map[string]EventFieldSpec{}
-				}
-				entry.Payload.Properties[projection.Field] = EventFieldSpec{Type: projection.SourceType}
-				entry.Payload.Required = normalizeStrings(append(entry.Payload.Required, projection.Field))
-			}
+	if bundle != nil {
+		if compiled, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType); err != nil {
+			return EventCatalogEntry{}, "", TypeCatalogDocument{}, false, false
+		} else if ok {
+			return cloneEventCatalogEntry(compiled.value.declaration), compiled.EventName(), bundle.ResolvedTypeCatalogForFlow(compiled.FlowPath()), connected, true
 		}
 	}
-	return entry, key, types, connected, ok
+	if connected {
+		return EventCatalogEntry{}, "", TypeCatalogDocument{}, true, false
+	}
+	entry, key, types, ok := eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
+	return entry, key, types, false, ok
 }
 
 func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, eventType string) (CompiledFlowInputPin, bool) {

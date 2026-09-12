@@ -30,6 +30,7 @@ type WorkflowContractBundle struct {
 	flowEntities          map[string]EntityContractsDocument
 	eventOwnership        []eventSchemaOwnershipRow
 	eventOwnersByFlow     map[string][]eventSchemaOwnershipRow
+	compiledEventSchemas  map[string]compiledFlowEventSchemas
 	effectiveProvenance   EffectiveProvenanceLedger
 	dataDeclarations      map[string]DurableDataDeclaration
 	staticData            []durabledata.StaticData

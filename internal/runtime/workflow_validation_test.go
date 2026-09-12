@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -265,7 +266,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 				}
 				return semanticviewtest.WrapRootAgents(bundle)
 			}(),
-			errContains: "'missing.event' emitted but no schema in events.yaml",
+			errContains: "agent agent-1 emit missing.event has no exact schema in .",
 			wantErr:     true,
 		},
 		{
@@ -672,73 +673,37 @@ func TestValidateWorkflowContractSurface_DurableActivityIdempotentWriteFailsClos
 }
 
 func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectAuthoredCollision(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle()
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
-		"source.requested": {},
-		"scanner_source_requested_source_scrape.succeeded": {
-			Note: "authored event with generated activity result name",
-		},
+	root := canonicalrouting.CopyPublicationActivity(t, "root", "http://127.0.0.1:1/send", false)
+	path := filepath.Join(root, "events.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"})),
+	if err := os.WriteFile(path, append(raw, []byte("\nsend.succeeded: {activity_id: string}\n")...), 0600); err != nil {
+		t.Fatal(err)
 	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"scanner": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
-				},
-			},
-		},
-	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
-		ExecutionPosture:               executionposture.Live,
-		CheckMCPReachable:              false,
-		StrictEmitSchemas:              false,
-		FatalToolImplementationWarning: false,
-		FatalBootWarnings:              false,
-	})
-	if err == nil || !strings.Contains(err.Error(), "generated activity result event \"scanner_source_requested_source_scrape.succeeded\" collides with authored event") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want authored event collision", err)
+	repo := canonicalrouting.RepoRoot(t)
+	_, err = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err == nil || !strings.Contains(err.Error(), "compiled event .:send.succeeded has multiple declaration owners") {
+		t.Fatalf("admission error = %v, want authored/generated collision before runtime boot", err)
 	}
 }
 
 func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGeneratedCollision(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle("source.requested", "source.other_requested")
-	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"})),
+	root := canonicalrouting.CopyPublicationActivity(t, "root", "http://127.0.0.1:1/send", false)
+	path := filepath.Join(root, "nodes.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"scanner": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{
-						ID:   "shared_activity",
-						Tool: "source_scrape",
-					},
-				},
-			},
-		},
-		"reader": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"source.other_requested": {
-					Activity: runtimecontracts.ActivitySpec{
-						ID:   "/shared_activity/",
-						Tool: "source_scrape",
-					},
-				},
-			},
-		},
+	duplicate := "\nother:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: {ref: payload.message}}\n"
+	if err := os.WriteFile(path, append(raw, []byte(duplicate)...), 0600); err != nil {
+		t.Fatal(err)
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
-		ExecutionPosture:               executionposture.Live,
-		CheckMCPReachable:              false,
-		StrictEmitSchemas:              false,
-		FatalToolImplementationWarning: false,
-		FatalBootWarnings:              false,
-	})
-	if err == nil || !strings.Contains(err.Error(), "generated activity result event \"shared_activity.succeeded\" collides with generated result event") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want generated event collision", err)
+	repo := canonicalrouting.RepoRoot(t)
+	_, err = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err == nil || !strings.Contains(err.Error(), "compiled event .:send.failed has multiple declaration owners") {
+		t.Fatalf("admission error = %v, want two generated owners rejected before runtime boot", err)
 	}
 }
 
@@ -1044,13 +1009,14 @@ func TestValidateWorkflowContractSurfaceRejectsInvalidGeneratedEmitToolSchema(t 
 	source := semanticviewtest.WrapRootAgents(bundle)
 
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-	if err == nil || !strings.Contains(err.Error(), "generated emit tool schema validation failed") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want generated emit schema refusal before boot", err)
+	if err == nil || !strings.Contains(err.Error(), "generated_tool_schema_closure") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want canonical generated schema refusal", err)
 	}
-	if len(result.GeneratedEmitSchemaErrors) != 1 {
-		t.Fatalf("GeneratedEmitSchemaErrors = %#v, want one error", result.GeneratedEmitSchemaErrors)
+	findings := result.BootReport.Errors()
+	if len(findings) != 1 || findings[0].CheckID != "generated_tool_schema_closure" {
+		t.Fatalf("generated schema findings = %#v, want one exact owner refusal", findings)
 	}
-	if got := result.GeneratedEmitSchemaErrors[0].Error(); !strings.Contains(got, "unsupported JSON Schema type \"NotDeclared\"") {
+	if got := findings[0].Message; !strings.Contains(got, "ready.event schema contains unresolved contract type(s): NotDeclared") {
 		t.Fatalf("generated emit schema error = %q, want unsupported type", got)
 	}
 }

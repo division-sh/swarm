@@ -289,7 +289,6 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	}
 	errs = append(errs, validateWorkflowSchemaRefinements(bundle)...)
 	errs = append(errs, validateCompiledConnectEventSchemaOwnership(bundle)...)
-	errs = append(errs, validateEventBusinessKeys(bundle)...)
 	errs = append(errs, validateWorkflowCriteriaContracts(bundle)...)
 	errs = append(errs, validateScopedAgentIntentCoordinates(bundle)...)
 	errs = append(errs, validateWorkflowPolicyValidationContracts(bundle)...)
@@ -303,29 +302,6 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	return nil
 }
 
-func validateEventBusinessKeys(bundle *WorkflowContractBundle) []error {
-	if bundle == nil {
-		return nil
-	}
-	var errs []error
-	for _, record := range bundle.canonicalCurrentEventDeclarationRecords() {
-		if strings.TrimSpace(record.entry.BusinessKeyField) == "" {
-			continue
-		}
-		if _, _, err := bundle.compileCurrentEventDeclaration(
-			record.flowPath,
-			record.layer,
-			record.sourceFile,
-			record.localName,
-			record.qualifiedName,
-			record.entry,
-			record.types,
-		); err != nil {
-			errs = append(errs, fmt.Errorf("%w: %v", ErrInvalidField, err))
-		}
-	}
-	return errs
-}
 func workflowHandlerDeclaresConflictingCompletion(handler SystemNodeEventHandler) bool {
 	return len(handler.Rules) > 0 && workflowHandlerHasOnComplete(handler)
 }

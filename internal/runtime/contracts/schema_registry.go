@@ -91,29 +91,12 @@ func EventSchemaRegistryFromBundle(bundle *WorkflowContractBundle) map[string]Ev
 		return map[string]EventSchema{}
 	}
 	out := map[string]EventSchema{}
-	if bundle.FlowTree.Root != nil {
-		appendEventSchemas(out, bundle, "", bundle.FlowTree.Root.Events, bundle.RootTypeCatalog())
-	} else {
-		appendEventSchemas(out, bundle, "", bundle.Events, bundle.RootTypeCatalog())
-	}
-	flowIDs := make([]string, 0, len(bundle.FlowTree.ByID))
-	for flowID := range bundle.FlowTree.ByID {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
+	for _, scope := range bundle.compiledEventSchemas {
+		for key, schema := range scope.bindings {
+			if key == schema.EventName() {
+				out[key] = schema.EventSchema()
+			}
 		}
-		flowIDs = append(flowIDs, flowID)
-	}
-	sort.Strings(flowIDs)
-	for _, flowID := range flowIDs {
-		view := bundle.FlowTree.ByID[flowID]
-		if view == nil {
-			continue
-		}
-		appendEventSchemas(out, bundle, flowID, view.Events, bundle.ResolvedTypeCatalogForFlow(flowID))
-	}
-	for eventType, schema := range bundle.GeneratedActivityEventSchemas() {
-		out[eventType] = schema
 	}
 	appendPlatformEventSchemas(out, bundle.Platform)
 	return out
@@ -182,46 +165,12 @@ func isNumericPrecisionModifier(value string) bool {
 	return true
 }
 
-func appendEventSchemas(out map[string]EventSchema, bundle *WorkflowContractBundle, flowID string, entries map[string]EventCatalogEntry, types TypeCatalogDocument) {
-	for eventType, entry := range entries {
-		if bundle != nil {
-			if schema, key, ok := EventSchemaForFlowEvent(bundle, flowID, eventType); ok {
-				out[key] = schema
-				continue
-			}
-		}
-		key := resolvedEventSchemaKey(bundle, flowID, eventType)
-		if key == "" {
-			continue
-		}
-		out[key] = eventSchemaFromCatalogEntry(key, entry, types)
-	}
-}
-
 func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool) {
 	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	if bundle == nil || eventType == "" {
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
 	}
-	if bundle.FlowTree.Root == nil {
-		entry, key, ok := bundle.resolveAuthoredFlowEventCatalogEntry(flowID, eventType)
-		if !ok {
-			if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(bundle.Platform, eventType); platformOK && len(platformEntry.Payload.Properties) > 0 {
-				return platformEntry, platformKey, TypeCatalogDocument{}, true
-			}
-			return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
-		}
-		return entry, key, bundle.RootTypeCatalog(), true
-	}
-
-	targetKeys := eventSchemaLookupKeys(bundle, flowID, eventType)
-	if declaration, ok := eventSchemaDeclarationScopeForFlow(bundle, flowID); ok {
-		if entry, resolvedKey, ok := eventSchemaDeclarationEntry(bundle, declaration, targetKeys); ok {
-			return entry, resolvedKey, declaration.types, true
-		}
-	}
-
 	entry, key, ok := bundle.resolveAuthoredFlowEventCatalogEntry(flowID, eventType)
 	if !ok {
 		if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(bundle.Platform, eventType); platformOK && len(platformEntry.Payload.Properties) > 0 {
@@ -245,79 +194,6 @@ func appendPlatformEventSchemas(out map[string]EventSchema, platform PlatformSpe
 	}
 }
 
-type eventSchemaDeclarationScope struct {
-	flowID string
-	view   *FlowContractView
-	types  TypeCatalogDocument
-}
-
-func eventSchemaDeclarationScopeForFlow(bundle *WorkflowContractBundle, flowID string) (eventSchemaDeclarationScope, bool) {
-	if bundle == nil || bundle.FlowTree.Root == nil {
-		return eventSchemaDeclarationScope{}, false
-	}
-	flowID = strings.TrimSpace(flowID)
-	view, ok := bundle.exactFlowEventDeclarationView(flowID)
-	if !ok || view == nil {
-		return eventSchemaDeclarationScope{}, false
-	}
-	types := bundle.RootTypeCatalog()
-	if view != bundle.FlowTree.Root {
-		types = bundle.ResolvedTypeCatalogForFlow(flowID)
-	}
-	return eventSchemaDeclarationScope{flowID: flowID, view: view, types: types}, true
-}
-
-func eventSchemaDeclarationEntry(bundle *WorkflowContractBundle, declaration eventSchemaDeclarationScope, targetKeys []string) (EventCatalogEntry, string, bool) {
-	if declaration.view == nil {
-		return EventCatalogEntry{}, "", false
-	}
-	for localKey, entry := range declaration.view.Events {
-		resolvedKey := resolvedEventSchemaKey(bundle, declaration.flowID, localKey)
-		for _, targetKey := range targetKeys {
-			if normalizedEventSchemaKey(resolvedKey) != normalizedEventSchemaKey(targetKey) {
-				continue
-			}
-			return entry, resolvedKey, true
-		}
-	}
-	return EventCatalogEntry{}, "", false
-}
-
-func eventSchemaLookupKeys(bundle *WorkflowContractBundle, flowID, eventType string) []string {
-	keys := []string{
-		eventType,
-		resolvedEventSchemaKey(bundle, flowID, eventType),
-	}
-	if strings.TrimSpace(flowID) != "" {
-		keys = append(keys, eventSchemaScopedLeafKey(bundle, flowID, eventType))
-	}
-	if key := instanceScopedEventSchemaKey(bundle, eventType); key != "" {
-		keys = append(keys, key)
-	}
-	return uniqueNormalizedEventSchemaKeys(keys...)
-}
-
-func eventSchemaScopedLeafKey(bundle *WorkflowContractBundle, flowID, eventType string) string {
-	eventType = normalizedEventSchemaKey(eventType)
-	if eventType == "" || !strings.Contains(eventType, "/") {
-		return ""
-	}
-	flowPath := ""
-	if bundle != nil {
-		flowPath = normalizedEventSchemaKey(bundle.FlowPath(flowID))
-	}
-	if flowPath == "" {
-		flowPath = normalizedEventSchemaKey(flowID)
-	}
-	if flowPath == "" || !strings.HasPrefix(eventType, flowPath+"/") {
-		return ""
-	}
-	if idx := strings.LastIndex(eventType, "/"); idx >= 0 && idx+1 < len(eventType) {
-		return strings.TrimSpace(eventType[idx+1:])
-	}
-	return ""
-}
-
 func resolvedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventType string) string {
 	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
@@ -331,71 +207,6 @@ func resolvedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventType st
 		return resolved
 	}
 	return eventType
-}
-
-func instanceScopedEventSchemaKey(bundle *WorkflowContractBundle, eventType string) string {
-	if bundle == nil {
-		return ""
-	}
-	eventType = normalizedEventSchemaKey(eventType)
-	idx := strings.LastIndex(eventType, "/")
-	if idx <= 0 || idx+1 >= len(eventType) {
-		return ""
-	}
-	eventPath := normalizedEventSchemaKey(eventType[:idx])
-	if eventPath == "" || eventSchemaFlowIDForPath(bundle, eventPath) != "" {
-		return ""
-	}
-	semanticPath := eventSchemaSemanticScopeFromInstancePath(eventPath)
-	if semanticPath == "" {
-		return ""
-	}
-	flowID := eventSchemaFlowIDForPath(bundle, semanticPath)
-	if flowID == "" {
-		return ""
-	}
-	return resolvedEventSchemaKey(bundle, flowID, eventType[idx+1:])
-}
-
-func eventSchemaFlowIDForPath(bundle *WorkflowContractBundle, flowPath string) string {
-	flowPath = normalizedEventSchemaKey(flowPath)
-	if bundle == nil || flowPath == "" {
-		return ""
-	}
-	if view := bundle.FlowTree.ByPath[flowPath]; view != nil {
-		return strings.TrimSpace(view.Paths.FlowPath)
-	}
-	flowIDs := make([]string, 0, len(bundle.FlowTree.ByID))
-	for flowID := range bundle.FlowTree.ByID {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		flowIDs = append(flowIDs, flowID)
-	}
-	sort.Strings(flowIDs)
-	for _, flowID := range flowIDs {
-		view := bundle.FlowTree.ByID[flowID]
-		if view == nil {
-			continue
-		}
-		if normalizedEventSchemaKey(view.Path) == flowPath {
-			return flowID
-		}
-	}
-	return ""
-}
-
-func eventSchemaSemanticScopeFromInstancePath(instancePath string) string {
-	instancePath = normalizedEventSchemaKey(instancePath)
-	if instancePath == "" {
-		return ""
-	}
-	idx := strings.LastIndex(instancePath, "/")
-	if idx <= 0 {
-		return ""
-	}
-	return normalizedEventSchemaKey(instancePath[:idx])
 }
 
 func uniqueNormalizedEventSchemaKeys(values ...string) []string {

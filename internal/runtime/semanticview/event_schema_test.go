@@ -51,8 +51,9 @@ func TestResolveEventSchemaBindsConcreteTemplateInstanceToAuthoredDeclaration(t 
 	}
 }
 
-func TestResolveEventSchema_ReportsUnresolvedTypesAfterBundleResolution(t *testing.T) {
+func TestCompiledEventSchemaRejectsUnresolvedTypesAtAdmission(t *testing.T) {
 	root := &runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"handoff.completed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -67,18 +68,11 @@ func TestResolveEventSchema_ReportsUnresolvedTypesAfterBundleResolution(t *testi
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{".": root},
 		},
 	}
-
-	resolution := ResolveEventSchema(Wrap(bundle), "", "handoff.completed")
-	if !resolution.HasSchema {
-		t.Fatal("expected event schema resolution")
-	}
-	if len(resolution.UnresolvedTypes) != 1 || resolution.UnresolvedTypes[0] != "NotDeclared" {
-		t.Fatalf("UnresolvedTypes = %#v, want [NotDeclared]", resolution.UnresolvedTypes)
-	}
-	if err := resolution.UnresolvedTypeError(); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
-		t.Fatalf("UnresolvedTypeError = %v, want NotDeclared", err)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
+		t.Fatalf("admission error = %v, want unresolved NotDeclared", err)
 	}
 }
 
@@ -137,7 +131,7 @@ note: Full payload schema is owned by the diagnostic subtype.
 }
 
 func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *testing.T) {
-	root := runtimecontracts.FlowContractView{}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
 	root.Children = []runtimecontracts.FlowContractView{{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
 		Path:  "child",
@@ -162,12 +156,16 @@ func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *test
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":     &root,
 				"child": &root.Children[0],
 			},
 			ByPath: map[string]*runtimecontracts.FlowContractView{
 				"child": &root.Children[0],
 			},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
 
 	source := Wrap(bundle)

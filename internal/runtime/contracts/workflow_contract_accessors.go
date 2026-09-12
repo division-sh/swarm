@@ -349,42 +349,7 @@ func (b *WorkflowContractBundle) resolveAuthoredExecutableNodeEventCatalogEntry(
 	if b == nil || !ref.Valid() {
 		return EventCatalogEntry{}, "", false
 	}
-	resolution, resolvedScope := b.resolveExecutableNodeEvents(ref)
-	authored := eventidentity.Normalize(eventType)
-	canonical := authored
-	if resolvedScope {
-		canonical = resolution.resolveEvent(authored)
-	}
-	lookup := func(entries map[string]EventCatalogEntry) (EventCatalogEntry, string, bool) {
-		for key, entry := range entries {
-			key = eventidentity.Normalize(key)
-			if key == "" {
-				continue
-			}
-			resolved := key
-			if resolvedScope {
-				resolved = resolution.resolveEvent(key)
-			}
-			if key == authored || key == canonical || resolved == canonical {
-				return entry, resolved, true
-			}
-		}
-		return EventCatalogEntry{}, "", false
-	}
-	if resolvedScope {
-		view, ok := resolution.semanticScope.OwningFlow()
-		if ok {
-			if entry, key, found := lookup(view.Events); found {
-				return entry, key, true
-			}
-		}
-	}
-	if ref.FlowPath() == "." {
-		if entry, key, found := lookup(b.Events); found {
-			return entry, key, true
-		}
-	}
-	return b.generatedActivityDeclaration(ref.FlowPath(), canonical)
+	return b.resolveAuthoredFlowEventCatalogEntry(ref.FlowPath(), eventType)
 }
 
 func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeidentity.ExecutableNode, pattern string) string {
@@ -681,32 +646,11 @@ func (b *WorkflowContractBundle) ResolvedEventCatalog() map[string]EventCatalogE
 	return out
 }
 func (b *WorkflowContractBundle) resolveAuthoredFlowEventCatalogEntry(flowID, eventType string) (EventCatalogEntry, string, bool) {
-	if b == nil {
+	compiled, ok, err := b.ResolveCompiledFlowEventSchema(flowID, eventType)
+	if err != nil || !ok {
 		return EventCatalogEntry{}, "", false
 	}
-	flowID = strings.TrimSpace(flowID)
-	rawKey := eventidentity.Normalize(eventType)
-	if rawKey == "" {
-		return EventCatalogEntry{}, "", false
-	}
-	resolvedKey := b.ResolveFlowEventReference(flowID, eventType)
-	entries := b.Events
-	if b.FlowTree.Root != nil {
-		view, ok := b.exactFlowEventDeclarationView(flowID)
-		if !ok || view == nil {
-			return EventCatalogEntry{}, "", false
-		}
-		entries = view.Events
-	}
-	for _, localKey := range sortedContractKeys(entries) {
-		entry := entries[localKey]
-		localKey = eventidentity.Normalize(localKey)
-		canonicalKey := b.ResolveFlowEventReference(flowID, localKey)
-		if localKey == rawKey || localKey == resolvedKey || canonicalKey == rawKey || canonicalKey == resolvedKey {
-			return entry, canonicalKey, true
-		}
-	}
-	return b.generatedActivityDeclaration(flowID, eventType)
+	return cloneEventCatalogEntry(compiled.value.declaration), compiled.EventName(), true
 }
 
 func (b *WorkflowContractBundle) exactFlowEventDeclarationView(flowID string) (*FlowContractView, bool) {

@@ -234,53 +234,16 @@ func flowScopeEventNamesForProof(scope FlowScope) []string {
 	return localNames
 }
 
-func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, canonical string, localNames []string) string {
-	if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, canonical string, _ []string) string {
+	bundle, ok := Bundle(source)
+	if !ok || scope.Mode != "template" {
 		return ""
 	}
-	scopePath := runtimeeventidentity.Normalize(scope.Path)
-	canonical = runtimeeventidentity.Normalize(canonical)
-	if scopePath == "" || canonical == "" || !strings.HasPrefix(canonical, scopePath+"/") {
+	compiled, ok, err := bundle.ResolveCompiledFlowEventSchema(scope.ID, canonical)
+	if err != nil || !ok || compiled.FlowPath() != scope.ID {
 		return ""
 	}
-	remainder := strings.TrimPrefix(canonical, scopePath+"/")
-	if remainder == "" || !strings.Contains(remainder, "/") {
-		return ""
-	}
-	if eventProofRemainderTargetsDescendantScope(source, scopePath, remainder) {
-		return ""
-	}
-	for _, local := range localNames {
-		if local == "" {
-			continue
-		}
-		if remainder == local || strings.HasSuffix(remainder, "/"+local) {
-			return local
-		}
-	}
-	return ""
-}
-
-func eventProofRemainderTargetsDescendantScope(source Source, scopePath, remainder string) bool {
-	if source == nil {
-		return false
-	}
-	scopePath = runtimeeventidentity.Normalize(scopePath)
-	remainder = runtimeeventidentity.Normalize(remainder)
-	if scopePath == "" || remainder == "" {
-		return false
-	}
-	for _, descendant := range source.FlowScopes() {
-		descendantPath := runtimeeventidentity.Normalize(descendant.Path)
-		if descendantPath == "" || descendantPath == scopePath || !strings.HasPrefix(descendantPath, scopePath+"/") {
-			continue
-		}
-		relativePath := strings.TrimPrefix(descendantPath, scopePath+"/")
-		if relativePath != "" && (remainder == relativePath || strings.HasPrefix(remainder, relativePath+"/")) {
-			return true
-		}
-	}
-	return false
+	return runtimeeventidentity.LeafName(compiled.EventName())
 }
 
 func uniqueNormalizedProofCandidates(values ...string) []string {

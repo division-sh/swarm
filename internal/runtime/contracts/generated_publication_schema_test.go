@@ -137,3 +137,49 @@ func TestGeneratedPublicationSchemaExactCoordinatesAndReadback(t *testing.T) {
 		})
 	}
 }
+
+func TestCompiledPublicationBindingsSurviveRawMapMutation(t *testing.T) {
+	for _, mode := range []string{"root", "static", "template", "nested_template"} {
+		t.Run(mode, func(t *testing.T) {
+			root := canonicalrouting.CopyPublicationActivity(t, mode, "http://127.0.0.1:1/send", true)
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			flow := map[string]string{"root": ".", "static": "source", "template": "source", "nested_template": "outer/source"}[mode]
+			producer, ok, err := bundle.ResolveCompiledFlowEventSchema(flow, "send.succeeded")
+			if err != nil || !ok {
+				t.Fatalf("producer admission: %t %v", ok, err)
+			}
+			resources, err := bundle.CompiledEventSchemas()
+			if err != nil {
+				t.Fatal(err)
+			}
+			generated := bundle.GeneratedActivityEventSchemas()
+			registry := EventSchemaRegistryFromBundle(bundle)
+			for _, view := range bundle.FlowTree.ByID {
+				view.Events = nil
+				view.Nodes = nil
+			}
+			bundle.Nodes, bundle.Events, bundle.Tools = nil, nil, nil
+			for _, receiver := range []string{flow, "sink"} {
+				compiled, found, err := bundle.ResolveEffectiveCompiledFlowEventSchema(receiver, "send.succeeded")
+				if err != nil || !found || compiled.value != producer.value {
+					t.Fatalf("%s recompiled or lost admitted reference: found=%t err=%v", receiver, found, err)
+				}
+				entry, key, found := bundle.ResolveFlowEventCatalogEntry(receiver, "send.succeeded")
+				if !found || key != producer.EventName() || entry.Payload.Properties["activity_id"].Type != "string" {
+					t.Fatalf("%s catalog reread mutable syntax: key=%q found=%t entry=%+v", receiver, key, found, entry)
+				}
+			}
+			again, err := bundle.CompiledEventSchemas()
+			if err != nil || !reflect.DeepEqual(resources, again) || !reflect.DeepEqual(generated, bundle.GeneratedActivityEventSchemas()) || !reflect.DeepEqual(registry, EventSchemaRegistryFromBundle(bundle)) {
+				t.Fatalf("resource/generated readback recompiled declarations: %v", err)
+			}
+			if source := producer.Source(); source.Layer != "generated_activity" || !strings.HasSuffix(source.File, "nodes.yaml") {
+				t.Fatalf("generated provenance does not name the declaring handler: %+v", source)
+			}
+		})
+	}
+}

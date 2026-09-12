@@ -101,7 +101,7 @@ func TestConnectedOutputBindingCompilesProducerSchemaIntoReceiverPin(t *testing.
 	if !found || ambiguous {
 		t.Fatalf("connected producer row = found:%t ambiguous:%t row:%#v", found, ambiguous, row)
 	}
-	if row.producerFlowID != "producer" || row.producerName != "work.ready" {
+	if row.producerFlowID != "producer" || row.producerName != "producer/work.ready" {
 		t.Fatalf("connected producer = flow:%q declaration:%q, want producer/work.ready", row.producerFlowID, row.producerName)
 	}
 	pins := bundle.FlowInputEventPins("consumer")

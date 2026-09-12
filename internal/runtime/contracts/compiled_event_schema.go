@@ -93,6 +93,7 @@ type compiledEventSchemaValue struct {
 	source                 CompiledEventSchemaSource
 	structuralType         ResolvedCatalogType
 	readback               EventSchema
+	declaration            EventCatalogEntry
 }
 
 // CompiledEventSchema is the immutable, admitted event-schema boundary used
@@ -282,10 +283,20 @@ func (s CompiledEventSchema) withRequiredField(name, typeRef string, fieldSchema
 	})
 	sort.Slice(structuralType.Fields, func(i, j int) bool { return structuralType.Fields[i].Name < structuralType.Fields[j].Name })
 	value.structuralType = structuralType
+	value.declaration = cloneEventCatalogEntry(s.value.declaration)
+	value.declaration.Payload.Properties[name] = EventFieldSpec{Type: typeRef}
+	value.declaration.Payload.Required = normalizeStrings(append(value.declaration.Payload.Required, name))
 	return CompiledEventSchema{value: &value}, nil
 }
 
 var _ CompiledEventSchemaProvider = (*WorkflowContractBundle)(nil)
+
+type compiledFlowEventSchemas struct {
+	path        string
+	template    bool
+	descendants []string
+	bindings    map[string]CompiledEventSchema
+}
 
 // ResolveCompiledFlowEventSchema returns the immutable producer declaration
 // for one exact flow-local event. It never rebuilds evidence from reader-side
@@ -294,28 +305,86 @@ func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventTyp
 	if b == nil {
 		return CompiledEventSchema{}, false, nil
 	}
-	view, exists := b.exactFlowEventDeclarationView(flowID)
-	if !exists || view == nil {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		flowID = "."
+	}
+	bindings, exists := b.compiledEventSchemas[flowID]
+	if !exists {
 		return CompiledEventSchema{}, false, nil
 	}
-	declaration := eventSchemaDeclarationScope{flowID: flowID, view: view, types: b.ResolvedTypeCatalogForFlow(flowID)}
-	entry, key, ok := eventSchemaDeclarationEntry(b, declaration, eventSchemaLookupKeys(b, flowID, eventType))
-	generated := false
-	if !ok {
-		entry, key, ok = b.generatedActivityDeclaration(flowID, eventType)
-		generated = ok
+	name := eventidentity.Normalize(eventType)
+	compiled, ok := bindings.bindings[name]
+	if !ok && bindings.template && strings.HasPrefix(name, bindings.path+"/") {
+		remainder := strings.TrimPrefix(name, bindings.path+"/")
+		for _, descendant := range bindings.descendants {
+			if remainder == descendant || strings.HasPrefix(remainder, descendant+"/") {
+				return CompiledEventSchema{}, false, nil
+			}
+		}
+		// Concrete template spellings are readback projections of this
+		// declaration, never another declaration or receiver authority.
+		if strings.Contains(remainder, "/") {
+			compiled, ok = bindings.bindings[eventidentity.LeafName(remainder)]
+		}
 	}
-	if !ok || eventidentity.IsCanonicalPattern(key) {
-		return CompiledEventSchema{}, false, nil
+	return compiled, ok, nil
+}
+
+// compileEventSchemaBindings admits producer declarations before pins capture
+// them. Later lookups may resolve a name within this exact scope, but cannot
+// recompile a declaration from a mutable catalog or choose a foreign owner.
+func (b *WorkflowContractBundle) compileEventSchemaBindings() error {
+	b.compiledEventSchemas = nil
+	bindings := make(map[string]compiledFlowEventSchemas)
+	views := b.FlowViews()
+	for _, view := range views {
+		scope := compiledFlowEventSchemas{path: view.Path, template: view.Schema.Mode == "template", bindings: make(map[string]CompiledEventSchema)}
+		for _, descendant := range views {
+			if strings.HasPrefix(descendant.Path, view.Path+"/") {
+				scope.descendants = append(scope.descendants, strings.TrimPrefix(descendant.Path, view.Path+"/"))
+			}
+		}
+		bindings[view.Paths.FlowPath] = scope
 	}
-	compiled, ok, err := b.compileCurrentEventDeclaration(view.Paths.FlowPath, "flow", view.Paths.EventsFile, key, key, entry, b.ResolvedTypeCatalogForFlow(flowID))
-	if err != nil || !ok {
-		return CompiledEventSchema{}, ok, err
+	records := b.canonicalCurrentEventDeclarationRecords()
+	generated := b.generatedActivityDeclarationRecords()
+	authoredCount := len(records)
+	records = append(records, generated...)
+	for i, record := range records {
+		compiled, ok, err := b.compileCurrentEventDeclaration(record.flowPath, record.layer, record.sourceFile,
+			record.localName, record.qualifiedName, record.entry, record.types)
+		if eventidentity.IsCanonicalPattern(record.localName) {
+			compiled, err = newCompiledEventSchema(record.flowPath, record.qualifiedName, record.entry, record.types, "",
+				CompiledEventSchemaSource{FlowPath: record.flowPath, Layer: record.layer, File: record.sourceFile})
+			ok = err == nil
+			if ok {
+				compiled.value.classification = CompiledEventSchemaPattern
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if i >= authoredCount {
+			compiled.value.classification = CompiledEventSchemaGenerated
+		}
+		flow := compiled.FlowPath()
+		scope, exists := bindings[flow]
+		if !exists {
+			return fmt.Errorf("compiled event %s:%s has no admitted flow", flow, record.qualifiedName)
+		}
+		for _, key := range uniqueNormalizedEventSchemaKeys(record.localName, record.qualifiedName) {
+			if previous, exists := scope.bindings[key]; exists {
+				return fmt.Errorf("compiled event %s:%s has multiple declaration owners (%s and %s)", flow, key, previous.Source().File, compiled.Source().File)
+			}
+			scope.bindings[key] = compiled
+		}
 	}
-	if generated {
-		compiled.value.classification = CompiledEventSchemaGenerated
-	}
-	return compiled, true, nil
+	b.compiledEventSchemas = bindings
+	return nil
 }
 
 // ResolveEffectiveCompiledFlowEventSchema returns the exact receiver schema
@@ -356,22 +425,15 @@ func (b *WorkflowContractBundle) CompiledEventSchemas() ([]CompiledEventSchema, 
 	if b == nil {
 		return nil, nil
 	}
+	if b.compiledEventSchemas == nil {
+		return nil, fmt.Errorf("event schema bindings have not been admitted")
+	}
 	var out []CompiledEventSchema
-	for _, record := range b.canonicalCurrentEventDeclarationRecords() {
-		compiled, ok, err := b.compileCurrentEventDeclaration(
-			record.flowPath,
-			record.layer,
-			record.sourceFile,
-			record.localName,
-			record.qualifiedName,
-			record.entry,
-			record.types,
-		)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			out = append(out, compiled)
+	for _, scope := range b.compiledEventSchemas {
+		for key, compiled := range scope.bindings {
+			if key == compiled.EventName() && compiled.Importable() {
+				out = append(out, compiled)
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -534,6 +596,7 @@ func newCompiledEventSchema(
 		acceptanceSchemaDigest: canonicaljson.HashBytes(canonicalSchema),
 		source:                 source,
 		readback:               readback,
+		declaration:            cloneEventCatalogEntry(entry),
 	}
 	structuralType, err := ResolveJSONSchemaStructuralType(acceptanceSchema, "event."+value.acceptanceSchemaDigest)
 	if err != nil {
