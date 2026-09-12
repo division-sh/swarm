@@ -11,13 +11,16 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -139,7 +142,10 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			// schema/admission parity. Here the real claim SQL and COMMIT are used.
 			if _, err := db.Exec(`
 				CREATE TABLE source_artifacts (bundle_hash text PRIMARY KEY);
-				CREATE TABLE runs (run_id uuid PRIMARY KEY, status text, bundle_hash text);
+				CREATE TABLE runs (run_id uuid PRIMARY KEY, status text, bundle_hash text,
+					origin_kind text, trigger_event_id uuid, trigger_event_type text,
+					origin_service_id uuid, origin_generation bigint,
+					forked_from_run_id uuid, forked_from_event_id uuid, started_at timestamptz);
 				CREATE TABLE run_fork_selected_contract_runtime_executions (
 					execution_id uuid PRIMARY KEY, fork_run_id uuid, generation bigint,
 					state text, execution_owner text, lease_expires_at timestamptz, updated_at timestamptz,
@@ -170,11 +176,28 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			if _, err := db.Exec(`INSERT INTO source_artifacts VALUES ($1)`, hash); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(`INSERT INTO runs VALUES ($1,'running',$2)`, issued.ForkRunID, hash); err != nil {
+			source, err := correlation.NewSourceArtifactFact(hash)
+			if err != nil {
+				t.Fatal(err)
+			}
+			origin, err := runlifecycle.ForkMaterializationRunOrigin(issued.SourceRunID, issued.ForkEventID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx, err := db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err := runlifecyclefixture.PostgresCreateRunInMutation(context.Background(), tx, runlifecycle.CreateRequest{
+				RunID: issued.ForkRunID, Source: source, Origin: origin, StartedAt: time.Now().UTC(),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
 				t.Fatal(err)
 			}
 			preparation := selectedClaimPreparationFixture(t, db, issued, hash)
-			var err error
 			issued.PreparationFingerprint, err = preparation.Fingerprint()
 			if err != nil {
 				t.Fatal(err)

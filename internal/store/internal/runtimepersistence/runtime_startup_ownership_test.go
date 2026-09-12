@@ -2004,9 +2004,19 @@ func TestProcessCapabilityOperationCancellationPreservesPossessionParity(t *test
 				t.Fatalf("construct cancellation source set: %v", err)
 			}
 			operationCtx, cancelOperation := context.WithTimeout(ctx, 500*time.Millisecond)
-			_, err = capability.InstallCompleteSourceSet(operationCtx, runtimeagenttopology.SourceSetCommitRequest{
-				OperationID: uuid.NewString(), Plan: plan,
-			})
+			installed := make(chan error, 1)
+			go func() {
+				_, err := capability.InstallCompleteSourceSet(operationCtx, runtimeagenttopology.SourceSetCommitRequest{
+					OperationID: uuid.NewString(), Plan: plan,
+				})
+				installed <- err
+			}()
+			<-operationCtx.Done()
+			if err := lockTx.Rollback(); err != nil {
+				t.Fatalf("release backend I/O barrier for admitted drain: %v", err)
+			}
+			lockReleased = true
+			err = <-installed
 			cancelOperation()
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("backend I/O cancellation error=%v, want context.DeadlineExceeded", err)
@@ -2020,11 +2030,6 @@ func TestProcessCapabilityOperationCancellationPreservesPossessionParity(t *test
 			if contender != nil || !errors.As(err, &acquisitionErr) || acquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
 				t.Fatalf("contender after cancellation capability=%#v err=%v, want live-owner refusal", contender, err)
 			}
-			if err := lockTx.Rollback(); err != nil {
-				t.Fatalf("release backend I/O barrier: %v", err)
-			}
-			lockReleased = true
-
 			if _, _, err := capability.CurrentSourceSet(ctx); err != nil {
 				t.Fatalf("process capability after caller cancellation: %v", err)
 			}

@@ -132,8 +132,6 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					if outcome == "cancel_loser" {
 						cancelLoser()
 						barrier.resume()
-						got := awaitForkContentionResult(t, ctx, loser)
-						requireForkContentionCancellation(t, got.err)
 					}
 					if outcome == "cancel_winner" {
 						cancelWinner()
@@ -160,6 +158,8 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					barrier.openGate(t, gate)
 					barrier.resume()
 					if outcome == "cancel_loser" {
+						got := awaitForkContentionResult(t, ctx, loser)
+						requireForkContentionCancellation(t, got.err)
 						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")) {
 							t.Fatal("cancelled loser and rolled-back winner left durable effects")
 						}

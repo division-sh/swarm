@@ -31,13 +31,15 @@ func proveBulkRetirementWaitsForMutation(t *testing.T, db *sql.DB, backend strin
 		t.Fatal(err)
 	}
 	waiting, cancel := context.WithTimeout(ctx, time.Second)
-	err = retire(waiting)
-	cancel()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("bulk retirement must wait for held mutation fence until cancelled: %v", err)
-	}
+	defer cancel()
+	retired := make(chan error, 1)
+	go func() { retired <- retire(waiting) }()
+	<-waiting.Done()
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
+	}
+	if err := <-retired; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("bulk retirement must wait for held mutation fence until cancelled: %v", err)
 	}
 	var state string
 	var version uint64

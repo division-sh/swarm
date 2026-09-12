@@ -924,8 +924,11 @@ func TestPostgresPipelineCompletionHandoffSurvivesPostCommitCleanupError(t *test
 						count, outcome, reason,
 					)
 				}
-				if err := owner.Release(ctx, claim); err != nil {
-					t.Fatalf("release processed decision claim: %v", err)
+				if state.LeaseForTest().Current() {
+					t.Fatal("unsafe post-commit cleanup left the claim session reusable")
+				}
+				if err := owner.Release(ctx, claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+					t.Fatalf("disposed decision claim must be stale: %v", err)
 				}
 			}
 
