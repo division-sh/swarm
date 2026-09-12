@@ -1180,6 +1180,19 @@ seam_families:
       The matrix proves selected route-authority rows. This inventory proves
       the repo-wide drift audit boundary and identifies guardrails that should
       prevent future narrow closure.
+  - id: complexity_measurement_artifact
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - .github/complexity-baseline.json
+    search_dimensions: [connect_route_plan, descriptor_evidence, direct_delivery_path, flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority, route_plan_source_reason, typed_connect_recipient_evaluation]
+    notes: >
+      #2447 records source paths and callable names as pinned-analyzer score
+      evidence for the development-only complexity ratchet. Routing symbols
+      appear only as measured identities, not executable producers, readers,
+      routing descriptors, or delivery authority. The exact artifact path is
+      classified here without excluding it from the repo-wide search or
+      admitting any additional source path. Runtime route ownership is unchanged.
   - id: source_artifact_operation_guard
     layer: conformance_guardrails
     classification: separate_semantic_concept
