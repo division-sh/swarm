@@ -149,6 +149,15 @@ func testRuntimeWorkflowValidationBundle(localEvents ...string) *runtimecontract
 	return bundle
 }
 
+func compiledRuntimeValidationSource(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	t.Helper()
+	source := semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile validation fixture: %v", err)
+	}
+	return source
+}
+
 func testRuntimeWorkflowValidationAgent(id string) runtimecontracts.AgentRegistryEntry {
 	intent, err := runtimeagentintent.Resolve(
 		runtimeagentintent.SourceInline,
@@ -321,7 +330,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPToolRequiresEffectCl
 			},
 		},
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -347,7 +356,7 @@ func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t 
 			},
 		},
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -385,7 +394,7 @@ func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *t
 			},
 		},
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -411,7 +420,7 @@ func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitt
 			},
 		},
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -455,7 +464,7 @@ func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) 
 			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 				"support": {EventHandlers: handlers},
 			}
-			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 				ExecutionPosture:  executionposture.Live,
 				CheckMCPReachable: false, StrictEmitSchemas: false, FatalToolImplementationWarning: false, FatalBootWarnings: false,
 			})
@@ -507,7 +516,7 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 			},
 		},
 	}
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -570,7 +579,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 			},
 		},
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -617,7 +626,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 			},
 		},
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -634,7 +643,7 @@ func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsu
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
 		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage"})),
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -660,7 +669,7 @@ func TestValidateWorkflowContractSurface_DurableActivityIdempotentWriteFailsClos
 			},
 		},
 	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
@@ -775,7 +784,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 					},
 				},
 			}
-			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticviewtest.WrapRootAgents(bundle), WorkflowContractValidationOptions{
+			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 				ExecutionPosture:               executionposture.Live,
 				CheckMCPReachable:              false,
 				StrictEmitSchemas:              false,
@@ -964,7 +973,7 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 			},
 		},
 	}
-	source := semanticviewtest.WrapRootAgents(bundle)
+	source := compiledRuntimeValidationSource(t, bundle)
 
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err != nil {
@@ -978,7 +987,7 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 	}
 }
 
-func TestValidateWorkflowContractSurfaceRejectsInvalidGeneratedEmitToolSchema(t *testing.T) {
+func TestWorkflowContractAdmissionRejectsInvalidGeneratedEmitToolSchema(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := testRuntimeWorkflowValidationBundle()
@@ -1006,18 +1015,13 @@ func TestValidateWorkflowContractSurfaceRejectsInvalidGeneratedEmitToolSchema(t 
 			},
 		},
 	}
-	source := semanticviewtest.WrapRootAgents(bundle)
-
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-	if err == nil || !strings.Contains(err.Error(), "generated_tool_schema_closure") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want canonical generated schema refusal", err)
+	semanticviewtest.WrapRootAgents(bundle)
+	err := runtimecontracts.CompileWorkflowSemantics(bundle)
+	if err == nil || !strings.Contains(err.Error(), `compile event .:ready.event: compiled structural schema: structural schema field unsupported: unsupported structural schema type "NotDeclared"`) {
+		t.Fatalf("compiled event admission = %v, want exact invalid-type refusal before boot", err)
 	}
-	findings := result.BootReport.Errors()
-	if len(findings) != 1 || findings[0].CheckID != "generated_tool_schema_closure" {
-		t.Fatalf("generated schema findings = %#v, want one exact owner refusal", findings)
-	}
-	if got := findings[0].Message; !strings.Contains(got, "ready.event schema contains unresolved contract type(s): NotDeclared") {
-		t.Fatalf("generated emit schema error = %q, want unsupported type", got)
+	if _, ok, err := bundle.ResolveCompiledFlowEventSchema(".", "ready.event"); err != nil || ok {
+		t.Fatalf("failed admission retained an executable schema: present=%v err=%v", ok, err)
 	}
 }
 
@@ -1059,7 +1063,7 @@ func TestValidateWorkflowContractSurfaceAllowsPrecisionQualifiedGeneratedEmitToo
 			},
 		},
 	}
-	source := semanticviewtest.WrapRootAgents(bundle)
+	source := compiledRuntimeValidationSource(t, bundle)
 
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err != nil {

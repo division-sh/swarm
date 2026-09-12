@@ -4103,6 +4103,9 @@ func TestExecutionValidation_AgreesWithRuntimeValidationOnTouchedToolAndEventCla
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			source := semanticviewtest.WrapRootAgents(tc.bundle)
+			if err := runtimecontracts.CompileWorkflowSemantics(tc.bundle); err != nil {
+				t.Fatalf("compile validation fixture: %v", err)
+			}
 			verifyErr := validateExecutionFixture(context.Background(), source, executionposture.Live)
 			if tc.wantErr {
 				if verifyErr == nil || !strings.Contains(verifyErr.Error(), tc.errContains) {
