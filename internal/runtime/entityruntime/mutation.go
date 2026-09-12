@@ -1,6 +1,7 @@
 package entityruntime
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -22,6 +23,8 @@ type Mutation struct {
 }
 
 const MutationClear = "clear"
+
+var ErrImmutableMutation = errors.New("immutable entity field write forbidden")
 
 // MutationPlan owns a private ordered candidate and structural conflict history.
 // Validate ends one executed operation list; the same plan can then continue to
@@ -131,7 +134,7 @@ func (p *MutationPlan) apply(next map[string]any, op Mutation) (string, error) {
 				return "", fmt.Errorf("cannot clear bare entity field %s", path)
 			}
 			if decl.Immutable {
-				return "", fmt.Errorf("cannot clear immutable entity field %s", path)
+				return "", fmt.Errorf("%w: cannot clear %s", ErrImmutableMutation, path)
 			}
 			if err := clearMutationField(next, strings.Split(path, ".")); err != nil {
 				return "", err
@@ -141,7 +144,7 @@ func (p *MutationPlan) apply(next map[string]any, op Mutation) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			value, err := normalizeFieldValue(p.contract, path, op.Value, true)
+			value, err := NormalizeFieldValue(p.contract, path, op.Value)
 			if err != nil {
 				return "", err
 			}
@@ -181,7 +184,7 @@ func (p *MutationPlan) apply(next map[string]any, op Mutation) (string, error) {
 	if previous, exists := p.draft[root]; exists && decl.Immutable {
 		value, remains := next[root]
 		if !remains || !reflect.DeepEqual(previous, value) {
-			return "", fmt.Errorf("immutable entity field %s cannot change", root)
+			return "", fmt.Errorf("%w: %s cannot change", ErrImmutableMutation, root)
 		}
 	}
 	return path, nil

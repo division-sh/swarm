@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"strings"
 	"time"
 
@@ -61,34 +61,21 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		return nil, failures.New(failures.ClassAuthorizationDenied, "runtime_materialized_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName})
 	}
 	currentFields := entityRowFieldMap(row)
-	value, err := normalizeEntityFieldValue(schema, field, payload["value"])
+	candidate, err := entityruntime.ApplyMutations(schema.Contract, currentFields, []entityruntime.Mutation{{Target: "entity." + field.Path, Value: payload["value"]}})
 	if err != nil {
+		if errors.Is(err, entityruntime.ErrImmutableMutation) {
+			return nil, failures.Wrap(failures.ClassAuthorizationDenied, "immutable_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName}, err)
+		}
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", map[string]any{"field": fieldName}, err)
 	}
-	if field.FieldDecl.Immutable {
-		materializedCurrent, currentErr := entityruntime.NormalizeState(schema.Contract, entityruntime.DeclaredValues(schema.Contract, currentFields))
-		if currentErr != nil {
-			return nil, failures.Wrap(failures.ClassInternalFailure, "immutable_field_current_value_unavailable", "tool-executor", "exec_save_entity_field.field", map[string]any{"field": fieldName}, currentErr)
-		}
-		if currentValue, exists := entityruntime.PathValue(materializedCurrent, field.Path); exists && !valuesEqual(currentValue, value) {
-			return nil, failures.New(failures.ClassAuthorizationDenied, "immutable_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName})
-		}
-	}
-	valueJSON, err := json.Marshal(value)
-	if err != nil {
-		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", map[string]any{"field": fieldName}, err)
-	}
-	pathSegments, err := entityJSONPathSegments(field.Path)
-	if err != nil {
-		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", map[string]any{"field": fieldName})
-	}
+	value, _ := entityruntime.PathValue(candidate, field.Path)
 
 	revision, err := store.SaveEntityField(ctx, EntityFieldUpdate{
-		RunID:        identity.RunID,
-		EntityID:     identity.EntityID,
-		FieldPath:    field.Path,
-		PathSegments: pathSegments,
-		ValueJSON:    json.RawMessage(valueJSON),
+		RunID:     identity.RunID,
+		EntityID:  identity.EntityID,
+		FieldPath: field.Path,
+		Value:     value,
+		Source:    source,
 		Writer: EntityMutationWriter{
 			Type:        "agent",
 			ID:          strings.TrimSpace(actor.ID),
@@ -96,6 +83,9 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		},
 	})
 	if err != nil {
+		if errors.Is(err, entityruntime.ErrImmutableMutation) {
+			return nil, failures.Wrap(failures.ClassAuthorizationDenied, "immutable_field_write_forbidden", "tool-executor", "exec_save_entity_field.update", map[string]any{"action": "entity_write", "field": fieldName}, err)
+		}
 		return nil, failures.WrapDetail("write_failed", "tool-executor", "exec_save_entity_field.update", map[string]any{"entity_id": entityID, "field": fieldName}, err)
 	}
 	return map[string]any{
@@ -103,26 +93,6 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		"field":     field.Path,
 		"revision":  revision,
 	}, nil
-}
-
-func entityJSONPathSegments(path string) ([]string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil, fmt.Errorf("field is required")
-	}
-	if strings.Contains(path, "[") || strings.Contains(path, "]") {
-		return nil, fmt.Errorf("list index writes are not supported for path %s", path)
-	}
-	rawSegments := strings.Split(path, ".")
-	segments := make([]string, 0, len(rawSegments))
-	for _, segment := range rawSegments {
-		segment = strings.TrimSpace(segment)
-		if segment == "" {
-			return nil, fmt.Errorf("field is required")
-		}
-		segments = append(segments, segment)
-	}
-	return segments, nil
 }
 
 func enforceEntityWriteOwnership(ctx context.Context, store EntityPersistence, source semanticview.Source, actor models.AgentConfig, entityID string, logger runtimeToolLogSink) error {
@@ -258,6 +228,7 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	}
 	now := time.Now().UTC()
 	if err := store.CreateEntity(ctx, EntityCreateRecord{
+		Source:       source,
 		RunID:        runID,
 		EntityID:     entityID,
 		FlowInstance: flowInstance,

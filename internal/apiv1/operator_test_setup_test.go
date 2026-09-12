@@ -20,6 +20,40 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestTestSetupSparseStateValidatesFinalCandidate(t *testing.T) {
+	primary := runtimecontracts.PrimaryEntityContract{
+		EntityType: "work",
+		Contract: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"left":   {Type: "text", IsOptional: true},
+			"right":  {Type: "text", IsOptional: true, Refinements: runtimecontracts.SchemaRefinements{EqualTo: "left"}},
+			"record": {Type: "Record"},
+		}},
+		Types: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"Record": {Fields: map[string]runtimecontracts.TypeFieldSpec{"name": {Type: "text"}}},
+		}},
+	}
+	for _, tc := range []struct {
+		name   string
+		fields map[string]any
+		valid  bool
+	}{
+		{"unassigned", map[string]any{}, true},
+		{"equal pair", map[string]any{"left": "x", "right": "x"}, true},
+		{"partial pair", map[string]any{"left": "x"}, false},
+		{"unequal pair", map[string]any{"left": "x", "right": "y"}, false},
+		{"null", map[string]any{"left": nil, "right": nil}, false},
+		{"incomplete record", map[string]any{"record": map[string]any{}}, false},
+		{"complete record", map[string]any{"record": map[string]any{"name": ""}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateTestSetupFieldsAgainstBundle("work", primary, tc.fields, "entity")
+			if (err == nil) != tc.valid {
+				t.Fatalf("validation error=%v, valid=%v", err, tc.valid)
+			}
+		})
+	}
+}
+
 func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)

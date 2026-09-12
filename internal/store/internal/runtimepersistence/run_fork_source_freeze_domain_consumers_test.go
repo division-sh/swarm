@@ -79,7 +79,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			lateEntity.EntityID = uuid.NewString()
 			requireForkedSourceRefusal(t, "create entity", surface.CreateEntity(ctx, lateEntity))
 			_, err := surface.SaveEntityField(ctx, runtimetools.EntityFieldUpdate{
-				RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "value", ValueJSON: json.RawMessage(`2`),
+				RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "value", Value: 2,
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
 			})
 			requireForkedSourceRefusal(t, "save entity field and mutation log", err)

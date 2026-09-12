@@ -27,3 +27,15 @@ func TestEntitySnapshotHydrationPreservesSparseFields(t *testing.T) {
 		}
 	}
 }
+
+func TestEntityCreationInitializerErrorsDoNotBecomeEmptyState(t *testing.T) {
+	source := semanticview.Wrap(&rc.WorkflowContractBundle{RootEntities: rc.EntityContractsDocument{
+		"work": {Fields: map[string]rc.EntityFieldDecl{"score": {Type: "integer", Initial: "not a number"}}},
+	}})
+	if _, err := workflowEntitySchemaInitialValues(source, ""); err == nil {
+		t.Fatal("invalid initializer silently became an empty creation state")
+	}
+	if _, err := workflowEntitySchemaInitialValues(nil, "missing"); err == nil {
+		t.Fatal("missing creation contract silently became an empty state")
+	}
+}

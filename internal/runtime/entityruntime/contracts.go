@@ -321,7 +321,7 @@ func InitialValues(contract Contract) (map[string]any, error) {
 		if decl.Initial == nil {
 			continue
 		}
-		value, err := normalizeFieldValue(contract, name, decl.Initial, true)
+		value, err := NormalizeFieldValue(contract, name, decl.Initial)
 		if err != nil {
 			return nil, err
 		}
@@ -355,7 +355,7 @@ func NormalizeState(contract Contract, provided map[string]any) (map[string]any,
 			continue
 		} else {
 			var err error
-			value, err = normalizeFieldValue(contract, name, value, true)
+			value, err = NormalizeFieldValue(contract, name, value)
 			if err != nil {
 				return nil, err
 			}
@@ -402,25 +402,12 @@ func NormalizeMetadataForFlow(source semanticview.Source, flowID string, metadat
 	return out, nil
 }
 
+// NormalizeFieldValue checks a supplied value's type, not assignment authority
+// or sibling equality. Writes must use MutationPlan's final-candidate validation.
 func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, error) {
-	return normalizeFieldValue(contract, fieldName, value, false)
-}
-
-// FieldPathParticipatesInEquality reports whether an isolated write to path
-// would bypass an equal_to proof owned by the surrounding entity/object.
-func FieldPathParticipatesInEquality(contract Contract, path string) bool {
-	return fieldPathParticipatesInEquality(contract, path)
-}
-
-func normalizeFieldValue(contract Contract, fieldName string, value any, allowEqualityParticipant bool) (any, error) {
 	field, err := ResolveFieldPath(contract, fieldName)
 	if err != nil {
 		return nil, err
-	}
-	if !allowEqualityParticipant {
-		if fieldPathParticipatesInEquality(contract, strings.TrimSpace(field.Path)) {
-			return nil, fieldTypeError(strings.TrimSpace(field.Path), "cannot be written in isolation because it participates in equal_to")
-		}
 	}
 	normalized, err := normalizeValueForType(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), value)
 	if err != nil {
@@ -826,81 +813,6 @@ func validateEqualityValue(context, name, target string, values map[string]any) 
 		return fieldTypeError(joinFieldName(context, name), "must equal "+joinFieldName(context, target))
 	}
 	return nil
-}
-
-func fieldPathParticipatesInEquality(contract Contract, path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return false
-	}
-	segments := strings.Split(path, ".")
-	if len(segments) == 0 {
-		return false
-	}
-	root := strings.TrimSpace(segments[0])
-	decl, ok := contract.Entity.Fields[root]
-	if !ok {
-		return false
-	}
-	if entityFieldParticipatesInEquality(contract.Entity.Fields, root) {
-		return true
-	}
-	if len(segments) == 1 {
-		return false
-	}
-	currentType := strings.TrimSpace(decl.Type)
-	for _, segment := range segments[1:] {
-		resolved, err := resolveStructuralType(contract, currentType)
-		if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
-			return false
-		}
-		segment = strings.TrimSpace(segment)
-		if structuralFieldParticipatesInEquality(resolved.Fields, segment) {
-			return true
-		}
-		field, ok := resolved.Field(segment)
-		if !ok {
-			return false
-		}
-		currentType = strings.TrimSpace(field.TypeRef)
-	}
-	return false
-}
-
-func entityFieldParticipatesInEquality(fields map[string]runtimecontracts.EntityFieldDecl, name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	for fieldName, field := range fields {
-		fieldName = strings.TrimSpace(fieldName)
-		target := strings.TrimSpace(field.Refinements.EqualTo)
-		if fieldName == name && target != "" {
-			return true
-		}
-		if target == name {
-			return true
-		}
-	}
-	return false
-}
-
-func structuralFieldParticipatesInEquality(fields []runtimecontracts.ResolvedCatalogField, name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	for _, field := range fields {
-		fieldName := strings.TrimSpace(field.Name)
-		target := strings.TrimSpace(field.Refinements.EqualTo)
-		if fieldName == name && target != "" {
-			return true
-		}
-		if target == name {
-			return true
-		}
-	}
-	return false
 }
 
 func resolvedStructuralField(fields []runtimecontracts.ResolvedCatalogField, name string) (runtimecontracts.ResolvedCatalogField, bool) {

@@ -2079,7 +2079,9 @@ contract_formats:
       generated_reads:
         read_entity: 'read_{entity_type}() returns the complete current entity envelope and fields for the actor''s flow-owned
           entity contract.'
-        read_field: 'read_{entity_type}_{field}() returns the complete typed value of one declared field.'
+        read_field: 'read_{entity_type}_{field}() returns the complete typed value of one declared field. If that
+          field is unassigned, return a typed not_found error identifying the field and unassigned reason, never
+          successful null. Whole-entity reads preserve omission; explicit zero, false and empty values remain values.'
         non_lossy_invariant: 'Generated typed reads return the complete typed value or fail closed with an explicit typed-read
           error. They MUST NOT silently return preview, truncated, omitted, or follow-up-file placeholder shapes as the value.'
       generated_writes:
@@ -2087,13 +2089,20 @@ contract_formats:
           entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.'
         update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
           named-object field. The value schema is the exact declared subpath type. Runtime lowering consumes the same
-          declared dotted replacement owner as save_entity_field.'
+          declared typed mutation plan as handlers. A missing named parent rejects; the tool never synthesizes it.'
+        transactional_validation: 'Generated writes and internal entity creation carry the admitted source to the selected
+          persistence owner, which checks it against the active run source and stored entity owner. Re-evaluate the shared
+          typed mutation plan against the locked current snapshot before writing fields, revision or mutation evidence.
+          Optimistic executor validation is not commit authority. Equality-participant paths remain available when explicitly
+          granted, but each single-field tool call must leave the full candidate valid. No bulk, clear or CEL agent tool is added.'
         materialized_field_exclusion: 'Fields declaring materialize_from, and every nested subpath below them, MUST NOT
           appear in generated write tools or writable-path summaries. They are runtime-owned projection fields.'
         create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
           expose a generic agent-facing create_entity replacement for current-entity tools.'
       generated_schema_closure: 'Generated entity-tool input and output schemas are closed recursively: additionalProperties
-        is false for object schemas, required fields are explicit, and enum values come from the shared type system. Provider-visible
+        is false for object schemas, required fields are explicit, and enum values come from the shared type system.
+        Closure does not require every declared property: whole-entity read fields preserve progressive root omission,
+        while assigned named records preserve exactly their declared required members. Provider-visible
         schemas, runtime validation, and bootverify schema-closure checks must agree. Provider schema enforcement is a first
         validation layer when honored; runtime validation remains mandatory defense-in-depth.'
       legacy_surface_retirement: 'For normal agents, the legacy universal entity surface is removed from the

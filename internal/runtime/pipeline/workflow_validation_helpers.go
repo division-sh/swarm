@@ -32,19 +32,12 @@ func workflowEntitySchemaFields(source semanticview.Source, flowID string) map[s
 	return out
 }
 
-func workflowEntitySchemaInitialValues(source semanticview.Source, flowID string) map[string]any {
+func workflowEntitySchemaInitialValues(source semanticview.Source, flowID string) (map[string]any, error) {
 	contract, ok := workflowEntityContract(source, flowID)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("entity creation requires declared contract for flow %q", flowID)
 	}
-	values, err := entityruntime.InitialValues(contract)
-	if err != nil {
-		return nil
-	}
-	if len(values) == 0 {
-		return nil
-	}
-	return values
+	return entityruntime.InitialValues(contract)
 }
 
 func WorkflowEntitySchemaInitialValueFields(source semanticview.Source) map[string]struct{} {

@@ -66,8 +66,7 @@ accounts:
   priority: integer
 `)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
-	ensureSQLiteEntityToolTestRun(t, sqliteStore)
-	ctx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID), actor)
+	ctx := runtimetools.WithActor(seedEntityToolSourceRun(t, sqliteStore, bundle), actor)
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    sqliteStore,
 		WorkflowSource:                 semanticview.Wrap(bundle),
@@ -181,16 +180,14 @@ func TestEntityTools_CreateEntityPersistsCanonicalEntityContractOnBothStores(t *
 			var query string
 			if backend == "sqlite" {
 				selected := newSQLiteRuntimeToolStoreForTest(t)
-				ensureSQLiteEntityToolTestRun(t, selected)
 				entityStore = selected
 				query = `SELECT entity_type FROM entity_state WHERE run_id = ? AND entity_id = ?`
 			} else {
 				selected := newPostgresHumanTaskToolStoreForTest(t)
-				ensureEntityToolTestRun(t, storetest.DatabaseForTest(selected))
 				entityStore = selected
 				query = `SELECT entity_type FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			}
-			ctx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID), actor)
+			ctx := runtimetools.WithActor(seedEntityToolSourceRun(t, entityStore, bundle), actor)
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 				EntityStore: entityStore, WorkflowSource: semanticview.Wrap(bundle), AllowInternalLegacyEntityTools: true,
 			})
@@ -218,10 +215,11 @@ func TestEntityTools_CreateEntityPersistsCanonicalEntityContractOnBothStores(t *
 
 func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
-	ensureSQLiteEntityToolTestRun(t, sqliteStore)
-	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
+	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "account", "types:\n  Brief:\n    summary: text\n", "account:\n  business_brief: Brief\n  tags: list<text>\n")
+	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	entityID := uuid.NewString()
 	if err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
+		Source:       semanticview.Wrap(bundle),
 		RunID:        entityToolTestRunID,
 		EntityID:     entityID,
 		FlowInstance: "review/inst-structured",
@@ -260,10 +258,10 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor, true)
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
-	ensureSQLiteEntityToolTestRun(t, sqliteStore)
-	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
+	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	entityID := uuid.NewString()
 	if err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
+		Source:       semanticview.Wrap(bundle),
 		RunID:        entityToolTestRunID,
 		EntityID:     entityID,
 		FlowInstance: "validation/inst-1",

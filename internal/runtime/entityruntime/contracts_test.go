@@ -90,7 +90,7 @@ func TestMaterialize_EnforcesSchemaRefinementEquality(t *testing.T) {
 	}
 }
 
-func TestNormalizeFieldValue_RejectsIsolatedEqualityParticipants(t *testing.T) {
+func TestNormalizeFieldValueIsTypeValidationNotAssignmentProof(t *testing.T) {
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{
 			Fields: map[string]runtimecontracts.EntityFieldDecl{
@@ -104,8 +104,11 @@ func TestNormalizeFieldValue_RejectsIsolatedEqualityParticipants(t *testing.T) {
 	}
 
 	for _, field := range []string{"owner", "component"} {
-		if _, err := NormalizeFieldValue(contract, field, "deploy"); err == nil || !strings.Contains(err.Error(), "participates in equal_to") {
-			t.Fatalf("NormalizeFieldValue(%s) = %v, want isolated equality rejection", field, err)
+		if _, err := NormalizeFieldValue(contract, field, "deploy"); err != nil {
+			t.Fatalf("NormalizeFieldValue(%s): %v", field, err)
+		}
+		if _, err := ApplyMutations(contract, nil, []Mutation{{Target: "entity." + field, Value: "deploy"}}); err == nil {
+			t.Fatalf("mutation of %s bypassed final-candidate equality", field)
 		}
 	}
 	if _, err := NormalizeState(contract, map[string]any{"component": "deploy", "owner": "deploy"}); err != nil {

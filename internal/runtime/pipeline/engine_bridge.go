@@ -240,7 +240,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx = runtimecorrelation.WithHandlerID(ctx, node.Key()+":"+strings.TrimSpace(string(triggerCtx.Event.Type())))
 	initialFieldValues := map[string]any(nil)
 	if handler.CreateEntity {
-		initialFieldValues = workflowEntitySchemaInitialValues(source, flowID)
+		var initialErr error
+		initialFieldValues, initialErr = workflowEntitySchemaInitialValues(source, flowID)
+		if initialErr != nil {
+			return contractHandlerExecutionResult{}, initialErr
+		}
 	}
 	handlerEventKey := strings.TrimSpace(triggerCtx.HandlerEventKey)
 	if handlerEventKey == "" {
@@ -308,14 +312,8 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			RuleSelection:        admittedHandlerRuleSelection(result.HandlerRuleSelection),
 		}, err
 	}
-	if handler.CreateEntity && result.StateMutation.StateCarrier.Fields == nil {
-		result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(stateSnapshot.StateCarrier.Fields)
-	}
 	previewMetadata := previewMetadataAfterExecution(stateSnapshot, result.StateMutation)
-	initialValuesMaterialized := map[string]any(nil)
-	if handler.CreateEntity {
-		initialValuesMaterialized = workflowEntitySchemaInitialValues(source, flowID)
-	}
+	initialValuesMaterialized := cloneStringAnyMap(initialFieldValues)
 	emissions := &pipelineEmissionPlan{}
 	if deferCommittedDispatch {
 		emissions.appendIntents(result.EmitIntents)
@@ -452,7 +450,10 @@ func resolveHandlerEntityIDForFlowAtNode(
 			state.EntityID = entityID
 			state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
 			state.Status = ""
-			state.Metadata = workflowCreateEntityFields(source, flowID)
+			state.Metadata, err = workflowEntitySchemaInitialValues(source, flowID)
+			if err != nil {
+				return "", evt, err
+			}
 			state.Control = workflowStateControlFromIdentity(instance, entityType)
 		}
 		envelope := events.EnvelopeForFlowInstance(evt.NormalizedEnvelope(), instance.InstancePath)
@@ -510,14 +511,6 @@ func canonicalHandlerInstanceID(flowID string, evt events.Event) string {
 		return strings.TrimSpace(flowID[idx+1:])
 	}
 	return flowID
-}
-
-func workflowCreateEntityFields(source semanticview.Source, flowID string) map[string]any {
-	fields := workflowEntitySchemaInitialValues(source, flowID)
-	if len(fields) == 0 {
-		return nil
-	}
-	return fields
 }
 
 func workflowStateControlFromIdentity(instance FlowInstanceIdentity, entityType string) runtimeengine.StateControl {

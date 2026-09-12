@@ -2167,7 +2167,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsMaterializedFieldPresenceChe
 	}
 }
 
-func TestExecuteNodeContractHandlerEmitFieldsEntityPresenceCheckMintsEntityID(t *testing.T) {
+func TestExecuteNodeContractHandlerExplicitCreationAssignsBeforeEmit(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -2209,10 +2209,14 @@ node-a:
 	}
 
 	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+		CreateEntity: true,
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{TargetField: "kill_reason", Value: runtimecontracts.RefExpression("payload.reason")}},
+		},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
-				"label": runtimecontracts.CELExpression(`entity.kill_reason != "" ? entity.kill_reason : payload.reason`),
+				"label": runtimecontracts.RefExpression("entity.kill_reason"),
 			},
 		},
 	}, workflowTriggerContext{
@@ -2228,7 +2232,7 @@ node-a:
 	}
 	emitted := bus.publishedEvent(0)
 	if got := emitted.EntityID(); got == "" {
-		t.Fatal("expected emit.fields entity reference to mint entity_id")
+		t.Fatal("explicit creation did not carry its canonical entity_id")
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(emitted.Payload(), &payload); err != nil {

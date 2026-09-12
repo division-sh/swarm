@@ -408,7 +408,7 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 	}
 }
 
-func TestRoleScopedEntityTools_ExcludeEqualityParticipantWriteAffordances(t *testing.T) {
+func TestRoleScopedEntityTools_EqualityUsesFinalCandidateValidation(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
 		"validation": {
@@ -476,8 +476,8 @@ validation-orchestrator:
 		"update_validation_case_manifest_component",
 		"update_validation_case_manifest_owner",
 	} {
-		if _, ok := names[name]; ok {
-			t.Fatalf("equality participant produced mutation tool %q in %#v", name, sortedRoleScopedToolNames(names))
+		if _, ok := names[name]; !ok {
+			t.Fatalf("equality participant lacks declared mutation tool %q in %#v", name, sortedRoleScopedToolNames(names))
 		}
 	}
 }
@@ -1038,7 +1038,7 @@ accounts:
 	}
 }
 
-func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
+func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",
@@ -1061,69 +1061,18 @@ func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
 		t.Fatalf("inject legacy field: %v", err)
 	}
 
-	got, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
-	if err != nil {
-		t.Fatalf("get_entity with legacy stored field: %v", err)
-	}
-	entity, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("expected entity map, got %#v", got)
-	}
-	fields, ok := entity["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected fields map, got %#v", entity["fields"])
-	}
-	if _, exists := fields["legacy_flag"]; exists {
-		t.Fatalf("legacy stored field leaked into materialized entity: %#v", fields)
-	}
-	if _, exists := entity["bookkeeping"]; exists {
-		t.Fatalf("platform bookkeeping leaked through get_entity: %#v", entity)
-	}
-	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{
-		"flow_instance": "review/inst-1",
-		"limit":         10,
-	})
-	if err != nil {
-		t.Fatalf("search_entities with hostile bookkeeping: %v", err)
-	}
-	searchRows := searchOut.(map[string]any)["results"].([]map[string]any)
-	if len(searchRows) != 1 {
-		t.Fatalf("search rows = %#v", searchRows)
-	}
-	if _, exists := searchRows[0]["bookkeeping"]; exists {
-		t.Fatalf("platform bookkeeping leaked through search_entities: %#v", searchRows[0])
-	}
-
-	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"filter": `status == "open"`,
-		"select": []string{"status"},
-		"limit":  10,
-	})
-	if err != nil {
-		t.Fatalf("query_entities with legacy stored field: %v", err)
-	}
-	queryResult, ok := queryOut.(map[string]any)
-	if !ok {
-		t.Fatalf("expected query result map, got %#v", queryOut)
-	}
-	queryRows, ok := queryResult["results"].([]map[string]any)
-	if !ok || len(queryRows) != 1 {
-		t.Fatalf("unexpected query results: %#v", queryResult["results"])
-	}
-
-	wholeOut, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"filter": `status == "open"`,
-		"limit":  10,
-	})
-	if err != nil {
-		t.Fatalf("query_entities whole rows with hostile bookkeeping: %v", err)
-	}
-	wholeRows := wholeOut.(map[string]any)["results"].([]map[string]any)
-	if len(wholeRows) != 1 {
-		t.Fatalf("whole query rows = %#v", wholeRows)
-	}
-	if _, exists := wholeRows[0]["bookkeeping"]; exists {
-		t.Fatalf("platform bookkeeping leaked through query_entities: %#v", wholeRows[0])
+	for _, tc := range []struct {
+		name  string
+		input map[string]any
+	}{
+		{"get_entity", map[string]any{"entity_id": entityID}},
+		{"search_entities", map[string]any{"flow_instance": "review/inst-1", "limit": 10}},
+		{"query_entities", map[string]any{"filter": `status == "open"`, "select": []string{"status"}, "limit": 10}},
+		{"query_entities", map[string]any{"filter": `status == "open"`, "limit": 10}},
+	} {
+		if _, err := exec.Execute(ctx, tc.name, tc.input); err == nil {
+			t.Fatalf("%s accepted undeclared stored fields", tc.name)
+		}
 	}
 }
 
@@ -1486,7 +1435,7 @@ accounts:
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'review/inst-1', 'default', 'queued',
+			$1::uuid, $2::uuid, 'review/inst-1', 'accounts', 'queued',
 			'{}'::jsonb, '{"status":"open"}'::jsonb, '{}'::jsonb, 1, $3, $4, $4
 		)
 	`, sourceRunID, entityID, at, forkAt); err != nil {
@@ -1922,13 +1871,13 @@ types:
 validation_case:
   mvp_spec:
     type: MvpSpec
-    initial: {}
+    initial: {core_features: [], out_of_scope: []}
   brand:
     type: Brand
-    initial: {}
+    initial: {alternatives: []}
   validation_kit:
     type: ValidationKit
-    initial: {}
+    initial: {risk_flags: []}
   score: integer
 `)
 	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
@@ -2225,15 +2174,19 @@ func TestEntityTools_ConstrainedAllowedToolsDoNotPermitLegacyEntityTools(t *test
 }
 
 func TestEntityTools_CreateEntityRejectsFlowWithoutEntityContract(t *testing.T) {
+	root := t.TempDir()
+	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: no-entity-contract\n")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",
 		Role:          "operator",
 		Tools:         []string{"create_entity", "save_entity_field", "get_entity"},
-	}, &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{InitialStage: "queued"},
-	})
-	_, err := exec.Execute(ctx, "create_entity", map[string]any{
+	}, bundle)
+	_, err = exec.Execute(ctx, "create_entity", map[string]any{
 		"flow_instance": "review/inst-1",
 	})
 	missingContract := requireToolFailure(t, err, runtimefailures.ClassTargetUnreachable, "not_found")
@@ -2834,9 +2787,8 @@ func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, 
 func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, allowInternalLegacy bool) (context.Context, *runtimetools.Executor, *sql.DB) {
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
-	ensureEntityToolTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
+	ctx := seedEntityToolSourceRun(t, pg, bundle)
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),

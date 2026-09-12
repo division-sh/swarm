@@ -326,16 +326,14 @@ func validateTestSetupFieldsAgainstBundle(flowID string, primary runtimecontract
 		Entity:     primary.Contract,
 		Types:      primary.Types,
 	}
-	for field, value := range fields {
-		normalized, err := entityruntime.NormalizeFieldValue(contract, field, value)
-		if err != nil {
-			return NewInvalidParamsError(map[string]any{
-				"field":       fieldPrefix + ".fields." + field,
-				"reason":      err.Error(),
-				"entity_type": primary.EntityType,
-			})
-		}
-		fields[field] = normalized
+	normalized, err := entityruntime.NormalizeState(contract, fields)
+	if err != nil {
+		return NewInvalidParamsError(map[string]any{
+			"field": fieldPrefix + ".fields", "reason": err.Error(), "entity_type": primary.EntityType,
+		})
+	}
+	for field, value := range normalized {
+		fields[field] = value
 	}
 	return nil
 }

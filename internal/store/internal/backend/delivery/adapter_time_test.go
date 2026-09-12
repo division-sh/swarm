@@ -77,11 +77,12 @@ func TestSQLiteCaptureSnapshotTimeEstablishesSnapshotBeforeReturningTime(t *test
 		id INTEGER PRIMARY KEY CHECK (id = 1),
 		swarm_version TEXT NOT NULL,
 		platform_version TEXT NOT NULL,
-		created_at TEXT NOT NULL
+		created_at TEXT NOT NULL,
+		entity_presence_model TEXT NOT NULL CHECK (entity_presence_model = 'sparse-v1')
 	)`); err != nil {
 		t.Fatalf("create runtime store metadata: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at) VALUES (1, 'test', 'test', '2026-08-25T00:00:00Z')`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at, entity_presence_model) VALUES (1, 'test', 'test', '2026-08-25T00:00:00Z', 'sparse-v1')`); err != nil {
 		t.Fatalf("insert runtime store metadata: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `CREATE TABLE snapshot_fact (id INTEGER PRIMARY KEY, value TEXT NOT NULL)`); err != nil {

@@ -1611,14 +1611,11 @@ func (r scenarioRunner) evaluateScenarioSetupFields(evaluator *scenarioExpressio
 		Entity:     primary.Contract,
 		Types:      primary.Types,
 	}
-	for field, fieldValue := range fields {
-		normalized, err := entityruntime.NormalizeFieldValue(contract, field, fieldValue)
-		if err != nil {
-			return nil, fmt.Errorf("setup.entities[%s].fields.%s: %w", entity.Alias, field, err)
-		}
-		fields[field] = normalized
+	normalized, err := entityruntime.NormalizeState(contract, fields)
+	if err != nil {
+		return nil, fmt.Errorf("setup.entities[%s].fields: %w", entity.Alias, err)
 	}
-	return fields, nil
+	return normalized, nil
 }
 
 func (r scenarioRunner) evaluateScenarioSetupGates(evaluator *scenarioExpressionEvaluator, flowID string, entity scenarioSetupEntity) (map[string]bool, error) {
