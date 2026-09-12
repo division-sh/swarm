@@ -82,7 +82,7 @@ func TestValidateUsageHintCoverage_RejectsGeneratedEmitHintMentioningCEL(t *test
 	t.Fatalf("findings = %#v, want generated emit CEL usage rejection", findings)
 }
 
-func TestValidateUsageHintCoverage_CoversRoleDerivedEmitTools(t *testing.T) {
+func TestValidateUsageHintCoverageDoesNotInventRoleDerivedEmitTools(t *testing.T) {
 	original := emitToolUsageHint
 	emitToolUsageHint = "Use CEL"
 	t.Cleanup(func() { emitToolUsageHint = original })
@@ -116,9 +116,8 @@ func TestValidateUsageHintCoverage_CoversRoleDerivedEmitTools(t *testing.T) {
 
 	findings := ValidateUsageHintCoverage(source, nil)
 	for _, finding := range findings {
-		if finding.ToolName == "emit_review_completed" && finding.Severity == "error" && strings.Contains(finding.Message, "must not instruct") {
-			return
+		if finding.ToolName == "emit_review_completed" {
+			t.Fatalf("node role invented an agent emit tool: %#v", findings)
 		}
 	}
-	t.Fatalf("findings = %#v, want role-derived generated emit usage rejection", findings)
 }

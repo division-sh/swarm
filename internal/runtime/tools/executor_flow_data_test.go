@@ -97,6 +97,7 @@ factory-cto:
 	}
 	source := semanticview.Wrap(bundle)
 	actor := flowDataActor()
+	actor.ID = "factory-cto"
 	actor.FlowID, actor.FlowPath = ".", "."
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 	if !containsToolName(toolDefinitionNames(exec.ToolDefinitionsForActor(actor)), "read_flow_data") {

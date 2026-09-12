@@ -333,7 +333,7 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-1", ".")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-1", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -418,7 +418,7 @@ func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T)
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "selected-agent", ".")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "selected-agent", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
@@ -453,7 +453,7 @@ func TestExecutorTelemetry_EmitToolLogsSchemaValidationFailureSeparatelyFromPubl
 			},
 		},
 	}
-	source := semanticview.Wrap(bundle)
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-2", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -484,7 +484,7 @@ func TestExecutorTelemetry_EmitToolLogsSchemaValidationFailureSeparatelyFromPubl
 
 func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t *testing.T) {
 	bus := &telemetryBusStub{}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"category.assessed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -496,7 +496,7 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 				},
 			},
 		},
-	})
+	}, "agent-emit-undeclared", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -572,7 +572,7 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 			},
 		},
 	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-3", ".")
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-3", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -618,7 +618,7 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 
 func TestExecutorTelemetry_EmitToolLogsPayloadShapeFailureBeforeSchemaValidation(t *testing.T) {
 	bus := &telemetryBusStub{}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"category.assessed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -630,7 +630,7 @@ func TestExecutorTelemetry_EmitToolLogsPayloadShapeFailureBeforeSchemaValidation
 				},
 			},
 		},
-	})
+	}, "agent-emit-4", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -695,7 +695,7 @@ func TestExecutorTelemetry_EmitToolLogsInvalidEmitToolNameOutcome(t *testing.T) 
 
 func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshotsOnSchemaValidationFailure(t *testing.T) {
 	bus := &telemetryBusStub{}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"category.assessed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -708,7 +708,7 @@ func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshotsOnSchemaValidati
 				},
 			},
 		},
-	})
+	}, "agent-emit-6", ".", "category.assessed")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
