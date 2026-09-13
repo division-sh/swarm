@@ -123,6 +123,39 @@ func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutAc
 	}
 }
 
+func TestProviderSchemaOnlyImportRetainsBindingWithoutInputPin(t *testing.T) {
+	source, catalog := schemaOnlyTelegramDeclarationSource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("schema-only fixture requires an admitted bundle")
+	}
+	schema := bundle.FlowSchemas["coordinator"]
+	schema.Pins.Inputs.EventPins = nil
+	bundle.FlowSchemas["coordinator"] = schema
+	bundle.FlowTree.ByID["coordinator"].Schema = schema
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const eventName = "inbound.telegram.text_message"
+	if _, found := wrapped.FlowInputEventPin("coordinator", eventName); found {
+		t.Fatal("schema-only import invented an input pin")
+	}
+	compiled, found, err := wrapped.ResolveEffectiveCompiledFlowEventSchema("coordinator", eventName)
+	if err != nil || !found || compiled.Classification() != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatalf("schema-only import lost exact declaration evidence: found=%v err=%v", found, err)
+	}
+	if _, found, err := wrapped.ResolveEffectiveCompiledFlowEventSchema("sibling", eventName); err != nil || found {
+		t.Fatalf("schema-only import crossed declaration scope: found=%v err=%v", found, err)
+	}
+	if len(wrapped.SemanticCapabilities().ProviderTriggerTargetFreeAuthorizations()) != 0 {
+		t.Fatal("schema-only import granted provider publication authority")
+	}
+}
+
 func TestProviderCompiledSchemaReadbackDoesNotGrantReceiverOwnership(t *testing.T) {
 	source, catalog := schemaOnlyTelegramDeclarationSource(t)
 	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)

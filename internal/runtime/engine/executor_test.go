@@ -57,8 +57,28 @@ func requiredEventPayload(fields map[string]runtimecontracts.EventFieldSpec) run
 	return runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Properties: fields, Required: required}}
 }
 
-func sourceWithEvents(entries map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
-	return mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{Events: entries})
+func sourceWithEvents(flowID string, entries map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
+	return mustCompileEngineFlowSource(flowID, &runtimecontracts.WorkflowContractBundle{Events: entries})
+}
+
+func mustCompileEngineFlowSource(flowID string, bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	if flowID == "." || flowID == "" {
+		return mustCompileEngineSource(bundle)
+	}
+	if bundle.FlowTree.Root != nil || len(bundle.FlowTree.ByID) != 0 {
+		panic("scoped engine fixture must declare its flow only once")
+	}
+	flow := &runtimecontracts.FlowContractView{
+		Path: flowID, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
+		Events: bundle.Events, Nodes: bundle.Nodes, Tools: bundle.Tools,
+	}
+	bundle.Events, bundle.Nodes = nil, nil
+	bundle.FlowTree = runtimecontracts.FlowTree{
+		Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{*flow}},
+		ByID: map[string]*runtimecontracts.FlowContractView{flowID: flow},
+	}
+	bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{flowID: {}}
+	return mustCompileEngineSource(bundle)
 }
 
 func mustCompileEngineSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
@@ -460,12 +480,12 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 	return mustCompileEngineSource(bundle)
 }
 
-func sourceWithPolicy(values map[string]any) semanticview.Source {
+func sourceWithPolicy(flowID string, values map[string]any) semanticview.Source {
 	policy := runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{}}
 	for key, value := range values {
 		policy.Values[key] = runtimecontracts.PolicyValue{Value: value}
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return mustCompileEngineFlowSource(flowID, &runtimecontracts.WorkflowContractBundle{
 		Policy: policy,
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
@@ -3204,7 +3224,7 @@ func (d *orderedActivityDispatcher) DispatchActivities(_ context.Context, intent
 }
 
 func sourceWithActivityTool() semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return mustCompileEngineFlowSource("research", &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"source.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"url": {Type: "text"}}),
 		},
@@ -3376,7 +3396,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy(nil), "flow-1", "pending", "pending", "done"),
+		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", nil), "flow-1", "pending", "pending", "done"),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -3458,7 +3478,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy(nil), "flow-1", "pending", "pending"),
+		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", nil), "flow-1", "pending", "pending"),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -3695,7 +3715,7 @@ func TestExecutor_QuerySelectionRejectsMissingRequiredField(t *testing.T) {
 }
 
 func collectionExecutionSource() semanticview.Source {
-	return sourceWithFixtureStages(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return sourceWithFixtureStages(mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"WorkItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
 				"id": {Type: "text"}, "status": {Type: "text"}, "note": {Type: "text", IsOptional: true},
@@ -3711,7 +3731,7 @@ func collectionExecutionSource() semanticview.Source {
 }
 
 func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
-	source := sourceWithPolicy(map[string]any{"score": 6})
+	source := sourceWithPolicy(".", map[string]any{"score": 6})
 	bundle, _ := semanticview.Bundle(source)
 	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"score": {Type: "integer"}, "query_rows": {Type: "[ScoredItem]"}}}}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -3752,7 +3772,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 
 func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy(map[string]any{"score": 1}), "flow-1", "pending", "pending"),
+		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", map[string]any{"score": 1}), "flow-1", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -3816,7 +3836,7 @@ func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
 
 func TestExecutorChainedCollectionConditionUsesCompiledItemType(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy(nil), ".", "pending", "pending"),
+		Source:        sourceWithFixtureStages(sourceWithPolicy(".", nil), ".", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -4149,7 +4169,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 }
 
 func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing.T) {
-	source := sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
+	source := sourceWithEvents("flow-1", map[string]runtimecontracts.EventCatalogEntry{
 		"account.scored": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
 			"account_id": {Type: "text"}, "score": {Type: "integer"},
 		}),
@@ -5560,7 +5580,7 @@ func TestSelectedFanOutPlanIgnoresContradictoryRawHandlerSpec(t *testing.T) {
 }
 
 func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
-	source := sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
+	source := sourceWithEvents(".", map[string]runtimecontracts.EventCatalogEntry{
 		"vertical.discovered": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
 			"mode": {Type: "text"}, "discovery_context": {Type: "object"},
 		}),
@@ -6831,7 +6851,7 @@ func TestExecutor_FanOutDoesNotPersistHiddenCountInEntityBookkeeping(t *testing.
 	}
 	source = fanOutSourceWithBundleIdentity(t, bundle)
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(source, "root", "pending", "pending", "scanning"),
+		Source:        sourceWithFixtureStages(source, ".", "pending", "pending", "scanning"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -6842,7 +6862,7 @@ func TestExecutor_FanOutDoesNotPersistHiddenCountInEntityBookkeeping(t *testing.
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "root", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-no-hidden-count"), "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
@@ -6947,7 +6967,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 
 func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy(nil), "flow-1", "pending", "pending", "done"),
+		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", nil), "flow-1", "pending", "pending", "done"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -6989,7 +7009,7 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 
 func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy(map[string]any{"category": "policy"}), "flow-1", "pending", "pending", "done"),
+		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", map[string]any{"category": "policy"}), "flow-1", "pending", "pending", "done"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -7481,7 +7501,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing.T) {
 	shaper := &recordingPayloadShaper{}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: sourceWithFixtureStages(sourceWithEvents(map[string]runtimecontracts.EventCatalogEntry{
+		Source: sourceWithFixtureStages(sourceWithEvents("flow-1", map[string]runtimecontracts.EventCatalogEntry{
 			"task.completed": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
 				"ok": {Type: "boolean"}, "score": {Type: "integer"}, "legacy": {Type: "text"},
 			}),

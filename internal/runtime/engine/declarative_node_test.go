@@ -43,10 +43,11 @@ func TestNewDeclarativeNode_StoresNodeID(t *testing.T) {
 }
 
 func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-			".": runtimecontracts.BuildWorkflowStageTopology(".", "pending", []string{"pending", "done"}, nil,
-				[]runtimecontracts.HandlerTransitionSemantic{{Node: testRootExecutableNode(t, "node-a"), EventType: "task.completed", AdvancesTo: "done"}}, nil, nil),
+	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{
+			Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
+				{ID: "pending", Initial: true}, {ID: "done"},
+			},
 		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.completed": {},
