@@ -2694,6 +2694,48 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 	}
 }
 
+func waitFlowActivationBoundary(ctx context.Context, entered <-chan struct{}, completed <-chan error) error {
+	select {
+	case <-entered:
+		return nil
+	case err := <-completed:
+		return fmt.Errorf("activation completed before reaching the test boundary: %v", err)
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for activation test boundary: %w", ctx.Err())
+	}
+}
+
+func receiveFlowActivationResult(t *testing.T, completed <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-completed:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("activation did not complete within 5s")
+		return nil
+	}
+}
+
+func TestFlowActivationBoundaryWaitReportsEarlyExitAndCancellation(t *testing.T) {
+	for _, early := range []error{nil, errors.New("missing admitted schema")} {
+		completed := make(chan error, 1)
+		completed <- early
+		if err := waitFlowActivationBoundary(context.Background(), make(chan struct{}), completed); err == nil || !strings.Contains(err.Error(), fmt.Sprint(early)) {
+			t.Fatalf("early completion = %v, want original result %v", err, early)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := waitFlowActivationBoundary(ctx, make(chan struct{}), make(chan error)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled boundary wait = %v", err)
+	}
+	entered := make(chan struct{})
+	close(entered)
+	if err := waitFlowActivationBoundary(context.Background(), entered, make(chan error)); err != nil {
+		t.Fatalf("entered boundary = %v", err)
+	}
+}
+
 func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
@@ -2723,7 +2765,11 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	go func() {
 		leaderErr <- activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	}()
-	<-admissionEntered
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWait()
+	if err := waitFlowActivationBoundary(waitCtx, admissionEntered, leaderErr); err != nil {
+		t.Fatal(err)
+	}
 
 	followerErrs := make(chan error, 3)
 	ensureCtx, cancelEnsure := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -2743,12 +2789,12 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	cancelPending()
 	cancelStartup()
 	for range 3 {
-		if err := <-followerErrs; !errors.Is(err, context.Canceled) {
+		if err := receiveFlowActivationResult(t, followerErrs); !errors.Is(err, context.Canceled) {
 			t.Fatalf("coalesced follower: %v, want context cancellation from in-flight attempt", err)
 		}
 	}
 	close(admissionRelease)
-	if err := <-leaderErr; err != nil {
+	if err := receiveFlowActivationResult(t, leaderErr); err != nil {
 		t.Fatalf("coalesced leader: %v", err)
 	}
 	if len(bus.addedPaths) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 {
@@ -2780,6 +2826,13 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 	}
 	stageEntered := make(chan struct{})
 	stageRelease := make(chan struct{})
+	defer func() {
+		select {
+		case <-stageRelease:
+		default:
+			close(stageRelease)
+		}
+	}()
 	bus.stageRoute = func(runtimebus.FlowInstanceRouteMaterializationRequest) error {
 		close(stageEntered)
 		<-stageRelease
@@ -2793,12 +2846,16 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 			req.Instance.InstancePath,
 		)
 	}()
-	<-stageEntered
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelWait()
+	if err := waitFlowActivationBoundary(waitCtx, stageEntered, reconciled); err != nil {
+		t.Fatal(err)
+	}
 	if err := instances.MarkTerminated(context.Background(), testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	close(stageRelease)
-	if err := <-reconciled; err != nil {
+	if err := receiveFlowActivationResult(t, reconciled); err != nil {
 		t.Fatalf("terminal reconciliation: %v", err)
 	}
 	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
