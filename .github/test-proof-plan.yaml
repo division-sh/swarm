@@ -64,6 +64,8 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-journeys-first
+      - serveapp-journeys-rest
       - serveapp-selected
       - serveapp-standing
       - store-full
@@ -110,6 +112,8 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-journeys-first
+      - serveapp-journeys-rest
       - serveapp-selected
       - serveapp-standing
       - store-full
@@ -156,6 +160,8 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-journeys-first
+      - serveapp-journeys-rest
       - serveapp-selected
       - serveapp-standing
       - store-full
@@ -202,6 +208,8 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-journeys-first
+      - serveapp-journeys-rest
       - serveapp-selected
       - serveapp-standing
       - store-full
@@ -436,9 +444,24 @@ units:
   serveapp-surfaces:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # Run 34693302523 exceeded the unchanged surface budget. Keep complete
-    # selected/selector journeys in their own disjoint unit, not fewer cases.
-    run: '^TestSe($|[^l].*)$'
+    # 6817ec998 qualification: this family totals 755s before the numeric
+    # failure. Separate runtime (128s), A-L journeys (284s), and M-Z (342s).
+    # RE2 complement of TestSel* and TestServed*: no test/case is dropped.
+    run: '^TestSe($|[^lr].*|r($|[^v].*|v($|[^e].*|e($|[^d].*))))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-journeys-first:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestServed($|[^M-Z].*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-journeys-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestServed[M-Z].*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
