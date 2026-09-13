@@ -320,6 +320,7 @@ portfolio-coordinator:
 `)
 		}
 		if opts.RegistrationUUIDField {
+			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "types.yaml"), "    external_id: text?\n", "    external_id: text\n")
 			applyClosedReplacement(t, ownerNodes, `            gem_score: account.gem_score
             eligible: entity.threshold >= 70
 `, `            gem_score: account.gem_score

@@ -5472,6 +5472,7 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 			"gem_score":      runtimecontracts.CELExpression("company.gem_score"),
 			"batch_count":    runtimecontracts.CELExpression("payload.batch_count"),
 			"exponent_score": runtimecontracts.CELExpression("company.exponent_score"),
+			"eligible":       runtimecontracts.CELExpression("entity.threshold >= 70"),
 		}},
 	}}
 	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", handler)
@@ -5487,6 +5488,9 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 				"id": {Type: "text"}, "eng_roles": {Type: "integer"}, "gem_score": {Type: "number"}, "exponent_score": {Type: "number"},
 			}},
 		}},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"threshold": {Type: "integer"}}},
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 			"numeric-fan-out-node": {"batch.ready": qualified},
 		}},
@@ -5494,6 +5498,7 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 			"batch.ready": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[NumericCompany]"}, "batch_count": {Type: "integer"}}),
 			"company.registered": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 				"id": {Type: "text"}, "eng_roles": {Type: "integer"}, "gem_score": {Type: "number"}, "batch_count": {Type: "integer"}, "exponent_score": {Type: "number"},
+				"eligible": {Type: "boolean"},
 			}}},
 		},
 	}
@@ -5512,7 +5517,7 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 	)
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", Node: node, Event: trigger, Handler: qualified,
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", map[string]any{"threshold": int64(75)}, nil, map[string]map[string]any{}),
 	})
 	if err != nil || result.FanOutIntent == nil {
 		t.Fatalf("create numeric fan-out intent: result=%#v err=%v", result, err)
@@ -5528,6 +5533,11 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 		"gem_score": json.Number("7.25"), "exponent_score": json.Number("1e3"),
 	}
 	eagerBase := values.NewContext().WithPayload(map[string]any{"batch_count": json.Number("1")})
+	entityType, err := semanticview.ResolveEntityStructuralType(exec.deps.Source, node.FlowPath())
+	if err != nil || entityType == nil {
+		t.Fatalf("exact entity structural type: %v", err)
+	}
+	eagerBase.Entity = values.Wrap(map[string]any{"threshold": int64(75)})
 	plan, err := exec.resolveFanOutPlan(intent.Request.PlanRef)
 	if err != nil {
 		t.Fatal(err)
@@ -5536,6 +5546,7 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 	eagerPayload, err := emitFieldsPayload(eagerBase, ExecutionState{FanOut: map[string]any{"item": item}}, handler.FanOut.Emit, workflowexpr.ValueExpressionOptions{
 		ItemAlias:   plan.ItemAlias,
 		ItemType:    &itemType,
+		EntityType:  entityType,
 		PayloadType: exec.executionPayloadType(ExecutionRequest{Node: node, Event: trigger, HandlerEventKey: "batch.ready"}),
 	}, nil)
 	if err != nil {
@@ -5547,6 +5558,9 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 	}
 	if shaper.lastPayload["eng_roles"] != int64(9007199254740991) || shaper.lastPayload["gem_score"] != float64(7.25) || shaper.lastPayload["batch_count"] != int64(1) || shaper.lastPayload["exponent_score"] != float64(1000) {
 		t.Fatalf("deferred numeric payload = %#v", shaper.lastPayload)
+	}
+	if shaper.lastPayload["eligible"] != true {
+		t.Fatalf("deferred entity arithmetic = %#v", shaper.lastPayload["eligible"])
 	}
 	if !reflect.DeepEqual(eagerPayload, shaper.lastPayload) {
 		t.Fatalf("numeric eager/deferred payloads disagree: eager=%#v deferred=%#v", eagerPayload, shaper.lastPayload)

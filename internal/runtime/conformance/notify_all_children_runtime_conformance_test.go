@@ -2515,6 +2515,15 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 			}
 			return
 		}
+		if owed > 0 {
+			summary, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("diagnose fan-out cursor: %v", err)
+			}
+			if summary.Blocked > 0 {
+				t.Fatalf("fan-out cannot reach the expected cursor without a repair: %#v", summary.BlockedIntents)
+			}
+		}
 		select {
 		case <-ctx.Done():
 			t.Fatalf("wait for fan-out cursor: %v; total=%d cursor=%d owed=%d", ctx.Err(), total, cursor, owed)

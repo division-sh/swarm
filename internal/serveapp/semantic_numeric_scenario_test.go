@@ -72,7 +72,7 @@ collector:
 						t.Fatal(err)
 					}
 				}
-				rt := startSemanticNumericScenarioRuntime(t, backend, root)
+				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 				args := []string{"test", root, "--config", writeServeRuntimeTestConfig(t), "--timeout", "10s", "--poll-interval", "10ms"}
 				if mode == "automatic_derived" {
 					args = append(args, "--derive", "fulfillment", "--input", "fulfillment.requested")
