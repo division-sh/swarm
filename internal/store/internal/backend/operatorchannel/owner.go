@@ -881,7 +881,9 @@ func RequirePrincipalTx(ctx context.Context, tx *sql.Tx, principalID string, pos
 		return fmt.Errorf("principal admission requires a transaction and principal")
 	}
 	d := dialectSQLite
-	if postgres { d = dialectPostgres }
+	if postgres {
+		d = dialectPostgres
+	}
 	return requirePrincipal(ctx, tx, d, principalID)
 }
 

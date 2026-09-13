@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-
 	"github.com/division-sh/swarm/internal/events"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"

@@ -126,7 +126,7 @@ func executeConversationForkCreate(ctx context.Context, req Request, opts Conver
 		},
 		Idempotency: apiidempotency.Request{
 			Method:         req.Method,
-			Actor: apiidempotency.BearerActor(req.ActorTokenID),
+			Actor:          apiidempotency.BearerActor(req.ActorTokenID),
 			IdempotencyKey: idempotencyKey,
 			RequestHash:    req.RequestHash,
 			ResourceID:     sourceSessionID,
@@ -162,7 +162,7 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Conversa
 	}
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
-		Actor: apiidempotency.BearerActor(req.ActorTokenID),
+		Actor:          apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		ResourceID:     forkID,
@@ -293,7 +293,7 @@ func executeConversationForkDelete(ctx context.Context, req Request, opts Conver
 	}
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
-		Actor: apiidempotency.BearerActor(req.ActorTokenID),
+		Actor:          apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		ResourceID:     forkID,

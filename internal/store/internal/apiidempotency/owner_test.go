@@ -89,7 +89,7 @@ func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapaci
 			}
 			req := apiidempotencycontract.Request{
 				Method:         "test.release",
-				Actor: apiidempotencycontract.BearerActor("actor"),
+				Actor:          apiidempotencycontract.BearerActor("actor"),
 				IdempotencyKey: fmt.Sprintf("terminal-%d", i),
 				RequestHash:    fmt.Sprintf("hash-%d", i),
 				ResourceID:     fmt.Sprintf("resource-%d", i),

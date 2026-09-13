@@ -66,7 +66,9 @@ type sqliteSourceArtifactQueryer interface {
 }
 
 func RequireSQLiteSourceArtifactTx(ctx context.Context, tx *sql.Tx, bundleHash string) error {
-	if tx == nil { return fmt.Errorf("source artifact transaction is required") }
+	if tx == nil {
+		return fmt.Errorf("source artifact transaction is required")
+	}
 	_, err := loadSQLiteSourceArtifact(ctx, tx, bundleHash)
 	return err
 }

@@ -48,8 +48,12 @@ func StorePostgresCompletionTx(ctx context.Context, lease *PostgresRequestLease,
 	if err != nil {
 		return err
 	}
-	if err := admitPrincipalTx(ctx, tx, lease.req, true); err != nil { return err }
-	if lease.req.IdempotencyKey == "" { return nil }
+	if err := admitPrincipalTx(ctx, tx, lease.req, true); err != nil {
+		return err
+	}
+	if lease.req.IdempotencyKey == "" {
+		return nil
+	}
 	return storeAPIIdempotency(ctx, tx, completionRequest(lease.req, lease.started), completion)
 }
 
@@ -95,7 +99,9 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
 	var existing apiIdempotencyRecord
 	var found bool
 	err = postgresbackend.RunAuthorityTransaction(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
-		if err := admitPrincipalTx(sqlCtx, tx, req, true); err != nil { return err }
+		if err := admitPrincipalTx(sqlCtx, tx, req, true); err != nil {
+			return err
+		}
 		if err := purgeExpiredAPIIdempotency(sqlCtx, tx, req.Now); err != nil {
 			return err
 		}
@@ -291,8 +297,12 @@ func StoreSQLiteCompletionTx(ctx context.Context, lease *SQLiteRequestLease, tx 
 	if err != nil {
 		return err
 	}
-	if err := admitPrincipalTx(ctx, tx, lease.req, false); err != nil { return err }
-	if lease.req.IdempotencyKey == "" { return nil }
+	if err := admitPrincipalTx(ctx, tx, lease.req, false); err != nil {
+		return err
+	}
+	if lease.req.IdempotencyKey == "" {
+		return nil
+	}
 	return storeSQLite(ctx, tx, completionRequest(lease.req, lease.started), completion)
 }
 
@@ -327,7 +337,9 @@ func AcquireSQLiteRequest(ctx context.Context, owner *SQLiteOwner, req apiidempo
 	var existing apiIdempotencyRecord
 	var found bool
 	err := owner.backend.RunTransaction(ctx, "sqlite api idempotency lookup", func(txCtx context.Context, tx *sql.Tx) error {
-		if err := admitPrincipalTx(txCtx, tx, req, false); err != nil { return err }
+		if err := admitPrincipalTx(txCtx, tx, req, false); err != nil {
+			return err
+		}
 		if err := purgeExpiredSQLite(txCtx, tx, req.Now); err != nil {
 			return err
 		}
@@ -428,7 +440,9 @@ func validateRequest(req apiidempotencycontract.Request) error {
 }
 
 func admitPrincipalTx(ctx context.Context, tx *sql.Tx, req apiidempotencycontract.Request, postgres bool) error {
-	if req.Actor.Kind != apiidempotencycontract.ActorOperatorPrincipal { return nil }
+	if req.Actor.Kind != apiidempotencycontract.ActorOperatorPrincipal {
+		return nil
+	}
 	return storeoperatorchannel.RequirePrincipalTx(ctx, tx, req.Actor.ID, postgres)
 }
 

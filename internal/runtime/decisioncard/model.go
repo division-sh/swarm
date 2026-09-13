@@ -268,7 +268,7 @@ type InputDraft struct {
 	InputDraftID      string    `json:"input_draft_id"`
 	RunID             string    `json:"run_id"`
 	CardID            string    `json:"card_id"`
-	PrincipalID      string    `json:"principal_id"`
+	PrincipalID       string    `json:"principal_id"`
 	Verdict           string    `json:"verdict"`
 	DeliveryReceiptID string    `json:"delivery_receipt_id,omitempty"`
 	Status            string    `json:"status"`
@@ -339,7 +339,7 @@ type DecideRequest struct {
 	CardID              string
 	Verdict             string
 	Fields              semanticvalue.Value
-	PrincipalID        string
+	PrincipalID         string
 	ObservedContentHash string
 	DeliveryReceiptID   string
 	DeliveryRenderHash  string
@@ -349,16 +349,16 @@ type DecideRequest struct {
 }
 
 type DeferRequest struct {
-	CardID       string
+	CardID      string
 	PrincipalID string
-	Until        time.Time
-	Now          time.Time
+	Until       time.Time
+	Now         time.Time
 }
 
 type BeginInputRequest struct {
 	CardID            string
 	Verdict           string
-	PrincipalID      string
+	PrincipalID       string
 	DeliveryReceiptID string
 	Now               time.Time
 	TTL               time.Duration
@@ -367,7 +367,7 @@ type BeginInputRequest struct {
 type CancelInputRequest struct {
 	CardID       string
 	InputDraftID string
-	PrincipalID string
+	PrincipalID  string
 	Now          time.Time
 }
 

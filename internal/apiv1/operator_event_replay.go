@@ -201,7 +201,7 @@ func executeOperatorEventReplay(
 	var replayPublishErr error
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
-		Actor: apiidempotency.BearerActor(req.ActorTokenID),
+		Actor:          apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		ResourceID:     eventID,

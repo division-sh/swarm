@@ -21,6 +21,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -34,7 +35,6 @@ import (
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
 	"github.com/google/uuid"
-	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 )
 
 type CompletionCandidateRequester interface {
@@ -148,7 +148,7 @@ func nullUUIDString(raw string) string {
 }
 
 type PipelinePostgresOwner struct {
-	apiIdempotency         *storeapiidempotency.PostgresOwner
+	apiIdempotency *storeapiidempotency.PostgresOwner
 	*storerunlifecycle.RunLifecyclePostgresOwner
 	*storedecision.DecisionPostgresOwner
 	*storedelivery.DeliveryPostgresOwner
@@ -166,7 +166,7 @@ type PipelinePostgresOwner struct {
 }
 
 type PipelineSQLiteOwner struct {
-	apiIdempotency         *storeapiidempotency.SQLiteOwner
+	apiIdempotency *storeapiidempotency.SQLiteOwner
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedecision.DecisionSQLiteOwner
 	*storedelivery.DeliverySQLiteOwner
@@ -268,7 +268,7 @@ func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, life
 		now = time.Now
 	}
 	return &PipelineSQLiteOwner{
-		apiIdempotency: idempotency,
+		apiIdempotency:          idempotency,
 		RunLifecycleSQLiteOwner: lifecycle, DecisionSQLiteOwner: decision, DeliverySQLiteOwner: delivery, ReplySQLiteOwner: reply,
 		backend: backend, requireCurrent: requireCurrent, candidateRequests: lifecycle, runLifecycleCandidates: candidates, workflowEntityQueries: entityQueries, workflowRoutes: routes, events: events, nowFn: now,
 		pipelineClaimIssuer: runtimepipelineobligation.NewClaimIssuer(), pipelineClaims: map[string]*pipelineClaimState{},

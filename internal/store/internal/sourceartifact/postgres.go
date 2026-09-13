@@ -66,7 +66,9 @@ type postgresSourceArtifactQueryer interface {
 }
 
 func RequirePostgresSourceArtifactTx(ctx context.Context, tx *sql.Tx, bundleHash string) error {
-	if tx == nil { return fmt.Errorf("source artifact transaction is required") }
+	if tx == nil {
+		return fmt.Errorf("source artifact transaction is required")
+	}
 	_, err := loadPostgresSourceArtifact(ctx, tx, bundleHash)
 	return err
 }

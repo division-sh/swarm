@@ -23,7 +23,9 @@ func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, ide
 	if schemaGuard == nil {
 		return nil, fmt.Errorf("mailbox postgres schema guard is required")
 	}
-	if idempotency == nil { return nil, fmt.Errorf("mailbox completion owner is required") }
+	if idempotency == nil {
+		return nil, fmt.Errorf("mailbox completion owner is required")
+	}
 	return &MailboxPostgresOwner{backend: backend, schemaGuard: schemaGuard, idempotency: idempotency}, nil
 }
 
@@ -47,7 +49,9 @@ func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, idempot
 	if schemaGuard == nil {
 		return nil, fmt.Errorf("mailbox sqlite schema guard is required")
 	}
-	if idempotency == nil { return nil, fmt.Errorf("mailbox completion owner is required") }
+	if idempotency == nil {
+		return nil, fmt.Errorf("mailbox completion owner is required")
+	}
 	return &MailboxSQLiteOwner{backend: backend, schemaGuard: schemaGuard, idempotency: idempotency}, nil
 }
 

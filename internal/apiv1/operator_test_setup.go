@@ -59,7 +59,7 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHa
 	}
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
-		Actor: apiidempotency.BearerActor(req.ActorTokenID),
+		Actor:          apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		TTL:            runStartIDempotencyTTL,
