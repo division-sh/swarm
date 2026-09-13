@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
@@ -30,6 +31,7 @@ import (
 type sparseEntityToolStore interface {
 	tools.EntityPersistence
 	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
+	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 }
 
 func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.WorkflowContractBundle) context.Context {
@@ -181,6 +183,7 @@ writer:
 			}{
 				{"save_work_label", ""},
 				{"save_work_left", "paired"},
+				{"save_work_profile", map[string]any{"name": "first", "note": "previous"}},
 				{"save_work_profile", map[string]any{"name": "first"}},
 				{"update_work_profile_name", "second"},
 			} {
@@ -227,6 +230,79 @@ writer:
 			}
 			if !reflect.DeepEqual(before, read()) {
 				t.Fatal("backend rejection changed state or revision")
+			}
+			// Inspect actual persisted history on both stores. Only PostgreSQL's
+			// existing internal debug reader exposes these records; neither store
+			// has a public entity.history RPC.
+			historyRows, err := db.QueryContext(ctx, `SELECT entity_id, domain, path, COALESCE(new_value, 'null')
+				FROM entity_mutations WHERE run_id = $1 ORDER BY created_at DESC, mutation_id DESC`, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var mutations []operatorread.RunDebugMutation
+			for historyRows.Next() {
+				var mutation operatorread.RunDebugMutation
+				var value []byte
+				if err := historyRows.Scan(&mutation.EntityID, &mutation.Domain, &mutation.Path, &value); err != nil {
+					historyRows.Close()
+					t.Fatal(err)
+				}
+				mutation.NewValue = append(json.RawMessage(nil), value...)
+				mutations = append(mutations, mutation)
+			}
+			if err := historyRows.Err(); err != nil {
+				historyRows.Close()
+				t.Fatal(err)
+			}
+			historyRows.Close()
+			if backend == "postgres" {
+				report, err := persistence.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{MutationLimit: 100})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(report.Mutations) != len(mutations) {
+					t.Fatalf("debug history omitted records: got %d want %d", len(report.Mutations), len(mutations))
+				}
+				mutations = report.Mutations
+			}
+			labels, initials, withNote, withoutNote, nestedNames := 0, 0, 0, 0, 0
+			for _, mutation := range mutations {
+				if mutation.EntityID != entityID || mutation.Domain != "authored_field" {
+					continue
+				}
+				switch mutation.Path {
+				case "label":
+					labels++
+					if string(mutation.NewValue) != `""` {
+						t.Fatalf("history lost explicit empty label: %+v", mutation)
+					}
+				case "seeded":
+					initials++
+					if string(mutation.NewValue) != "7" {
+						t.Fatalf("history changed explicit initial: %+v", mutation)
+					}
+				case "profile.name":
+					nestedNames++
+					if string(mutation.NewValue) != `"second"` {
+						t.Fatalf("history changed nested update: %+v", mutation)
+					}
+				case "profile":
+					var value map[string]any
+					if err := json.Unmarshal(mutation.NewValue, &value); err != nil {
+						t.Fatal(err)
+					}
+					if note, present := value["note"]; present {
+						if note != "previous" {
+							t.Fatalf("history fabricated note: %+v", mutation)
+						}
+						withNote++
+					} else {
+						withoutNote++
+					}
+				}
+			}
+			if labels != 1 || initials != 1 || withNote != 1 || withoutNote != 1 || nestedNames != 1 {
+				t.Fatalf("history presence counts label=%d initial=%d with_note=%d without_note=%d nested_name=%d", labels, initials, withNote, withoutNote, nestedNames)
 			}
 		})
 	}

@@ -251,6 +251,17 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 			last = entity
 			// Exact maps prove omission, not null or fabricated zero values.
 			if entity.Entity.CurrentState == stage && reflect.DeepEqual(entity.Fields, fields) {
+				// List and aggregate are envelope/count surfaces, not additional
+				// field renderers. Check their real public contract explicitly.
+				var aggregate struct {
+					Counts map[string]int `json:"counts"`
+				}
+				if err := process.rpc.call(ctx, "entity.aggregate", map[string]any{"run_id": runID, "type": "work", "group_by": "current_state"}, &aggregate); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(aggregate.Counts, map[string]int{stage: 1}) {
+					t.Fatalf("aggregate disagrees with exact sparse entity: %#v", aggregate)
+				}
 				return id
 			}
 		}
