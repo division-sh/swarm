@@ -632,7 +632,7 @@ func completeEventAgentSource(agentID, subscription string, intent runtimeagenti
 		AgentURIs: map[string]string{agentID: ownerURI},
 	}
 	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: runtimecontracts.FlowTree{
 			Root: root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"global": &root.Children[0]},
@@ -641,7 +641,11 @@ func completeEventAgentSource(agentID, subscription string, intent runtimeagenti
 			Agents: map[string]runtimecontracts.ContractURIRef{"global/" + agentID: {Kind: "agent", FlowID: "global", LocalID: agentID, Full: ownerURI}},
 			ByURI:  map[string]runtimecontracts.ContractURIRef{ownerURI: {Kind: "agent", FlowID: "global", LocalID: agentID, Full: ownerURI}},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func completeEventAgentOwnerURI(agentID string) string {

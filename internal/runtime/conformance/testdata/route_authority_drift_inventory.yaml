@@ -664,6 +664,8 @@ seam_families:
       - internal/runtime/semanticview/endpoint_census_test.go
       - internal/runtime/semanticview/subscription_admission.go
       - internal/runtime/semanticview/subscription_admission_test.go
+      - internal/runtime/semanticview/generated_publication_schema_test.go
+      - internal/runtime/provider_trigger_source_test.go
       - internal/runtime/bootverify/report_test.go
       - internal/runtime/bootverify/workflow_event_topology_checks.go
       - internal/runtime/bootverify/workflow_stage_timer_checks_test.go

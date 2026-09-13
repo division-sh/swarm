@@ -3174,6 +3174,9 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	eb, err := newScopedTestEventBus(newRouteSetEventStore(), runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
 	})
@@ -4325,6 +4328,9 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 				"child/grandchild": &root.Children[0].Children[0],
 			},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
 	eb, err := newScopedTestEventBus(newRouteSetEventStore(), runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),

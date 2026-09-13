@@ -1172,6 +1172,9 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
 	}}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	wantBlueprint := runtimebus.DeliveryRouteBlueprint{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")), Target: events.RouteIdentity{
 		FlowID:       "review",
 		FlowInstance: "review/inst-1",
