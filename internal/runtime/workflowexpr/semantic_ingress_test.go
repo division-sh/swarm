@@ -95,3 +95,31 @@ func TestProjectCELValueUsesCanonicalSemanticProjection(t *testing.T) {
 		t.Fatalf("explicit double execution = %#v, %v", result, err)
 	}
 }
+
+func TestSemanticNumericSchemaAcceptsProjectedIntegerExecution(t *testing.T) {
+	for _, raw := range []string{`0`, `8`, `8.0`, `8e0`, `8.25`} {
+		t.Run(raw, func(t *testing.T) {
+			admitted, err := canonicaljson.Decode([]byte(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err := ProjectSemanticValue(admitted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			schema := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+				{Name: "value", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeNumber}},
+			}}
+			got, err := EvalValueExpressionWithOptions(`double(payload.value) + 0.5`, ValueContext{Payload: map[string]any{"value": value}}, ValueExpressionOptions{PayloadType: &schema})
+			want := 8.5
+			if raw == "0" {
+				want = 0.5
+			} else if raw == "8.25" {
+				want = 8.75
+			}
+			if err != nil || got != want {
+				t.Fatalf("declared numeric with projected %T(%v): got=%v err=%v", value, value, got, err)
+			}
+		})
+	}
+}
