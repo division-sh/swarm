@@ -194,9 +194,11 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	var db *sql.DB
+	var selectedPG *store.PostgresStore
+	var selectedSQLite *store.SQLiteRuntimeStore
 	if backend == "sqlite" {
 		opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "gate-completion.sqlite"))
-		captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+		captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p) })
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
@@ -208,6 +210,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 			}
 			storetest.BootstrapPostgresRuntimeStore(t, pg)
 			db = storetest.DatabaseForTest(pg)
+			selectedPG = pg
 			return openSelectedPostgresOwner(t, dsn, db, cfg), nil
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
@@ -217,7 +220,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 	return opts, func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
 		p := startServeRuntimeTestProcess(t, *opts)
 		p.waitForReadyLine()
-		return p, servedControlProofRuntime{Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
+		return p, servedControlProofRuntime{Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), Postgres: selectedPG, SQLite: selectedSQLite}
 	}
 }
 

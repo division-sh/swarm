@@ -447,6 +447,48 @@ func (s *DecisionSQLiteOwner) ApplyDecisionForTest(ctx context.Context, req deci
 	return out, err
 }
 
+func loadPendingDecisionCardMutation(ctx context.Context, tx *sql.Tx, cardID string, postgres bool) (decisioncard.Card, error) {
+	card, err := loadDecisionCard(ctx, tx, cardID, postgres, false)
+	if err != nil {
+		return decisioncard.Card{}, err
+	}
+	// Hold the continuation before taking the card row lock, matching lifecycle
+	// settlement. Stage-gate workflow locks are held by the pipeline transaction.
+	if err := requirePendingCardMutation(ctx, tx, card, postgres); err != nil {
+		return decisioncard.Card{}, err
+	}
+	card, err = loadDecisionCard(ctx, tx, cardID, postgres, true)
+	if err != nil {
+		return decisioncard.Card{}, err
+	}
+	return card, card.RequirePendingMutation()
+}
+
+func requirePendingCardMutation(ctx context.Context, tx *sql.Tx, card decisioncard.Card, postgres bool) error {
+	if err := card.RequirePendingMutation(); err != nil {
+		return err
+	}
+	switch card.Anchor.Kind() {
+	case decisioncard.AnchorKindStageGate:
+		// Workflow anchor admission belongs to the enclosing pipeline transaction.
+		return nil
+	case decisioncard.AnchorKindHumanTask:
+		continuation, err := loadHumanTaskContinuation(ctx, tx, card.CardID, postgres, true)
+		if err != nil {
+			return err
+		}
+		return continuation.RequirePendingMutation(card)
+	case decisioncard.AnchorKindProposedEffect:
+		continuation, err := loadProposedEffectContinuation(ctx, tx, card.CardID, postgres, true)
+		if err != nil {
+			return err
+		}
+		return continuation.RequirePendingMutation(card)
+	default:
+		return fmt.Errorf("decision-card mutation requires a registered anchor")
+	}
+}
+
 func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DecideRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
 	if story == nil {
 		return decisioncard.DecisionOutcome{}, fmt.Errorf("decision card decision requires private story ownership")
@@ -458,12 +500,9 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
-	card, err := loadDecisionCard(ctx, tx, req.CardID, postgres, true)
+	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
 	if err != nil {
 		return decisioncard.DecisionOutcome{}, err
-	}
-	if card.Status != decisioncard.StatusPending {
-		return decisioncard.DecisionOutcome{}, decisioncard.ErrAlreadyTerminal
 	}
 	if strings.TrimSpace(req.ObservedContentHash) == "" || strings.TrimSpace(req.ObservedContentHash) != card.CardContentHash {
 		return decisioncard.DecisionOutcome{}, decisioncard.ErrStaleContent
@@ -542,7 +581,7 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 		return decisioncard.DecisionOutcome{}, err
 	}
 	if rows, _ := res.RowsAffected(); rows != 1 {
-		return decisioncard.DecisionOutcome{}, decisioncard.ErrAlreadyTerminal
+		return decisioncard.DecisionOutcome{}, fmt.Errorf("locked pending decision card update affected %d rows", rows)
 	}
 	card.Status = decisioncard.StatusDecided
 	card.Verdict = strings.TrimSpace(req.Verdict)
@@ -609,12 +648,9 @@ func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity
 	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
-	card, err := loadDecisionCard(ctx, tx, req.CardID, postgres, true)
+	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
 	if err != nil {
 		return decisioncard.DecisionOutcome{}, err
-	}
-	if card.Status != decisioncard.StatusPending {
-		return decisioncard.DecisionOutcome{}, decisioncard.ErrAlreadyTerminal
 	}
 	if card.Anchor.Kind() == decisioncard.AnchorKindHumanTask {
 		if err := deferHumanTaskContinuation(ctx, tx, card, until, now, postgres); err != nil {
@@ -673,12 +709,9 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
-	card, err := loadDecisionCard(ctx, tx, req.CardID, postgres, true)
+	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
 	if err != nil {
 		return decisioncard.InputDraft{}, err
-	}
-	if card.Status != decisioncard.StatusPending {
-		return decisioncard.InputDraft{}, decisioncard.ErrAlreadyTerminal
 	}
 	outcome, ok := card.Snapshot.Outcomes[strings.TrimSpace(req.Verdict)]
 	if !ok {

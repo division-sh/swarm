@@ -557,7 +557,7 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 			if err != nil || loaded.Status != decisioncard.StatusSuperseded || loaded.SupersededReason != "stage_exited" {
 				t.Fatalf("superseded card = %#v, %v", loaded, err)
 			}
-			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ObservedContentHash: card.CardContentHash}); !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ObservedContentHash: card.CardContentHash}); !errors.Is(err, decisioncard.ErrSuperseded) {
 				t.Fatalf("decide superseded card error = %v", err)
 			}
 		})

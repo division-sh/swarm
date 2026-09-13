@@ -48,7 +48,6 @@ const (
 var (
 	ErrNotFound          = errors.New("decision card not found")
 	ErrInvalidCursor     = errors.New("invalid decision card cursor")
-	ErrAlreadyTerminal   = errors.New("decision card is already terminal")
 	ErrStaleContent      = errors.New("decision card content hash does not match")
 	ErrInvalidVerdict    = errors.New("decision card verdict is not authored")
 	ErrInvalidFields     = errors.New("decision card fields are invalid")

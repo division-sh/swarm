@@ -388,6 +388,8 @@ func decisionCardAPIError(cardID string, err error) error {
 		return NewInvalidParamsError(map[string]any{"field": "mailbox_id", "reason": err.Error(), "remediation": "use mailbox.decide for a decision card"})
 	case errors.Is(err, decisioncard.ErrNotFound), errors.Is(err, mailbox.ErrV1NotFound):
 		return NewApplicationError(MailboxNotFoundCode, false, map[string]any{"card_id": cardID})
+	case errors.Is(err, decisioncard.ErrSuperseded):
+		return NewApplicationError("MAILBOX_CARD_SUPERSEDED", false, map[string]any{"card_id": cardID})
 	case errors.Is(err, decisioncard.ErrAlreadyTerminal):
 		return NewApplicationError(MailboxAlreadyDecidedCode, false, map[string]any{"card_id": cardID})
 	case errors.Is(err, decisioncard.ErrStaleContent):
@@ -402,9 +404,6 @@ func decisionCardAPIError(cardID string, err error) error {
 	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{"original_request_hash": conflict.OriginalRequestHash, "conflicting_request_hash": conflict.ConflictingRequestHash})
-	}
-	if strings.Contains(err.Error(), "superseded") || strings.Contains(err.Error(), "no longer current") {
-		return NewApplicationError("MAILBOX_CARD_SUPERSEDED", false, map[string]any{"card_id": cardID})
 	}
 	return err
 }

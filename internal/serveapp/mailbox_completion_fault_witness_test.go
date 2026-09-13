@@ -1,14 +1,15 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	modernsqlite "modernc.org/sqlite"
 )
@@ -113,31 +114,19 @@ func installMailboxCompletionFaultWitness(t *testing.T, rt servedControlProofRun
 	counter := &atomic.Int64{}
 	mailboxCompletionFaultFunction.counters.Store(id, counter)
 	t.Cleanup(func() { mailboxCompletionFaultFunction.counters.Delete(id) })
-	literal := "'" + strings.ReplaceAll(key, "'", "''") + "'"
-	install := []string{`CREATE TRIGGER mailbox_completion_cut BEFORE INSERT ON api_idempotency WHEN NEW.idempotency_key=` + literal + ` BEGIN SELECT swarm_test_mailbox_completion_cut('` + id + `'); SELECT RAISE(ABORT,'mailbox_completion_exact_insert_cut'); END`}
-	removeSQL := []string{`DROP TRIGGER mailbox_completion_cut`}
-	if rt.Backend == "postgres" {
-		// Sequences intentionally do not roll back, unlike the domain transaction.
-		install = []string{
-			`CREATE SEQUENCE mailbox_completion_cut_seen`,
-			`CREATE FUNCTION mailbox_completion_cut() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.idempotency_key=` + literal + ` THEN PERFORM nextval('mailbox_completion_cut_seen'); RAISE EXCEPTION 'mailbox_completion_exact_insert_cut'; END IF; RETURN NEW; END $$`,
-			`CREATE TRIGGER mailbox_completion_cut BEFORE INSERT ON api_idempotency FOR EACH ROW EXECUTE FUNCTION mailbox_completion_cut()`,
-		}
-		removeSQL = []string{`DROP TRIGGER mailbox_completion_cut ON api_idempotency`, `DROP FUNCTION mailbox_completion_cut()`, `DROP SEQUENCE mailbox_completion_cut_seen`}
+	var selected any = rt.SQLite
+	if rt.Postgres != nil {
+		selected = rt.Postgres
 	}
-	for _, query := range install {
-		if _, err := rt.DB.Exec(query); err != nil {
-			t.Fatal(err)
-		}
+	if err := storetest.SetMailboxCompletionInsertFault(context.Background(), selected, key, id, true); err != nil {
+		t.Fatal(err)
 	}
 	var removeOnce sync.Once
 	remove = func() {
 		t.Helper()
 		removeOnce.Do(func() {
-			for _, query := range removeSQL {
-				if _, err := rt.DB.Exec(query); err != nil {
-					t.Error(err)
-				}
+			if err := storetest.SetMailboxCompletionInsertFault(context.Background(), selected, key, id, false); err != nil {
+				t.Error(err)
 			}
 		})
 	}

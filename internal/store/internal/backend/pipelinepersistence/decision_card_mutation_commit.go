@@ -19,6 +19,7 @@ import (
 )
 
 type decisionCardMutationTxOwner interface {
+	LoadTx(context.Context, *sql.Tx, string, bool) (decisioncard.Card, error)
 	DecideTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error)
 	DeferTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error)
 	BeginInputTx(context.Context, *sql.Tx, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error)
@@ -40,6 +41,9 @@ func commitDecisionCardOperation(
 	}
 	result := runtimepipeline.CommittedDecisionCardMutation{Kind: command.Mutation.Kind()}
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		if err := admitDecisionCardAnchorTx(txctx, tx, decisions, command.Mutation, postgres); err != nil {
+			return err
+		}
 		var selected runtimeengine.DurablePublicationPlan
 		switch command.Mutation.Kind() {
 		case runtimepipeline.DecisionCardMutationDecide:
@@ -140,6 +144,63 @@ func commitDecisionCardOperation(
 		return runtimepipeline.CommittedDecisionCardMutation{}, err
 	}
 	return result, nil
+}
+
+func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, decisions decisionCardMutationTxOwner, mutation runtimepipeline.DecisionCardMutation, postgres bool) error {
+	var cardID string
+	switch mutation.Kind() {
+	case runtimepipeline.DecisionCardMutationDecide:
+		req, _ := mutation.Decision()
+		cardID = req.CardID
+	case runtimepipeline.DecisionCardMutationDefer:
+		req, _ := mutation.Deferral()
+		cardID = req.CardID
+	case runtimepipeline.DecisionCardMutationBeginInput:
+		req, _, _ := mutation.InputBegin()
+		cardID = req.CardID
+	case runtimepipeline.DecisionCardMutationCancelInput:
+		return nil // Cancellation is draft authority, not a fresh card decision.
+	default:
+		return fmt.Errorf("decision-card mutation kind is required")
+	}
+	// The run/source fence is already held. Read immutable card identity, then
+	// lock the workflow anchor before the card mutation takes its row lock.
+	card, err := decisions.LoadTx(ctx, tx, cardID, false)
+	if err != nil {
+		return err
+	}
+	if err := card.RequirePendingMutation(); err != nil {
+		return err
+	}
+	if card.Anchor.Kind() != decisioncard.AnchorKindStageGate {
+		return nil
+	}
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		return err
+	}
+	query := sqliteWorkflowInstanceSelect + ` WHERE es.run_id = ? AND es.entity_id = ? AND es.flow_instance = ?`
+	if postgres {
+		query = postgresWorkflowInstanceSelect + ` WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid AND es.flow_instance = $3 FOR UPDATE OF es, fi`
+	}
+	rows, err := tx.QueryContext(ctx, query, card.RunID, anchor.EntityID, anchor.Route.InstancePath)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var instances []runtimepipeline.WorkflowInstance
+	if postgres {
+		instances, err = scanPostgresWorkflowInstances(rows)
+	} else {
+		instances, err = scanSQLiteWorkflowInstances(rows)
+	}
+	if err != nil {
+		return err
+	}
+	if len(instances) != 1 {
+		return fmt.Errorf("decision card workflow instance is missing or non-singular")
+	}
+	return runtimepipeline.ValidateDecisionCardGateMutation(card, instances[0])
 }
 
 func validateDecisionCardGateState(state *runtimepipeline.WorkflowEngineStateRecord, card decisioncard.Card) error {

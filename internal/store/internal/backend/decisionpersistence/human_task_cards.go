@@ -460,11 +460,8 @@ func commitHumanTaskContinuation(ctx context.Context, tx *sql.Tx, card decisionc
 	if err != nil {
 		return false, err
 	}
-	if err := continuation.Validate(card); err != nil {
+	if err := continuation.RequirePendingMutation(card); err != nil {
 		return false, err
-	}
-	if continuation.State != decisioncard.HumanTaskContinuationPending {
-		return false, decisioncard.ErrAlreadyTerminal
 	}
 	if continuation.BudgetLimit > 0 && card.Verdict == "approve" {
 		if err := lockHumanTaskBudgetAdmission(ctx, tx, continuation, postgres); err != nil {
@@ -507,7 +504,7 @@ func commitHumanTaskContinuation(ctx context.Context, tx *sql.Tx, card decisionc
 		return false, err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return false, decisioncard.ErrAlreadyTerminal
+		return false, fmt.Errorf("locked pending human-task decision update affected %d rows", rows)
 	}
 	return false, nil
 }
@@ -530,7 +527,7 @@ func deferHumanTaskContinuation(ctx context.Context, tx *sql.Tx, card decisionca
 	if err != nil {
 		return err
 	}
-	if err := continuation.Validate(card); err != nil {
+	if err := continuation.RequirePendingMutation(card); err != nil {
 		return err
 	}
 	query := `UPDATE human_task_continuations SET requeue_count = requeue_count + 1, defer_cause = 'operator_deferred', deferred_until = ?, updated_at = ? WHERE card_id = ? AND state = 'pending'`
@@ -542,7 +539,7 @@ func deferHumanTaskContinuation(ctx context.Context, tx *sql.Tx, card decisionca
 		return err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return decisioncard.ErrAlreadyTerminal
+		return fmt.Errorf("locked pending human-task deferral update affected %d rows", rows)
 	}
 	return nil
 }

@@ -7803,6 +7803,44 @@
           }
         },
         {
+          "code": -32044,
+          "message": "Application error: MAILBOX_CARD_SUPERSEDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_CARD_SUPERSEDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "card_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
           "code": -32041,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
@@ -8103,7 +8141,7 @@
     },
     {
       "name": "mailbox.decide",
-      "description": "Commit one authored verdict against a pending typed decision card. The registered anchor authority, typed verdict/fields, change cursor, mailbox.card_decided event, and idempotency response commit atomically. Outcome routing consumes the frozen card snapshot after commit. The admitted operator principal owns the decision and replay, independent of the carrying token or channel. Budget-forced deferral projects the actual committed outcome rather than the requested approval.\n",
+      "description": "Commit one authored verdict against a pending typed decision card. The registered anchor authority, typed verdict/fields, change cursor, mailbox.card_decided event, and idempotency response commit atomically. Outcome routing consumes the frozen card snapshot after commit. The admitted operator principal owns the decision and replay, independent of the carrying token or channel. Budget-forced deferral projects the actual committed outcome rather than the requested approval. For decide, defer and begin_input, after principal, capability and source admission, an exact completed request replays its original response before any fresh card-state interpretation. Fresh mutations consume the same typed decision-card refusal owner in preparation and the locked transaction: superseded cards return MAILBOX_CARD_SUPERSEDED; decided cards return MAILBOX_ALREADY_DECIDED even if their former stage has moved. A pending card with an authoritatively superseded gate, human-task or proposed-effect anchor returns MAILBOX_CARD_SUPERSEDED. Existing human-task expiry remains terminal; draft expiry retains input-draft authority semantics. Missing run/source, selected-fork restrictions, stale content, invalid verdict and invalid defer remain distinct admission failures. Refusal never changes domain state, cursor, completion, publication or delivery. The transaction preserves anchor-before-card lock ordering and CAS; API projection must not infer refusal from diagnostic strings or an unfenced reread. Cancel-input and notice acknowledgment retain their separate draft/notice authority.\n",
       "params": [
         {
           "name": "card_id",
@@ -8744,6 +8782,44 @@
                 },
                 "required": [
                   "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32044,
+          "message": "Application error: MAILBOX_CARD_SUPERSEDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_CARD_SUPERSEDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "card_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "card_id"
                 ],
                 "type": "object"
               },

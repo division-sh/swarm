@@ -34545,6 +34545,21 @@ api_specification:
         The admitted operator principal owns the decision and replay, independent
         of the carrying token or channel. Budget-forced deferral projects the
         actual committed outcome rather than the requested approval.
+        For decide, defer and begin_input, after principal, capability and source
+        admission, an exact completed request replays its original response before
+        any fresh card-state interpretation. Fresh mutations consume the same
+        typed decision-card refusal owner in preparation and the locked transaction:
+        superseded cards return MAILBOX_CARD_SUPERSEDED; decided cards return
+        MAILBOX_ALREADY_DECIDED even if their former stage has moved. A pending
+        card with an authoritatively superseded gate, human-task or proposed-effect
+        anchor returns MAILBOX_CARD_SUPERSEDED. Existing human-task expiry remains
+        terminal; draft expiry retains input-draft authority semantics. Missing
+        run/source, selected-fork restrictions, stale content, invalid verdict and
+        invalid defer remain distinct admission failures. Refusal never changes
+        domain state, cursor, completion, publication or delivery. The transaction
+        preserves anchor-before-card lock ordering and CAS; API projection must not
+        infer refusal from diagnostic strings or an unfenced reread. Cancel-input
+        and notice acknowledgment retain their separate draft/notice authority.
       scope:
         required:
         - decide:mailbox
@@ -34626,6 +34641,7 @@ api_specification:
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
       - INVALID_DEFER_UNTIL
+      - MAILBOX_CARD_SUPERSEDED
       - IDEMPOTENCY_CONFLICT
     mailbox.begin_input:
       tier: must_have
@@ -34642,7 +34658,7 @@ api_specification:
       - {name: delivery_receipt_id, required: false, schema: {type: string}}
       - {name: idempotency_key, required: false, schema: {type: string, minLength: 1}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/DecisionCardInputResult'}}
-      errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
+      errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, MAILBOX_CARD_SUPERSEDED, IDEMPOTENCY_CONFLICT]
     mailbox.cancel_input:
       tier: must_have
       description: >-

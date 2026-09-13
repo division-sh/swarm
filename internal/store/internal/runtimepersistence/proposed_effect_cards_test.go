@@ -446,8 +446,13 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 					if err := supersede(); err != nil {
 						t.Fatal(err)
 					}
-					if err := decide(); !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
-						t.Fatalf("decision after supersession = %v, want already terminal", err)
+					want := error(decisioncard.ErrSuperseded)
+					if winner == "run_supersession" {
+						// The earlier inactive-run fence retains its existing contract.
+						want = decisioncard.ErrAlreadyTerminal
+					}
+					if err := decide(); !errors.Is(err, want) {
+						t.Fatalf("decision after %s = %v, want %v", winner, err, want)
 					}
 				}
 				storedCard, err := cards.GetDecisionCard(ctx, card.CardID)

@@ -362,6 +362,11 @@ func (pc *PipelineCoordinator) prepareDecisionCardMutation(
 		}
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, card.RunID)
+	if mutation.kind != DecisionCardMutationCancelInput {
+		if err := pc.requireDecisionCardMutation(ctx, card); err != nil {
+			return DecisionCardMutationCommand{}, nil, err
+		}
+	}
 	command := DecisionCardMutationCommand{Mutation: mutation}
 	intents := make([]runtimeengine.EmitIntent, 0, 2)
 	switch mutation.kind {
@@ -442,6 +447,77 @@ func (pc *PipelineCoordinator) prepareDecisionCardMutation(
 	return command, plans, nil
 }
 
+func (pc *PipelineCoordinator) requireDecisionCardMutation(ctx context.Context, card decisioncard.Card) error {
+	if err := card.RequirePendingMutation(); err != nil {
+		return err
+	}
+	switch card.Anchor.Kind() {
+	case decisioncard.AnchorKindStageGate:
+		_, err := pc.loadDecisionCardGateMutation(ctx, card)
+		return err
+	case decisioncard.AnchorKindHumanTask:
+		if pc.humanTasks == nil {
+			return fmt.Errorf("human-task mutation requires its continuation owner")
+		}
+		continuation, err := pc.humanTasks.LoadHumanTaskContinuation(ctx, card.CardID)
+		if err != nil {
+			return err
+		}
+		return continuation.RequirePendingMutation(card)
+	case decisioncard.AnchorKindProposedEffect:
+		if pc.proposedEffects == nil {
+			return fmt.Errorf("proposed-effect mutation requires its continuation owner")
+		}
+		continuation, err := pc.proposedEffects.LoadProposedEffectContinuation(ctx, card.CardID)
+		if err != nil {
+			return err
+		}
+		return continuation.RequirePendingMutation(card)
+	default:
+		return fmt.Errorf("decision-card mutation requires a registered anchor")
+	}
+}
+
+func (pc *PipelineCoordinator) loadDecisionCardGateMutation(ctx context.Context, card decisioncard.Card) (WorkflowInstance, error) {
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		return WorkflowInstance{}, err
+	}
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(card.RunID, anchor.Route)
+	if err != nil {
+		return WorkflowInstance{}, err
+	}
+	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
+	if err != nil {
+		return WorkflowInstance{}, err
+	}
+	if !found {
+		return WorkflowInstance{}, fmt.Errorf("decision card workflow instance is missing")
+	}
+	return instance, ValidateDecisionCardGateMutation(card, instance)
+}
+
+// ValidateDecisionCardGateMutation projects the canonical workflow carrier for
+// both preparation and the final transaction; it does not reconstruct routes.
+func ValidateDecisionCardGateMutation(card decisioncard.Card, instance WorkflowInstance) error {
+	if err := card.RequirePendingMutation(); err != nil {
+		return err
+	}
+	anchor, err := card.Anchor.StageGate()
+	if err != nil {
+		return err
+	}
+	carrier, err := workflowInstanceStateCarrier(instance)
+	if err != nil {
+		return err
+	}
+	activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
+	if err != nil {
+		return err
+	}
+	return card.RequireGateMutation(activation, found, instance.CurrentState)
+}
+
 func (pc *PipelineCoordinator) prepareDecisionCardGateCommit(
 	ctx context.Context,
 	card decisioncard.Card,
@@ -455,27 +531,17 @@ func (pc *PipelineCoordinator) prepareDecisionCardGateCommit(
 	if err != nil {
 		return nil, err
 	}
-	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(card.RunID, anchor.Route)
+	instance, err := pc.loadDecisionCardGateMutation(ctx, card)
 	if err != nil {
 		return nil, err
-	}
-	instance, found, err := pc.workflowStore.Load(ctx, flowIdentity)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, fmt.Errorf("decision card workflow instance is missing")
 	}
 	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		return nil, err
 	}
-	activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
+	activation, _, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
 	if err != nil {
 		return nil, err
-	}
-	if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID || activation.Stage != anchor.Stage || instance.CurrentState != anchor.Stage {
-		return nil, fmt.Errorf("decision card is superseded by the current stage activation")
 	}
 	if err := activation.CommitDecision(eventID, now.UTC()); err != nil {
 		return nil, err

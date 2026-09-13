@@ -278,8 +278,8 @@ func commitProposedEffectDecision(ctx context.Context, tx *sql.Tx, card decision
 	if err != nil {
 		return err
 	}
-	if continuation.State != decisioncard.ProposedEffectPending {
-		return decisioncard.ErrAlreadyTerminal
+	if err := continuation.RequirePendingMutation(card); err != nil {
+		return err
 	}
 	query := `UPDATE proposed_effect_continuations SET state = 'decision_committed', verdict = ?, decision_event_id = ?, updated_at = ? WHERE card_id = ? AND state = 'pending'`
 	if postgres {
@@ -290,7 +290,7 @@ func commitProposedEffectDecision(ctx context.Context, tx *sql.Tx, card decision
 		return err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return decisioncard.ErrAlreadyTerminal
+		return fmt.Errorf("locked pending proposed-effect decision update affected %d rows", rows)
 	}
 	return nil
 }
@@ -521,7 +521,7 @@ func supersedeProposedEffectsForLoopGenerations(ctx context.Context, story runti
 			return false, err
 		}
 		if affected, _ := result.RowsAffected(); affected != 1 {
-			return false, decisioncard.ErrAlreadyTerminal
+			return false, fmt.Errorf("proposed-effect supersession lost pending card authority")
 		}
 		if _, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, at, postgres); err != nil {
 			return false, err
@@ -554,7 +554,7 @@ func supersedeProposedEffectContinuation(ctx context.Context, tx *sql.Tx, cardID
 		return err
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
-		return decisioncard.ErrAlreadyTerminal
+		return fmt.Errorf("proposed-effect continuation lost run-supersession authority")
 	}
 	return nil
 }
