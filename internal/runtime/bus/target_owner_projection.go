@@ -15,6 +15,7 @@ import (
 )
 
 type selectedRunTargetOwnerProjection struct {
+	prospective      runtimepipeline.PreparedWorkflowPublicationState
 	context          context.Context
 	agents           map[agentidentity.Identity]ActiveAgentDescriptor
 	agentsAvailable  bool
@@ -151,7 +152,7 @@ func (p selectedRunTargetOwnerProjection) resolveActiveAgentTarget(descriptor Ac
 		}
 		route.EntityID = descriptor.EntityID
 	}
-	if p.targetsAvailable {
+	if p.targetsAvailable || !p.prospective.Empty() {
 		return p.resolveSelectedRoute(route)
 	}
 	return events.NewExistingEntityTarget(route)
@@ -188,6 +189,9 @@ func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePla
 		intent := &plan.DeliveryIntents[index]
 		if intent.Recipient.IsAgent() {
 			continue
+		}
+		if err := p.prospective.ValidateTarget(intent.TargetBlueprint); err != nil {
+			return err
 		}
 		if intent.TargetOwnership.Empty() {
 			handler := intent.Handler
@@ -248,13 +252,12 @@ func (p selectedRunTargetOwnerProjection) sameFlowAgentTargetBlueprint(evt event
 	}
 	blueprint := events.RouteIdentity{FlowID: flowID, FlowInstance: instance, EntityID: activeEntityID}.Normalized()
 	foundFlowOwner := false
-	for _, selected := range p.descriptors {
-		selected = selected.Normalized()
-		if selected.FlowInstance != blueprint.FlowInstance {
+	for _, selected := range p.targetOwnerCandidates() {
+		if selected.Route.FlowInstance != blueprint.FlowInstance {
 			continue
 		}
 		foundFlowOwner = true
-		if selected.EntityID == activeEntityID {
+		if selected.Route.EntityID == activeEntityID {
 			return blueprint, true, nil
 		}
 	}
@@ -391,8 +394,9 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 		}
 	}
 	projection := selectedRunTargetOwnerProjection{
-		context: ctx,
-		agents:  agents, agentsAvailable: agentsAvailable,
+		prospective: p.prospective,
+		context:     ctx,
+		agents:      agents, agentsAvailable: agentsAvailable,
 		descriptors: descriptors, targetsAvailable: targetsAvailable,
 		source: p.semanticSource, required: p.requireTargetOwners,
 	}
@@ -416,18 +420,32 @@ func (p selectedRunTargetOwnerProjection) validate() error {
 
 func (p selectedRunTargetOwnerProjection) pinRoutingDescriptors() ([]runtimepinrouting.Descriptor, error) {
 	out := make([]runtimepinrouting.Descriptor, 0, len(p.descriptors))
+	prospective := p.prospective.Candidate()
 	for _, descriptor := range p.descriptors {
 		descriptor = descriptor.Normalized()
+		if !p.prospective.Empty() && descriptor.FlowInstance == prospective.Route.FlowInstance && descriptor.EntityID == prospective.Route.EntityID {
+			continue
+		}
 		out = append(out, runtimepinrouting.Descriptor{
 			ID: descriptor.ID, EntityID: descriptor.EntityID, FlowInstance: descriptor.FlowInstance,
 			AddressFields: normalizeDescriptorAddressFields(descriptor.AddressFields),
 		})
+	}
+	if !p.prospective.Empty() {
+		descriptor, err := p.prospective.PinRoutingDescriptor()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, descriptor)
 	}
 	return out, nil
 }
 
 func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.RouteIdentity) (events.DeliveryTargetOwnership, error) {
 	blueprint = blueprint.Normalized()
+	if err := p.prospective.ValidateTarget(blueprint); err != nil {
+		return events.DeliveryTargetOwnership{}, err
+	}
 	if blueprint.Empty() {
 		if !p.required {
 			return events.DeliveryTargetOwnership{}, nil
@@ -435,22 +453,21 @@ func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint is required")
 	}
 	owners := make(map[events.DeliveryTargetOwnership]struct{})
-	for _, descriptor := range p.descriptors {
-		descriptor = descriptor.Normalized()
-		if blueprint.FlowInstance != "" && descriptor.FlowInstance != blueprint.FlowInstance {
+	for _, candidate := range p.targetOwnerCandidates() {
+		if blueprint.FlowInstance != "" && candidate.Route.FlowInstance != blueprint.FlowInstance {
 			continue
 		}
-		if blueprint.EntityID != "" && descriptor.EntityID != blueprint.EntityID {
+		if blueprint.EntityID != "" && candidate.Route.EntityID != blueprint.EntityID {
 			continue
 		}
-		if !descriptor.Materializing {
-			if err := descriptor.Availability.Validate(p.source, blueprint.FlowID); err != nil {
+		if !candidate.Materializing {
+			if err := candidate.Availability.Validate(p.source, blueprint.FlowID); err != nil {
 				return events.DeliveryTargetOwnership{}, err
 			}
 		}
 		owner := blueprint
-		owner.EntityID = descriptor.EntityID
-		ownership, err := deliveryTargetOwnershipFromDescriptor(owner, descriptor)
+		owner.EntityID = candidate.Route.EntityID
+		ownership, err := deliveryTargetOwnershipFromDescriptor(owner, ActiveTargetDescriptor{Materializing: candidate.Materializing})
 		if err != nil {
 			return events.DeliveryTargetOwnership{}, err
 		}
@@ -489,8 +506,12 @@ func deliveryTargetOwnershipFromDescriptor(route events.RouteIdentity, descripto
 
 func (p selectedRunTargetOwnerProjection) targetOwnerCandidates() []runtimepipeline.DeliveryTargetOwnerCandidate {
 	out := make([]runtimepipeline.DeliveryTargetOwnerCandidate, 0, len(p.descriptors))
+	prospective := p.prospective.Candidate()
 	for _, descriptor := range p.descriptors {
 		descriptor = descriptor.Normalized()
+		if !p.prospective.Empty() && descriptor.FlowInstance == prospective.Route.FlowInstance && descriptor.EntityID == prospective.Route.EntityID {
+			continue
+		}
 		out = append(out, runtimepipeline.DeliveryTargetOwnerCandidate{
 			Route: events.RouteIdentity{
 				FlowID:       runtimeflowidentity.SemanticScopeFromFlowInstanceRef(descriptor.FlowInstance),
@@ -500,6 +521,9 @@ func (p selectedRunTargetOwnerProjection) targetOwnerCandidates() []runtimepipel
 			Materializing: descriptor.Materializing,
 			Availability:  descriptor.Availability,
 		})
+	}
+	if !p.prospective.Empty() {
+		out = append(out, prospective)
 	}
 	return out
 }

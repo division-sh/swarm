@@ -17,7 +17,7 @@ func inheritedFanOutBoundaryAllowances() map[string]historicalBoundaryAllowance 
 	edge("store/internal/backend/eventrecord::Record.decodeInheritedFanOutOrigin", "events::NewInheritedFanOutOrigin", "strict private durable codec")
 	edge("runtime/engine::Executor.EvaluateFanOutOrdinal", "runtime/fanoutobligation::PrepareOrdinalEmission", "evaluator consumes immutable intent relation")
 	edge("store/internal/backend/pipelinepersistence::commitFanOutChunk", "runtime/fanoutobligation::PrepareOrdinalEmission", "locked intent and trigger select exact ordinal")
-	edge("runtime/bus::EventBus.PrepareEnginePublications", "runtime/bus::EventBus.admitEnginePublishEvent", "only engine planning can prepare inherited origin")
+	edge("runtime/bus::EventBus.prepareEnginePublications", "runtime/bus::EventBus.admitEnginePublishEvent", "the common engine planning owner prepares inherited origin; prospective state cannot authorize its commit")
 	edge("runtime/bus::EnginePublicationPlan.ValidateDurablePublicationPlan", "runtime/bus::PublicationCommand.ValidateFanOut", "pure prepared-plan shape, not write authority")
 	edge("store/internal/backend/eventpersistence::commitFanOutPublicationTx", "runtime/bus::PublicationCommand.ValidateFanOut", "named transaction validates plan shape")
 	edge("store/internal/backend/eventpersistence::commitPublicationTx", "store/internal/backend/eventpersistence::commitValidatedPublicationTx", "generic publication rejects inherited class before private mutation")

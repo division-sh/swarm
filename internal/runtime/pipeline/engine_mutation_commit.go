@@ -26,6 +26,11 @@ type EnginePublicationPlanner interface {
 	FinalizeEnginePublications(context.Context, []runtimeengine.CommittedDurablePublication) error
 }
 
+type EngineMutationPublicationPlanner interface {
+	EnginePublicationPlanner
+	PrepareEngineMutationPublications(context.Context, []runtimeengine.EmitIntent, PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error)
+}
+
 // WorkflowEngineStateTransition is the closed atomic relation between the
 // selected entity_state row and its exact flow_instances companion.
 type WorkflowEngineStateTransition uint8

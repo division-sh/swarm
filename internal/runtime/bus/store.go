@@ -139,6 +139,7 @@ type FlowInstanceActivationCommitOwner interface {
 // admission and route planning. Activation plans are semantic facts derived by
 // the runtime; selected-store adapters persist them atomically with the event.
 type PublicationCommand struct {
+	prospective         runtimepipeline.PreparedWorkflowPublicationState
 	Commit              CommitPublishRequest
 	Activations         []runtimepipeline.FlowInstanceActivationPlan
 	RouteTopology       []FlowInstanceRouteRecordSet
@@ -150,6 +151,9 @@ type PublicationCommand struct {
 }
 
 func (c PublicationCommand) Validate() error {
+	if !c.prospective.Empty() {
+		return fmt.Errorf("prospective receiver publication requires its exact engine mutation transaction")
+	}
 	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
 		return err
 	}
@@ -160,6 +164,9 @@ func (c PublicationCommand) Validate() error {
 // Only the named chunk transaction may admit an inherited origin against its
 // locked intent and the exact source-run lineage.
 func (c PublicationCommand) ValidateFanOut() error {
+	if !c.prospective.Empty() {
+		return fmt.Errorf("prospective receiver publication requires its exact engine mutation transaction")
+	}
 	if c.Commit.Event.Event().AdmissionClass() != events.EventAdmissionInheritedFanOut {
 		return c.Validate()
 	}

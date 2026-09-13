@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -232,7 +233,23 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			if o.publication == nil {
 				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine publication planner is required")
 			}
-			publications, err = o.publication.PrepareEnginePublications(ctx, emissionIntents)
+			fact, exists := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+			if !exists {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine publication requires admitted source artifact")
+			}
+			flowID := mutation.Address.FlowID.String()
+			if flowID == "" {
+				flowID = semanticview.RootExecutionFlowID(o.state.coordinator.SemanticSource())
+			}
+			prospective, prepareErr := prepareWorkflowPublicationState(state, lifecycle.Commit, flowID, fact)
+			if prepareErr != nil {
+				return runtimeengine.CommittedEngineMutation{}, prepareErr
+			}
+			planner, ok := o.publication.(EngineMutationPublicationPlanner)
+			if !ok {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine mutation requires prospective-state publication planner")
+			}
+			publications, err = planner.PrepareEngineMutationPublications(ctx, emissionIntents, prospective)
 			if err != nil {
 				return runtimeengine.CommittedEngineMutation{}, err
 			}

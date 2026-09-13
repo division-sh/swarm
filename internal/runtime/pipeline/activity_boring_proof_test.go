@@ -677,6 +677,11 @@ func (b *persistingActivityBoringBus) PrepareEnginePublications(ctx context.Cont
 	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
 }
 
+func (b *persistingActivityBoringBus) PrepareEngineMutationPublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {
+	b.recordingPipelineBus.publishInMutationHook = b.appendEvent
+	return b.recordingPipelineBus.PrepareEngineMutationPublications(ctx, intents, prospective)
+}
+
 func (b *persistingActivityBoringBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return persistingActivityBoringDispatcher{bus: b}
 }

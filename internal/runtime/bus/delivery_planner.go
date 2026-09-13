@@ -115,6 +115,7 @@ type deliveryRecipientManifest struct {
 }
 
 type deliveryRecipientPolicy struct {
+	prospective                 runtimepipeline.PreparedWorkflowPublicationState
 	loadActiveAgentDescriptors  func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
 	semanticSource              semanticview.Source

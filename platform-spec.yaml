@@ -1526,6 +1526,15 @@ contract_formats:
             exact run for dependency admission and state readback. Entityless root-agent publication carries that same
             exact run coordinate from its admitted live identity, never from the inbound event; its business name stays local.
             Planned agents are never fabricated active descriptors.
+            A workflow engine mutation supplies its exact immutable prospective receiver-state fact to publication
+            planning before its state and child events commit. This fact binds the admitted source artifact, run,
+            semantic flow, instance, entity and complete state/lifecycle record, including expected revision and stage.
+            It replaces committed-state availability only for that exact owner; unrelated receivers retain their own
+            authoritative evidence. It is not a stored row, ambient context override or independent materialization.
+            The post-mutation state determines availability, so an owner made terminal by the mutation cannot gain
+            receiver authority. Only the matching engine transaction may discharge the fact after its ordinary
+            ownership and revision compare-and-write succeeds. Ordinary publication writers reject an undischarged
+            prospective fact. Planning, state, lifecycle or publication failure rolls back the complete operation.
             Any flow or run mismatch
             fails before event, delivery, settlement, entity-state, or lifecycle mutation.
             Reads of the exact receiver persistence aggregate MUST observe entity state and its lifecycle companion from one

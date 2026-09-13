@@ -331,6 +331,7 @@ func (eb *EventBus) LookupAPIEventPublication(ctx context.Context, request apiid
 }
 
 type eventBusCommitPublishPlan struct {
+	prospective           runtimepipeline.PreparedWorkflowPublicationState
 	bus                   *EventBus
 	event                 events.Event
 	providerRawSettlement providerRawSettlementAdmission
@@ -516,8 +517,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		}
 	}
 
+	planner := eb.deliveryPlanner
+	planner.recipientPolicy.prospective = publication.prospective
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
-		return eb.planSubscribedRoutePlan(withClosedPublicationPlanning(ctx), evt, true)
+		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}
 	replayScope := runtimepipelineobligation.ScopeSubscribed
 	if publication.direct {
@@ -534,14 +537,14 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 				return releaseFailure(errors.New("direct event publication requires at least one recipient"))
 			}
 			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
-				plan, err := eb.planDirectRoutePlan(withClosedPublicationPlanning(ctx), evt, requested)
+				plan, err := planner.PlanDirect(withClosedPublicationPlanning(ctx), evt, requested)
 				if err != nil {
 					return RoutePlan{}, err
 				}
 				if filtered := filteredRecipients(requested, plan.RecipientIDs()); len(filtered) > 0 {
 					return RoutePlan{}, fmt.Errorf("direct delivery rejected recipients: %s", strings.Join(filtered, ", "))
 				}
-				return plan, nil
+				return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
 			}
 		}
 	}
@@ -1915,6 +1918,10 @@ func (eb *EventBus) planSubscribedPublish(ctx context.Context, evt events.Event)
 }
 
 func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Event, recordDiagnostic bool) (RoutePlan, error) {
+	return eb.planSubscribedRoutePlanWithPlanner(ctx, evt, recordDiagnostic, eb.deliveryPlanner)
+}
+
+func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt events.Event, recordDiagnostic bool, planner deliveryPlanner) (RoutePlan, error) {
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
 		return RoutePlan{}, err
@@ -1922,11 +1929,11 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 	if err := validateEventRootTargetCoordinates(eb.semanticSource, evt); err != nil {
 		return RoutePlan{}, err
 	}
-	plan, err := eb.deliveryPlanner.planForRecipientMaterialization(ctx, evt)
+	plan, err := planner.planForRecipientMaterialization(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	plan, err = eb.materializePublishRecipientPlan(ctx, evt, plan)
+	plan, err = eb.materializePublishRecipientPlanWithPlanner(ctx, evt, plan, planner)
 	if err != nil {
 		return RoutePlan{}, err
 	}
@@ -1952,6 +1959,10 @@ func (eb *EventBus) authorizePublishRecipientPlanning(ctx context.Context, evt e
 }
 
 func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) (RoutePlan, error) {
+	return eb.materializePublishRecipientPlanWithPlanner(ctx, evt, routePlan, eb.deliveryPlanner)
+}
+
+func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Context, evt events.Event, routePlan RoutePlan, planner deliveryPlanner) (RoutePlan, error) {
 	routePlan = routePlan.Normalized()
 	if eb == nil || eb.recipientPlanMaterializer == nil {
 		return routePlan, nil
@@ -1968,7 +1979,7 @@ func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt eve
 	}
 	routePlan.MarkLowerPrecedenceRouteProduction(routeIntentProducerRecipientMaterializer)
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
-	projection, err := eb.deliveryPlanner.recipientPolicy.loadSelectedRunTargetOwnerProjection(runtimecorrelation.WithInboundEvent(ctx, evt))
+	projection, err := planner.recipientPolicy.loadSelectedRunTargetOwnerProjection(runtimecorrelation.WithInboundEvent(ctx, evt))
 	if err != nil {
 		return RoutePlan{}, err
 	}

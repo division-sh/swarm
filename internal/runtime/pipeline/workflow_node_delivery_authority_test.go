@@ -42,6 +42,13 @@ func (b *failOnceRetryPipelineBus) PrepareEnginePublications(ctx context.Context
 	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
 }
 
+func (b *failOnceRetryPipelineBus) PrepareEngineMutationPublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {
+	if prospective.Empty() {
+		return nil, errors.New("test mutation publication requires prepared state")
+	}
+	return b.PrepareEnginePublications(ctx, intents)
+}
+
 func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)

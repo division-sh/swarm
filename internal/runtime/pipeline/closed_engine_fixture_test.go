@@ -61,6 +61,13 @@ func (p pipelineTestCommittedPublication) ValidateCommittedDurablePublication() 
 	return nil
 }
 
+func (b *recordingPipelineBus) PrepareEngineMutationPublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {
+	if prospective.Empty() {
+		return nil, fmt.Errorf("test mutation publication requires prepared state")
+	}
+	return b.PrepareEnginePublications(ctx, intents)
+}
+
 func (b *recordingPipelineBus) PrepareEnginePublications(_ context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
 	if b != nil && b.publishErr != nil {
 		return nil, b.publishErr

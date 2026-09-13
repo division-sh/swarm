@@ -12,6 +12,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
@@ -46,7 +47,9 @@ func (p EnginePublicationPlan) DurablePublicationEventID() string {
 }
 
 func (p EnginePublicationPlan) ValidateDurablePublicationPlan() error {
-	if err := p.command.ValidateFanOut(); err != nil {
+	command := p.command
+	command.prospective = runtimepipeline.PreparedWorkflowPublicationState{}
+	if err := command.ValidateFanOut(); err != nil {
 		return err
 	}
 	if p.prepared.Event.ID() != p.DurablePublicationEventID() || p.intent.Event.ID() != p.DurablePublicationEventID() {
@@ -56,6 +59,19 @@ func (p EnginePublicationPlan) ValidateDurablePublicationPlan() error {
 }
 
 func (p EnginePublicationPlan) PublicationCommand() PublicationCommand { return p.command }
+
+// PublicationCommandForMutation discharges prospective ownership only for the
+// exact state record that the named engine transaction has compare-and-written.
+func (p EnginePublicationPlan) PublicationCommandForMutation(state runtimepipeline.WorkflowEngineStateRecord, lifecycle runtimepipeline.WorkflowLifecycleMutationPlan) (PublicationCommand, error) {
+	command := p.command
+	if !command.prospective.Empty() {
+		if err := command.prospective.ValidateMutation(state, lifecycle); err != nil {
+			return PublicationCommand{}, err
+		}
+		command.prospective = runtimepipeline.PreparedWorkflowPublicationState{}
+	}
+	return command, nil
+}
 
 // CommittedEnginePublication pairs one immutable plan with exact selected-
 // store evidence. It contains no executable post-commit callback.
@@ -99,6 +115,17 @@ func (p CommittedEnginePublication) NewlyInserted() bool {
 // PrepareEnginePublications resolves exact route/delivery facts before the
 // engine mutation enters its selected-store transaction.
 func (eb *EventBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+	return eb.prepareEnginePublications(ctx, intents, runtimepipeline.PreparedWorkflowPublicationState{})
+}
+
+func (eb *EventBus) PrepareEngineMutationPublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective runtimepipeline.PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {
+	if prospective.Empty() {
+		return nil, fmt.Errorf("engine mutation publication requires prospective receiver state")
+	}
+	return eb.prepareEnginePublications(ctx, intents, prospective)
+}
+
+func (eb *EventBus) prepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective runtimepipeline.PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {
 	if eb == nil || len(intents) == 0 {
 		return nil, nil
 	}
@@ -118,7 +145,13 @@ func (eb *EventBus) PrepareEnginePublications(ctx context.Context, intents []run
 			return nil, err
 		}
 		intent.Event = admitted.Event()
-		publication := eventBusCommitPublishPlan{bus: eb, event: intent.Event, admitted: admitted}
+		if !prospective.Empty() {
+			if err := prospective.ValidatePublication(eb.sourceArtifactFact, intent.Event); err != nil {
+				release()
+				return nil, err
+			}
+		}
+		publication := eventBusCommitPublishPlan{bus: eb, event: intent.Event, admitted: admitted, prospective: prospective}
 		if len(intent.Recipients) > 0 {
 			publication.direct = true
 			publication.directRecipients = append([]string(nil), intent.Recipients...)
@@ -131,6 +164,7 @@ func (eb *EventBus) PrepareEnginePublications(ctx context.Context, intents []run
 		// Post-commit dispatch must consume the same canonical route facts that
 		// the selected store committed, not the pre-projection engine event.
 		intent.Event = prepared.Event
+		command.prospective = prospective
 		plan := EnginePublicationPlan{prepared: prepared, command: command, intent: intent}
 		if err := plan.ValidateDurablePublicationPlan(); err != nil {
 			_ = prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx))

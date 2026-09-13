@@ -1,6 +1,8 @@
 package canonicalrouting
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -31,6 +33,20 @@ receiver:
 	if !requiresExisting {
 		nodes = strings.Replace(nodes, "entity.case_id == payload.case_id", "payload.case_id == 'exact'", 1)
 	}
+	writeClosedVariantFile(t, root, "nodes.yaml", nodes)
+	return root
+}
+
+func CopyProspectiveTerminalSender(t testing.TB) string {
+	t.Helper()
+	root := CopyMaterializingSenderExistingReceiver(t, true)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: materializing-sender\nstages:\n  waiting: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [{event: start, source: external}]\n")
+	path := filepath.Join(root, "nodes.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := strings.Replace(string(raw), "    start:\n", "    start:\n      advances_to: done\n", 1)
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes)
 	return root
 }

@@ -176,13 +176,26 @@ func (b *proposedEffectRouteProofBus) PrepareEnginePublications(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
+	b.recordPrepared(intents)
+	return plans, nil
+}
+
+func (b *proposedEffectRouteProofBus) PrepareEngineMutationPublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective runtimepipeline.PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {
+	plans, err := b.eventBus.PrepareEngineMutationPublications(ctx, intents, prospective)
+	if err != nil {
+		return nil, err
+	}
+	b.recordPrepared(intents)
+	return plans, nil
+}
+
+func (b *proposedEffectRouteProofBus) recordPrepared(intents []runtimeengine.EmitIntent) {
 	if b.prepared == nil {
 		b.prepared = make(map[string]runtimeengine.EmitIntent, len(intents))
 	}
 	for _, intent := range intents {
 		b.prepared[intent.Event.ID()] = intent
 	}
-	return plans, nil
 }
 
 func (b *proposedEffectRouteProofBus) ReleaseEnginePublications(ctx context.Context, plans []runtimeengine.DurablePublicationPlan) error {

@@ -596,7 +596,11 @@ func commitWorkflowEngineMutation(
 			if !ok {
 				return fmt.Errorf("workflow engine publication %d has unexpected type %T", index, value)
 			}
-			committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), handoff)
+			publication, err := plan.PublicationCommandForMutation(command.State, command.Lifecycle)
+			if err != nil {
+				return err
+			}
+			committed, err := store.commitPublicationTx(txctx, tx, story, effects, publication, handoff)
 			if err != nil {
 				return fmt.Errorf("commit workflow engine publication %d: %w", index, err)
 			}

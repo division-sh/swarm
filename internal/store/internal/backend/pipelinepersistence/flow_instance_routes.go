@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -911,21 +911,7 @@ func exactDescriptorAddressFields(raw any) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]string, len(values))
-	for key, value := range values {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			return nil, fmt.Errorf("entity field name is empty")
-		}
-		scalar, ok := descriptorScalarString(value)
-		if ok {
-			out["entity."+key] = scalar
-		}
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
+	return runtimepinrouting.DescriptorAddressFields(values)
 }
 
 func decodeDescriptorJSONMap(raw any) (map[string]any, error) {
@@ -941,22 +927,4 @@ func decodeDescriptorJSONMap(raw any) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	return out, nil
-}
-
-func descriptorScalarString(value any) (string, bool) {
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed), true
-	case bool:
-		if typed {
-			return "true", true
-		}
-		return "false", true
-	case float64:
-		return strconv.FormatFloat(typed, 'g', -1, 64), true
-	case json.Number:
-		return typed.String(), true
-	default:
-		return "", false
-	}
 }
