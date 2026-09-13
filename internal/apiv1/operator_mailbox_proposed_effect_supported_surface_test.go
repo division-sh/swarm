@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -191,8 +192,15 @@ func newProposedEffectMailboxHandler(
 		t.Fatal("persistence store does not implement APIIdempotencyStore")
 	}
 	runBundleContext, _ := persistence.(RunBundleContextStore)
+	principal, err := persistence.(interface {
+		EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
+	}).EnsureOperatorPrincipal(context.Background(), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
+		AuthTokens:          []string{testToken},
+		OperatorPrincipalID: principal.ID,
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now: func() time.Time { return time.Now().UTC() }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: runs, Observability: observability, Idempotency: idempotency, Events: bus, Source: source,

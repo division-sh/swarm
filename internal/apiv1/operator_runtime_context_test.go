@@ -403,7 +403,11 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 		&swruntime.Runtime{Bus: fixture.busA, Pipeline: primaryPipeline},
 		&swruntime.Runtime{Bus: fixture.busB, Pipeline: selectedPipeline},
 	)
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{
+	principal, err := fixture.pg.EnsureOperatorPrincipal(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: principal.ID, Handlers: testOperatorHandlers(testOperatorCapabilities{
 		Now: func() time.Time { return now.Add(time.Minute) }, Idempotency: fixture.pg,
 		Mailbox: fixture.pg, DecisionCards: fixture.pg, DecisionAuthority: primaryPipeline, Events: fixture.busA,
 		RunBundleContext: fixture.pg, RuntimeContexts: manager, Source: fixture.sourceA,

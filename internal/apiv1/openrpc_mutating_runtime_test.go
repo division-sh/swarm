@@ -202,9 +202,10 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 }
 
 func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
+	operation := decisioncardtest.HumanOperation(t, t.Name(), "provider-turn/tool-call-1")
 	handler, _, state := newMutatingRuntimeProbeHandler(t, "mailbox.decide", func(state *mutatingRuntimeProbeState) {
 		anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
-			RequesterAgentID: "requester-agent", OperationID: decisioncardtest.HumanOperation(t, t.Name(), "provider-turn/tool-call-1"), Category: "review",
+			RequesterAgentID: "requester-agent", OperationID: operation, Category: "review",
 			Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: eventtest.RootRoutingSource("requester-entity"),
 		})
 		if err != nil {
@@ -234,7 +235,7 @@ func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 		t.Fatalf("human-task decision event = %#v", found)
 	}
 	anchor := asMap(t, found.Payload["anchor"])
-	if anchor["requester_agent_id"] != "requester-agent" || anchor["operation_id"] != "provider-turn/tool-call-1" {
+	if anchor["requester_agent_id"] != "requester-agent" || anchor["operation_id"] != operation.String() {
 		t.Fatalf("human-task decision event anchor = %#v", anchor)
 	}
 }

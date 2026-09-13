@@ -222,6 +222,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 }
 
 func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T) {
+	requireMailboxCompletionFaultFunction(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			opts, start := gateCompletionHarness(t, backend, canonicalrouting.CopyGateCompletionDiagnostic(t))
@@ -236,30 +237,17 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 			params := map[string]any{"card_id": cardID, "verdict": "approve", "observed_content_hash": hash, "idempotency_key": "completion-insert"}
 			domain := gateCompletionRequestDomain(t, rt.DB, params)
 			before := gateCompletionRead(t, rt, "before_insert_failure", seed.RunID, cardID, domain)
-			install := []string{`CREATE TRIGGER fail_mailbox_completion BEFORE INSERT ON api_idempotency WHEN NEW.method = 'mailbox.decide' BEGIN SELECT RAISE(ABORT, 'mailbox completion fault'); END`}
-			remove := []string{`DROP TRIGGER fail_mailbox_completion`}
-			if backend == "postgres" {
-				install = []string{`CREATE FUNCTION fail_mailbox_completion() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.method = 'mailbox.decide' THEN RAISE EXCEPTION 'mailbox completion fault'; END IF; RETURN NEW; END $$`, `CREATE TRIGGER fail_mailbox_completion BEFORE INSERT ON api_idempotency FOR EACH ROW EXECUTE FUNCTION fail_mailbox_completion()`}
-				remove = []string{`DROP TRIGGER fail_mailbox_completion ON api_idempotency`, `DROP FUNCTION fail_mailbox_completion()`}
-			}
-			for _, stmt := range install {
-				if _, err := rt.DB.Exec(stmt); err != nil {
-					t.Fatal(err)
-				}
-			}
+			assertCut, remove := installMailboxCompletionFaultWitness(t, rt, "completion-insert")
 			response := gateCompletionHTTP(context.Background(), rt.Endpoint, params)
 			if response.Err != nil || response.Envelope.Error == nil {
 				t.Fatalf("completion INSERT failure must return an application error: %#v", response)
 			}
+			assertCut()
 			after := gateCompletionRead(t, rt, "after_failed_completion_insert", seed.RunID, cardID, domain)
 			if after.Status != before.Status || after.DecisionEventID != before.DecisionEventID || after.State != before.State || after.History != before.History || after.Accumulator != before.Accumulator || !reflect.DeepEqual(after.Changes, before.Changes) || after.DecisionEvents != 0 || after.OutcomeEvents != 1 || len(after.API) != 0 {
 				t.Errorf("completion INSERT failure left partial domain or response state: before=%#v after=%#v", before, after)
 			}
-			for _, stmt := range remove {
-				if _, err := rt.DB.Exec(stmt); err != nil {
-					t.Fatal(err)
-				}
-			}
+			remove()
 			if code := first.stop(); code != 0 {
 				t.Fatalf("first stop=%d", code)
 			}
