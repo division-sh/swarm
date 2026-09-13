@@ -15605,13 +15605,18 @@ platform_tables:
         card decision and continuation commit, expiry, and run supersession are each one selected-store mutation. Human-task
         admission canonicalizes source, deadline, budget-window, and continuation lifecycle timestamps to UTC microsecond
         precision before snapshot construction, hashing, persistence, or idempotent replay comparison; both selected stores
-        consume that same admitted representation. The complete requester route (flow ID, flow instance, and entity for flow
-        execution; entity only for root execution) is stamped from the admitted routing source independently from the card business scope,
+        consume that same admitted representation. The complete requester route is stamped from the canonical admitted agent
+        execution source independently from card business scope. Flow scope uses that source instance, not inbound event or
+        target coordinates. Root entityless requesters use the exact selected-run instance; entity ownership, when present,
+        belongs to the requester and is never borrowed from the triggering event. Flow-owned entityless requesters retain
+        their exact flow and instance through control publication, persistence and final requester delivery,
         so entity-bound requesters receive flow- and global-scoped task outcomes. Transactional direct publication rolls back
         when its explicit requester is rejected by route policy; outcome delivery state never commits against an empty plan.
         Human-task outcome completion is transaction-local only and requires the deterministic human_task.approved,
         human_task.rejected, or human_task.expired event to be visible in that active private workflow mutation before the
         continuation can enter outcome_dispatched; standalone or identity-inconsistent completion fails closed.
+        All three final outcomes use the same canonical outcome identity from card ID and originating decision/expiry
+        event ID; expiry must not derive a second ID dialect that differs from settlement validation.
         Automatic expiry executes inside one selected-store workflow mutation owned privately by runtime/pipeline: the transaction-local store operation
         updates the card, continuation, and decision-card change rows and returns the deterministic mailbox.card_expired
         event, then PipelineCoordinator publishes that event with EventBus.PublishInMutation before the same transaction

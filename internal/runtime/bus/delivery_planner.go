@@ -1489,7 +1489,7 @@ func deliveryTargetForDescriptor(descriptor ActiveAgentDescriptor, singular even
 func routeMatchesAgentDescriptor(route events.RouteIdentity, descriptor ActiveAgentDescriptor, root semanticview.RootExecutionCoordinate) bool {
 	descriptor = descriptor.Normalized()
 	if descriptor.Identity.Route.Presence == agentidentity.RouteRoot {
-		return exactRootTarget(route, root) && descriptor.EntityID != "" && descriptor.EntityID == route.Normalized().EntityID
+		return exactRootTarget(route, root) && descriptor.EntityID == route.Normalized().EntityID
 	}
 	return routeMatchesTargetDescriptor(route, descriptor.TargetDescriptor())
 }

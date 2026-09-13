@@ -214,6 +214,45 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 	}
 }
 
+func TestRootAgentTargetAgreementRequiresExactRunFlowAndEntity(t *testing.T) {
+	runID := eventtest.UUID("human-root-run")
+	source := connectRoutePlanRootProducerSingletonSource(t)
+	root, err := semanticview.AdmitRootExecutionCoordinate(source, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := agentidentitytest.RootDeclaredForRun(t, runID, "requester", "human-root-owner")
+	entity := eventtest.UUID("human-root-entity")
+	for _, tc := range []struct {
+		name   string
+		owner  string
+		target events.RouteIdentity
+		want   bool
+	}{
+		{"entityless", "", events.RouteIdentity{FlowID: ".", FlowInstance: runID}, true},
+		{"entity_owned", entity, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entity}, true},
+		{"borrowed_entity", "", events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entity}, false},
+		{"omitted_entity", entity, events.RouteIdentity{FlowID: ".", FlowInstance: runID}, false},
+		{"foreign_entity", entity, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: eventtest.UUID("foreign")}, false},
+		{"foreign_run", "", events.RouteIdentity{FlowID: ".", FlowInstance: eventtest.UUID("foreign")}, false},
+		{"foreign_flow", "", events.RouteIdentity{FlowID: "child", FlowInstance: runID}, false},
+		{"missing_flow", "", events.RouteIdentity{FlowInstance: runID}, false},
+		{"missing_instance", "", events.RouteIdentity{FlowID: "."}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			descriptor := ActiveAgentDescriptor{Identity: identity, EntityID: tc.owner}
+			if got := routeMatchesAgentDescriptor(tc.target, descriptor, root); got != tc.want {
+				t.Fatalf("root target agreement=%v, want %v", got, tc.want)
+			}
+			_, singular := deliveryTargetForDescriptor(descriptor, tc.target, nil, root)
+			_, multiple := deliveryTargetForDescriptor(descriptor, events.RouteIdentity{}, []events.RouteIdentity{tc.target}, root)
+			if singular != tc.want || multiple != tc.want {
+				t.Fatalf("singular/multiple target agreement=%v/%v, want %v", singular, multiple, tc.want)
+			}
+		})
+	}
+}
+
 func TestExplicitAgentTargetPreservesEntitylessAndSelectedEntityOwners(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "reviewer", "entityless-target-proof", "review", "one", "review/one")
 	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{

@@ -396,7 +396,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			if anchor.RequesterAgentID != requester.ID || anchor.OperationID != operation || anchor.Scope.Kind != decisioncard.ScopeFlow || anchor.Scope.FlowInstance != "provider" {
+			if anchor.RequesterAgentID != requester.ID || anchor.OperationID != operation || anchor.Scope.Kind != decisioncard.ScopeFlow || anchor.Scope.FlowInstance != flowPath {
 				t.Fatalf("human-task anchor = %#v", anchor)
 			}
 			if got, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx); !ok || got != logicalCall {

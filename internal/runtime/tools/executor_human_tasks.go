@@ -107,22 +107,16 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 		return nil, errors.New("ask_human requires pinned bundle hash")
 	}
 
-	flowInstance := strings.Trim(actor.CanonicalFlowPath(), "/")
-	requesterEntityID := actor.EffectiveEntityID()
+	source, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, actor.EffectiveEntityID())
+	if err != nil {
+		return nil, fmt.Errorf("admit human-task requester source: %w", err)
+	}
+	flowInstance := source.Route().FlowInstance
 	var sourceEventID string
 	var createdAt time.Time
 	if inbound, found := runtimebus.InboundEventFromContext(ctx); found {
 		sourceEventID = strings.TrimSpace(inbound.ID())
 		createdAt = inbound.CreatedAt().UTC()
-		target := inbound.TargetRoute().Normalized()
-		if target.FlowInstance != "" {
-			flowInstance = target.FlowInstance
-		} else if inbound.FlowInstance() != "" {
-			flowInstance = inbound.FlowInstance()
-		}
-		if target.EntityID != "" {
-			requesterEntityID = target.EntityID
-		}
 	}
 	if sourceEventID == "" || createdAt.IsZero() {
 		return nil, errors.New("ask_human requires an admitted source event with a durable timestamp")
@@ -164,10 +158,6 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 		deadline = decisioncard.CanonicalTimestamp(now.Add(time.Duration(hours) * time.Hour))
 	}
 
-	source, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, requesterEntityID)
-	if err != nil {
-		return nil, fmt.Errorf("admit human-task requester source: %w", err)
-	}
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 		RequesterAgentID: actor.ID, OperationID: operationID, Category: in.Category, Scope: scope, Source: source,
 	})

@@ -1,16 +1,21 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -23,6 +28,16 @@ func newMailboxCompletionFixture(t *testing.T, backend servedparity.Backend) cur
 func newMailboxCompletionRuntime(t *testing.T, backend servedparity.Backend) (servedControlProofRuntime, cursorMailboxStore) {
 	t.Helper()
 	root := canonicalrouting.CopyMailboxCompletionMatrix(t)
+	return newMailboxCompletionRuntimeSource(t, backend, root)
+}
+
+func newMailboxCompletionRuntimeSource(t *testing.T, backend servedparity.Backend, root string) (servedControlProofRuntime, cursorMailboxStore) {
+	rt, owner, _ := newRetainedMailboxCompletionRuntime(t, backend, root)
+	return rt, owner
+}
+
+func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Backend, root string) (servedControlProofRuntime, cursorMailboxStore, func() (servedControlProofRuntime, cursorMailboxStore)) {
+	t.Helper()
 	opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	name := "sqlite"
 	if backend == servedparity.BackendDefaultSQLite {
@@ -31,7 +46,19 @@ func newMailboxCompletionRuntime(t *testing.T, backend servedparity.Backend) (se
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, name, filepath.Join(t.TempDir(), "completion.sqlite"))
 	} else {
 		name = "postgres"
-		installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		stubServeRuntimeWorkspaceLifecycle(t)
+		dsn, _, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		original := buildStoresForServe
+		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			pg, err := store.NewPostgresStore(dsn)
+			if err != nil {
+				return nil, err
+			}
+			storetest.BootstrapPostgresRuntimeStore(t, pg)
+			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg), nil
+		}
+		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, name, "")
 		opts.StoreMode, opts.StoreModeSet = name, true
 	}
@@ -39,13 +66,27 @@ func newMailboxCompletionRuntime(t *testing.T, backend servedparity.Backend) (se
 	var pg *store.PostgresStore
 	var sq *store.SQLiteRuntimeStore
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, pg, sq = selectedRuntimeStoreForTest(t, p) })
-	endpoint, runtime := startOwnedMockLifecycleFollowUpRuntime(t, opts)
-	rt := servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
-	var owner cursorMailboxStore = sq
-	if pg != nil {
-		owner = pg
+	retained := t.TempDir()
+	var process *serveRuntimeTestProcess
+	start := func() (servedControlProofRuntime, cursorMailboxStore) {
+		if process != nil {
+			if code := process.stop(); code != 0 {
+				t.Fatalf("stop retained mailbox runtime: %d\n%s", code, process.outputString())
+			}
+		}
+		process = startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retained, opts)
+		process.waitForReadyLine()
+		runtime := servedTestProcessRuntime(t, process)
+		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+		rt := servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+		var owner cursorMailboxStore = sq
+		if pg != nil {
+			owner = pg
+		}
+		return rt, owner
 	}
-	return rt, owner
+	rt, owner := start()
+	return rt, owner, start
 }
 
 func mailboxCompletionFixtureInRuntime(t *testing.T, rt servedControlProofRuntime, owner cursorMailboxStore) cursorMailboxFixture {
