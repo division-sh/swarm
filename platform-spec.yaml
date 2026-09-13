@@ -12104,6 +12104,9 @@ flow_model:
     binding_lifetime: >-
       Compilation binds authored and generated declarations before pin and connect admission. Exact scope-local
       indexes return these retained immutable references, never recompile from mutable authored or generated maps.
+      Generated activity results include the current owning loop declaration's required revision field before
+      input/output bindings capture their schemas; compilation must not use a prior semantic generation or omit
+      revision evidence while handler operations and loop regions are still being compiled.
       Producer bindings and explicit receiver projections remain distinct. Retained-source readers rebuild bindings
       only by admitting that exact source artifact, never against the ambient current bundle. Flow instance spellings
       may project an admitted template declaration for readback; they do not establish execution ownership or eligibility.

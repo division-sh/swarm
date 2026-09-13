@@ -37,7 +37,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		TerminalStages:         deriveWorkflowTerminalStages(bundle.RootSchema, bundle.FlowSchemas),
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
 		Joins:                  nil,
-		Loops:                  nil,
+		Loops:                  deriveWorkflowLoopPlans(bundle, nil),
 		Gates:                  deriveWorkflowGatePlans(bundle),
 		Guards:                 deriveWorkflowGuardEntries(bundle),
 		Actions:                deriveWorkflowActionEntries(bundle),
@@ -66,6 +66,8 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	}
 	// Connected producer ownership is an input to independent pin compilation,
 	// not a reader-side reconstruction performed by route-plan consumers.
+	// Loop declaration fields must also precede generated activity schemas. The
+	// operation/region pass below completes these plans after handler compilation.
 	bundle.Semantics = semantics
 	bundle.eventOwnership, bundle.eventOwnersByFlow = nil, nil
 	if err := bundle.compileEventSchemaBindings(); err != nil {

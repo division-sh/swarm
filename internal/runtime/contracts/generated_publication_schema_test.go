@@ -4,11 +4,64 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func TestCompiledActivityResultBindingsRetainCurrentLoopRevision(t *testing.T) {
+	for _, mode := range []string{"root", "static", "template", "nested_template"} {
+		t.Run(mode, func(t *testing.T) {
+			root := canonicalrouting.CopyPublicationActivity(t, mode, "http://127.0.0.1:1/send", false)
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			flow := map[string]string{"root": ".", "static": "source", "template": "source", "nested_template": "outer/source"}[mode]
+			view := bundle.FlowTree.ByID[flow]
+			if view == nil {
+				t.Fatalf("missing declaring flow %s", flow)
+			}
+			handler := view.Nodes["producer"].EventHandlers["activity.requested"]
+			handler.Loop = &LoopOperationSpec{Admit: "revision", From: "review"}
+			view.Nodes["producer"].EventHandlers["activity.requested"] = handler
+			// Recompilation must use current declarations, not the previous semantic
+			// generation. Pins must capture the completed result schema on each pass.
+			for _, fieldName := range []string{"revision_id", "next_revision"} {
+				view.Schema.LoopDeclarations = FlowLoopDeclarations{Declared: true, Entries: []FlowLoopDeclaration{{
+					ID: "revision", RevisionField: fieldName, MaxAttempts: LoopAttemptLimit{Literal: 3},
+					Escape: LoopEscapeSpec{AdvancesTo: "exhausted"},
+				}}}
+				if flow == "." {
+					*bundle.RootSchema = view.Schema
+				} else {
+					bundle.FlowSchemas[flow] = view.Schema
+				}
+				if err := CompileWorkflowSemantics(bundle); err != nil {
+					t.Fatal(err)
+				}
+				for _, result := range []string{"send.succeeded", "send.failed"} {
+					for _, receiver := range []string{flow, "sink"} {
+						schema, found, err := bundle.ResolveEffectiveCompiledFlowEventSchema(receiver, result)
+						if err != nil || !found || !slices.Contains(schema.RequiredFieldNames(), fieldName) {
+							t.Fatalf("%s/%s lost required %s: fields=%v found=%t err=%v", receiver, result, fieldName, schema.RequiredFieldNames(), found, err)
+						}
+						field, found := schema.StructuralField(fieldName)
+						if !found || field.IsOptional || field.Type.Kind != "text" {
+							t.Fatalf("%s/%s revision structural evidence = %+v found=%t", receiver, result, field, found)
+						}
+						if fieldName == "next_revision" && slices.Contains(schema.RequiredFieldNames(), "revision_id") {
+							t.Fatal("schema retained the prior loop declaration's field")
+						}
+					}
+				}
+			}
+		})
+	}
+}
 
 func TestGeneratedPublicationSchemaOwnershipDoesNotBorrowSibling(t *testing.T) {
 	for _, mode := range []string{"root", "static", "template", "nested_template"} {
