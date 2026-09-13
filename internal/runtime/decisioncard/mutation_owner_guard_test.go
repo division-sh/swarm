@@ -31,6 +31,7 @@ func classifierWithArbitraryReceiver(nothingToDoWithCard dc.Card) error {
 `),
 		filepath.Join(root, "internal/apiv1/refusal_hostile.go"): []byte(`package apiv1
 import dc "github.com/division-sh/swarm/internal/runtime/decisioncard"
+var borrowedRefusal = dc.ErrSuperseded
 type impostorClassifier struct{}
 func (impostorClassifier) decisionCardAPIError() error {
   alias := dc.ErrSuperseded
@@ -39,7 +40,7 @@ func (impostorClassifier) decisionCardAPIError() error {
 `),
 	}
 	findings := mutationRefusalFindings(t, overlay)
-	if len(findings) != 2 || !strings.Contains(strings.Join(findings, ";"), "classifierWithArbitraryReceiver") || !strings.Contains(strings.Join(findings, ";"), "impostorClassifier") {
+	if len(findings) != 3 || !strings.Contains(strings.Join(findings, ";"), "classifierWithArbitraryReceiver") || !strings.Contains(strings.Join(findings, ";"), "impostorClassifier") || !strings.Contains(strings.Join(findings, ";"), "<package initializer>") {
 		t.Fatalf("missed hostile classifiers: %v", findings)
 	}
 }
@@ -61,15 +62,16 @@ func mutationRefusalFindings(t *testing.T, overlay map[string][]byte) []string {
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Syntax {
 			for _, decl := range file.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Body == nil {
-					continue
+				name := pkg.PkgPath + ".<package initializer>"
+				allowed := false
+				if fn, ok := decl.(*ast.FuncDecl); ok {
+					owner := pkg.TypesInfo.Defs[fn.Name].(*types.Func)
+					name = owner.FullName()
+					signature := owner.Type().(*types.Signature)
+					allowed = signature.Recv() == nil && ((pkg.PkgPath == base+"apiv1" && owner.Name() == "decisionCardAPIError") ||
+						(pkg.PkgPath == base+"store/internal/backend/decisionpersistence" && owner.Name() == "requireActiveDecisionCardRun"))
 				}
-				owner := pkg.TypesInfo.Defs[fn.Name].(*types.Func)
-				signature := owner.Type().(*types.Signature)
-				allowed := signature.Recv() == nil && ((pkg.PkgPath == base+"apiv1" && owner.Name() == "decisionCardAPIError") ||
-					(pkg.PkgPath == base+"store/internal/backend/decisionpersistence" && owner.Name() == "requireActiveDecisionCardRun"))
-				ast.Inspect(fn.Body, func(n ast.Node) bool {
+				ast.Inspect(decl, func(n ast.Node) bool {
 					id, ok := n.(*ast.Ident)
 					if !ok {
 						return true
@@ -79,7 +81,7 @@ func mutationRefusalFindings(t *testing.T, overlay map[string][]byte) []string {
 						return true
 					}
 					if !allowed {
-						findings = append(findings, owner.FullName()+":"+obj.Name())
+						findings = append(findings, name+":"+obj.Name())
 					}
 					return true
 				})
