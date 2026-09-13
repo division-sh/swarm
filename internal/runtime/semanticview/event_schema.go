@@ -64,6 +64,26 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 	if source == nil || eventType == "" {
 		return EventSchemaResolution{}
 	}
+	if compiled, ok, err := source.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType); err == nil && ok {
+		resolution := EventSchemaResolution{
+			Schema: compiled.EventSchema(), CompiledSchema: compiled,
+			EventKey: compiled.EventName(), HasSchema: true, HasCompiled: true,
+			Classification: compiled.Classification(), HasClassification: true,
+		}
+		bindStructuralEventSchema(&resolution)
+		return resolution
+	}
+	if flowID == "" || flowID == "." {
+		if compiled, ok := source.SemanticCapabilities().ProviderTriggerSchemaReadback(eventType); ok {
+			resolution := EventSchemaResolution{
+				Schema: compiled.EventSchema(), CompiledSchema: compiled,
+				EventKey: compiled.EventName(), HasSchema: true, HasCompiled: true,
+				Classification: compiled.Classification(), HasClassification: true,
+			}
+			bindStructuralEventSchema(&resolution)
+			return resolution
+		}
+	}
 	if bundle, ok := Bundle(source); ok && bundle != nil {
 		if flowID != "" && flowID != "." {
 			if _, found := source.FlowSchemaByID(flowID); !found {
@@ -77,7 +97,6 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 				HasSchema:       true,
 				UnresolvedTypes: UnsupportedJSONSchemaTypes(schema.Schema),
 			}
-			bindCompiledEventSchema(source, bundle, flowID, eventType, &resolution)
 			bindEventSchemaClassification(source, flowID, eventType, &resolution)
 			bindStructuralEventSchema(&resolution)
 			return resolution
@@ -106,22 +125,9 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 		HasSchema:       true,
 		UnresolvedTypes: UnsupportedJSONSchemaTypes(schema.Schema),
 	}
-	if bundle, ok := Bundle(source); ok && bundle != nil {
-		bindCompiledEventSchema(source, bundle, flowID, eventType, &resolution)
-	}
 	bindEventSchemaClassification(source, flowID, eventType, &resolution)
 	bindStructuralEventSchema(&resolution)
 	return resolution
-}
-
-func bindCompiledEventSchema(_ Source, bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string, resolution *EventSchemaResolution) {
-	if resolution == nil {
-		return
-	}
-	if schema, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType); err == nil && ok {
-		resolution.CompiledSchema = schema
-		resolution.HasCompiled = true
-	}
 }
 
 func bindEventSchemaClassification(source Source, flowID, eventType string, resolution *EventSchemaResolution) {

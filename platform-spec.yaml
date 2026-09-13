@@ -12092,7 +12092,7 @@ flow_model:
       concrete declaration.
   compiled_event_schema_projection:
     status: implemented_recursive_structural_presence
-    owner: internal/runtime/contracts.WorkflowContractBundle.ResolveEffectiveCompiledFlowEventSchema
+    owner: internal/runtime/semanticview.Source.ResolveEffectiveCompiledFlowEventSchema
     rule: >-
       Runtime consumers use one immutable admitted CompiledEventSchema projection for the exact owning flow and
       event, including compiler-generated activity results and approvals. Receiver schemas derive only from that
@@ -12112,6 +12112,10 @@ flow_model:
       Connected schema readers consume retained producer and receiver coordinates; they never rebuild a missing
       ownership index from raw connect rows. Input pin names project only their immutable admitted receiver scope,
       not a fresh flow-tree search or the connected producer's publication name.
+      Composed provider sources retain imported schema references and once-bound input pins; semantic readers
+      query that composed source rather than bypassing it for the underlying authored bundle. Provider catalog
+      inspection without a target retains compiled schema classification but cannot establish receiver ownership,
+      an input binding, resource eligibility, or publication authority in an undeclaring flow.
     resource_enumeration: >-
       CompiledEventSchemas enumerates only exact authored resource-eligible declarations in canonical
       (flow_path, qualified_event_name) order. Runtime generated-schema availability never makes a generated,

@@ -63,6 +63,7 @@ type Source interface {
 	ResolvedPolicyForExecutableNode(node runtimeidentity.ExecutableNode) runtimecontracts.PolicyDocument
 	ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry
 	ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool)
+	ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (runtimecontracts.CompiledEventSchema, bool, error)
 	ResolveFlowEventStructuralType(flowID, eventType string) (runtimecontracts.ResolvedCatalogType, bool)
 	DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic
 	RuntimeEventOwners(eventType string) []runtimeidentity.ExecutableNode

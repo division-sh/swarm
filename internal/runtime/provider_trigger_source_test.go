@@ -123,6 +123,60 @@ func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutAc
 	}
 }
 
+func TestProviderCompiledSchemaReadbackDoesNotGrantReceiverOwnership(t *testing.T) {
+	source, catalog := schemaOnlyTelegramDeclarationSource(t)
+	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const eventName = "inbound.telegram.text_message"
+	compiled, ok, err := wrapped.ResolveEffectiveCompiledFlowEventSchema("coordinator", eventName)
+	if err != nil || !ok || compiled.Classification() != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatalf("imported receiver binding: found=%v err=%v", ok, err)
+	}
+	classify := func(flow string) semanticview.AuthoredSubscriptionAdmission {
+		return semanticview.ClassifyAuthoredSubscription(wrapped, semanticview.AuthoredSubscriptionRequest{
+			ConsumerKind: semanticview.AuthoredSubscriptionConsumerNode, ConsumerID: "reader",
+			FlowID: flow, FlowPath: flow, Authored: eventName,
+			LocalEvents: map[string]struct{}{eventName: {}}, InputEvents: []string{eventName},
+		})
+	}
+	if admission := classify("coordinator"); !admission.Admitted() {
+		t.Fatalf("exact imported receiver rejected: %#v", admission)
+	}
+	for _, flow := range []string{"", ".", "sibling", "coordinator/unknown"} {
+		if _, found, err := wrapped.ResolveEffectiveCompiledFlowEventSchema(flow, eventName); err != nil || found {
+			t.Fatalf("undeclaring flow %q acquired imported receiver binding: found=%v err=%v", flow, found, err)
+		}
+		if admission := classify(flow); admission.Admitted() {
+			t.Fatalf("undeclaring flow %q borrowed imported receiver authority: %#v", flow, admission)
+		}
+	}
+	for _, root := range []string{"", "."} {
+		readback := semanticview.ResolveEventSchema(wrapped, root, eventName)
+		if !readback.HasCompiled || !readback.HasStructural || readback.Classification != runtimecontracts.CompiledEventSchemaImported {
+			t.Fatalf("provider catalog readback %q lost compiled evidence: %#v", root, readback)
+		}
+	}
+	// Neither a mutable diagnostic catalog nor returned schema maps may change
+	// the retained acceptance binding or turn an import into authored data.
+	composed := wrapped.(providerTriggerEventSource)
+	delete(composed.byFlow["coordinator"], eventName)
+	delete(composed.imported, eventName)
+	readback := compiled.AcceptanceSchema()
+	delete(readback, "properties")
+	after, found, err := wrapped.ResolveEffectiveCompiledFlowEventSchema("coordinator", eventName)
+	if err != nil || !found || after.AcceptanceSchemaDigest() != compiled.AcceptanceSchemaDigest() {
+		t.Fatalf("diagnostic mutation changed receiver binding: found=%v err=%v", found, err)
+	}
+	if after.Classification() != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatal("provider schema acquired authored classification")
+	}
+	if admission := classify("coordinator"); !admission.Admitted() {
+		t.Fatalf("diagnostic mutation revoked exact compiled receiver: %#v", admission)
+	}
+}
+
 func TestSourceWithProviderTriggerEventsRejectsInvalidSchemaOnlyDeclarations(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -412,7 +466,8 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	}
 	payload := []byte(`{"conversation_reference":"12345","conversation_scope":"direct","external_account_reference":"67890","provider_message_reference":1,"text":"hello"}`)
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "inbound.telegram.text_message", "telegram", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
-	admission, err := NewRuntimePayloadAdmitter(nil, wrapped, fact)(context.Background(), event, "telegram-ingress")
+	// This is a target-free root ingress, not a receiver named telegram-ingress.
+	admission, err := NewRuntimePayloadAdmitter(nil, wrapped, fact)(context.Background(), event, "")
 	if err != nil {
 		t.Fatalf("admit imported provider payload: %v", err)
 	}

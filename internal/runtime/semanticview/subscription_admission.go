@@ -313,10 +313,8 @@ func receiverDeclaresSubscriptionEvent(source Source, req AuthoredSubscriptionRe
 		return true
 	}
 	if source != nil {
-		if bundle, ok := Bundle(source); ok {
-			if _, found, err := bundle.ResolveEffectiveCompiledFlowEventSchema(req.FlowID, localEvent); err == nil && found {
-				return true
-			}
+		if _, found, err := source.ResolveEffectiveCompiledFlowEventSchema(req.FlowID, localEvent); err == nil && found {
+			return true
 		}
 		return runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), localEvent)
 	}

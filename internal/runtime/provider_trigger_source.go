@@ -141,9 +141,14 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 	if err != nil {
 		return nil, err
 	}
+	catalogSchemas, err := compileProviderTriggerEventSchemas(map[string]map[string]runtimecontracts.EventCatalogEntry{".": imported}, owners)
+	if err != nil {
+		return nil, err
+	}
 	return providerTriggerEventSource{
 		Source: source, generation: catalog.Generation(), imported: imported, owners: owners,
-		byFlow: byFlow, targetFree: targetFree, compiledInputPins: compiledInputPins,
+		byFlow: byFlow, targetFree: targetFree, compiledInputPins: compiledInputPins, compiledByFlow: compiledByFlow,
+		compiledCatalog: catalogSchemas["."],
 	}, nil
 }
 
@@ -330,10 +335,27 @@ type providerTriggerEventSource struct {
 	byFlow            map[string]map[string]runtimecontracts.EventCatalogEntry
 	targetFree        map[string]runtimeprovideroutput.Authorization
 	compiledInputPins map[string][]runtimecontracts.CompiledFlowInputPin
+	compiledByFlow    map[string]map[string]runtimecontracts.CompiledEventSchema
+	compiledCatalog   map[string]runtimecontracts.CompiledEventSchema
+}
+
+func (s providerTriggerEventSource) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (runtimecontracts.CompiledEventSchema, bool, error) {
+	if pin, ok := s.FlowInputEventPin(flowID, eventType); ok {
+		if schema, owned := pin.ReceiverEventSchema(); owned {
+			return schema, true, nil
+		}
+	}
+	if schema, ok := s.compiledByFlow[normalizedProviderTriggerProjectKey(flowID)][strings.TrimSpace(eventType)]; ok {
+		return schema, true, nil
+	}
+	return s.Source.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType)
 }
 
 func (s providerTriggerEventSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
 	flowID = strings.TrimSpace(flowID)
+	if flowID == "." {
+		flowID = ""
+	}
 	if pins, ok := s.compiledInputPins[flowID]; ok {
 		return append([]runtimecontracts.CompiledFlowInputPin(nil), pins...)
 	}
@@ -361,7 +383,7 @@ func (s providerTriggerEventSource) SemanticCapabilities() semanticview.Capabili
 		out = append(out, s.targetFree[name])
 	}
 	capabilities := s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, out)
-	return capabilities.WithProviderTriggerEventProvenance(s.provenanceReadback())
+	return capabilities.WithProviderTriggerEventProvenance(s.provenanceReadback()).WithProviderTriggerSchemaReadback(s.compiledCatalog)
 }
 
 func (s providerTriggerEventSource) provenanceReadback() []semanticview.ProviderTriggerEventProvenance {

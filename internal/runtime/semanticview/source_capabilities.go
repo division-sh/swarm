@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -204,6 +205,35 @@ type providerTriggerCapabilities struct {
 	generation triggergeneration.Generation
 	targetFree []runtimeprovideroutput.Authorization
 	provenance []ProviderTriggerEventProvenance
+	schemas    map[string]runtimecontracts.CompiledEventSchema
+}
+
+// WithProviderTriggerSchemaReadback retains the admitted provider catalog for
+// target-free payload inspection. It grants neither receiver nor emit authority.
+func (c Capabilities) WithProviderTriggerSchemaReadback(schemas map[string]runtimecontracts.CompiledEventSchema) Capabilities {
+	out := c
+	if out.providerTrigger == nil {
+		return out
+	}
+	provider := *out.providerTrigger
+	provider.schemas = make(map[string]runtimecontracts.CompiledEventSchema, len(schemas))
+	for name, schema := range schemas {
+		if name != schema.EventName() || schema.Classification() != runtimecontracts.CompiledEventSchemaImported {
+			out.providerTrigger = nil
+			return out
+		}
+		provider.schemas[name] = schema
+	}
+	out.providerTrigger = &provider
+	return out
+}
+
+func (c Capabilities) ProviderTriggerSchemaReadback(event string) (runtimecontracts.CompiledEventSchema, bool) {
+	if c.providerTrigger == nil {
+		return runtimecontracts.CompiledEventSchema{}, false
+	}
+	schema, ok := c.providerTrigger.schemas[event]
+	return schema, ok
 }
 
 type ProviderTriggerEventProvenance struct {

@@ -37,7 +37,7 @@ func hostileGeneratedSchema(unrelated *alternate.WorkflowContractBundle) any {
 	if strings.Count(string(raw), marker) != 1 {
 		t.Fatal("exact schema owner not found")
 	}
-	overlay[path] = []byte(strings.Replace(string(raw), marker, marker+"\n _ = source.FlowScopes()", 1))
+	overlay[path] = []byte(strings.Replace(string(raw), marker, marker+"\n _ = source.FlowScopes()\n if backing, ok := Bundle(source); ok { _ = backing.ResolveEffectiveCompiledFlowEventSchema }", 1))
 	compilerPath := filepath.Join(root, "internal/runtime/contracts/compiled_event_schema.go")
 	compilerRaw, err := os.ReadFile(compilerPath)
 	if err != nil {
@@ -77,7 +77,7 @@ func hostileConnectRecompile(unrelated *WorkflowContractBundle) any {
 	}
 	overlay[subscriptionPath] = []byte(strings.Replace(string(subscriptionRaw), subscriptionMarker, subscriptionMarker+"\n _ = runtimecontracts.ActivitySitesForNode", 1))
 	findings := generatedSchemaFindings(t, overlay)
-	alias, scope, recompile, subscription, connect, receiver := false, false, false, false, false, false
+	alias, scope, recompile, subscription, connect, receiver, composition := false, false, false, false, false, false, false
 	for _, finding := range findings {
 		alias = alias || strings.Contains(finding, "hostileGeneratedSchema")
 		scope = scope || (strings.Contains(finding, "ResolveEventSchema") && strings.HasSuffix(finding, ":FlowScopes"))
@@ -85,8 +85,9 @@ func hostileConnectRecompile(unrelated *WorkflowContractBundle) any {
 		subscription = subscription || strings.Contains(finding, "fillAuthoredSubscriptionScope")
 		connect = connect || strings.Contains(finding, "hostileConnectRecompile")
 		receiver = receiver || strings.Contains(finding, "flowInputEventPinForResolvedEvent")
+		composition = composition || (strings.Contains(finding, "ResolveEventSchema") && strings.Contains(finding, ":bypassed_composed_source"))
 	}
-	if len(findings) != 6 || !alias || !scope || !recompile || !subscription || !connect || !receiver {
+	if len(findings) != 7 || !alias || !scope || !recompile || !subscription || !connect || !receiver || !composition {
 		t.Fatalf("guard missed alias or in-owner scope search: %v", findings)
 	}
 }
@@ -108,6 +109,15 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 		allowed := map[types.Object]bool{}
 		retainedReceiverReaders := map[types.Object]bool{}
 		var bindingCompiler types.Object
+		var bundleBindingAdapter types.Object
+		if pkg.PkgPath == "github.com/division-sh/swarm/internal/runtime/semanticview" {
+			adapter := pkg.Types.Scope().Lookup("bundleSource").Type().(*types.Named)
+			for i := 0; i < adapter.NumMethods(); i++ {
+				if method := adapter.Method(i); method.Name() == "ResolveEffectiveCompiledFlowEventSchema" {
+					bundleBindingAdapter = method
+				}
+			}
+		}
 		if pkg.PkgPath == contracts {
 			for _, name := range []string{"connectedEventSchemaOwnershipRow", "eventSchemaReceiverOwnerKey", "validateCompiledConnectEventSchemaOwnership"} {
 				retainedReceiverReaders[pkg.Types.Scope().Lookup(name)] = true
@@ -142,6 +152,9 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 					used, ok := pkg.TypesInfo.Uses[id].(*types.Func)
 					if !ok || used.Pkg() == nil {
 						return true
+					}
+					if bundleBindingAdapter != nil && used.Pkg().Path() == contracts && used.Name() == "ResolveEffectiveCompiledFlowEventSchema" && owner != bundleBindingAdapter {
+						findings = append(findings, owner.String()+":bypassed_composed_source")
 					}
 					if used.Pkg().Path() == contracts && (used.Name() == "GeneratedActivityEventEntries" || used.Name() == "GeneratedActivityEventSchemas") && !allowed[owner] {
 						findings = append(findings, owner.String()+":"+used.FullName())

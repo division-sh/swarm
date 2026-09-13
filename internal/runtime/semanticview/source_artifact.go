@@ -268,6 +268,10 @@ func (s bundleSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCa
 func (s bundleSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
 	return s.bundle.EffectiveEventCatalogEntryForFlowEvent(flowID, eventType)
 }
+
+func (s bundleSource) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (runtimecontracts.CompiledEventSchema, bool, error) {
+	return s.bundle.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType)
+}
 func (s bundleSource) ResolveFlowEventStructuralType(flowID, eventType string) (runtimecontracts.ResolvedCatalogType, bool) {
 	resolved := ResolveEventSchema(s, flowID, eventType)
 	return resolved.StructuralType, resolved.HasStructural
