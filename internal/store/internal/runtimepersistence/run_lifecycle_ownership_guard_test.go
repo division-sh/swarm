@@ -168,6 +168,11 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 	compact := compactSQLForLifecycleGuard(value)
 	switch relative {
+	case "internal/serveapp/mailbox_source_admission_test.go":
+		// Exact hostile source-binding corruption after request acquisition,
+		// followed by restoration; neither statement constructs a semantic run.
+		return compact == "UPDATE runs SET bundle_hash=$1 WHERE run_id=$2" ||
+			compact == "UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3"
 	case "internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":
 		// Deliberate persisted-source corruption and restoration at final fork
 		// validation, not a semantic run constructor or lifecycle transition.

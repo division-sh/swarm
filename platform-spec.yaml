@@ -657,6 +657,16 @@ contract_formats:
         meaning; ambiguous evidence fails closed without reconstructing which
         rule executed. An equal string value or familiar property name alone
         cannot turn business data into generation lineage.
+        An admitted absent-source external frontier supplies no producer-owned
+        generation meaning. Fork projection preserves its opaque payload without
+        inferring ownership from the target, receiver, field name or matching
+        value. A retained parent revision outside the fresh child activation's
+        lineage is platform.unexpected_arrival / loop_revision_unexpected,
+        nonretryable, not a stale revision of that child activation. Executing
+        that rejected delivery may persist its event, receipt and failure
+        bookkeeping, but cannot advance or close the child loop. Subsequent
+        public controls still obey selected deferred-execution restrictions;
+        copying a gate card or loop history does not grant execution authority.
         Selected preparation and supported historical delivery replay consume
         that same artifact-bound declaration admission together with immutable
         source event evidence and fixed-revision state. Historical activation

@@ -117,7 +117,7 @@ func TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores(t *tes
 				if err := coordinator.CommitDecision(ctx, card, eventID, decidedAt); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := DecisionCardDomainForTest(store).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{}), PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: decidedAt}); err != nil {
+				if _, err := DecisionCardDomainForTest(selected).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{}), PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: decidedAt}); err != nil {
 					t.Fatal(err)
 				}
 				evt := eventtest.RuntimeControl(eventID, "mailbox.card_decided", "platform", "", []byte(`{"card_id":"`+card.CardID+`"}`), 0, runID, "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), decidedAt)

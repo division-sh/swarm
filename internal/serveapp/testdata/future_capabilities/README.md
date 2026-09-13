@@ -1,5 +1,9 @@
 # Receiver Post-Revision Future Capability
 
+Root frozen-gate and loop continuation assertions, including the separately
+superseded absent-source remapping assumption, are retained with exact hash and
+reproduction in [lifecycle_transition_fork_README.md](lifecycle_transition_fork_README.md).
+
 T17's original dynamic sibling gate/fork success oracle is retained under #642
 with its exact proof-policy distinction in
 [lifecycle_template_sibling_fork_README.md](lifecycle_template_sibling_fork_README.md).

@@ -213,7 +213,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		Actor: apiidempotency.BearerActor("token-1"),
+		Actor:          apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-1",
 		RequestHash:    "hash-1",
 		Now:            time.Now().UTC(),
@@ -265,6 +265,9 @@ func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t 
 		t.Fatalf("reopen selected SQLite store: %v", err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
+	if err := reopened.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
+		t.Fatalf("accept reopened selected SQLite schema: %v", err)
+	}
 	if unread, countErr := reopened.CountUnreadInformationalNotices(ctx); countErr != nil || unread != 1 {
 		t.Fatalf("reopened unread informational notices = %d, want 1: %v", unread, countErr)
 	}
@@ -1076,7 +1079,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 	entityID := "11111111-1111-1111-1111-111111111111"
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		Actor: apiidempotency.BearerActor("token-1"),
+		Actor:          apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-nested-publish",
 		RequestHash:    "hash-nested-publish",
 		Now:            time.Now().UTC(),
@@ -1154,7 +1157,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 	eventID := uuid.NewString()
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		Actor: apiidempotency.BearerActor("token-1"),
+		Actor:          apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-failed-publish",
 		RequestHash:    "hash-failed-publish",
 		Now:            time.Now().UTC(),
@@ -1196,7 +1199,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutat
 
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		Actor: apiidempotency.BearerActor("token-1"),
+		Actor:          apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-concurrent-completion",
 		RequestHash:    "hash-concurrent-completion",
 		Now:            time.Now().UTC(),
@@ -1288,7 +1291,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	storeB := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		Actor: apiidempotency.BearerActor("token-1"),
+		Actor:          apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-shared-path",
 		RequestHash:    "hash-shared-path",
 		Now:            time.Now().UTC(),
