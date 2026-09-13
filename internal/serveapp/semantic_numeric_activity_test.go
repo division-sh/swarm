@@ -69,7 +69,7 @@ func TestActivitySemanticResultExecutionParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Exercise the real HTTP activity dispatcher, not the mock-only scenario lifetime.
-			rt := startSemanticNumericScenarioRuntime(t, backend, root)
+			rt, restart := startSemanticNumericLiveRuntime(t, backend, root)
 			key := uuid.NewString()
 			first := semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7"))
 			if first.Error != nil {
@@ -81,6 +81,9 @@ func TestActivitySemanticResultExecutionParity(t *testing.T) {
 			}
 			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
 			requireSemanticReplay(t, first.Result, semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7e0")))
+			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
+			rt = restart()
+			requireSemanticReplay(t, first.Result, semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7.0")))
 			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
 			if calls.Load() != 1 {
 				t.Fatalf("provider dispatches=%d", calls.Load())

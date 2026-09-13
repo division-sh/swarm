@@ -161,7 +161,7 @@ collector:
 	}
 }
 
-func startSemanticNumericScenarioRuntime(t *testing.T, backend servedparity.Backend, root string) servedControlProofRuntime {
+func startSemanticNumericLiveRuntime(t *testing.T, backend servedparity.Backend, root string) (servedControlProofRuntime, func() servedControlProofRuntime) {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -179,6 +179,20 @@ func startSemanticNumericScenarioRuntime(t *testing.T, backend servedparity.Back
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, dialect, filepath.Join(t.TempDir(), "numeric.db"))
 	}
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
-	endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
-	return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: rt}
+	start := func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
+		process := startServeRuntimeTestProcess(t, opts)
+		process.waitForReadyLine()
+		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+		return process, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}
+	}
+	process, rt := start()
+	return rt, func() servedControlProofRuntime {
+		t.Helper()
+		if code := process.stop(); code != 0 {
+			t.Fatalf("numeric runtime stop=%d", code)
+		}
+		var restarted servedControlProofRuntime
+		process, restarted = start()
+		return restarted
+	}
 }
