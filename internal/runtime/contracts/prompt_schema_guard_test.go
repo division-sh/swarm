@@ -120,6 +120,9 @@ func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testin
 		},
 	}
 
+	if err := CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	cases := DerivePromptSchemaGuards(bundle)
 	if len(cases) != 2 {
 		t.Fatalf("guard cases = %#v, want both scoped reviewer declarations", cases)

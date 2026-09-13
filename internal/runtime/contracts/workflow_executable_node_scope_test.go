@@ -30,6 +30,9 @@ func TestExecutableNodeSemanticScopeUsesExactFilesystemFlow(t *testing.T) {
 	}
 	ref := identitytest.ExecutableNode(t, "orders", "shared")
 
+	if err := CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	scope, err := bundle.ExecutableNodeSemanticScope(ref)
 	if err != nil {
 		t.Fatalf("ExecutableNodeSemanticScope: %v", err)

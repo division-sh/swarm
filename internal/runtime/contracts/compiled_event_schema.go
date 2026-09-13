@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -477,28 +476,9 @@ func (b *WorkflowContractBundle) currentEventDeclarationRecords() []currentEvent
 
 // canonicalCurrentEventDeclarationRecords is the sole declaration-list owner
 // for non-behavioral compiled projections. Connected producer ownership is
-// admitted separately; this projection only collapses a package-qualified
-// project view when the same coordinate has one exact flow declaration.
+// admitted separately; declarations retain their exact compiled flow coordinate.
 func (b *WorkflowContractBundle) canonicalCurrentEventDeclarationRecords() []currentEventDeclarationRecord {
 	return b.currentEventDeclarationRecords()
-}
-
-func resolvedOwnedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventName string) string {
-	resolved := resolvedEventSchemaKey(bundle, flowID, eventName)
-	if bundle == nil || strings.TrimSpace(flowID) == "" || resolved != eventidentity.Normalize(eventName) {
-		return resolved
-	}
-	// Ownership discovery proves this project declaration is local to the flow,
-	// even though it is not repeated in the flow view's local event map.
-	return eventidentity.ExternalizeForFlow(bundle.FlowPath(flowID), []string{resolved}, resolved)
-}
-
-func currentEventDeclarationRecordKey(sourceFile, localName string) string {
-	sourceFile = strings.TrimSpace(sourceFile)
-	if sourceFile == "" {
-		return ""
-	}
-	return filepath.Clean(sourceFile) + "\x00" + strings.TrimSpace(localName)
 }
 
 func (b *WorkflowContractBundle) compileCurrentEventDeclaration(

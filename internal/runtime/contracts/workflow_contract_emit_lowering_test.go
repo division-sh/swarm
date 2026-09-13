@@ -187,6 +187,9 @@ func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 	}
 	root := &FlowContractView{Paths: FlowContractPaths{FlowPath: "."}, Path: ".", Schema: rootSchema, Events: events}
 	bundle.FlowTree = FlowTree{Root: root, ByID: map[string]*FlowContractView{".": root}, ByPath: map[string]*FlowContractView{".": root}}
+	if err := CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
 	return bundle
 }
 

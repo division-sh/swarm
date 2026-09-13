@@ -154,11 +154,15 @@ func instanceResolutionTestBundle(events map[string]EventCatalogEntry) *Workflow
 		{Paths: FlowContractPaths{FlowPath: "account"}, Path: "account", Events: events},
 	}}
 	account := &root.Children[0]
-	return &WorkflowContractBundle{
+	bundle := &WorkflowContractBundle{
 		Events:     events,
 		RootSchema: &FlowSchemaDocument{},
 		FlowTree:   flowmodel.Tree[FlowContractView]{Root: root, ByID: map[string]*FlowContractView{".": root, "account": account}, ByPath: map[string]*FlowContractView{".": root, "account": account}},
 	}
+	if err := CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }
 
 func TestRequireInstanceSourceTypesCompatiblePreservesIntegerConstraints(t *testing.T) {

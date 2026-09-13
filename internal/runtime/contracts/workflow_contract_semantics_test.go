@@ -117,7 +117,7 @@ func TestWorkflowSemanticsJoinPlanPreservesDeclaringResultCatalog(t *testing.T) 
 		},
 	}
 
-	populateWorkflowSemantics(bundle)
+	compileRootContractTestFixture(bundle)
 
 	joins := bundle.WorkflowJoins()
 	if len(joins) != 1 || joins[0].ResultType.Type != "JoinResult" {

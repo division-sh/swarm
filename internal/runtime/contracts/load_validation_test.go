@@ -703,6 +703,9 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := criteriaValidationTestBundle(t)
 			tc.mutate(bundle)
+			if err := CompileWorkflowSemantics(bundle); err != nil {
+				t.Fatal(err)
+			}
 			err := validateWorkflowContractBundleLoadConstraints(bundle)
 			if err == nil || !contractErrorContains(err, tc.wantError) {
 				t.Fatalf("validateWorkflowContractBundleLoadConstraints error = %v, want %q", err, tc.wantError)

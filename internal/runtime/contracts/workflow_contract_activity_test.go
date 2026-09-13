@@ -68,6 +68,7 @@ func TestActivityResultEventsMaterializeIntoCatalogSchemaAndProduces(t *testing.
 			},
 		},
 	}
+	compileRootContractTestFixture(bundle)
 	success := "scanner_source_requested_source_scrape.succeeded"
 	failure := "scanner_source_requested_source_scrape.failed"
 	if _, ok := bundle.EventEntries()[success]; !ok {

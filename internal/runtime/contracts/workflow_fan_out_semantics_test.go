@@ -26,6 +26,7 @@ func TestResolveHandlerCollectionItemTypeOwnsDirectAndIntermediateSources(t *tes
 			"work.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[WorkItem]"}}, Required: []string{"items"}}},
 		},
 	}
+	compileRootContractTestFixture(bundle)
 	node := identitytest.RootNode(t, "worker")
 	handler := SystemNodeEventHandler{
 		Query:  &QuerySpec{Source: "payload.items", StoreAs: "computed.queried"},
@@ -262,7 +263,7 @@ func TestResolveCollectionPlansRejectInvalidSelectors(t *testing.T) {
 }
 
 func collectionSemanticsTestBundle() *WorkflowContractBundle {
-	return &WorkflowContractBundle{
+	bundle := &WorkflowContractBundle{
 		RootTypes: TypeCatalogDocument{Types: map[string]NamedTypeDecl{
 			"WorkItem": {Fields: map[string]TypeFieldSpec{
 				"id":     {Type: "text"},
@@ -279,6 +280,8 @@ func collectionSemanticsTestBundle() *WorkflowContractBundle {
 			"work.received": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[WorkItem]"}, "other_items": {Type: "[OtherItem]"}}, Required: []string{"items", "other_items"}}},
 		},
 	}
+	compileRootContractTestFixture(bundle)
+	return bundle
 }
 
 func TestFanOutCollectionItemTypePreservesNamedFieldPresence(t *testing.T) {
@@ -370,12 +373,14 @@ func fanOutPlanRegistryTestBundle(t *testing.T, handler SystemNodeEventHandler) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &WorkflowContractBundle{
+	bundle := &WorkflowContractBundle{
 		SourceArtifact: artifact,
 		Paths:          ContractPaths{PlatformSpecFile: platformFile},
 		Nodes:          map[string]SystemNodeContract{"dispatcher": {EventHandlers: map[string]SystemNodeEventHandler{"batch.ready": handler}}},
 		Events:         map[string]EventCatalogEntry{"batch.ready": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"items": {Type: "[json]"}}}}},
 	}
+	compileRootContractTestFixture(bundle)
+	return bundle
 }
 
 func TestFanOutSourceAfterWritesClassifiesEveryEntityMutationForm(t *testing.T) {
