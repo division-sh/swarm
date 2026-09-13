@@ -68,7 +68,27 @@ func loopCarriageBundle(t *testing.T) (*contracts.WorkflowContractBundle, identi
 			},
 		}}},
 	}
+	root := &contracts.FlowContractView{
+		Path: ".", Paths: contracts.FlowContractPaths{FlowPath: "."},
+		Events: bundle.Events, Nodes: bundle.Nodes,
+	}
+	bundle.FlowTree = contracts.FlowTree{
+		Root: root, ByID: map[string]*contracts.FlowContractView{".": root},
+		ByPath: map[string]*contracts.FlowContractView{".": root},
+	}
+	compileLoopCarriageFixtureSchemas(t, bundle)
 	return bundle, node
+}
+
+func compileLoopCarriageFixtureSchemas(t *testing.T, bundle *contracts.WorkflowContractBundle) {
+	t.Helper()
+	// The unit under test admits the supplied loop plan, including hostile plan
+	// mutations. Schema admission still belongs to the normal source compiler.
+	loops := bundle.Semantics.Loops
+	if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	bundle.Semantics.Loops = loops
 }
 
 func TestOriginalLoopCarriageDeclaration(t *testing.T) {
@@ -130,6 +150,7 @@ func TestOriginalLoopCarriageRejectsDeclarationContradictions(t *testing.T) {
 			case "missing_output_schema":
 				delete(bundle.Events, "review.requested")
 			}
+			compileLoopCarriageFixtureSchemas(t, bundle)
 			if _, err := compileLoopCarriage(Wrap(bundle)); err == nil {
 				t.Fatal("contradictory declaration accepted")
 			}

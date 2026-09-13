@@ -10,7 +10,11 @@ import (
 )
 
 func wrapRootAgentBundle(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
-	return semanticviewtest.WrapRootAgents(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return source
 }
 
 func toolTestSourceWithDeclaredAgent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, agentID, flowID string, emitEvents ...string) semanticview.Source {

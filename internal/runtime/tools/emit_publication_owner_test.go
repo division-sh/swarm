@@ -12,9 +12,9 @@ func TestEmitPublicationSchemaRefusalRemainsVisibleToValidators(t *testing.T) {
 	for _, mode := range []string{runtimecontracts.FlowModeStatic, "template"} {
 		t.Run(mode, func(t *testing.T) {
 			bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{{id: "left", mode: mode}, {id: "right", mode: mode}}, nil)
-			for flow, fieldType := range map[string]string{"left": "MissingLeftType", "right": "text"} {
+			for _, flow := range []string{"left", "right"} {
 				bundle.FlowTree.ByID[flow].Events = map[string]runtimecontracts.EventCatalogEntry{
-					"result.done": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"value": {Type: fieldType}}}},
+					"result.done": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"value": {Type: "text"}}}},
 				}
 				toolTestDeclareAgent(t, bundle, flow+"-agent", flow, "result.done")
 			}
@@ -28,20 +28,43 @@ func TestEmitPublicationSchemaRefusalRemainsVisibleToValidators(t *testing.T) {
 				actor := models.AgentConfig{ID: flow + "-agent", Identity: toolTestAgentIdentity(t, flow+"-agent", flow, path),
 					FlowID: flow, FlowPath: path, Role: "shared-role", EmitEvents: []string{"result.done"}}
 				definitions := registry.GenerateEmitToolsForActor(actor, nil)
-				want := 1
-				if flow == "left" {
-					want = 0
+				if len(definitions) != 1 {
+					t.Fatalf("%s generated tools=%d, want 1 before corruption", flow, len(definitions))
 				}
-				if len(definitions) != want {
-					t.Fatalf("%s generated tools=%d, want %d", flow, len(definitions), want)
+			}
+			bundle.FlowTree.ByID["left"].Events["result.done"].Payload.Properties["value"] = runtimecontracts.EventFieldSpec{Type: "MissingLeftType"}
+			if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "MissingLeftType") {
+				t.Fatalf("compile invalid schema = %v, want exact missing type diagnostic", err)
+			}
+			// Failed source admission must not expose a partially compiled sibling or
+			// the previously admitted generation through a newly constructed reader.
+			registry = NewEmitRegistry(source, nil)
+			for _, flow := range []string{"left", "right"} {
+				path := flow
+				if mode == "template" {
+					path += "/one"
+				}
+				actor := models.AgentConfig{ID: flow + "-agent", Identity: toolTestAgentIdentity(t, flow+"-agent", flow, path),
+					FlowID: flow, FlowPath: path, Role: "shared-role", EmitEvents: []string{"result.done"}}
+				if definitions := registry.GenerateEmitToolsForActor(actor, nil); len(definitions) != 0 {
+					t.Fatalf("%s retained executable tools after failed admission: %+v", flow, definitions)
 				}
 			}
 			for name, errs := range map[string][]error{
 				"provider": ValidateGeneratedEmitToolSchemasForSource(source),
 				"closure":  ValidateGeneratedToolSchemaClosureForSource(source),
 			} {
-				if len(errs) != 1 || !strings.Contains(errs[0].Error(), "left-agent") || !strings.Contains(errs[0].Error(), "MissingLeftType") {
-					t.Fatalf("%s hid failed schema generation or borrowed sibling: %v", name, errs)
+				if len(errs) != 2 {
+					t.Fatalf("%s hid failed atomic source admission: %v", name, errs)
+				}
+				for _, flow := range []string{"left", "right"} {
+					found := false
+					for _, err := range errs {
+						found = found || (strings.Contains(err.Error(), flow+"-agent") && strings.Contains(err.Error(), "has no exact schema"))
+					}
+					if !found {
+						t.Fatalf("%s hid %s admission failure: %v", name, flow, errs)
+					}
 				}
 			}
 		})

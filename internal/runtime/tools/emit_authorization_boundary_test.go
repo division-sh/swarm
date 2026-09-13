@@ -60,6 +60,10 @@ func TestEmitAuthorizationRejectsUnknownActorWithUniqueDeclaredRole(t *testing.T
 		}}},
 	})
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
+	permitted := models.AgentConfig{ID: "permitted", Role: "shared", EmitEvents: []string{"result.done"}}
+	if definitions := registry.GenerateEmitToolsForActor(permitted, nil); len(definitions) != 1 {
+		t.Fatalf("exact identity control has no admitted emit tool: %+v", definitions)
+	}
 	for _, id := range []string{"unknown", ""} {
 		t.Run("actor="+id, func(t *testing.T) {
 			actor := models.AgentConfig{ID: id, Role: "shared", EmitEvents: []string{"result.done"}}

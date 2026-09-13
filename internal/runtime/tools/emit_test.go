@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 )
 
@@ -531,7 +532,7 @@ func generatedSchemaClosureErrorStrings(errs []error) []string {
 }
 
 func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t *testing.T) {
-	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"market-research-agent": {
 				ID:         "market-research-agent",
@@ -548,14 +549,18 @@ func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t
 				},
 			},
 		},
-	})
+	}
+	source := semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
+		t.Fatalf("compile unlowered contract reference = %v, want unknown NotDeclared type", err)
+	}
 
 	errs := ValidateGeneratedEmitToolSchemasForSource(source)
 	if len(errs) != 1 {
 		t.Fatalf("errors = %#v, want one provider schema error", errs)
 	}
-	if got := errs[0].Error(); !strings.Contains(got, "category.assessed schema contains unresolved contract type(s): NotDeclared") {
-		t.Fatalf("error = %q, want exact declaration's unresolved type", got)
+	if got := errs[0].Error(); !strings.Contains(got, "category.assessed has no exact schema") {
+		t.Fatalf("error = %q, want refusal of schema rejected by compiler", got)
 	}
 	closureErrors := ValidateGeneratedToolSchemaClosureForSource(source)
 	if len(closureErrors) != 1 || closureErrors[0].Error() != errs[0].Error() {

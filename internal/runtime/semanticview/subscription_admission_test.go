@@ -273,12 +273,16 @@ func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	source := Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	source := Wrap(bundle)
 
 	resolved := ResolveExecutableNodeSubscriptionHandler(source, identitytest.FlowNode(t, "child", "listener"), "child/task.completed")
 	if !resolved.Matched || resolved.HandlerEventKey != "task.completed" {

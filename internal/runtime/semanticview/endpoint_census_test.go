@@ -53,6 +53,9 @@ func TestAuthoredEventEndpointCensusReportsHarnessSinkWithoutConsumer(t *testing
 	}}
 	bundle.FlowSchemas["worker"] = schema
 	bundle.FlowTree.ByID["worker"].Schema = schema
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 
 	source := withCompiledTestPins(t, Wrap(bundle), nil, map[string][]runtimecontracts.FlowOutputEventPin{"worker": {{Event: "work.completed", Sink: runtimecontracts.FlowOutputSinkHarness}}})
 	census := BuildAuthoredEventEndpointCensus(source)
@@ -71,6 +74,11 @@ func TestAuthoredEventEndpointCensusIncludesCompiledHandlersOutsideEffectiveSubs
 			"worker": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
+	}
+	root := &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Nodes: bundle.Nodes, Events: bundle.Events}
+	bundle.FlowTree = runtimecontracts.FlowTree{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
 
 	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
@@ -123,10 +131,17 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"external.received":  {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"external"}}},
+			"flow.started":       {},
+			"flow.completed":     {},
+			"flow.created":       {},
 			"work.requested":     {},
+			"work.completed":     {},
 			"analysis.requested": {},
+			"analysis.completed": {},
 			"review.requested":   {},
+			"review.completed":   {},
 			"timer.started":      {},
+			"timer.fired":        {},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Timers: []runtimecontracts.WorkflowTimerContract{{ID: "reminder", Event: "timer.fired", StartOn: "event:timer.started"}},
@@ -142,6 +157,12 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 		ByPath: map[string]*runtimecontracts.FlowContractView{".": &root},
 		ByID:   map[string]*runtimecontracts.FlowContractView{".": &root},
 	}
+	timers := bundle.Semantics.Timers
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	// Timer census is a direct compiled-carrier fixture, not timer authoring.
+	bundle.Semantics.Timers = timers
 	base := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {{Event: "flow.started"}}}, map[string][]runtimecontracts.FlowOutputEventPin{".": {{Event: "flow.completed"}}})
 	census := BuildAuthoredEventEndpointCensus(base)
 	producerKinds := endpointKindSet(census.Producers())
@@ -574,7 +595,11 @@ func TestInvalidAuthoredSubscriptionsRejectAncestorSameNameWithoutReceiverDeclar
 
 func endpointCensusFixture(t testing.TB, inputPins []runtimecontracts.FlowInputEventPin) Source {
 	t.Helper()
-	return withCompiledTestPins(t, Wrap(endpointCensusBundle(inputPins)), map[string][]runtimecontracts.FlowInputEventPin{"worker": inputPins}, map[string][]runtimecontracts.FlowOutputEventPin{"worker": {{Event: "work.completed"}}})
+	bundle := endpointCensusBundle(inputPins)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	return withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"worker": inputPins}, map[string][]runtimecontracts.FlowOutputEventPin{"worker": {{Event: "work.completed"}}})
 }
 
 func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runtimecontracts.WorkflowContractBundle {
@@ -589,6 +614,9 @@ func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runti
 	}
 	worker := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "worker"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"work.requested": {}, "work.completed": {},
+		},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs:  runtimecontracts.FlowInputPins{EventPins: inputPins},
