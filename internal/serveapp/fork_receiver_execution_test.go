@@ -360,6 +360,24 @@ func writeSelectedForkAgentProofFixture(t *testing.T, root, role, subscriptions,
 
 func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, runID, eventID string, declaredAgent bool) {
 	t.Helper()
+	// Receiver settlement returns before the background completion candidate
+	// is evaluated. Drain that existing work before the all-table refusal
+	// baseline; do not hide completion_due_at from the comparison.
+	waitForkReceiverSourceCompletion(t, rt, runID)
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for {
+		var pending int
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE run_id=$1 AND completion_due_at IS NOT NULL`, runID).Scan(&pending); err != nil {
+			t.Fatal(err)
+		}
+		if pending == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("selected fork completion candidate did not settle before refusal proof")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	var bindingID string
 	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&bindingID); err != nil {
 		t.Fatal(err)

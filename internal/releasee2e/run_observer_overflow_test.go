@@ -323,7 +323,8 @@ worker-completion:
   produces: [completion.item]
   event_handlers:
     agent.completed:
-      guard: has(entity.requests)
+      guard:
+        check: has(entity.requests)
       fan_out:
         items_from: entity.requests
         as: completed_request
