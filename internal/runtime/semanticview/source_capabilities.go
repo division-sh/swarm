@@ -322,6 +322,19 @@ func (c Capabilities) ProviderTriggerEvents() (generation triggergeneration.Gene
 	return c.providerTrigger.generation, c.providerTrigger.base, true
 }
 
+// WithProviderTriggerRebuildBase retains admitted trigger evidence while a
+// later connector composition updates the source used for catalog replacement.
+func (c Capabilities) WithProviderTriggerRebuildBase(base Source) Capabilities {
+	if c.providerTrigger == nil || base == nil {
+		return c
+	}
+	out := c
+	trigger := *c.providerTrigger
+	trigger.base = base
+	out.providerTrigger = &trigger
+	return out
+}
+
 func (c Capabilities) ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization {
 	if c.providerTrigger == nil {
 		return nil

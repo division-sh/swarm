@@ -76,8 +76,25 @@ func hostileConnectRecompile(unrelated *WorkflowContractBundle) any {
 		t.Fatal("subscription scope owner not found")
 	}
 	overlay[subscriptionPath] = []byte(strings.Replace(string(subscriptionRaw), subscriptionMarker, subscriptionMarker+"\n _ = runtimecontracts.ActivitySitesForNode", 1))
+	connectorPath := filepath.Join(root, "internal/providerconnectors/packs.go")
+	connectorRaw, err := os.ReadFile(connectorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectorMarker := "func SourceWithConnectorPackImports(source semanticview.Source, registry *PackRegistry) (semanticview.Source, error) {"
+	if strings.Count(string(connectorRaw), connectorMarker) != 1 {
+		t.Fatal("connector composition owner not found")
+	}
+	overlay[connectorPath] = []byte(strings.Replace(string(connectorRaw), connectorMarker, connectorMarker+"\n renamedGenerator := runtimecontracts.ActivityResultEventSchemasForSite\n _ = renamedGenerator", 1))
+	overlay[filepath.Join(root, "internal/runtime/hostile_connector_schema.go")] = []byte(`package runtime
+import renamed "github.com/division-sh/swarm/internal/runtime/contracts"
+func hostileEffectiveSourceGeneration() any {
+    alias := renamed.ActivityApprovalEventCatalogEntry
+    return alias
+}
+`)
 	findings := generatedSchemaFindings(t, overlay)
-	alias, scope, recompile, subscription, connect, receiver, composition := false, false, false, false, false, false, false
+	alias, scope, recompile, subscription, connect, receiver, composition, connector, effective := false, false, false, false, false, false, false, false, false
 	for _, finding := range findings {
 		alias = alias || strings.Contains(finding, "hostileGeneratedSchema")
 		scope = scope || (strings.Contains(finding, "ResolveEventSchema") && strings.HasSuffix(finding, ":FlowScopes"))
@@ -86,8 +103,10 @@ func hostileConnectRecompile(unrelated *WorkflowContractBundle) any {
 		connect = connect || strings.Contains(finding, "hostileConnectRecompile")
 		receiver = receiver || strings.Contains(finding, "flowInputEventPinForResolvedEvent")
 		composition = composition || (strings.Contains(finding, "ResolveEventSchema") && strings.Contains(finding, ":bypassed_composed_source"))
+		connector = connector || strings.Contains(finding, "SourceWithConnectorPackImports")
+		effective = effective || strings.Contains(finding, "hostileEffectiveSourceGeneration")
 	}
-	if len(findings) != 7 || !alias || !scope || !recompile || !subscription || !connect || !receiver || !composition {
+	if len(findings) != 9 || !alias || !scope || !recompile || !subscription || !connect || !receiver || !composition || !connector || !effective {
 		t.Fatalf("guard missed alias or in-owner scope search: %v", findings)
 	}
 }
@@ -96,7 +115,7 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 	t.Helper()
 	pkgs, err := packages.Load(&packages.Config{Dir: agentNameGuardRepoRoot(t), Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedCompiledGoFiles},
-		"./internal/runtime/contracts", "./internal/runtime/semanticview", "./internal/runtime/bootverify", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/manager", "./internal/runtime/tools", "./internal/runtime/bus", "./internal/runtime/core/pinrouting", "./internal/runtime/accprojection", "./internal/runtime/scenarioderivation", "./internal/cliapp", "./internal/store/internal/backend/decisionpersistence")
+		"./internal/runtime/contracts", "./internal/runtime/semanticview", "./internal/runtime/bootverify", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/manager", "./internal/runtime/tools", "./internal/runtime/bus", "./internal/runtime/core/pinrouting", "./internal/runtime/accprojection", "./internal/runtime/scenarioderivation", "./internal/cliapp", "./internal/store/internal/backend/decisionpersistence", "./internal/providerconnectors", "./internal/runtime", "./internal/serveapp")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +128,7 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 		allowed := map[types.Object]bool{}
 		retainedReceiverReaders := map[types.Object]bool{}
 		var bindingCompiler types.Object
+		var activityCompiler types.Object
 		var bundleBindingAdapter types.Object
 		if pkg.PkgPath == "github.com/division-sh/swarm/internal/runtime/semanticview" {
 			adapter := pkg.Types.Scope().Lookup("bundleSource").Type().(*types.Named)
@@ -131,6 +151,9 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 				}
 				if method.Name() == "compileEventSchemaBindings" {
 					bindingCompiler = method
+				}
+				if method.Name() == "generatedActivityDeclarationRecords" {
+					activityCompiler = method
 				}
 				if method.Name() == "flowInputEventPinForResolvedEvent" {
 					retainedReceiverReaders[method] = true
@@ -160,6 +183,9 @@ func generatedSchemaFindings(t *testing.T, overlay map[string][]byte) []string {
 						findings = append(findings, owner.String()+":"+used.FullName())
 					}
 					if used.Pkg().Path() == contracts && (used.Name() == "compileCurrentEventDeclaration" || used.Name() == "generatedActivityDeclarationRecords") && owner != bindingCompiler {
+						findings = append(findings, owner.String()+":"+used.FullName())
+					}
+					if used.Pkg().Path() == contracts && (used.Name() == "ActivityResultEventCatalogEntry" || used.Name() == "ActivityResultEventSchemasForSite" || used.Name() == "ActivityApprovalEventCatalogEntry" || used.Name() == "activityApprovalEventSchema") && owner != activityCompiler {
 						findings = append(findings, owner.String()+":"+used.FullName())
 					}
 					if used.Pkg().Path() == contracts && used.Name() == "compileEventSchemaOwnershipRows" && owner != pkg.Types.Scope().Lookup("populateEventSchemaOwnershipIndex") {

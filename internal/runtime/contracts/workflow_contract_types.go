@@ -31,6 +31,7 @@ type WorkflowContractBundle struct {
 	eventOwnership        []eventSchemaOwnershipRow
 	eventOwnersByFlow     map[string][]eventSchemaOwnershipRow
 	compiledEventSchemas  map[string]compiledFlowEventSchemas
+	activityToolsByFlow   map[string]map[string]ToolSchemaEntry
 	effectiveProvenance   EffectiveProvenanceLedger
 	dataDeclarations      map[string]DurableDataDeclaration
 	staticData            []durabledata.StaticData

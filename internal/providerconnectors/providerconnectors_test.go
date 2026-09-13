@@ -981,7 +981,7 @@ func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T
 	}
 
 	explicit := providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
 		},
@@ -1017,7 +1017,7 @@ func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T
 
 func TestConnectorPackImportApplicationSurvivesSemanticSourceWrappers(t *testing.T) {
 	explicit := providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
 		},
@@ -1038,7 +1038,7 @@ func TestConnectorPackImportApplicationSurvivesSemanticSourceWrappers(t *testing
 
 func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
 	explicit := providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "github", "github.create_issue"),
 		},
@@ -1094,7 +1094,7 @@ func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(
 	}
 
 	explicit := providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "slack", "slack.post_message"),
 		},

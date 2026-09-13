@@ -429,14 +429,23 @@ func SourceWithConnectorPackImports(source semanticview.Source, registry *PackRe
 			importedByFlowScope[flowPath][item.toolID] = tool
 		}
 	}
-	return connectorPackSource{
+	var triggerBase semanticview.Source
+	if _, base, applied := source.SemanticCapabilities().ProviderTriggerEvents(); applied {
+		var err error
+		triggerBase, err = SourceWithConnectorPackImports(base, registry)
+		if err != nil {
+			return nil, fmt.Errorf("compose connector imports for provider catalog replacement: %w", err)
+		}
+	}
+	return semanticview.CompileActivityToolBindings(connectorPackSource{
 		Source:              source,
 		importedTools:       importedTools,
 		importedGeneration:  importedGeneration,
 		importSources:       importSources,
 		importProvenance:    importProvenance,
 		importedByFlowScope: importedByFlowScope,
-	}, nil
+		providerTriggerBase: triggerBase,
+	})
 }
 
 type connectorPackImport struct {
@@ -478,10 +487,11 @@ type connectorPackSource struct {
 	importSources       map[string]semanticview.ConnectorImportSource
 	importProvenance    map[string]semanticview.ConnectorPackProvenance
 	importedByFlowScope map[string]map[string]runtimecontracts.ToolSchemaEntry
+	providerTriggerBase semanticview.Source
 }
 
 func (s connectorPackSource) SemanticCapabilities() semanticview.Capabilities {
-	return s.Source.SemanticCapabilities().WithConnectorPackImports(s.importedGeneration, s.importSources).WithConnectorPackProvenance(s.importProvenance)
+	return s.Source.SemanticCapabilities().WithConnectorPackImports(s.importedGeneration, s.importSources).WithConnectorPackProvenance(s.importProvenance).WithProviderTriggerRebuildBase(s.providerTriggerBase)
 }
 
 func (s connectorPackSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
@@ -508,70 +518,13 @@ func (s connectorPackSource) FlowScopes() []semanticview.FlowScope {
 	return out
 }
 
-func (s connectorPackSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
-	out := cloneConnectorEventCatalog(s.Source.ResolvedEventCatalog())
-	for eventType, entry := range s.generatedActivityEventEntries() {
-		out[eventType] = entry
-	}
-	return out
-}
-
-func (s connectorPackSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
-	if entry, resolved, ok := s.Source.ResolveFlowEventCatalogEntry(flowID, eventType); ok {
-		return entry, resolved, true
-	}
-	eventType = s.Source.ResolveFlowEventReference(strings.TrimSpace(flowID), strings.TrimSpace(eventType))
-	entry, ok := s.generatedActivityEventEntries()[eventType]
-	return entry, eventType, ok
-}
-
-func (s connectorPackSource) EventEntries() map[string]runtimecontracts.EventCatalogEntry {
-	out := cloneConnectorEventCatalog(s.Source.EventEntries())
-	for eventType, entry := range s.generatedActivityEventEntries() {
-		out[eventType] = entry
-	}
-	return out
-}
-
-func (s connectorPackSource) EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool) {
-	if entry, ok := s.Source.EventEntry(eventType); ok {
-		return entry, true
-	}
-	entry, ok := s.generatedActivityEventEntries()[strings.TrimSpace(eventType)]
-	return entry, ok
-}
-
-func (s connectorPackSource) generatedActivityEventEntries() map[string]runtimecontracts.EventCatalogEntry {
-	out := map[string]runtimecontracts.EventCatalogEntry{}
-	tools := s.ToolEntries()
-	for _, record := range s.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err != nil {
-			continue
-		}
-		for _, site := range runtimecontracts.ActivitySitesForNode(node, s.ExecutableNodeEventHandlers(node)) {
-			tool, ok := tools[strings.TrimSpace(site.Spec.Tool)]
-			if !ok {
-				continue
-			}
-			events := runtimecontracts.ActivityResultEventsForSite(site)
-			out[events.SuccessEvent] = runtimecontracts.ActivityResultEventCatalogEntry(site, tool, runtimecontracts.ActivityResultStatusSucceeded)
-			out[events.FailureEvent] = runtimecontracts.ActivityResultEventCatalogEntry(site, tool, runtimecontracts.ActivityResultStatusFailed)
-			if site.Spec.Approval != nil {
-				out[events.RevisionRequested] = runtimecontracts.ActivityApprovalEventCatalogEntry(site, true)
-				out[events.Rejected] = runtimecontracts.ActivityApprovalEventCatalogEntry(site, false)
-			}
+func (s connectorPackSource) FlowScopeByID(id string) (semanticview.FlowScope, bool) {
+	for _, scope := range s.FlowScopes() {
+		if scope.ID == id {
+			return scope, true
 		}
 	}
-	return out
-}
-
-func cloneConnectorEventCatalog(in map[string]runtimecontracts.EventCatalogEntry) map[string]runtimecontracts.EventCatalogEntry {
-	out := make(map[string]runtimecontracts.EventCatalogEntry, len(in))
-	for eventType, entry := range in {
-		out[eventType] = entry
-	}
-	return out
+	return semanticview.FlowScope{}, false
 }
 
 func existingToolSources(source semanticview.Source) map[string][]string {

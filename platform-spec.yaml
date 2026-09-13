@@ -12119,6 +12119,11 @@ flow_model:
       Generated activity results include the current owning loop declaration's required revision field before
       input/output bindings capture their schemas; compilation must not use a prior semantic generation or omit
       revision evidence while handler operations and loop regions are still being compiled.
+      Connector import admission completes this same compilation using the exact tools admitted in each declaring
+      flow, before executable admission. All four success, failure, revision-requested and rejected result arms retain
+      immutable schemas. Dependent output/input pins and connected receiver projections are rebound by the existing
+      compiler. Catalog readers consume those records; they never regenerate schemas from node handlers or a global
+      tool map. Already-bound provider-trigger imported schemas survive composition without becoming authored data.
       Producer bindings and explicit receiver projections remain distinct. Retained-source readers rebuild bindings
       only by admitting that exact source artifact, never against the ambient current bundle. Flow instance spellings
       may project an admitted template declaration for readback; they do not establish execution ownership or eligibility.

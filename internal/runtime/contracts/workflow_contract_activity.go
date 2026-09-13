@@ -339,7 +339,11 @@ func (b *WorkflowContractBundle) GeneratedActivityEventEntries() map[string]Even
 func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() []currentEventDeclarationRecord {
 	var out []currentEventDeclarationRecord
 	for _, site := range b.ActivitySites() {
-		tool, ok := b.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
+		tools := b.ToolEntries()
+		if b.activityToolsByFlow != nil {
+			tools = b.activityToolsByFlow[site.Node.FlowPath()]
+		}
+		tool, ok := tools[strings.TrimSpace(site.Spec.Tool)]
 		if !ok {
 			continue
 		}
