@@ -3079,8 +3079,10 @@ state_machine_authority:
       hierarchy is not part of this slice. Flow composition owns hierarchy
       between parent and child flow instances.
     not_field_presence_authority: |
-      The state machine answers lifecycle questions, not field-write
-      status questions.
+      A lifecycle state name alone does not assign a field or synthesize
+      its value. Definite-assignment analysis consumes the existing compiled
+      topology together with exact reaching handler effects; committed
+      sparse state remains the runtime authority for actual presence.
 companion_field_pattern:
   status: retired_for_structural_presence
   description: |
