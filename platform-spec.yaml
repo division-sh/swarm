@@ -1529,6 +1529,9 @@ contract_formats:
             A workflow engine mutation supplies its exact immutable prospective receiver-state fact to publication
             planning before its state and child events commit. This fact binds the admitted source artifact, run,
             semantic flow, instance, entity and complete state/lifecycle record, including expected revision and stage.
+            Schedule mutations bind the canonical schedule command's immutable hash together with their mutation kind,
+            cancellation cause and time; prospective admission must not JSON-encode the command's internal semantic
+            value representation or discard its payload, timing or ownership evidence.
             It replaces committed-state availability only for that exact owner; unrelated receivers retain their own
             authoritative evidence. It is not a stored row, ambient context override or independent materialization.
             A partial receiver blueprint constrains canonical selection only in its explicit coordinates; an omitted

@@ -8,8 +8,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 )
 
 func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T) {
@@ -82,6 +85,64 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 	if err := prepared.ValidateMutation(record, WorkflowLifecycleMutationPlan{RequestCompletionCandidate: true}); err == nil {
 		t.Fatal("different lifecycle mutation reused prospective authority")
 	}
+	t.Run("typed schedule identity", func(t *testing.T) {
+		payload, err := canonicaljson.Decode([]byte(`{"nested":{"count":2,"fraction":1.5},"items":[null,true,"x"]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		routing, err := events.NewRootRoutingSource(record.EntityID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		schedule := WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: genericschedule.AdmissionCommand{
+			ScheduleKey: "prospective-schedule", TaskID: "prospective-schedule", RunID: runID, EntityID: record.EntityID,
+			OwnerKind: genericschedule.OwnerSystem, OwnerID: "workflow-runtime", EventType: "platform.generic_schedule_proof",
+			Payload: payload, RoutingSource: routing, ExecutionMode: executionmode.Live, Due: genericschedule.AbsoluteDue(at.Add(time.Hour)),
+		}}
+		plan := WorkflowLifecycleMutationPlan{Schedules: []WorkflowScheduleMutation{schedule}}
+		bound, err := prepareWorkflowPublicationState(record, plan, "review", fact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := bound.ValidateMutation(record, plan); err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.Schedules) != 1 || !plan.Schedules[0].Command.Payload.Equal(payload) {
+			t.Fatal("preparation mutated caller schedule")
+		}
+		for name, change := range map[string]func(*WorkflowScheduleMutation){
+			"payload": func(s *WorkflowScheduleMutation) {
+				s.Command.Payload, _ = canonicaljson.Decode([]byte(`{"nested":{"count":3,"fraction":1.5},"items":[null,true,"x"]}`))
+			},
+			"due":   func(s *WorkflowScheduleMutation) { s.Command.Due = genericschedule.AbsoluteDue(at.Add(2 * time.Hour)) },
+			"task":  func(s *WorkflowScheduleMutation) { s.Command.TaskID = "other" },
+			"owner": func(s *WorkflowScheduleMutation) { s.Command.OwnerID = "other" },
+			"mode":  func(s *WorkflowScheduleMutation) { s.Command.ExecutionMode = executionmode.Mock },
+			"cancel": func(s *WorkflowScheduleMutation) {
+				s.Kind = WorkflowScheduleMutationCancel
+				s.CancelCause = "completed"
+				s.CancelledAt = at
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				changed := schedule
+				change(&changed)
+				if err := changed.Validate(runID); err != nil {
+					t.Fatalf("hostile fixture must remain a valid distinct mutation: %v", err)
+				}
+				if err := bound.ValidateMutation(record, WorkflowLifecycleMutationPlan{Schedules: []WorkflowScheduleMutation{changed}}); err == nil {
+					t.Fatal("different schedule reused prospective authority")
+				}
+			})
+		}
+		if err := bound.ValidateMutation(record, WorkflowLifecycleMutationPlan{}); err == nil {
+			t.Fatal("omitted schedule reused authority")
+		}
+		plan.Schedules = append(plan.Schedules, schedule)
+		if err := bound.ValidateMutation(record, plan); err == nil {
+			t.Fatal("additional schedule reused authority")
+		}
+	})
 	descriptor, err := prepared.PinRoutingDescriptor()
 	if err != nil || descriptor.ID != "one" || descriptor.AddressFields["entity.case_id"] != "exact" {
 		t.Fatalf("prospective selector evidence=%#v err=%v", descriptor, err)

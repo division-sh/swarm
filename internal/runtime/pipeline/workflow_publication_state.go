@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -26,6 +27,34 @@ type PreparedWorkflowPublicationState struct {
 type preparedPublicationMutation struct {
 	State     WorkflowEngineStateRecord
 	Lifecycle WorkflowLifecycleMutationPlan
+	Schedules []preparedPublicationSchedule
+}
+
+type preparedPublicationSchedule struct {
+	Kind        WorkflowScheduleMutationKind
+	CommandHash string
+	CancelCause string
+	CancelledAt time.Time
+}
+
+func publicationMutationBytes(record WorkflowEngineStateRecord, lifecycle WorkflowLifecycleMutationPlan) ([]byte, error) {
+	projection := preparedPublicationMutation{State: record, Lifecycle: lifecycle}
+	// Schedule commands own semantic payload encoding and immutable identity.
+	// Bind that identity rather than serialize the command's private value model.
+	projection.Lifecycle.Schedules = nil
+	for _, schedule := range lifecycle.Schedules {
+		if err := schedule.Validate(record.Identity.RunID); err != nil {
+			return nil, err
+		}
+		hash, err := schedule.Command.ImmutableHash()
+		if err != nil {
+			return nil, err
+		}
+		projection.Schedules = append(projection.Schedules, preparedPublicationSchedule{
+			Kind: schedule.Kind, CommandHash: hash, CancelCause: schedule.CancelCause, CancelledAt: schedule.CancelledAt,
+		})
+	}
+	return canonicaljson.Bytes(projection)
 }
 
 func prepareWorkflowPublicationState(record WorkflowEngineStateRecord, lifecycle WorkflowLifecycleMutationPlan, flowID string, source runtimecorrelation.SourceArtifactFact) (PreparedWorkflowPublicationState, error) {
@@ -38,7 +67,7 @@ func prepareWorkflowPublicationState(record WorkflowEngineStateRecord, lifecycle
 	if flowID == "" {
 		return PreparedWorkflowPublicationState{}, fmt.Errorf("prospective publication requires exact semantic flow")
 	}
-	raw, err := canonicaljson.Bytes(preparedPublicationMutation{State: record, Lifecycle: lifecycle})
+	raw, err := publicationMutationBytes(record, lifecycle)
 	if err != nil {
 		return PreparedWorkflowPublicationState{}, err
 	}
@@ -68,7 +97,7 @@ func (p PreparedWorkflowPublicationState) ValidateMutation(record WorkflowEngine
 	if err := record.Validate(); err != nil {
 		return err
 	}
-	raw, err := canonicaljson.Bytes(preparedPublicationMutation{State: record, Lifecycle: lifecycle})
+	raw, err := publicationMutationBytes(record, lifecycle)
 	if err != nil {
 		return err
 	}
