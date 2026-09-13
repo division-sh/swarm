@@ -1,0 +1,144 @@
+package serveapp
+
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/google/uuid"
+	modernsqlite "modernc.org/sqlite"
+)
+
+var mailboxCompletionFaultFunction struct {
+	once     sync.Once
+	err      error
+	counters sync.Map
+}
+
+func mailboxCompletionRunEffects(t *testing.T, rt servedControlProofRuntime, runID string) []string {
+	t.Helper()
+	var snapshot []string
+	for _, query := range []string{
+		`SELECT * FROM human_task_continuations WHERE run_id=$1 ORDER BY card_id`,
+		`SELECT * FROM proposed_effect_continuations WHERE run_id=$1 ORDER BY card_id`,
+		`SELECT * FROM events WHERE run_id=$1 ORDER BY event_id`,
+		`SELECT d.* FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 ORDER BY d.delivery_id`,
+		`SELECT * FROM entity_state WHERE run_id=$1 ORDER BY entity_id,flow_instance`,
+		`SELECT * FROM flow_instances WHERE run_id=$1 ORDER BY instance_path`,
+	} {
+		rows, err := rt.DB.Query(query, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			values := make([]any, len(columns))
+			pointers := make([]any, len(columns))
+			for i := range values {
+				pointers[i] = &values[i]
+			}
+			if err := rows.Scan(pointers...); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(values)
+			if err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			snapshot = append(snapshot, query+":"+string(raw))
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return snapshot
+}
+
+// Register before opening the SQLite fixture: functions are installed on each
+// new connection. The counter survives rollback without writing domain state.
+func requireMailboxCompletionFaultFunction(t *testing.T) {
+	t.Helper()
+	mailboxCompletionFaultFunction.once.Do(func() {
+		mailboxCompletionFaultFunction.err = modernsqlite.RegisterScalarFunction("swarm_test_mailbox_completion_cut", 1, func(_ *modernsqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+			id, ok := args[0].(string)
+			if !ok {
+				return nil, fmt.Errorf("completion cut identity has type %T", args[0])
+			}
+			value, ok := mailboxCompletionFaultFunction.counters.Load(id)
+			if !ok {
+				return nil, fmt.Errorf("completion cut %s is not registered", id)
+			}
+			value.(*atomic.Int64).Add(1)
+			return int64(1), nil
+		})
+	})
+	if mailboxCompletionFaultFunction.err != nil {
+		t.Fatal(mailboxCompletionFaultFunction.err)
+	}
+}
+
+func installMailboxCompletionFaultWitness(t *testing.T, rt servedControlProofRuntime, key string) (assertReached func(), remove func()) {
+	t.Helper()
+	id := uuid.NewString()
+	counter := &atomic.Int64{}
+	mailboxCompletionFaultFunction.counters.Store(id, counter)
+	t.Cleanup(func() { mailboxCompletionFaultFunction.counters.Delete(id) })
+	literal := "'" + strings.ReplaceAll(key, "'", "''") + "'"
+	install := []string{`CREATE TRIGGER mailbox_completion_cut BEFORE INSERT ON api_idempotency WHEN NEW.idempotency_key=` + literal + ` BEGIN SELECT swarm_test_mailbox_completion_cut('` + id + `'); SELECT RAISE(ABORT,'mailbox_completion_exact_insert_cut'); END`}
+	removeSQL := []string{`DROP TRIGGER mailbox_completion_cut`}
+	if rt.Backend == "postgres" {
+		// Sequences intentionally do not roll back, unlike the domain transaction.
+		install = []string{
+			`CREATE SEQUENCE mailbox_completion_cut_seen`,
+			`CREATE FUNCTION mailbox_completion_cut() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.idempotency_key=` + literal + ` THEN PERFORM nextval('mailbox_completion_cut_seen'); RAISE EXCEPTION 'mailbox_completion_exact_insert_cut'; END IF; RETURN NEW; END $$`,
+			`CREATE TRIGGER mailbox_completion_cut BEFORE INSERT ON api_idempotency FOR EACH ROW EXECUTE FUNCTION mailbox_completion_cut()`,
+		}
+		removeSQL = []string{`DROP TRIGGER mailbox_completion_cut ON api_idempotency`, `DROP FUNCTION mailbox_completion_cut()`, `DROP SEQUENCE mailbox_completion_cut_seen`}
+	}
+	for _, query := range install {
+		if _, err := rt.DB.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var removeOnce sync.Once
+	remove = func() {
+		t.Helper()
+		removeOnce.Do(func() {
+			for _, query := range removeSQL {
+				if _, err := rt.DB.Exec(query); err != nil {
+					t.Error(err)
+				}
+			}
+		})
+	}
+	t.Cleanup(remove)
+	return func() {
+		t.Helper()
+		seen := counter.Load()
+		if rt.Backend == "postgres" {
+			var called bool
+			if err := rt.DB.QueryRow(`SELECT last_value,is_called FROM mailbox_completion_cut_seen`).Scan(&seen, &called); err != nil {
+				t.Fatal(err)
+			}
+			if !called {
+				seen = 0
+			}
+		}
+		if seen != 1 {
+			t.Fatalf("expected exact response INSERT fault once, reached %d times", seen)
+		}
+	}, remove
+}
