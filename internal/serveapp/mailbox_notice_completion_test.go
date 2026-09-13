@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -17,9 +16,9 @@ func TestMailboxNoticeAtomicCompletionBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.RootIngress)
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			f := newCursorMailboxFixture(t, backend)
-			n := f.notice(t, uuid.NewString(), time.Now().UTC())
-			id := n.Notice.MailboxID
+			rt, owner, restart := newRetainedMailboxCompletionRuntime(t, backend, canonicalrouting.CopyMailboxNoticeCompletion(t))
+			f := mailboxCompletionFixtureInRuntime(t, rt, owner)
+			id := mailboxCompletionNotice(t, f)
 			params := map[string]any{"mailbox_id": id, "idempotency_key": "notice-atomic"}
 			beforeEffects := mailboxCompletionRunEffects(t, f.rt, f.base.RunID)
 			assertCut, remove := installMailboxCompletionFaultWitness(t, f.rt, "notice-atomic")
@@ -79,6 +78,23 @@ func TestMailboxNoticeAtomicCompletionBothStores(t *testing.T) {
 			}
 			if strings.Contains(raw, "decision_event_id") {
 				t.Fatal("notice returned a card decision")
+			}
+			rt, _ = restart()
+			before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+			replay = nil
+			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.acknowledge", params, &replay)
+			if replay["idempotency_replayed"] != true {
+				t.Fatal("notice restart lost completion")
+			}
+			delete(replay, "idempotency_replayed")
+			if !reflect.DeepEqual(original, replay) {
+				t.Fatalf("notice restart changed exact response: %v / %v", original, replay)
+			}
+			if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(before, after) {
+				t.Fatalf("notice restart changed domain: %s", mailboxEffectsDifference(before, after))
+			}
+			if err := rt.DB.QueryRow(`SELECT notified FROM mailbox WHERE item_id=$1`, id).Scan(&notified); err != nil || !notified {
+				t.Fatalf("notice restart lost acknowledgment: notified=%t err=%v", notified, err)
 			}
 		})
 	}

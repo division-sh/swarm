@@ -3,14 +3,18 @@ package serveapp
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -27,7 +31,7 @@ func newMailboxCompletionFixture(t *testing.T, backend servedparity.Backend) cur
 
 func newMailboxCompletionRuntime(t *testing.T, backend servedparity.Backend) (servedControlProofRuntime, cursorMailboxStore) {
 	t.Helper()
-	root := canonicalrouting.CopyMailboxCompletionMatrix(t)
+	root := canonicalrouting.CopyMailboxNoticeCompletion(t)
 	return newMailboxCompletionRuntimeSource(t, backend, root)
 }
 
@@ -36,8 +40,15 @@ func newMailboxCompletionRuntimeSource(t *testing.T, backend servedparity.Backen
 	return rt, owner
 }
 
-func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Backend, root string) (servedControlProofRuntime, cursorMailboxStore, func() (servedControlProofRuntime, cursorMailboxStore)) {
+func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Backend, root string, tokens ...string) (servedControlProofRuntime, cursorMailboxStore, func() (servedControlProofRuntime, cursorMailboxStore)) {
+	return newRetainedMailboxCompletionRuntimeConfigured(t, backend, root, "", tokens...)
+}
+
+func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedparity.Backend, root, configSuffix string, tokens ...string) (servedControlProofRuntime, cursorMailboxStore, func() (servedControlProofRuntime, cursorMailboxStore)) {
 	t.Helper()
+	if len(tokens) == 0 {
+		tokens = []string{apiv1.DefaultLoopbackAPIToken}
+	}
 	opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	name := "sqlite"
 	if backend == servedparity.BackendDefaultSQLite {
@@ -62,6 +73,15 @@ func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Back
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, name, "")
 		opts.StoreMode, opts.StoreModeSet = name, true
 	}
+	if configSuffix != "" {
+		raw, err := os.ReadFile(opts.ConfigPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(opts.ConfigPath, append(raw, []byte(configSuffix)...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var db *sql.DB
 	var pg *store.PostgresStore
 	var sq *store.SQLiteRuntimeStore
@@ -74,7 +94,14 @@ func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Back
 				t.Fatalf("stop retained mailbox runtime: %d\n%s", code, process.outputString())
 			}
 		}
-		process = startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retained, opts)
+		t.Log("proof_surface=H in-process retained mock lifecycle with real authenticated HTTP/WS; not public serve/test")
+		process = startRuntimeTestProcessWithRunner(t, repoRootForTest(), opts, func(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
+			code, err := runOwnedMockLifecycle(ctx, repo, retained, opts, apiv1.AuthTokenResolution{Tokens: tokens, Explicit: true, Source: "internal-lifecycle-parent"})
+			if err != nil {
+				fmt.Fprintf(opts.ErrorOutput, "internal mailbox lifecycle setup: %v\n", err)
+			}
+			return code
+		})
 		process.waitForReadyLine()
 		runtime := servedTestProcessRuntime(t, process)
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
@@ -146,4 +173,19 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 		t.Fatal(err)
 	}
 	return card
+}
+
+func mailboxCompletionNotice(t *testing.T, f cursorMailboxFixture) string {
+	t.Helper()
+	seed := requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "observers/notice.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "notice-seed-" + uuid.NewString()})
+	waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, f.base.RunID)
+	waitPublicationSiteCompletion(t, f.rt, f.base.RunID)
+	var id, summary, from string
+	if err := f.rt.DB.QueryRow(`SELECT item_id,summary,from_agent FROM mailbox WHERE source_event_id=$1 AND item_type=$2`, seed.EventID, runtimetools.NotifyHumanMailboxItemType).Scan(&id, &summary, &from); err != nil {
+		t.Fatalf("real notify_human did not persist the notice: %v", err)
+	}
+	if summary != "Observed notice" || from != "observer" {
+		t.Fatalf("wrong real notice producer: summary=%q from=%q", summary, from)
+	}
+	return id
 }

@@ -6,6 +6,18 @@ import (
 	"testing"
 )
 
+func CopyMailboxNoticeCompletion(t testing.TB) string {
+	t.Helper()
+	root := CopyMailboxCompletionMatrix(t)
+	applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "      - {event: observer.requested, source: external}", "      - {event: observer.requested, source: external}\n      - {event: notice.requested, source: external}")
+	applyClosedReplacement(t, filepath.Join(root, "observers/events.yaml"), "observer.started:\n", "notice.requested:\n  seed: boolean\nobserver.started:\n")
+	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.started,", "subscriptions: [notice.requested, observer.started,")
+	applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), `        if frame["event"]["type"].endswith("observer.started"):`, `        if frame["event"]["type"].endswith("notice.requested"):
+            return {"calls": [{"name": "notify_human", "arguments": {"summary": "Observed notice", "context": {"proof": "mailbox-completion"}}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
+        if frame["event"]["type"].endswith("observer.started"):`)
+	return root
+}
+
 func CopyMailboxCompletionMatrix(t testing.TB) string {
 	t.Helper()
 	root := CopyGateCompletionDiagnostic(t)

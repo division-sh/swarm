@@ -21,11 +21,19 @@ var mailboxCompletionFaultFunction struct {
 
 func mailboxCompletionRunEffects(t *testing.T, rt servedControlProofRuntime, runID string) []string {
 	t.Helper()
+	// Delivery settlement precedes the durable pipeline-to-continuation handoff.
+	// Snapshot only after that owner has acknowledged the actual publication.
+	waitPublicationSiteCompletion(t, rt, runID)
 	var snapshot []string
 	for _, query := range []string{
+		`SELECT * FROM decision_cards WHERE run_id=$1 ORDER BY card_id`,
+		`SELECT d.* FROM decision_card_input_drafts d JOIN decision_cards c ON c.card_id=d.card_id WHERE c.run_id=$1 ORDER BY d.input_draft_id`,
+		`SELECT d.* FROM decision_card_changes d JOIN decision_cards c ON c.card_id=d.card_id WHERE c.run_id=$1 ORDER BY d.change_id`,
 		`SELECT * FROM human_task_continuations WHERE run_id=$1 ORDER BY card_id`,
 		`SELECT * FROM proposed_effect_continuations WHERE run_id=$1 ORDER BY card_id`,
-		`SELECT * FROM events WHERE run_id=$1 ORDER BY event_id`,
+		// Diagnostics are asynchronous observations, not mailbox domain effects.
+		// Keep every execution/control event and every field, including timestamps.
+		`SELECT * FROM events WHERE run_id=$1 AND event_class NOT IN ('runtime_diagnostic','diagnostic_direct') ORDER BY event_id`,
 		`SELECT d.* FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 ORDER BY d.delivery_id`,
 		`SELECT * FROM entity_state WHERE run_id=$1 ORDER BY entity_id,flow_instance`,
 		`SELECT * FROM flow_instances WHERE run_id=$1 ORDER BY instance_path`,
@@ -65,6 +73,15 @@ func mailboxCompletionRunEffects(t *testing.T, rt servedControlProofRuntime, run
 		}
 	}
 	return snapshot
+}
+
+func mailboxEffectsDifference(before, after []string) string {
+	for i := 0; i < len(before) && i < len(after); i++ {
+		if before[i] != after[i] {
+			return fmt.Sprintf("first differing row %d:\nbefore=%s\nafter=%s", i, before[i], after[i])
+		}
+	}
+	return fmt.Sprintf("snapshot lengths before=%d after=%d", len(before), len(after))
 }
 
 // Register before opening the SQLite fixture: functions are installed on each

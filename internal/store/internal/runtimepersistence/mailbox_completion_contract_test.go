@@ -34,25 +34,29 @@ func TestMailboxCompletionAdmissionAndTTLBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			db := DatabaseForTest(selected)
-			acquire := func(req apiidempotency.Request) (mailboxCompletionLeaseFixture, error) {
+			acquire := func(t *testing.T, req apiidempotency.Request) (mailboxCompletionLeaseFixture, error) {
+				t.Helper()
 				switch s := selected.(type) {
 				case *PostgresStore:
 					lease, err := privateidempotency.AcquirePostgresRequest(ctx, s.postgresOwner, req)
 					if err != nil {
 						return mailboxCompletionLeaseFixture{}, err
 					}
-					return mailboxCompletionLeaseFixture{replay: lease.Replay, commit: func(ctx context.Context, tx *sql.Tx, c apiidempotency.Completion) error {
-						return privateidempotency.StorePostgresCompletionTx(ctx, lease, tx, c)
-					}, release: func() {
+					release := func() {
 						if err := lease.Release(ctx); err != nil {
 							t.Error(err)
 						}
-					}}, nil
+					}
+					t.Cleanup(release)
+					return mailboxCompletionLeaseFixture{replay: lease.Replay, commit: func(ctx context.Context, tx *sql.Tx, c apiidempotency.Completion) error {
+						return privateidempotency.StorePostgresCompletionTx(ctx, lease, tx, c)
+					}, release: release}, nil
 				case *SQLiteRuntimeStore:
 					lease, err := privateidempotency.AcquireSQLiteRequest(ctx, s.sQLiteOwner, req)
 					if err != nil {
 						return mailboxCompletionLeaseFixture{}, err
 					}
+					t.Cleanup(lease.Release)
 					return mailboxCompletionLeaseFixture{replay: lease.Replay, commit: func(ctx context.Context, tx *sql.Tx, c apiidempotency.Completion) error {
 						return privateidempotency.StoreSQLiteCompletionTx(ctx, lease, tx, c)
 					}, release: lease.Release}, nil
@@ -73,7 +77,7 @@ func TestMailboxCompletionAdmissionAndTTLBothStores(t *testing.T) {
 			for _, method := range []string{"mailbox.decide", "mailbox.defer", "mailbox.begin_input", "mailbox.cancel_input", "mailbox.acknowledge"} {
 				t.Run(method, func(t *testing.T) {
 					req := apiidempotency.Request{Method: method, Actor: apiidempotency.PrincipalActor(principal.ID), ResourceID: uuid.NewString(), RequestHash: "request", IdempotencyKey: method, Now: time.Now().UTC(), TTL: time.Hour}
-					lease, err := acquire(req)
+					lease, err := acquire(t, req)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -126,15 +130,20 @@ func TestMailboxCompletionAdmissionAndTTLBothStores(t *testing.T) {
 						t.Fatalf("TTL shortened by preparation: request=%v created=%v expires=%v", req.Now, created, expires)
 					}
 					for name, change := range map[string]func(*apiidempotency.Request){
-						"foreign":  func(r *apiidempotency.Request) { r.Actor = apiidempotency.PrincipalActor(changed) },
-						"missing":  func(r *apiidempotency.Request) { r.Actor = apiidempotency.PrincipalActor("") },
-						"bearer":   func(r *apiidempotency.Request) { r.Actor = apiidempotency.BearerActor(principal.ID) },
-						"hash":     func(r *apiidempotency.Request) { r.RequestHash = "changed" },
-						"resource": func(r *apiidempotency.Request) { r.ResourceID = uuid.NewString() },
+						"foreign":      func(r *apiidempotency.Request) { r.Actor = apiidempotency.PrincipalActor(changed) },
+						"missing":      func(r *apiidempotency.Request) { r.Actor = apiidempotency.PrincipalActor("") },
+						"bearer":       func(r *apiidempotency.Request) { r.Actor = apiidempotency.BearerActor(principal.ID) },
+						"zero_actor":   func(r *apiidempotency.Request) { r.Actor = apiidempotency.Actor{} },
+						"unknown_kind": func(r *apiidempotency.Request) { r.Actor.Kind = "operator" },
+						"nil_uuid":     func(r *apiidempotency.Request) { r.Actor.ID = uuid.Nil.String() },
+						"malformed_id": func(r *apiidempotency.Request) { r.Actor.ID = "not-a-principal" },
+						"whitespace":   func(r *apiidempotency.Request) { r.Actor.ID = " " + principal.ID },
+						"hash":         func(r *apiidempotency.Request) { r.RequestHash = "changed" },
+						"resource":     func(r *apiidempotency.Request) { r.ResourceID = uuid.NewString() },
 					} {
 						bad := req
 						change(&bad)
-						got, err := acquire(bad)
+						got, err := acquire(t, bad)
 						if err == nil {
 							got.release()
 							t.Fatalf("replay admitted %s", name)
@@ -144,7 +153,7 @@ func TestMailboxCompletionAdmissionAndTTLBothStores(t *testing.T) {
 						}
 					}
 					req.Now = expires.Add(-time.Microsecond)
-					lease, err = acquire(req)
+					lease, err = acquire(t, req)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -158,7 +167,7 @@ func TestMailboxCompletionAdmissionAndTTLBothStores(t *testing.T) {
 						t.Fatal("replay extended retention")
 					}
 					req.Now = expires
-					lease, err = acquire(req)
+					lease, err = acquire(t, req)
 					if err != nil {
 						t.Fatal(err)
 					}

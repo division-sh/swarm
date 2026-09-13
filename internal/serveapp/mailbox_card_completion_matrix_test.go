@@ -16,7 +16,12 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.RootIngress)
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			rt, owner := newMailboxCompletionRuntime(t, backend)
+			rt, owner, restart := newRetainedMailboxCompletionRuntime(t, backend, canonicalrouting.CopyMailboxNoticeCompletion(t))
+			type completedCase struct {
+				method, runID    string
+				params, original map[string]any
+			}
+			var completed []completedCase
 			for _, anchor := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				for _, method := range []string{"mailbox.decide", "mailbox.defer", "mailbox.begin_input", "mailbox.cancel_input"} {
 					t.Run(string(anchor)+"/"+method, func(t *testing.T) {
@@ -116,7 +121,24 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 						if actorKind != "operator_principal" || actor != principal || !reflect.DeepEqual(stored, original) {
 							t.Fatalf("wrong completion: %s %s %v", actorKind, actor, stored)
 						}
+						completed = append(completed, completedCase{method: method, runID: card.RunID, params: params, original: original})
 					})
+				}
+			}
+			rt, _ = restart()
+			for _, c := range completed {
+				before := mailboxCompletionRunEffects(t, rt, c.runID)
+				var replay map[string]any
+				requireServedJSONRPCResult(t, rt.Endpoint, c.method, c.params, &replay)
+				if replay["idempotency_replayed"] != true {
+					t.Fatalf("%s restarted as fresh mutation: %v", c.method, replay)
+				}
+				delete(replay, "idempotency_replayed")
+				if !reflect.DeepEqual(c.original, replay) {
+					t.Fatalf("%s restart changed response: %v / %v", c.method, c.original, replay)
+				}
+				if after := mailboxCompletionRunEffects(t, rt, c.runID); !reflect.DeepEqual(before, after) {
+					t.Fatalf("%s restart replay changed domain: %s", c.method, mailboxEffectsDifference(before, after))
 				}
 			}
 		})
