@@ -180,16 +180,12 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 		MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, EntryStage: "drafting",
 		RegionStages: []string{"drafting", "review"}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"},
 	}
-	source := fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Loops: []runtimecontracts.WorkflowLoopPlan{plan}},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"line_item.completed": {
-				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-					"items": {Type: "[json]"},
-				}},
-			},
-		},
-	})
+	source := fanOutPayloadSource(t, "validation", "line_item.completed")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("loop carrier fixture requires a compiled bundle")
+	}
+	bundle.Semantics.Loops = []runtimecontracts.WorkflowLoopPlan{plan}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: sourceWithFixtureStages(source, "validation", "drafting", "drafting", "review", "escalated"), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 	}, nil)

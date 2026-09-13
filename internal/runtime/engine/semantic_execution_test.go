@@ -181,6 +181,10 @@ func sourceWithFixtureStages(source semanticview.Source, flowID, initial string,
 		}
 		copyBundle.RootSchema = &schema
 	}
+	// This explicit stage-only fixture override invalidates that flow's old
+	// topology. ExecuteSemanticFixture compiles it with the supplied handler.
+	copyBundle.Semantics.StageTopologies = maps.Clone(bundle.Semantics.StageTopologies)
+	delete(copyBundle.Semantics.StageTopologies, flowID)
 	return semanticview.Wrap(&copyBundle)
 }
 

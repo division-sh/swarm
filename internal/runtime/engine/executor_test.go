@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -57,17 +58,18 @@ func requiredEventPayload(fields map[string]runtimecontracts.EventFieldSpec) run
 }
 
 func sourceWithEvents(entries map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Events: entries})
+	return mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{Events: entries})
 }
 
 func mustCompileEngineSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	semanticviewtest.WrapRootAgents(bundle)
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(fmt.Sprintf("compile engine test semantics: %v", err))
 	}
 	return semanticview.Wrap(bundle)
 }
 
-func fanOutPayloadSource(t testing.TB, eventTypes ...string) semanticview.Source {
+func fanOutPayloadSource(t testing.TB, flowID string, eventTypes ...string) semanticview.Source {
 	t.Helper()
 	events := make(map[string]runtimecontracts.EventCatalogEntry, len(eventTypes))
 	for _, eventType := range eventTypes {
@@ -77,7 +79,16 @@ func fanOutPayloadSource(t testing.TB, eventTypes ...string) semanticview.Source
 			}},
 		}
 	}
-	return fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{Events: events})
+	flow := &runtimecontracts.FlowContractView{
+		Path: flowID, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID}, Events: events,
+	}
+	return fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{*flow}},
+			ByID: map[string]*runtimecontracts.FlowContractView{flowID: flow},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: {}},
+	})
 }
 
 func mustFanOutDeclaration(t testing.TB, ref runtimecontracts.FanOutElementRef) identity.DeclarationIdentity {
@@ -120,7 +131,7 @@ func fanOutSourceWithBundleIdentity(t testing.TB, bundle *runtimecontracts.Workf
 		t.Fatal(err)
 	}
 	bundle.SourceArtifact = artifact
-	return semanticview.Wrap(bundle)
+	return mustCompileEngineSource(bundle)
 }
 
 func mustEngineSourceArtifact(t testing.TB, root string) *sourceartifact.AdmittedSourceArtifact {
@@ -4424,7 +4435,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 }
 
 func emitFromExecutorSource() semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"account": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
@@ -4824,7 +4835,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 
 func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "task.completed"), "flow-1", "pending", "pending", "processing"),
+		Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "flow-1", "task.completed"), "flow-1", "pending", "pending", "processing"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5286,7 +5297,7 @@ func TestExecutor_FanOutEntitySourceBindsAfterSameHandlerMutation(t *testing.T) 
 
 func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "task.completed"), "flow-1", "pending", "pending"),
+		Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "flow-1", "task.completed"), "flow-1", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5401,7 +5412,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "batch.ready"), "flow-1", "ready", "ready", "dispatched"),
+				Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "flow-1", "batch.ready"), "flow-1", "ready", "ready", "dispatched"),
 				StateRepo:     stubStateRepo{},
 				MutationOwner: stubMutationOwner{},
 				Locker:        stubLocker{},
@@ -6764,7 +6775,7 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 
 func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "task.completed"), "flow-1", "pending", "pending", "scanning"),
+		Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "flow-1", "task.completed"), "flow-1", "pending", "pending", "scanning"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -6857,7 +6868,7 @@ func TestExecutor_FanOutDoesNotPersistHiddenCountInEntityBookkeeping(t *testing.
 
 func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "batch.submitted"), "flow-1", "pending", "pending"),
+		Source:        sourceWithFixtureStages(fanOutPayloadSource(t, "flow-1", "batch.submitted"), "flow-1", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},

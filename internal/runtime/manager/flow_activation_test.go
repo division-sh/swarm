@@ -1330,6 +1330,7 @@ func registerTestFlowAgentOwner(bundle *runtimecontracts.WorkflowContractBundle,
 func testFlowBundle(t *testing.T, autoEmit string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	reviewFlow := runtimecontracts.FlowContractView{
+		Path:  "review",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.started": {
@@ -1395,6 +1396,7 @@ func testFlowRouteRevisionBundle(t *testing.T, nodeEvent string) *runtimecontrac
 		},
 	}
 	bundle.FlowTree.Root.Children[0] = *review
+	compileFlowActivationFixture(t, bundle)
 	return bundle
 }
 
@@ -1405,6 +1407,7 @@ func testFlowBundleWithTwoAgents(t *testing.T, autoEmit string) *runtimecontract
 		ID: "writer", Type: "generic", Role: "writer", ResolvedIntent: managerTestResolvedIntent("writer"), Subscriptions: []string{"task.started"},
 	}
 	registerTestFlowAgentOwner(bundle, "review", "writer")
+	compileFlowActivationFixture(t, bundle)
 	return bundle
 }
 
@@ -1419,6 +1422,7 @@ func testFlowBundleWithAutoEmitEntry(t *testing.T, autoEmit string, entry runtim
 		reviewFlow.Events = map[string]runtimecontracts.EventCatalogEntry{}
 	}
 	reviewFlow.Events[strings.TrimSpace(autoEmit)] = entry
+	compileFlowActivationFixture(t, bundle)
 	return bundle
 }
 
@@ -1511,7 +1515,15 @@ func admitFlowActivationEntityContracts(
 	admitted.Agents = base.Agents
 	admitted.Tools = base.Tools
 	admitted.Policy = base.Policy
+	compileFlowActivationFixture(t, admitted)
 	return admitted
+}
+
+func compileFlowActivationFixture(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
+	t.Helper()
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile final flow activation declarations: %v", err)
+	}
 }
 
 func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
@@ -1519,6 +1531,10 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 	analysisFlow := &runtimecontracts.FlowContractView{
 		Path:  "analyzer-flow",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "analyzer-flow"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.requested": {},
+			"analysis.done":      {},
+		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"analyzer": {
 				Type:           "generic",

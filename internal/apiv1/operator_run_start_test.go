@@ -862,6 +862,9 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Path:  "discovery",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			eventName: {},
+		},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
@@ -876,7 +879,10 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{
+		Events:   map[string]runtimecontracts.EventCatalogEntry{eventName: {}},
+		Children: []runtimecontracts.FlowContractView{flow},
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: authorActivityTestSourceArtifact,
 		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
