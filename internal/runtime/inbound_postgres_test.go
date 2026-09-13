@@ -1193,12 +1193,16 @@ func subscribeInboundGatewayAgent(
 		Events: flowEvents,
 	}
 	root := runtimecontracts.FlowContractView{Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{boundedProviderFlowID: &root.Children[0]},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile inbound subscriber declarations: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       agentID,
 		FlowID:        boundedProviderFlowID,

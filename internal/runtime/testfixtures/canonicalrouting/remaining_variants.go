@@ -303,6 +303,8 @@ func CopyTemplateConnectRollback(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
+	// This variant replaces the account edge with the faulted consumer edge.
+	removeClosedVariantFiles(t, root, "account/nodes.yaml", "account/entities.yaml", "account/schema.yaml", "account")
 	files := map[string]string{
 
 		"schema.yaml": "name: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer}\n",

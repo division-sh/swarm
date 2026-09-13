@@ -17,10 +17,9 @@ import (
 // Executing the hostile overlays below is part of the guard's proof.
 func receiverOwnerConstructorBudget() map[string]int {
 	return map[string]int{
-		"runtime/bus::filterDeliveryRecipientCandidates":                                       1,
-		"runtime/bus::agentDeliveryRoutesForCandidates":                                        1,
-		"runtime/bus::selectedRunTargetOwnerProjection.resolveRoutePlan":                       1,
+		"runtime/bus::selectedRunTargetOwnerProjection.resolveActiveAgentTarget":               2,
 		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute":                   2,
+		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute [descriptor]":      1,
 		"runtime/bus::deliveryTargetOwnershipFromDescriptor":                                   2,
 		"runtime/pipeline::ClassifyDeliveryTargetOwnership":                                    4,
 		"runtime/bus::selectedRunTargetOwnerProjection.withActivationPlans [descriptor]":       1,

@@ -7399,7 +7399,7 @@
     },
     {
       "name": "mailbox.acknowledge",
-      "description": "Acknowledge a notice. Decision cards reject this operation with a teaching error.",
+      "description": "Acknowledge a notice as the admitted operator principal. Notice-only eligibility, notified update and exact principal-scoped completion commit in the same notice transaction. Decision cards reject this operation with a teaching error; missing notices cannot create a success completion. No decision event is produced.",
       "params": [
         {
           "name": "mailbox_id",
@@ -7527,7 +7527,7 @@
     },
     {
       "name": "mailbox.begin_input",
-      "description": "Start a durable actor/card/verdict-scoped input draft. This operation never creates a verdict.",
+      "description": "Start a durable operator-principal/card/verdict-scoped input draft. Replacement, draft change cursor and principal-scoped completion commit together. This operation never creates a verdict or publication.",
       "params": [
         {
           "name": "card_id",
@@ -7865,7 +7865,7 @@
     },
     {
       "name": "mailbox.cancel_input",
-      "description": "Cancel the caller's still-active durable input draft. Foreign, stale, expired, replaced, or consumed drafts fail closed.",
+      "description": "Cancel the admitted principal's still-active durable input draft. Foreign, stale, expired, replaced, or consumed drafts fail closed on fresh execution. Cancellation, its change cursor and exact completion commit together; matching replay does not re-plan the cancelled draft.",
       "params": [
         {
           "name": "card_id",
@@ -8103,7 +8103,7 @@
     },
     {
       "name": "mailbox.decide",
-      "description": "Commit one authored verdict against a pending typed decision card. The registered anchor authority, typed verdict/fields, change cursor, mailbox.card_decided event, and idempotency response commit atomically. Outcome routing consumes the frozen card snapshot after commit.\n",
+      "description": "Commit one authored verdict against a pending typed decision card. The registered anchor authority, typed verdict/fields, change cursor, mailbox.card_decided event, and idempotency response commit atomically. Outcome routing consumes the frozen card snapshot after commit. The admitted operator principal owns the decision and replay, independent of the carrying token or channel. Budget-forced deferral projects the actual committed outcome rather than the requested approval.\n",
       "params": [
         {
           "name": "card_id",
@@ -8539,7 +8539,7 @@
     },
     {
       "name": "mailbox.defer",
-      "description": "Defer a pending typed decision card. Defer is non-terminal: status remains pending and only deferred_until changes. It never chooses a verdict or routes the stage. The admitted decision time and until value use the decision-card UTC-microsecond timestamp contract.\n",
+      "description": "Defer a pending typed decision card. Defer is non-terminal: status remains pending and only deferred_until changes. It never chooses a verdict or routes the stage. The admitted decision time and until value use the decision-card UTC-microsecond timestamp contract. Principal-scoped replay completion, card change and deferral publication commit together before outcome dispatch.\n",
       "params": [
         {
           "name": "card_id",

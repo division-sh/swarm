@@ -147,8 +147,25 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 				requireForkCommitCounts(t, db, 5, 3)
 			})
 			t.Run("ttl_expiry", func(t *testing.T) {
+				// Retention starts at successful completion, not request preparation.
+				// Reach the last persisted boundary without a wall-clock sleep, so
+				// all earlier completions are expired when the new fork commits.
+				var expiresAt time.Time
+				if backend == "sqlite" {
+					var raw string
+					if err := db.QueryRow(`SELECT expires_at FROM api_idempotency ORDER BY expires_at DESC LIMIT 1`).Scan(&raw); err != nil {
+						t.Fatal(err)
+					}
+					var err error
+					expiresAt, err = time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", raw)
+					if err != nil {
+						t.Fatalf("decode persisted completion expiry %q: %v", raw, err)
+					}
+				} else if err := db.QueryRow(`SELECT expires_at FROM api_idempotency ORDER BY expires_at DESC LIMIT 1`).Scan(&expiresAt); err != nil {
+					t.Fatal(err)
+				}
 				expired := req
-				expired.Idempotency.Now, expired.Creation.Now = now.Add(24*time.Hour), now.Add(24*time.Hour)
+				expired.Idempotency.Now, expired.Creation.Now = expiresAt, expiresAt
 				result, err := selected.CreateAPIConversationFork(ctx, expired)
 				if err != nil || result.IdempotencyReplayed || result.Fork.ForkID == firstID {
 					t.Fatalf("expired=%+v err=%v", result, err)

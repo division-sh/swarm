@@ -690,7 +690,7 @@ func TestEmbeddedPackInventoryLoadsGitHubAppInstallationPack(t *testing.T) {
 func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "notion", "notion.append_block_children"),
 		},
@@ -738,7 +738,7 @@ func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *t
 func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "github", "github.create_issue_comment"),
 		},
@@ -788,7 +788,7 @@ func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
 func TestGitHubConnectorPackImportsMultipleActionsExplicitly(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
 		importScopes: []connectorPackTestImportScope{{
 			Key: ".",
 			Imports: []runtimecontracts.ConnectorPackImport{
@@ -840,7 +840,7 @@ func TestGitHubConnectorPackImportsMultipleActionsExplicitly(t *testing.T) {
 func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirement(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
 		importScopes: []connectorPackTestImportScope{
 			flowScopeWithConnectorPackImport(".", "microsoft_graph", "microsoft_graph.send_mail"),
 		},

@@ -76,7 +76,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 								agentID = provider.provider + "-" + backend + "-raw-subscriber"
 								seedProviderRawSettlementAgent(t, ctx, selected, runID, target.FlowPath, flowInstance, entityID, agentID, provider.eventName)
 							}
-							bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, provider.eventName)
+							bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 							if err != nil {
 								t.Fatalf("NewEventBus: %v", err)
 							}
@@ -289,6 +289,7 @@ func providerRawSettlementSemanticSource(flowID, eventName string) semanticview.
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID}, Path: flowID, Schema: schema,
+		Events: map[string]runtimecontracts.EventCatalogEntry{eventName: providertriggers.RawEventCatalogEntry()},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	admittedFlow := &root.Children[0]
