@@ -109,6 +109,7 @@ pins:
     events:
       - work.ready
 `,
+		"unrelated/worker/result/events.yaml": "work.ready:\n  branch_id: string\n",
 		"unrelated/worker/result/nodes.yaml": `hostile-node:
   execution_type: system_node
   event_handlers:

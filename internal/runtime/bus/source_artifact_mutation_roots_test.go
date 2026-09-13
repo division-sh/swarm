@@ -326,13 +326,17 @@ func sourceMutationRouteSource() semanticview.Source {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"work": &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"work": {Mode: "template"}},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func newSourceMutationProbeBus(

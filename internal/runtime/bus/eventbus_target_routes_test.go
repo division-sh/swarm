@@ -1422,7 +1422,7 @@ func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.Event
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: rootSchema,
 		Nodes: map[string]runtimecontracts.SystemNodeContract{nodeID: node}, Events: map[string]runtimecontracts.EventCatalogEntry{event: {}},
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &rootSchema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root}, ByPath: map[string]*runtimecontracts.FlowContractView{".": &root},
@@ -1433,7 +1433,11 @@ func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.Event
 		},
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{nodeID: node},
 		Events: map[string]runtimecontracts.EventCatalogEntry{event: {}},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
 	handlerNode := testRootNode(t, nodeID)
 	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, handlerNode)
 	if err != nil {
@@ -1478,7 +1482,7 @@ func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string, eventTy
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: rootSchema,
 		Nodes: map[string]runtimecontracts.SystemNodeContract{nodeID: node}, Events: map[string]runtimecontracts.EventCatalogEntry{event: {}},
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &rootSchema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root}, ByPath: map[string]*runtimecontracts.FlowContractView{".": &root},
@@ -1489,7 +1493,11 @@ func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string, eventTy
 		},
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{nodeID: node},
 		Events: map[string]runtimecontracts.EventCatalogEntry{event: {}},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
 	handlerNode := testRootNode(t, nodeID)
 	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, handlerNode)
 	if err != nil {
@@ -2374,6 +2382,9 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 			"repo-scaffold":      &root.Children[1],
 		},
 	}}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	source := semanticview.Wrap(bundle)
 	componentNode := testFlowNode(t, "component-scaffold", "component-node")
 	componentHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, componentNode)
@@ -3773,7 +3784,7 @@ func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -3789,6 +3800,10 @@ func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }
 
 func routedCallbackTemplateBundle() *runtimecontracts.WorkflowContractBundle {
@@ -3817,7 +3832,7 @@ func routedCallbackTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{repoScaffold}}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -3828,6 +3843,10 @@ func routedCallbackTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 			"repo-scaffold": {Mode: "template"},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }
 
 func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle {
@@ -3848,7 +3867,7 @@ func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{validation}}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -3859,6 +3878,10 @@ func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle
 			"validation": {Mode: runtimecontracts.FlowModeTemplate},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }
 
 func routedNodeStaticChildBundle() *runtimecontracts.WorkflowContractBundle {
@@ -3879,7 +3902,7 @@ func routedNodeStaticChildBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -3890,4 +3913,8 @@ func routedNodeStaticChildBundle() *runtimecontracts.WorkflowContractBundle {
 			"child": {},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }

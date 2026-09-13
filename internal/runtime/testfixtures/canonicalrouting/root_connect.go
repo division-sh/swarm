@@ -192,6 +192,9 @@ func CopyNestedSingletonOutputRootConnect(t testing.TB) string {
 func copySingletonOutputRootConnect(t testing.TB, scoutPath string) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
+	if err := os.RemoveAll(filepath.Join(root, "consumer")); err != nil {
+		t.Fatalf("remove unused inherited consumer flow: %v", err)
+	}
 	writeClosedVariantFile(t, root, "manifest.yaml", `name: singleton-output-root-connect
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
@@ -227,6 +230,9 @@ pins:
 func CopyRootSingletonBoomerang(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
+	if err := os.RemoveAll(filepath.Join(root, "consumer")); err != nil {
+		t.Fatalf("remove unused inherited consumer flow: %v", err)
+	}
 	writeClosedVariantFile(t, root, "manifest.yaml", `name: root-singleton-boomerang
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
