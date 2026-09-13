@@ -37,9 +37,14 @@ import (
 const runStatusTestRuntimeInstanceID = "22222222-2222-2222-2222-222222222222"
 
 func runStatusSubscriptionSource() semanticview.Source {
-	return semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
-	})
+	}
+	source := semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return source
 }
 
 func runStatusAgentConfig(t *testing.T, runID, agentID string) runtimeactors.AgentConfig {

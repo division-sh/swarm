@@ -51,15 +51,18 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"platform-spec.yaml": 51,
 	}
 	expectedUnrelatedTextCounts := map[string]int{
-		"internal/events/construction_test.go":                                      3,
-		"internal/runtime/conformance/repo_validation_snapshot_test.go":             1,
-		"internal/runtime/contracts/mock_performance_ownership_guard_test.go":       1,
-		"internal/runtime/llm/runtime_resolver.go":                                  1,
-		"internal/runtime/pythonmodule/artifact_manifest_generated.go":              2,
-		"internal/store/internal/runtimepersistence/run_debug_read_surface_test.go": 5,
-		"internal/store/selected/boundary_test.go":                                  1,
-		"internal/store/testdata/persistence_authority_findings.tsv":                1,
-		"internal/userfacing/human_code_projection_cli_test.go":                     5,
+		"internal/runtime/bootverify/workflow_transition_relation_test.go":                  1,
+		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":           1,
+		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go": 1,
+		"internal/events/construction_test.go":                                              3,
+		"internal/runtime/conformance/repo_validation_snapshot_test.go":                     1,
+		"internal/runtime/contracts/mock_performance_ownership_guard_test.go":               1,
+		"internal/runtime/llm/runtime_resolver.go":                                          1,
+		"internal/runtime/pythonmodule/artifact_manifest_generated.go":                      2,
+		"internal/store/internal/runtimepersistence/run_debug_read_surface_test.go":         5,
+		"internal/store/selected/boundary_test.go":                                          1,
+		"internal/store/testdata/persistence_authority_findings.tsv":                        1,
+		"internal/userfacing/human_code_projection_cli_test.go":                             5,
 	}
 	classificationDocuments := map[string]bool{
 		".github/audit-artifacts/issue-2007-failure-class.yaml": true,
@@ -222,6 +225,12 @@ func retiredBuilderCandidateLines(body []byte, include func(start, end int) bool
 func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	lower := strings.ToLower(line)
 	switch {
+	case relative == "internal/runtime/bootverify/workflow_transition_relation_test.go" && strings.Contains(lower, "graph builders"):
+		return true
+	case relative == "internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go" && strings.Contains(lower, "(*endpointcensusbuilder).addlifecycleendpoints"):
+		return true
+	case relative == "internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go" && strings.Contains(lower, "declaration-to-plan builder"):
+		return true
 	case relative == "internal/events/construction_test.go" && strings.Contains(lower, "fixture builder"):
 		return true
 	case relative == "internal/runtime/conformance/repo_validation_snapshot_test.go" && strings.Contains(lower, "snapshot builder returned"):
