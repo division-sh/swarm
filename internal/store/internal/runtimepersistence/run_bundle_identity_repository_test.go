@@ -352,6 +352,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"PipelineWorkPresence":                       operationPureRead,
 		"PrepareAgentRoute":                          operationRetained,
 		"PrepareEnginePublications":                  operationMutation,
+		"PrepareEngineMutationPublications":          operationMutation,
 		"PrepareInboundDeliveryBatch":                operationMutation,
 		"PrepareSelectedForkPublish":                 operationMutation,
 		"PreflightRunQueue":                          operationPureRead,

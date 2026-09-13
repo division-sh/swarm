@@ -360,6 +360,24 @@ func writeSelectedForkAgentProofFixture(t *testing.T, root, role, subscriptions,
 
 func requireSelectedForkPublicControlBoundary(t *testing.T, rt servedControlProofRuntime, runID, eventID string, declaredAgent bool) {
 	t.Helper()
+	// Delivery completion precedes the completion worker's await-mutation
+	// projection. Observe that durable handoff before measuring API mutations;
+	// the full snapshots below must still include the candidate columns.
+	// A different selected bundle has no completion worker in this loaded runtime.
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for {
+		var awaitingMutation bool
+		if err := rt.DB.QueryRow(`SELECT status='running' AND (bundle_hash <> $2 OR completion_due_at IS NULL) FROM runs WHERE run_id=$1`, runID, rt.BundleHash).Scan(&awaitingMutation); err != nil {
+			t.Fatal(err)
+		}
+		if awaitingMutation {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("selected fork did not finish its completion candidate: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	var bindingID string
 	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&bindingID); err != nil {
 		t.Fatal(err)

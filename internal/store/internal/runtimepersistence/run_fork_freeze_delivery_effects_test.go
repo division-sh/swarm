@@ -36,7 +36,6 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 					runlifecycle.OperationOwner
 					CreateDecisionCard(context.Context, decisioncard.Card) error
 					GetDecisionCard(context.Context, string) (decisioncard.Card, error)
-					BeginDecisionCardInput(context.Context, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error)
 				})
 				card := newDecisionCardTestCard(t, runID, time.Now().UTC())
 				if err := store.CreateDecisionCard(ctx, card); err != nil {
