@@ -351,13 +351,14 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		const eventName = "scan.unroutable_requested"
 		bundle := runStartTestBundle(eventName)
-		bundle.FlowTree.Root.Children[0].Events = map[string]runtimecontracts.EventCatalogEntry{
-			"scan.other_requested": {},
-		}
+		bundle.FlowTree.Root.Children[0].Events["scan.other_requested"] = runtimecontracts.EventCatalogEntry{}
 		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
 			SubscribesTo: []string{"scan.other_requested"},
 		}
 		bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
+		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+			t.Fatalf("compile declared but unroutable input fixture: %v", err)
+		}
 		source := semanticview.Wrap(bundle)
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
