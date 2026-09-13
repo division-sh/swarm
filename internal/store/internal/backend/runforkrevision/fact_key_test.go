@@ -7,8 +7,12 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 type factKeyGolden struct {
@@ -173,6 +177,31 @@ func TestCanonicalProjectionConsumesFactKey(t *testing.T) {
 			var body map[string]any
 			if err := json.Unmarshal([]byte(tc.raw), &body); err != nil {
 				t.Fatal(err)
+			}
+			if tc.family == FamilyEventDeliveries {
+				// The revision writer now admits complete delivery evidence, not just
+				// its key. Keep the golden key literal while supplying a lawful row.
+				route := events.DeliveryRoute{
+					Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "worker")),
+					Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: "11111111-1111-4111-8111-111111111111"}),
+				}
+				id, err := route.Identity()
+				if err != nil {
+					t.Fatal(err)
+				}
+				target, err := json.Marshal(route.Target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for key, value := range map[string]any{
+					"event_id": "22222222-2222-4222-8222-222222222222", "run_id": "11111111-1111-4111-8111-111111111111",
+					"route_identity": events.EncodeDeliveryRouteIdentity(id), "subscriber_type": "node", "subscriber_id": route.Recipient.ID(),
+					"delivery_target_ownership": string(target), "delivery_context": `{}`, "delivery_payload_projection": `{}`, "connect_execution_claim": `{}`, "receiver_materialization_plan": `null`,
+					"status": "pending", "retry_count": int64(0), "max_retries": int64(deliverylifecycle.NodeMaxRetries), "claim_version": int64(0),
+					"next_eligible_at": time.Now().UTC(), "created_at": time.Now().UTC(), "updated_at": time.Now().UTC(),
+				} {
+					body[key] = value
+				}
 			}
 			columns := make([]string, 0, len(spec.columns))
 			values := make([]driver.Value, 0, len(spec.columns))

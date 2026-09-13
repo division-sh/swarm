@@ -39,6 +39,7 @@ type historicalBoundaryAllowance struct {
 // receiver variable spellings, or every method on an otherwise trusted type.
 func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed := map[string]historicalBoundaryAllowance{
+		historicalBoundaryWriter + "loadCanonicalProjection/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":                               {1, "delivery writer validates the same status/final-selection/route relation as historical readers before recording a revision"},
 		historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory/reference:runtime/runfork::NewTerminalBarrierHistory":                              {1, "only the complete fixed-revision barrier relation may mint terminal-history admission"},
 		historicalBoundaryOwner + "loadRunForkAdmissionEvidenceFromRevision/reference:" + historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory": {1, "all fixed-revision admission consumes the terminal relation"},
 		historicalBoundaryOwner + "resolveRunForkRevisionPoint/ledger_sql":                                                                               {1, "shared event-point read; contextual admission precedes cursor construction"},
