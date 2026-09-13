@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -39,7 +40,7 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 				name = "state_only"
 			}
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
-				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyMaterializingSenderExistingReceiver(t, true))
+				rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, canonicalrouting.CopyMaterializingSenderExistingReceiver(t, true))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "first"}, "idempotency_key": "seed"})
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 				var entityID, instance string
@@ -80,6 +81,16 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 				}
 				if deliveries != 2 || companions != 1 {
 					t.Fatalf("delivered=%d companions=%d; %s", deliveries, companions, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+				}
+				before := mailboxCompletionRunEffects(t, rt, seed.RunID)
+				rt, _ = restart()
+				duplicate = requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+				if duplicate.EventID != updated.EventID || duplicate.RunID != seed.RunID {
+					t.Fatal("restart changed the committed prospective-state publication")
+				}
+				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				if after := mailboxCompletionRunEffects(t, rt, seed.RunID); !reflect.DeepEqual(before, after) {
+					t.Fatal("restart/duplicate changed state, companion, publication or receiver delivery")
 				}
 			})
 		}
