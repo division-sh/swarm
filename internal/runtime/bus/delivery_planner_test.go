@@ -181,6 +181,9 @@ func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
 	byID["."] = &root
 	byPath["."] = &root
 	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: byID, ByPath: byPath}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
 	return semanticview.Wrap(bundle)
 }
 

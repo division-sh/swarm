@@ -1946,13 +1946,24 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 }
 
 func TestEventBusAuthoredDeliberateEmptyUsesOutputConsumerClassification(t *testing.T) {
-	entry := runtimecontracts.EventCatalogEntry{}
-	entry.Swarm.Consumer = []string{"external"}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "root.ready"}}}}},
-		Events:     map[string]runtimecontracts.EventCatalogEntry{"root.ready": entry},
+	fixture := func(consumer string) semanticview.Source {
+		t.Helper()
+		root := &runtimecontracts.FlowContractView{
+			Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+			Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "root.ready"}}}}},
+			Events: map[string]runtimecontracts.EventCatalogEntry{"root.ready": {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{consumer}}}},
+		}
+		bundle := &runtimecontracts.WorkflowContractBundle{
+			RootSchema: &root.Schema,
+			Events:     root.Events,
+			FlowTree:   runtimecontracts.FlowTree{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}},
+		}
+		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+			t.Fatal(err)
+		}
+		return semanticview.Wrap(bundle)
 	}
-	source := semanticview.Wrap(bundle)
+	source := fixture("external")
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -1967,9 +1978,7 @@ func TestEventBusAuthoredDeliberateEmptyUsesOutputConsumerClassification(t *test
 		t.Fatalf("settlement = %#v, want authored deliberate empty", settlement)
 	}
 
-	unregistered := *bundle
-	unregistered.Events = map[string]runtimecontracts.EventCatalogEntry{"root.ready": {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"webhook"}}}}
-	classification := runtimepinrouting.ClassifyRoutingSourceOutputConsumer(semanticview.Wrap(&unregistered), string(evt.Type()), evt.RoutingSource())
+	classification := runtimepinrouting.ClassifyRoutingSourceOutputConsumer(fixture("webhook"), string(evt.Type()), evt.RoutingSource())
 	if classification.DeliberateNoSubscriber() {
 		t.Fatal("free-form webhook spelling authorized deliberate no-delivery")
 	}
