@@ -54,11 +54,10 @@ pins:
 				t.Fatal(err)
 			}
 			nodes := strings.ReplaceAll(string(raw), "numeric.requested", "numeric.approved")
-			nodes = strings.ReplaceAll(nodes, "payload.nested.numbers[0]", "payload.value")
-			nodes = strings.ReplaceAll(nodes, "payload.nested.numbers[1]", "7.5")
+			nodes = strings.ReplaceAll(nodes, "payload.nested.numbers[?0].value()", "payload.value")
+			nodes = strings.ReplaceAll(nodes, "payload.nested.numbers[?1].value()", "7.5")
 			nodes = strings.ReplaceAll(nodes, "      create_entity: true\n", "")
 			nodes += `requester:
-  id: requester
   execution_type: system_node
   subscribes_to: [numeric.requested]
   event_handlers:

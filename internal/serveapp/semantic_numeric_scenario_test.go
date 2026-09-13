@@ -34,7 +34,6 @@ fulfillment.completed:
   explicit_double: numeric
 `,
 					"fulfillment/nodes.yaml": `complete-request:
-  id: complete-request
   execution_type: system_node
   subscribes_to: [fulfillment.requested]
   produces: [fulfillment.completed]
@@ -47,7 +46,6 @@ fulfillment.completed:
           fraction: {cel: 'double(payload.fraction) + 0.5'}
           explicit_double: {cel: 'double(payload.value) + 1.0'}
 collector:
-  id: collector
   execution_type: system_node
   subscribes_to: [fulfillment.completed]
   event_handlers:

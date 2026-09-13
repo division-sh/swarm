@@ -5482,11 +5482,16 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"numeric-fan-out-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.ready": qualified}},
 		},
+		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"NumericCompany": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+				"id": {Type: "text"}, "eng_roles": {Type: "integer"}, "gem_score": {Type: "number"}, "exponent_score": {Type: "number"},
+			}},
+		}},
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 			"numeric-fan-out-node": {"batch.ready": qualified},
 		}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"batch.ready": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[json]"}, "batch_count": {Type: "integer"}}}},
+			"batch.ready": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[NumericCompany]"}, "batch_count": {Type: "integer"}}),
 			"company.registered": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 				"id": {Type: "text"}, "eng_roles": {Type: "integer"}, "gem_score": {Type: "number"}, "batch_count": {Type: "integer"}, "exponent_score": {Type: "number"},
 			}}},
@@ -5523,9 +5528,15 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 		"gem_score": json.Number("7.25"), "exponent_score": json.Number("1e3"),
 	}
 	eagerBase := values.NewContext().WithPayload(map[string]any{"batch_count": json.Number("1")})
+	plan, err := exec.resolveFanOutPlan(intent.Request.PlanRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemType := plan.ItemType.Clone()
 	eagerPayload, err := emitFieldsPayload(eagerBase, ExecutionState{FanOut: map[string]any{"item": item}}, handler.FanOut.Emit, workflowexpr.ValueExpressionOptions{
-		AllowBareItem: true,
-		ItemAlias:     "company",
+		ItemAlias:   plan.ItemAlias,
+		ItemType:    &itemType,
+		PayloadType: exec.executionPayloadType(ExecutionRequest{Node: node, Event: trigger, HandlerEventKey: "batch.ready"}),
 	}, nil)
 	if err != nil {
 		t.Fatalf("eager numeric emit fields: %v", err)

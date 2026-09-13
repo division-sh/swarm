@@ -34,7 +34,6 @@ func TestActivitySemanticResultExecutionParity(t *testing.T) {
 			numeric = strings.ReplaceAll(numeric, "payload.value", "payload.result.value")
 			numeric = strings.ReplaceAll(numeric, "payload.nested", "payload.result.nested")
 			numeric += `requester:
-  id: requester
   execution_type: system_node
   subscribes_to: [numeric.requested]
   event_handlers:

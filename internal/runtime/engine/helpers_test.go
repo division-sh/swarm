@@ -201,10 +201,14 @@ func TestEncodePayloadPreservesEagerNumericKindForPersistedEvaluation(t *testing
 	if payload["integer"] != int64(50) || payload["double"] != float64(50) {
 		t.Fatalf("decoded payload kinds = %#v", payload)
 	}
+	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "integer", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
+		{Name: "double", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeNumber}},
+	}}
 	result, err := workflowexpr.EvalValueExpressionWithOptions(
 		"payload.integer + 1 == 51 && payload.double + 1.0 == 51.0",
 		workflowexpr.ValueContext{Payload: payload},
-		workflowexpr.ValueExpressionOptions{},
+		workflowexpr.ValueExpressionOptions{PayloadType: &payloadType},
 	)
 	matched, ok := result.(bool)
 	if err != nil || !ok || !matched {
