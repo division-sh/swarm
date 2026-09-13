@@ -99,6 +99,9 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 			t.Fatal("contradictory target acquired prospective state")
 		}
 	}
+	if err := prepared.ValidateTarget(events.RouteIdentity{FlowInstance: record.Identity.Route.InstancePath}); err != nil {
+		t.Fatalf("instance-only blueprint must reach canonical receiver classification: %v", err)
+	}
 	if err := prepared.ValidateTarget(events.RouteIdentity{FlowID: "other", FlowInstance: "other/one", EntityID: eventtest.UUID("other-entity")}); err != nil {
 		t.Fatalf("unrelated receiver must retain independent admission: %v", err)
 	}

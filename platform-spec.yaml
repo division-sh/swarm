@@ -1531,6 +1531,8 @@ contract_formats:
             semantic flow, instance, entity and complete state/lifecycle record, including expected revision and stage.
             It replaces committed-state availability only for that exact owner; unrelated receivers retain their own
             authoritative evidence. It is not a stored row, ambient context override or independent materialization.
+            A partial receiver blueprint constrains canonical selection only in its explicit coordinates; an omitted
+            flow or entity is not a contradictory owner or authority to bypass complete typed-target admission.
             The post-mutation state determines availability, so an owner made terminal by the mutation cannot gain
             receiver authority. Only the matching engine transaction may discharge the fact after its ordinary
             ownership and revision compare-and-write succeeds. Ordinary publication writers reject an undischarged

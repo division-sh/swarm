@@ -101,8 +101,10 @@ func (p PreparedWorkflowPublicationState) ValidateTarget(route events.RouteIdent
 	if p.Empty() || route.FlowInstance != p.route.FlowInstance {
 		return nil
 	}
-	if route.FlowID != p.route.FlowID || route.EntityID != "" && route.EntityID != p.route.EntityID {
-		return fmt.Errorf("receiver target contradicts prospective flow/entity ownership")
+	// A blueprint constrains selection; omitted coordinates are not yet an
+	// admitted owner. The receiver classifier still validates the complete target.
+	if route.FlowID != "" && route.FlowID != p.route.FlowID || route.EntityID != "" && route.EntityID != p.route.EntityID {
+		return fmt.Errorf("receiver target contradicts prospective flow/entity ownership: target=%+v prospective=%+v", route, p.route)
 	}
 	return nil
 }
