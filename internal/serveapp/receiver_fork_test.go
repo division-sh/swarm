@@ -2,6 +2,8 @@ package serveapp
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,9 +20,10 @@ import (
 
 func TestReceiverCompositionForkBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		for _, surface := range []string{"admitted", "admitted_http", "historical_refusal", "pending_refusal", "empty_snapshot_refusal"} {
+		for _, surface := range []string{"admitted", "admitted_http", "historical_refusal", "pending_refusal", "empty_snapshot_refusal", "entityless_post_output_refusal"} {
 			t.Run(string(backend)+"/"+surface, func(t *testing.T) {
 				admitted := strings.HasPrefix(surface, "admitted")
+				entityless := surface == "empty_snapshot_refusal" || surface == "entityless_post_output_refusal"
 				var selected *selectedStoreOwner
 				previous := projectRuntimePersistenceForServe
 				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
@@ -29,7 +32,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				}
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 				root := canonicalrouting.CopyReceiverOptionalChild(t, true)
-				if surface == "empty_snapshot_refusal" {
+				if entityless {
 					root = canonicalrouting.CopyReceiverEntitylessFork(t)
 				}
 				reached, release := make(chan struct{}, 1), make(chan struct{})
@@ -47,7 +50,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				})
 				t.Cleanup(func() { close(release) })
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
-				if surface != "empty_snapshot_refusal" {
+				if !entityless {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
 					if admitted {
@@ -67,15 +70,45 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, request.RunID)
 				}
 				var forkRunID string
+				forkPoint := request.EventID
+				if entityless {
+					// The ordinary entityless handler must actually emit and settle.
+					// Its original ingress is now a post-output replay-policy probe;
+					// only the settled output isolates the empty-snapshot admission.
+					var outputID string
+					deadline := time.Now().Add(servedProofPollDeadline)
+					for {
+						err := rt.DB.QueryRow(`SELECT e.event_id FROM events e WHERE e.run_id=$1 AND e.event_name='work.completed' AND EXISTS (SELECT 1 FROM event_receipts r WHERE r.event_id=e.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline')`, request.RunID).Scan(&outputID)
+						if err == nil {
+							break
+						}
+						if !errors.Is(err, sql.ErrNoRows) {
+							t.Fatal(err)
+						}
+						if time.Now().After(deadline) {
+							t.Fatalf("entityless output did not settle: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, request.RunID))
+						}
+						time.Sleep(10 * time.Millisecond)
+					}
+					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, request.RunID)
+					requireLifecycleEventCount(t, rt, request.RunID, "work.completed", 1)
+					if surface == "empty_snapshot_refusal" {
+						forkPoint = outputID
+					}
+				}
 				var beforeState, beforeFields string
 				var beforeRevision int
-				if surface != "empty_snapshot_refusal" {
+				if !entityless {
 					if err := rt.DB.QueryRow(`SELECT current_state,revision,CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1`, request.RunID).Scan(&beforeState, &beforeRevision, &beforeFields); err != nil {
 						t.Fatal(err)
 					}
 				}
 				checkSource := func() {
-					if surface == "empty_snapshot_refusal" {
+					if entityless {
+						var count int
+						if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, request.RunID).Scan(&count); err != nil || count != 0 {
+							t.Fatalf("entityless source acquired entity state: count=%d err=%v", count, err)
+						}
 						return
 					}
 					var state, fields string
@@ -87,6 +120,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						t.Fatal("fork mutated source entity state")
 					}
 				}
+				checkSource()
 				if surface == "admitted_http" {
 					params := map[string]any{"source_run_id": request.RunID, "fork_event_id": request.EventID, "allow_source_freeze": true, "idempotency_key": "receiver-fork"}
 					var fork, duplicate apiv1.RunForkExecutionResult
@@ -102,7 +136,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						t.Fatal("missing fork owner")
 					}
 					result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runtimerunforkexecution.SelectedContractExecutionRequest{
-						SourceRunID: request.RunID, At: request.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
+						SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
 						AgentRuntime:      rt.ForkRuntime,

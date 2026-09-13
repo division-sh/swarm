@@ -365,14 +365,6 @@ func (s *rejectingPrimaryDecisionCards) GetDecisionCard(context.Context, string)
 	return decisioncard.Card{}, s.reject()
 }
 
-func (s *rejectingPrimaryDecisionCards) DeferDecisionCard(context.Context, decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	return decisioncard.DecisionOutcome{}, s.reject()
-}
-
-func (s *rejectingPrimaryDecisionCards) CancelDecisionCardInput(context.Context, decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	return decisioncard.InputDraft{}, s.reject()
-}
-
 func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelectedPipeline(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)

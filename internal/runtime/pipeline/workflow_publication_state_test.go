@@ -142,6 +142,31 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 		if err := bound.ValidateMutation(record, plan); err == nil {
 			t.Fatal("additional schedule reused authority")
 		}
+		cancel := schedule
+		cancel.Kind, cancel.CancelCause, cancel.CancelledAt = WorkflowScheduleMutationCancel, "completed", at
+		cancelPlan := WorkflowLifecycleMutationPlan{Schedules: []WorkflowScheduleMutation{cancel}}
+		cancelled, err := prepareWorkflowPublicationState(record, cancelPlan, "review", fact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cancelled.ValidateMutation(record, cancelPlan); err != nil {
+			t.Fatal(err)
+		}
+		for name, change := range map[string]func(*WorkflowScheduleMutation){
+			"cause": func(s *WorkflowScheduleMutation) { s.CancelCause = "superseded" },
+			"time":  func(s *WorkflowScheduleMutation) { s.CancelledAt = at.Add(time.Second) },
+		} {
+			t.Run("cancel "+name, func(t *testing.T) {
+				changed := cancel
+				change(&changed)
+				if err := changed.Validate(runID); err != nil {
+					t.Fatal(err)
+				}
+				if err := cancelled.ValidateMutation(record, WorkflowLifecycleMutationPlan{Schedules: []WorkflowScheduleMutation{changed}}); err == nil {
+					t.Fatal("different cancellation reused prospective authority")
+				}
+			})
+		}
 	})
 	descriptor, err := prepared.PinRoutingDescriptor()
 	if err != nil || descriptor.ID != "one" || descriptor.AddressFields["entity.case_id"] != "exact" {

@@ -114,9 +114,13 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			selectedFact := mustServeTestPersistedSourceArtifactFact(selectedHash)
 			seedStandingRuntimeContextBundle(t, selectedStores.SourceArtifactWriter(), selectedBundle)
 			runtimeInstanceID := uuid.NewString()
-			primaryModule := stubWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			primaryBundle := &runtimecontracts.WorkflowContractBundle{
 				Platform: selectedBundle.Platform,
-			})}
+			}
+			if err := runtimecontracts.CompileWorkflowSemantics(primaryBundle); err != nil {
+				t.Fatalf("admit primary control bundle: %v", err)
+			}
+			primaryModule := stubWorkflowModule{source: semanticview.Wrap(primaryBundle)}
 			primary := newStandingRuntimeContextRuntime(t, process, primaryStores, primaryModule, primaryFact, runtimeInstanceID, catalog)
 			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog)
 			capability, _ := installSelectedStoreTestProcessTopology(t, selectedStores, selected, selectedModule.SemanticSource(), selectedFact, runtimeInstanceID)

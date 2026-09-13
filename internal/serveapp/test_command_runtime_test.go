@@ -1144,6 +1144,10 @@ steps:
 	return root
 }
 
+// The generated fixture uses conversation_reference="0". Keep its independent
+// concrete-instance vector in the ordered scenario and public target oracle.
+const publicTelegramMockApprovalInstance = "telegram-chat/ti-62b4c69a288fa3253aa5a034"
+
 func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 	t.Helper()
 	root := canonicalrouting.CopyTelegramChatWithoutIngress(t)
@@ -1166,7 +1170,7 @@ telegram-revision:
   event_handlers:
     telegram_send_message.revision_requested: {}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "tests", "public-mock-approval.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "tests", "public-mock-approval.yaml"), fmt.Sprintf(`
 name: public generated Telegram mock approval
 steps:
   - publish: inbound.telegram.text_message
@@ -1183,9 +1187,9 @@ expect:
     ordered:
       - inbound.telegram.text_message
       - platform.activity_requested
-      - telegram-chat/telegram_send_message.succeeded
+      - %s/telegram_send_message.succeeded
   no_dead_letters: true
-`)
+`, publicTelegramMockApprovalInstance))
 	return root
 }
 
@@ -1215,14 +1219,17 @@ func requirePublicMockApprovalEvents(t *testing.T, endpoint, runID string) {
 		"limit":  500,
 	}, &result)
 	wantCounts := map[string]int{
-		"inbound.telegram.text_message":                 1,
-		"platform.activity_requested":                   1,
-		"telegram-chat/telegram_send_message.succeeded": 1,
+		"inbound.telegram.text_message":                                         1,
+		"platform.activity_requested":                                           1,
+		publicTelegramMockApprovalInstance + "/telegram_send_message.succeeded": 1,
 	}
 	counts := make(map[string]int, len(wantCounts))
 	replyRequested := 0
 	for _, event := range result.Events {
 		if strings.HasPrefix(event.EventName, "telegram-chat/") && strings.HasSuffix(event.EventName, "/telegram.reply_requested") {
+			if event.EventName != publicTelegramMockApprovalInstance+"/telegram.reply_requested" {
+				t.Fatalf("reply borrowed a different template instance: %s", event.EventName)
+			}
 			replyRequested++
 			if event.ExecutionMode != executionmode.Mock {
 				t.Fatalf("event %s execution mode = %q, want mock", event.EventName, event.ExecutionMode)
@@ -1255,13 +1262,16 @@ func requirePublicMockApprovalEvents(t *testing.T, endpoint, runID string) {
 		if event.EventName != "inbound.telegram.text_message" {
 			continue
 		}
+		if event.Payload["conversation_reference"] != "0" || event.Payload["conversation_scope"] != "direct" {
+			t.Fatalf("generated input disagrees with instance golden vector: %#v", event.Payload)
+		}
 		agentDeliveries := 0
 		for _, delivery := range event.Deliveries {
 			if delivery.SubscriberType != "agent" || !strings.HasPrefix(delivery.SubscriberID, "phrase-bot") {
 				continue
 			}
 			agentDeliveries++
-			if delivery.Target.FlowID != "telegram-chat" || !strings.HasPrefix(delivery.Target.FlowInstance, "telegram-chat/") || delivery.Target.EntityID == "" {
+			if delivery.Target.FlowID != "telegram-chat" || delivery.Target.FlowInstance != publicTelegramMockApprovalInstance || delivery.Target.EntityID == "" {
 				t.Fatalf("public input agent delivery target = %#v", delivery.Target)
 			}
 		}

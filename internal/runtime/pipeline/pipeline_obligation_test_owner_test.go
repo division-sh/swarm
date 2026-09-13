@@ -129,18 +129,6 @@ func (*unavailablePipelineTestDecisionCards) ListDecisionCards(context.Context, 
 func (*unavailablePipelineTestDecisionCards) GetDecisionCard(context.Context, string) (decisioncard.Card, error) {
 	return decisioncard.Card{}, decisioncard.ErrNotFound
 }
-func (*unavailablePipelineTestDecisionCards) DecideDecisionCard(context.Context, decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	return decisioncard.DecisionOutcome{}, decisioncard.ErrNotFound
-}
-func (*unavailablePipelineTestDecisionCards) DeferDecisionCard(context.Context, decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	return decisioncard.DecisionOutcome{}, decisioncard.ErrNotFound
-}
-func (*unavailablePipelineTestDecisionCards) BeginDecisionCardInput(context.Context, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	return decisioncard.InputDraft{}, decisioncard.ErrNotFound
-}
-func (*unavailablePipelineTestDecisionCards) CancelDecisionCardInput(context.Context, decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	return decisioncard.InputDraft{}, decisioncard.ErrNotFound
-}
 func (*unavailablePipelineTestDecisionCards) ListDecisionCardChanges(context.Context, decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
 	return nil, nil
 }
