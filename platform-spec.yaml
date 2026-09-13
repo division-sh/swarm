@@ -4097,6 +4097,12 @@ handler_specification:
               or provenance. The target result-event schema must allow every runtime-owned field the action will emit and
               every required target field must be supplied by runtime-owned fields or declared result payload fields.
               Unsupported result-event declarations fail closed at verify/runtime.'
+            result_evidence: >
+              Typed artifact action emit-site evidence distinguishes runtime-owned result fields from authored payload
+              additions. Generic payload completeness and dedicated artifact validation consume that same evidence;
+              diagnostic site labels do not grant field ownership. The writer census includes all seven actual output
+              mappings at handler and handler.rules action sites. Completion and join outcome actions remain unsupported
+              and contribute no artifact writer or publication authority.
           behavior: The runtime normalizes file content, validates yaml content against the declared file schema, writes only
             allowlisted paths under the service-owned repo root, verifies the projected git tree stays within max_repo_bytes,
             commits staged files atomically, verifies the resulting ref is a 40-character git SHA, persists only the declared

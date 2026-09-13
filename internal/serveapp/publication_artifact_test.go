@@ -53,6 +53,20 @@ func TestServedArtifactPublicationBothStores(t *testing.T) {
 						if err != sql.ErrNoRows {
 							t.Fatal(err)
 						}
+						if outcome == "success" {
+							failureName := "commit.failed"
+							if flow != "." {
+								failureName = flow + "/" + failureName
+							}
+							var failed string
+							err := rt.DB.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name=$2`, seed.RunID, failureName).Scan(&failed)
+							if err == nil {
+								t.Fatalf("successful artifact request produced failure: %s", failed)
+							}
+							if err != sql.ErrNoRows {
+								t.Fatal(err)
+							}
+						}
 						time.Sleep(20 * time.Millisecond)
 					}
 					if eventID == "" {
@@ -93,12 +107,38 @@ func TestServedArtifactPublicationBothStores(t *testing.T) {
 						if err := json.Unmarshal([]byte(rawSource), &route); err != nil {
 							t.Fatal(err)
 						}
-						instance := flow
+						validSource := sourceKind == "static_flow" && route.FlowID == flow && route.FlowInstance == flow
 						if flow == "." {
-							instance = seed.RunID
+							validSource = sourceKind == "root" && route.FlowID == "" && route.FlowInstance == ""
 						}
-						if sourceKind != "static_flow" || route.FlowID != flow || route.FlowInstance != instance {
+						if !validSource {
 							t.Fatalf("artifact source=%s %+v", sourceKind, route)
+						}
+						if route.EntityID == "" {
+							t.Fatal("artifact action lost its authored receiving entity")
+						}
+						var rawFields string
+						if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, seed.RunID, route.EntityID).Scan(&rawFields); err != nil {
+							t.Fatal(err)
+						}
+						var fields map[string]any
+						if err := json.Unmarshal([]byte(rawFields), &fields); err != nil {
+							t.Fatal(err)
+						}
+						if fields["last_request_id"] != requestID || fields["last_source_event_id"] != seed.EventID {
+							t.Fatalf("artifact state lost request/source evidence: %s", rawFields)
+						}
+						if outcome == "success" {
+							if fields["status"] != "committed" || !reflect.DeepEqual(fields["failure"], map[string]any{}) {
+								t.Fatalf("artifact state did not commit success: %s", rawFields)
+							}
+							for _, field := range []string{"repo_url", "current_ref", "file_manifest"} {
+								if !reflect.DeepEqual(fields[field], public.Payload[field]) {
+									t.Fatalf("artifact output %s differs from publication: %s", field, rawFields)
+								}
+							}
+						} else if fields["status"] != "failed" || !reflect.DeepEqual(fields["failure"], public.Payload["failure"]) {
+							t.Fatalf("artifact failure state differs from publication: %s", rawFields)
 						}
 						payload, err := json.Marshal(public.Payload)
 						if err != nil {
@@ -120,7 +160,9 @@ func TestServedArtifactPublicationBothStores(t *testing.T) {
 						if err != nil || string(content) != document {
 							t.Fatalf("artifact bytes=%q err=%v", content, err)
 						}
-						count, err := exec.Command("git", "-C", repoPath, "rev-list", "--count", "HEAD").CombinedOutput()
+						// The provider creates an empty initialization commit. Count the
+						// exact business request, not that unrelated repository setup.
+						count, err := exec.Command("git", "-C", repoPath, "rev-list", "--count", "--fixed-strings", "--grep=Swarm-Request-Id: "+requestID, "HEAD").CombinedOutput()
 						if err != nil || strings.TrimSpace(string(count)) != "1" {
 							t.Fatalf("artifact commits=%q err=%v", count, err)
 						}

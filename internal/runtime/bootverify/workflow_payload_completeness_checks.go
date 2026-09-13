@@ -91,6 +91,9 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 					if _, ok := emitSite.Fields[field]; ok {
 						continue
 					}
+					if _, ok := emitSite.RuntimeFields[field]; ok {
+						continue
+					}
 
 					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
 						CheckID:  "semantic_drift_payload_completeness",
@@ -122,10 +125,11 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 }
 
 type payloadCompletenessEmitSite struct {
-	EventType string
-	Label     string
-	Fields    map[string]struct{}
-	Err       error
+	EventType     string
+	Label         string
+	Fields        map[string]struct{}
+	RuntimeFields map[string]struct{}
+	Err           error
 }
 
 func payloadCompletenessRequiredFields(resolution semanticview.EventSchemaResolution) []string {
@@ -134,7 +138,7 @@ func payloadCompletenessRequiredFields(resolution semanticview.EventSchemaResolu
 
 func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidentity.ExecutableNode, triggerEventType string, handler runtimecontracts.SystemNodeEventHandler) []payloadCompletenessEmitSite {
 	var out []payloadCompletenessEmitSite
-	add := func(label string, spec runtimecontracts.EmitSpec) {
+	add := func(label string, spec runtimecontracts.EmitSpec, runtimeFields []string) {
 		if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
 			lowered, err := bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
 				Node:             node,
@@ -163,19 +167,24 @@ func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidenti
 			}
 			targets[key] = struct{}{}
 		}
+		owned := map[string]struct{}{}
+		for _, field := range runtimeFields {
+			owned[field] = struct{}{}
+		}
 		out = append(out, payloadCompletenessEmitSite{
-			EventType: eventType,
-			Label:     strings.TrimSpace(label),
-			Fields:    targets,
+			EventType:     eventType,
+			Label:         strings.TrimSpace(label),
+			Fields:        targets,
+			RuntimeFields: owned,
 		})
 	}
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
-		add(payloadCompletenessDeclarativeSiteLabel(site), site.Spec)
+		add(payloadCompletenessDeclarativeSiteLabel(site), site.Spec, site.RuntimePayloadFields())
 	}
 	if handler.Guard != nil {
 		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
 			if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
-				add("guard.on_fail.escalate", failureSpec.EscalationEmitSpec())
+				add("guard.on_fail.escalate", failureSpec.EscalationEmitSpec(), nil)
 			}
 		}
 	}

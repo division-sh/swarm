@@ -9,13 +9,18 @@ import (
 )
 
 type HandlerDeclarativeEmitSite struct {
-	Source    string
-	SiteKey   string
-	RuleID    string
-	RuleRef   runtimeidentity.DeclarationIdentity
-	RuleIndex int
-	Spec      EmitSpec
-	ItemAlias string
+	Source               string
+	SiteKey              string
+	RuleID               string
+	RuleRef              runtimeidentity.DeclarationIdentity
+	RuleIndex            int
+	Spec                 EmitSpec
+	ItemAlias            string
+	runtimePayloadFields []string
+}
+
+func (s HandlerDeclarativeEmitSite) RuntimePayloadFields() []string {
+	return append([]string(nil), s.runtimePayloadFields...)
 }
 
 func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
@@ -87,8 +92,13 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 		if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
 			return
 		}
-		add(source+".success", siteKey+".success", ruleID, ruleRef, ruleIndex, EmitSpec{Event: action.ArtifactRepo.SuccessEvent, Fields: action.ArtifactRepo.SuccessPayload})
-		add(source+".failure", siteKey+".failure", ruleID, ruleRef, ruleIndex, EmitSpec{Event: action.ArtifactRepo.FailureEvent, Fields: action.ArtifactRepo.FailurePayload})
+		for _, result := range action.ArtifactRepo.ResultPublications() {
+			before := len(out)
+			add(source+"."+result.Label(), siteKey+"."+result.Label(), ruleID, ruleRef, ruleIndex, result.EmitSpec())
+			if len(out) != before {
+				out[len(out)-1].runtimePayloadFields = result.RuntimePayloadFields()
+			}
+		}
 	}
 	addAction("handler.action", "handler.action", "", runtimeidentity.DeclarationIdentity{}, -1, handler.Action)
 	templateSites := HandlerRuleEmitTemplateSites(handler)

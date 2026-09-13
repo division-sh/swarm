@@ -35,8 +35,8 @@ func CopyPublicationArtifact(t testing.TB, mode string) string {
     provider: text
     repo_id: text
     namespace: text
-    partition_key: text
-    display_slug: text
+    partition_key: text?
+    display_slug: text?
     request_id: text
     source_event_id: text
     repo_url: text
@@ -95,6 +95,7 @@ commit.failed:
   subscribes_to: [artifact.requested]
   event_handlers:
     artifact.requested:
+      create_entity: true
       action:
         id: artifact_repo_commit
         artifact_repo:

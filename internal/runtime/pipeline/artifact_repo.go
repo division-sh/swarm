@@ -1172,20 +1172,6 @@ func artifactRepoManifest(repoID, namespace, partitionKey, displaySlug string, p
 	return out
 }
 
-var artifactRepoResultReservedPayloadFields = map[string]struct{}{
-	"repo_id":         {},
-	"namespace":       {},
-	"partition_key":   {},
-	"display_slug":    {},
-	"request_id":      {},
-	"source_event_id": {},
-	"repo_url":        {},
-	"current_ref":     {},
-	"file_manifest":   {},
-	"failure":         {},
-	"provenance":      {},
-}
-
 func artifactRepoSuccessPayload(base runtimeengine.BaseContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID, repoURL, currentRef string, manifest map[string]any, opts workflowexpr.ValueExpressionOptions) (map[string]any, error) {
 	out, err := artifactRepoDeclaredResultPayload(base, "success_payload", specSuccessPayload(spec), opts)
 	if err != nil {
@@ -1255,7 +1241,7 @@ func artifactRepoDeclaredResultPayload(base runtimeengine.BaseContext, label str
 		if target == "" {
 			return nil, fmt.Errorf("artifact_repo_commit %s contains an empty target field", label)
 		}
-		if _, reserved := artifactRepoResultReservedPayloadFields[target]; reserved {
+		if runtimecontracts.ArtifactRepoResultPayloadFieldReserved(target) {
 			return nil, fmt.Errorf("artifact_repo_commit %s must not override runtime-owned field %s", label, target)
 		}
 		value, ok, err := evalMailboxExpressionValue(base, expr, opts)
