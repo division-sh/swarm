@@ -22,6 +22,7 @@ import (
 type mailboxCompletionChild struct {
 	Source, Config, Store string
 	Barrier               bool
+	SelectionCut          string
 }
 
 func TestMailboxCompletionServeProcessHelper(t *testing.T) {
@@ -46,23 +47,29 @@ func TestMailboxCompletionServeProcessHelper(t *testing.T) {
 		defer ready.Close()
 		defer release.Close()
 		opts.TestWorkflowNodeHandlerStartHook = func(_ context.Context, _ string, event events.Event) error {
-			if event.Type() != "work.completed" {
-				return nil
-			}
-			payload, err := canonicaljson.Decode(event.Payload())
-			if err != nil {
-				return err
-			}
-			value, _ := payload.Lookup("result")
-			result, _ := value.String()
-			if result != "approved" {
-				return nil
+			if request.SelectionCut != "" {
+				if string(event.Type()) != request.SelectionCut {
+					return nil
+				}
+			} else {
+				if event.Type() != "work.completed" {
+					return nil
+				}
+				payload, err := canonicaljson.Decode(event.Payload())
+				if err != nil {
+					return err
+				}
+				value, _ := payload.Lookup("result")
+				result, _ := value.String()
+				if result != "approved" {
+					return nil
+				}
 			}
 			if _, err := ready.Write([]byte{1}); err != nil {
 				return err
 			}
 			var signal [1]byte
-			_, err = io.ReadFull(release, signal[:])
+			_, err := io.ReadFull(release, signal[:])
 			return err
 		}
 	}
@@ -145,6 +152,10 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 }
 
 func mailboxCompletionProcessHarness(t *testing.T, backend, root string) (func(bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime), *os.File, *os.File) {
+	return mailboxCompletionProcessHarnessWithSelectionCut(t, backend, root, "")
+}
+
+func mailboxCompletionProcessHarnessWithSelectionCut(t *testing.T, backend, root, cut string) (func(bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime), *os.File, *os.File) {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	var db *sql.DB
@@ -177,7 +188,7 @@ func mailboxCompletionProcessHarness(t *testing.T, backend, root string) (func(b
 		t.Cleanup(func() { _ = f.Close() })
 	}
 	start := func(barrier bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime) {
-		raw, err := json.Marshal(mailboxCompletionChild{Source: root, Config: config, Store: backend, Barrier: barrier})
+		raw, err := json.Marshal(mailboxCompletionChild{Source: root, Config: config, Store: backend, Barrier: barrier, SelectionCut: cut})
 		if err != nil {
 			t.Fatal(err)
 		}
