@@ -9,6 +9,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 func projectionResolverBundle() *runtimecontracts.WorkflowContractBundle {
@@ -74,7 +75,11 @@ func projectionResolverBundle() *runtimecontracts.WorkflowContractBundle {
 }
 
 func TestForHandler_FiltersProjectionIssuesToActiveHandler(t *testing.T) {
-	source := semanticview.Wrap(projectionResolverBundle())
+	bundle := projectionResolverBundle()
+	source := semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	resolved := Resolve(source)
 	if len(resolved.Issues) == 0 {
 		t.Fatal("Resolve issues = 0, want global invalid bad-node declaration")

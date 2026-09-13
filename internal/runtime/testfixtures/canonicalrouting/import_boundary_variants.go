@@ -21,6 +21,9 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
 	removeInheritedScenarios(t, root)
+	removeClosedVariantFiles(t, root,
+		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
+		"consumer/nodes.yaml", "consumer/schema.yaml", "consumer")
 	parentSubscription := "parent.lead_enriched"
 	connected := false
 	mode := "static"
@@ -87,7 +90,11 @@ pins:
     events:
       - work.completed
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "events.yaml"), "work.completed: {}\n")
+	workerEvents := "work.completed: {}\n"
+	if !connected {
+		workerEvents += "work.requested: {}\n"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "events.yaml"), workerEvents)
 	workerNodes := `
 worker-node:
   execution_type: system_node

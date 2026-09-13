@@ -220,8 +220,8 @@ func managerTestSemanticSource() semanticview.Source {
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Events: events,
 	}
-	root := runtimecontracts.FlowContractView{Path: ".", Events: events, Children: []runtimecontracts.FlowContractView{review}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Events: events, Children: []runtimecontracts.FlowContractView{review}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -229,7 +229,11 @@ func managerTestSemanticSource() semanticview.Source {
 				"review": &root.Children[0],
 			},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func ensureManagerTestSemanticSource(am *AgentManager) {

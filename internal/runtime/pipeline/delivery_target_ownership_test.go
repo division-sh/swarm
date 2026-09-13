@@ -247,12 +247,16 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 			},
 		},
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "timer-proof"},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{".": &flow},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("selected-root-event"), "timer.cancel", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{},
 	)

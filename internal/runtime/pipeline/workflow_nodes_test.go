@@ -228,12 +228,16 @@ func workflowNodeExactSubscriptionSource(authored string) semanticview.Source {
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"listener": node},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func loadHarnessInjectionPipelineSource(t *testing.T, root string) semanticview.Source {
@@ -378,6 +382,11 @@ func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T
 		},
 	}
 
+	root := &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Nodes: bundle.Nodes, Events: bundle.Events}
+	bundle.FlowTree = runtimecontracts.FlowTree{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	nodes, err := LoadWorkflowNodes(semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
@@ -929,7 +938,8 @@ func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryConsumesExactTarget
 
 func workflowNodeDirectTemplateDeliverySource() semanticview.Source {
 	accountCase := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "account_case"},
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "account_case"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"account.ready": {}},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 			Pins: runtimecontracts.FlowPins{

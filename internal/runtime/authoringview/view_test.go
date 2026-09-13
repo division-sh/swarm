@@ -511,6 +511,10 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	}
 	dispatcher.EventHandlers["order.accepted"] = qualified
 	bundle.Nodes["dispatcher"] = dispatcher
+	source := semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	effective, err := bundle.ResolveFanOutEffectiveSemantics(identitytest.RootNode(t, "dispatcher"), "order.accepted", *qualified.FanOut)
 	if err != nil {
 		t.Fatalf("ResolveFanOutEffectiveSemantics: %v", err)
@@ -519,7 +523,6 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 		t.Fatalf("effective fan-out identity = %q, want line_item.id", effective.Identity)
 	}
 
-	source := semanticviewtest.WrapRootAgents(bundle)
 	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
 		t.Fatalf("PrepareFanOutPlans: %#v", failures)
 	}

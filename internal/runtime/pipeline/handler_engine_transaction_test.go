@@ -2573,6 +2573,9 @@ func newDeclarativeEmitContractCoordinator(t *testing.T, eventType string) (*Pip
 }
 
 func newDeclarativeEmitContractCoordinatorWithBundle(bundle *runtimecontracts.WorkflowContractBundle) (*PipelineCoordinator, *recordingPipelineBus) {
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
 	bus := &recordingPipelineBus{}
 	module := handlerTestWorkflowModuleWithBundle(bundle, bundle.Semantics.Name, "node-a")
 	return &PipelineCoordinator{

@@ -953,6 +953,9 @@ func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime
 	cfg = withTestResolvedIntent(t, cfg, "You coordinate workflow launch.")
 
 	source := semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	authority := runtimeauthority.NewSourceProvider(source)
 	emitRegistry := runtimetools.NewEmitRegistry(source, authority)
 	bus := &directiveFactoryPublishBus{}

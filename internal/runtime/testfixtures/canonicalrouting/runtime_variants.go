@@ -67,6 +67,9 @@ func CopyPayloadNamedField(t testing.TB) string {
 func CopyLegacyStaticCreate(t testing.TB, withTimer bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateCreateMintedKey)
+	removeClosedVariantFiles(t, root,
+		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
+		"validator/events.yaml", "validator/entities.yaml", "validator/nodes.yaml", "validator/schema.yaml", "validator")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\n")
 	inputs := "thing.created"

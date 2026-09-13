@@ -47,7 +47,8 @@ func TestValidateInputEventsRejectsDeclaredUnroutableRootInput(t *testing.T) {
 	}
 	bundle.FlowTree.ByID["discovery"] = flow
 	bundle.FlowSchemas["discovery"] = flow.Schema
-	bundle.Nodes["scan-orchestrator"] = flow.Nodes["scan-orchestrator"]
+	bundle.FlowTree.Root.Nodes = nil
+	bundle.Nodes = nil
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile unroutable root-input test semantics: %v", err)
 	}
@@ -115,8 +116,9 @@ func TestValidateInputEventsTreatsAbsentRootSchemaAsEmptyDomain(t *testing.T) {
 func rootInputTestBundle(t testing.TB, eventName string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
-		Path:  "discovery",
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
+		Path:   "discovery",
+		Events: map[string]runtimecontracts.EventCatalogEntry{eventName: {}},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
@@ -128,11 +130,14 @@ func rootInputTestBundle(t testing.TB, eventName string) *runtimecontracts.Workf
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events:   map[string]runtimecontracts.EventCatalogEntry{eventName: {}},
+		Nodes:    map[string]runtimecontracts.SystemNodeContract{"scan-orchestrator": flow.Nodes["scan-orchestrator"]},
+		Children: []runtimecontracts.FlowContractView{flow},
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": flow.Nodes["scan-orchestrator"],
-		},
+		Nodes: root.Nodes,
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},

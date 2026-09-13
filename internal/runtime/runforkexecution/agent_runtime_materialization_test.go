@@ -546,7 +546,8 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 
 func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
-		Path: "analysis",
+		Path:   "analysis",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"analysis.requested": {}, "analysis.done": {}},
 		Paths: runtimecontracts.FlowContractPaths{
 			FlowPath: "analysis",
 		},
@@ -591,6 +592,9 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
 
 	records, err := selectedContractStaticAgentRecords(selectedContractAgentTestRunID, semanticview.Wrap(bundle))
