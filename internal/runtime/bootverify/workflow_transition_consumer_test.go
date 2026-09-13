@@ -58,7 +58,7 @@ func TestCompiledTransitionHandlerReferenceGuards(t *testing.T) {
 				tc.mutate(bundle, &handler)
 			}
 			bundle.Semantics.NodeHandlers[node.Key()]["ticket.created"] = handler
-			c := &checkerContext{source: semanticview.Wrap(bundle)}
+			c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
 			findings := append(c.transitionReferences(), c.handlerFieldCompliance()...)
 			if tc.want == "" {
 				if len(findings) != 0 {
@@ -97,7 +97,7 @@ func TestCompiledTransitionAllRuleContextActionReferences(t *testing.T) {
 					handler.Join.Timeout.Outcome = rule
 				}
 				bundle.Semantics.NodeHandlers[node.Key()]["ticket.created"] = handler
-				c := &checkerContext{source: semanticview.Wrap(bundle)}
+				c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
 				findings := c.transitionReferences()
 				switch action {
 				case "unknown":
@@ -146,7 +146,7 @@ func TestCompiledTransitionStrictCarrierReferences(t *testing.T) {
 			topology := bundle.Semantics.StageTopologies["."]
 			tc.mutate(&topology.Edges[0])
 			bundle.Semantics.StageTopologies["."] = topology
-			c := &checkerContext{source: semanticview.Wrap(bundle)}
+			c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
 			findings := append(c.transitionReferences(), c.transitionOwnership()...)
 			if !reportContains(findings, tc.check, tc.want) {
 				t.Fatalf("missing %s %q: %#v", tc.check, tc.want, findings)
@@ -186,7 +186,7 @@ func TestCompiledTransitionOwnershipUsesCanonicalAdmission(t *testing.T) {
 				t.Fatalf("canonical admission: %v", err)
 			}
 			bundle.Semantics.StageTopologies["."] = graph
-			findings := (&checkerContext{source: semanticview.Wrap(bundle)}).transitionOwnership()
+			findings := (&checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}).transitionOwnership()
 			if tc.mutate == nil {
 				if len(findings) != 0 {
 					t.Fatalf("valid carrier rejected: %#v", findings)
@@ -207,7 +207,7 @@ func TestCompiledTransitionOwnershipUsesCanonicalAdmission(t *testing.T) {
 		if _, err := graph.AdmitTransition(edge.Site(), edge.From, edge.To); err != nil {
 			t.Fatal(err)
 		}
-		findings := (&checkerContext{source: semanticview.Wrap(bundle)}).transitionOwnership()
+		findings := (&checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}).transitionOwnership()
 		if !reportContains(findings, "transition_ownership_validation", "does not belong to its originating handler") {
 			t.Fatalf("declaration ownership proof was lost: %#v", findings)
 		}
@@ -229,7 +229,7 @@ func TestCompiledTransitionRootGateUsesScopedStageMetadata(t *testing.T) {
 		if foreignSource {
 			gate.Stage = "child_only"
 		}
-		findings := checkStageGateValidation(&checkerContext{source: semanticview.Wrap(bundle)})
+		findings := checkStageGateValidation(&checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)})
 		if foreignSource {
 			if !reportContains(findings, "stage_gate_validation", "gate source stage child_only is not declared") {
 				t.Fatalf("root gate borrowed sibling declaration: %#v", findings)
@@ -255,7 +255,7 @@ func TestCompiledTransitionConsumerAgreement(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadLifecycleEmitterBundle(t, tc.variant)
-			source := semanticview.Wrap(bundle)
+			source := compileBootverifySchemasPreservingPlans(bundle)
 			topology, ok := semanticview.WorkflowStageTopology(source, tc.flow)
 			if !ok || len(topology.Edges) == 0 {
 				t.Fatal("strict source loading produced no carriers")
@@ -332,7 +332,7 @@ func TestCompiledTransitionLifecycleReferenceGuards(t *testing.T) {
 				t.Fatalf("fixture has no %s carrier", tc.source)
 			}
 			bundle.Semantics.StageTopologies["."] = topology
-			c := &checkerContext{source: semanticview.Wrap(bundle)}
+			c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
 			findings := append(c.transitionReferences(), c.transitionOwnership()...)
 			if !reportContains(findings, tc.check, tc.want) {
 				t.Fatalf("missing %s %q: %#v", tc.check, tc.want, findings)
@@ -369,7 +369,7 @@ func TestCompiledTransitionStageTimerReferenceGuards(t *testing.T) {
 				tc.mutate(&topology.Edges[0])
 			}
 			bundle.Semantics.StageTopologies["."] = topology
-			c := &checkerContext{source: semanticview.Wrap(bundle)}
+			c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
 			findings := append(c.transitionReferences(), c.transitionOwnership()...)
 			if tc.want == "" {
 				if len(findings) != 0 {
@@ -442,7 +442,7 @@ worker:
 	}
 	repo := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	source := semanticview.Wrap(bundle)
+	source := compileBootverifySchemasPreservingPlans(bundle)
 	for _, flow := range []string{"sibling", ".", "child"} {
 		topology, ok := semanticview.WorkflowStageTopology(source, flow)
 		if !ok {

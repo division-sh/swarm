@@ -393,7 +393,7 @@ func handBuiltScopedReaderBundle(handler runtimecontracts.SystemNodeEventHandler
 			},
 		},
 	}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"state": {Fields: map[string]runtimecontracts.EntityFieldDecl{
 				"items":  {Type: "map[text]text"},
@@ -408,6 +408,8 @@ func handBuiltScopedReaderBundle(handler runtimecontracts.SystemNodeEventHandler
 		},
 		FlowTree: runtimecontracts.FlowTree{Root: &root},
 	}
+	compileBootverifyRootSource(bundle)
+	return bundle
 }
 
 func findingContainsAll(findings []Finding, checkID string, values ...string) bool {

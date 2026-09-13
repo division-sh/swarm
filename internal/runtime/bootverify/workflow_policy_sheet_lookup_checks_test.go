@@ -7,7 +7,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestPolicySheetLookupValueRowsAcceptsConsumedDefaultedInlineLookup(t *testing.T) {
@@ -137,7 +136,7 @@ func bootverifyLookupFindings(handler runtimecontracts.SystemNodeEventHandler) [
 			},
 		},
 	}
-	source := semanticview.Wrap(bundle)
+	source := compileBootverifyRootSource(bundle)
 	return checkPolicySheetLookupValueRows(newCheckerContext(context.Background(), source, Options{}))
 }
 

@@ -164,7 +164,7 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 			Tools: []string{"schedule"}, Permissions: []string{"schedule"},
 		},
 	}
-	source := semanticviewtest.WrapRootAgents(bundle)
+	source := compileBootverifyRootSource(bundle)
 
 	report := Run(context.Background(), source, Options{})
 
@@ -632,10 +632,17 @@ func TestRun_MapsGeneratedToolSchemaClosureToBootCheck(t *testing.T) {
 			},
 		},
 	})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("fixture source lost its bundle")
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
+		t.Fatalf("source admission must reject undeclared schema type: %v", err)
+	}
 
 	report := Run(context.Background(), source, Options{})
 
-	if !reportContains(report.Errors(), "generated_tool_schema_closure", "NotDeclared") {
+	if !reportContains(report.Errors(), "generated_tool_schema_closure", "ready.event has no exact schema in .") {
 		t.Fatalf("expected generated_tool_schema_closure hard invalidity, got %#v", report.Errors())
 	}
 }
@@ -1683,7 +1690,7 @@ func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
 }
 
 func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"artifact-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -1758,7 +1765,7 @@ func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
 }
 
 func TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"artifact-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -2365,7 +2372,7 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 			}
 			bundle.Platform.Platform.Name = "swarm"
 			bundle.Platform.Platform.Version = "test"
-			source := semanticview.Wrap(bundle)
+			source := compileBootverifyRootSource(bundle)
 
 			report := Run(context.Background(), source, Options{})
 
@@ -2449,7 +2456,7 @@ func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *te
 }
 
 func TestRun_MapsDataAccumulationSourcePayloadMismatchToNamedError(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"item.received": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -2493,7 +2500,7 @@ func TestRun_MapsDataAccumulationSourcePayloadMismatchToNamedError(t *testing.T)
 }
 
 func TestRun_MapsEmptyDataAccumulationSourcePayloadSchemaToNamedError(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"item.received": {},
 		},
@@ -3261,7 +3268,7 @@ func schemaBoundActivityInputSource(expression, payloadType string, toolInputTyp
 	if toolInputRequired {
 		inputOptions = append(inputOptions, runtimecontracts.ToolSchemaRequired("value"))
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"work.received": {Payload: runtimecontracts.EventPayloadSpec{
 				Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -3289,7 +3296,7 @@ func schemaBoundActivityInputSource(expression, payloadType string, toolInputTyp
 }
 
 func schemaBoundQueryFilterSource(expression string) semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"WorkItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
 				"id":   {Type: "text"},
@@ -3341,7 +3348,7 @@ func TestRunCollectionItemConditionsUseSharedSourceOwner(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			source := compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
 				RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 					"ScoredItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
 				}},
@@ -3776,7 +3783,7 @@ func TestRun_MapsPhantomProducesToNamedWarning(t *testing.T) {
 		SubscribesTo: []string{"task.start"},
 	}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if report.HasErrors() {
 		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
@@ -3809,7 +3816,7 @@ func TestRun_ErrorsWhenEmitFieldsOmitRequiredEmittedField(t *testing.T) {
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 		t.Fatalf("expected payload completeness error for scan_id, got %#v", report.Errors())
@@ -3825,7 +3832,7 @@ func TestRun_ErrorsWithoutEmitFieldsEvenWhenContextSuggestsPassthrough(t *testin
 	entry.Payload.Required = []string{"entity_id", "scan_id"}
 	bundle.Events["market_research.scan_assigned"] = entry
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 		t.Fatalf("expected payload completeness error for scan_id, got %#v", report.Errors())
@@ -3856,7 +3863,7 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayload(t *testing.T) {
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 		t.Fatalf("unexpected payload completeness error when transform covers required fields, got %#v", report.Errors())
@@ -3882,7 +3889,7 @@ func TestRun_RejectsEmitFieldsForEmptyPayloadSchema(t *testing.T) {
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "authors undeclared payload field scan_id in emit.fields") {
 		t.Fatalf("expected undeclared emit field error for empty payload schema, got %#v", report.Errors())
@@ -3907,7 +3914,7 @@ func TestRun_LowersEmitFromBeforePayloadCompletenessAndExpressionValidation(t *t
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "handler.emit") {
 		t.Fatalf("unexpected payload completeness error after emit.from lowering, got %#v", report.Errors())
@@ -3941,7 +3948,7 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[full].emit_template") {
 		t.Fatalf("unexpected template payload completeness error after emit.from lowering, got %#v", report.Errors())
@@ -3967,7 +3974,7 @@ func TestRun_ReportsEmitFromLoweringErrorsAsPayloadCompletenessFailures(t *testi
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "emit.from entity cannot fill required emitted payload field missing_required") {
 		t.Fatalf("expected emit.from missing source field error, got %#v", report.Errors())
@@ -4014,7 +4021,7 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(
 			bundle.Nodes["dispatcher"] = node
 			bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 			if reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") {
 				t.Fatalf("unexpected payload completeness error for %s transform form, got %#v", tc.name, report.Errors())
@@ -4031,7 +4038,7 @@ func TestRun_ErrorsWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) 
 	entry.Payload.Required = []string{"entity_id", "current_state"}
 	bundle.Events["market_research.scan_assigned"] = entry
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "entity_id is not statically provable") {
 		t.Fatalf("expected payload completeness error for envelope-owned required field entity_id, got %#v", report.Errors())
@@ -4058,7 +4065,7 @@ func TestRun_ErrorsWhenEmitFieldsAuthorEnvelopeOwnedFieldWithoutRequiredPayload(
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "authors envelope-owned field entity_id in emit.fields") {
 		t.Fatalf("expected authored envelope field error even without required payload fields, got %#v", report.Errors())
@@ -4096,7 +4103,7 @@ func TestRun_ErrorsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *test
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[partial].emit") {
 		t.Fatalf("expected site-specific payload completeness error for partial rule, got %#v", report.Errors())
@@ -4146,7 +4153,7 @@ func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") ||
 		reportContains(report.Errors(), "semantic_drift_payload_completeness", "geography is not statically provable") {
@@ -4191,7 +4198,7 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[partial].emit_template") {
 		t.Fatalf("expected template branch payload completeness error for partial rule, got %#v", report.Errors())
@@ -4234,7 +4241,7 @@ func TestRun_ErrorsForOnSuccessEmitSitePayloadDrift(t *testing.T) {
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "handler.on_success.emit") {
 		t.Fatalf("expected payload completeness error for on_success emit site, got %#v", report.Errors())
@@ -4273,7 +4280,7 @@ func TestRun_ErrorsForOnCompleteEmitSitePayloadDrift(t *testing.T) {
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "on_complete[partial].emit") {
 		t.Fatalf("expected on_complete payload completeness error, got %#v", report.Errors())
@@ -4307,7 +4314,7 @@ func TestRun_ErrorsForFanOutEmitSitePayloadDrift(t *testing.T) {
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
 	completeBootverifyFanOutFixture(t, bundle, "dispatcher", "scan.corpus_dispatch")
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "handler.fan_out.emit") {
 		t.Fatalf("expected fan_out payload completeness error, got %#v", report.Errors())
@@ -4477,6 +4484,7 @@ func setBootverifyFlowEvent(t testing.TB, bundle *runtimecontracts.WorkflowContr
 		t.Fatalf("flow %q is missing", flowPath)
 	}
 	view.Events[eventType] = entry
+	recompileBootverifySemantics(t, bundle)
 }
 
 func TestRun_ReportsInputPinWiringHardInvalidity(t *testing.T) {
@@ -5029,6 +5037,7 @@ func TestRun_ExactSubscriptionAdmissionPreservesOnlySameScopeAgentException(t *t
 			if tc.kind == "agent" {
 				addBootverifyAgentOwner(bundle, "child", "child", "observer")
 			}
+			compileBootverifyRootSource(bundle)
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 			gotInvalid := reportContains(report.HardInvalidities(), "legacy_qualified_subscription", tc.authored)
@@ -8586,6 +8595,23 @@ func recompileBootverifySemantics(t testing.TB, bundle *runtimecontracts.Workflo
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("CompileWorkflowSemantics: %v", err)
 	}
+}
+
+func compileBootverifyRootSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	source := semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return source
+}
+
+// Hand-built carrier tests deliberately supply plans, including corrupt ones.
+// Admit their schema declarations without rebuilding the evidence under test.
+func compileBootverifySchemasPreservingPlans(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	semantics := bundle.Semantics
+	source := compileBootverifyRootSource(bundle)
+	bundle.Semantics = semantics
+	return source
 }
 
 func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) {

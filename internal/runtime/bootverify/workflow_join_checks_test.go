@@ -322,6 +322,7 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 }
 
 func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBundle) {
+	compileBootverifyRootSource(bundle)
 	transitions := []runtimecontracts.HandlerTransitionSemantic{}
 	joins := []runtimecontracts.WorkflowJoinPlan{}
 	for nodeID, node := range bundle.Nodes {

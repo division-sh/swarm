@@ -10,8 +10,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -32,7 +30,7 @@ stages:
 `)
 	repoRoot := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifySchemasPreservingPlans(bundle), Options{})
 	if reportContains(report.Errors(), "semantic_drift_unreachable_state", "closed") {
 		t.Fatalf("timer-only terminal was classified unreachable: %#v", report.Errors())
 	}
@@ -79,7 +77,7 @@ func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
 	if !found {
 		t.Fatalf("nested delivery join topology = %#v, want active -> done completion edge", topology.Edges)
 	}
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), compileBootverifySchemasPreservingPlans(bundle), Options{})
 	if reportContains(report.Errors(), "semantic_drift_unreachable_state", "done") {
 		t.Fatalf("delivery-join-only terminal was classified unreachable: %#v", report.Errors())
 	}
@@ -128,7 +126,7 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 		t.Fatal(err)
 	}
 	declared := stringSet(stages)
-	got := timerActivationStates(semanticviewtest.WrapRootAgents(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, declared)
+	got := timerActivationStates(compileBootverifySchemasPreservingPlans(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, declared)
 	for _, target := range []string{"complete-a", "timeout-a"} {
 		if _, ok := got[target]; !ok {
 			t.Fatalf("activation states = %#v, missing %s", got, target)
@@ -181,7 +179,7 @@ func TestTimerActivationUnionsMultipleMatchingHandlerTopologies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := timerActivationStates(semanticviewtest.WrapRootAgents(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, stringSet(stages))
+	got := timerActivationStates(compileBootverifySchemasPreservingPlans(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, stringSet(stages))
 	for _, target := range []string{"exact-target", "pattern-target"} {
 		if _, ok := got[target]; !ok {
 			t.Fatalf("activation states = %#v, missing %s from matching handler union", got, target)
@@ -247,7 +245,7 @@ func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := timerActivationStates(semanticviewtest.WrapRootAgents(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, stringSet(stages))
+			got := timerActivationStates(compileBootverifySchemasPreservingPlans(bundle), runtimecontracts.WorkflowTimerContract{FlowID: "."}, trigger, stringSet(stages))
 			if len(got) != len(tc.want) {
 				t.Fatalf("activation states = %#v, want %v", got, tc.want)
 			}
@@ -300,7 +298,7 @@ func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOthe
 			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": topology},
 		},
 	}
-	source := semanticviewtest.WrapRootAgents(bundle)
+	source := compileBootverifySchemasPreservingPlans(bundle)
 	reachable := authoredReachableStates(source, ".", "waiting")
 	if _, ok := reachable["escaped"]; !ok {
 		t.Fatalf("reachable = %#v, want loop escape target", reachable)

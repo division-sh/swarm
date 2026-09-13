@@ -114,9 +114,7 @@ func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsume
 	}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "test"
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
+	compileBootverifyRootSource(bundle)
 	return bundle
 }
 

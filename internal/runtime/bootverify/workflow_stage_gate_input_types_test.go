@@ -227,7 +227,8 @@ func TestStageGateLiteralEmitConsumesExactResolvedEventFieldSchema(t *testing.T)
 
 func stageGateLiteralEmitReport(field runtimecontracts.EventFieldSpec, rootTypes runtimecontracts.TypeCatalogDocument, literal any) Report {
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootTypes: rootTypes,
+		RootSchema: stageGateInputTestSchema(),
+		RootTypes:  rootTypes,
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"review.completed": {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"value": field}, Required: []string{"value"}},
@@ -248,11 +249,12 @@ func stageGateLiteralEmitReport(field runtimecontracts.EventFieldSpec, rootTypes
 			}},
 		},
 	}
-	return Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	return Run(context.Background(), compileBootverifySchemasPreservingPlans(bundle), Options{})
 }
 
 func stageGateValidationBundle(plan runtimecontracts.WorkflowGatePlan, fields map[string]runtimecontracts.EventFieldSpec, required []string) *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: stageGateInputTestSchema(),
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"review.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: fields, Required: required}},
 		},
@@ -261,6 +263,15 @@ func stageGateValidationBundle(plan runtimecontracts.WorkflowGatePlan, fields ma
 			Gates: []runtimecontracts.WorkflowGatePlan{plan},
 		},
 	}
+	compileBootverifySchemasPreservingPlans(bundle)
+	return bundle
+}
+
+func stageGateInputTestSchema() *runtimecontracts.FlowSchemaDocument {
+	return &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{
+		Declared: true,
+		Entries:  []runtimecontracts.FlowStageDeclaration{{ID: "awaiting_review", Initial: true}, {ID: "complete", Terminal: true}},
+	}}
 }
 
 func stageGateLiteralFinding(report Report) string {

@@ -224,14 +224,7 @@ func completeBootverifyFanOutFixture(t testing.TB, bundle *runtimecontracts.Work
 	}
 	node.EventHandlers[eventType] = handler
 	bundle.Nodes[nodeID] = node
-	if bundle.Semantics.NodeHandlers == nil {
-		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	if bundle.Semantics.NodeHandlers[nodeID] == nil {
-		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
-
+	compileBootverifyRootSource(bundle)
 	bundle.PrepareFanOutPlans()
 }
 

@@ -52,6 +52,8 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				bundle.Events["work.result"] = rc.EventCatalogEntry{Payload: rc.EventPayloadSpec{Properties: map[string]rc.EventFieldSpec{"note": {Type: "text"}}, Required: []string{"note"}}}
 				tools, _ := semanticview.Bundle(schemaBoundActivityInputSource(value, "text", rc.ToolSchemaString, true))
 				bundle.Tools = tools.Tools
+				bundle.FlowTree.Root.Tools = tools.Tools
+				recompileBootverifySemantics(t, bundle)
 				report := Run(context.Background(), source, Options{})
 				presenceError := false
 				for _, f := range report.Errors() {

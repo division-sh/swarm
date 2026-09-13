@@ -7,7 +7,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestLoopValidationAcceptsBoundedDisjointRevisionLoop(t *testing.T) {
@@ -176,7 +175,7 @@ func TestLoopValidationRejectsReservedControlBucketAsNodeID(t *testing.T) {
 }
 
 func loopValidationFindings(bundle *runtimecontracts.WorkflowContractBundle) []Finding {
-	return checkLoopValidation(newCheckerContext(context.Background(), semanticview.Wrap(bundle), Options{}))
+	return checkLoopValidation(newCheckerContext(context.Background(), compileBootverifySchemasPreservingPlans(bundle), Options{}))
 }
 
 func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {

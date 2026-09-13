@@ -161,7 +161,7 @@ func TestCollectionItemSemanticsRejectsRootOnlyPathsWithoutPanic(t *testing.T) {
 }
 
 func collectionItemSemanticsSource(handler runtimecontracts.SystemNodeEventHandler) semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
 			"WorkItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
 				"id": {Type: "text"}, "status": {Type: "text"},
