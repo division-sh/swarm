@@ -1,6 +1,7 @@
 package pinrouting
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -630,7 +631,11 @@ func TestLowerTargetFreeInputRoutePlansUsesCanonicalRenamedIdentitySource(t *tes
 		triggergeneration.FromCanonicalBytes([]byte("target-free-renamed-source")),
 	)
 
-	plans, issues := lowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{authorization})
+	source, err := bindTargetFreeProviderFixture(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, issues := lowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{authorization})
 	if len(issues) != 0 || len(plans) != 1 || plans[0].instanceKey == nil {
 		t.Fatalf("plans/issues = %#v/%#v, want one target-free instance plan", plans, issues)
 	}
@@ -1162,7 +1167,11 @@ func TestLowerTargetFreeInputRoutePlansRejectsAuthoritativeSourceTypeMismatch(t 
 		triggergeneration.FromCanonicalBytes([]byte("target-free-source-type")),
 	)
 
-	plans, issues := lowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{authorization})
+	source, err := bindTargetFreeProviderFixture(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, issues := lowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{authorization})
 	if len(plans) != 0 || len(issues) != 1 || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
 		t.Fatalf("plans/issues = %#v/%#v, want target-free source type blocker", plans, issues)
 	}
@@ -1199,30 +1208,33 @@ func TestLowerTargetFreeInputRoutePlansAcceptsSyntheticProjectionWithDistinctSch
 	}
 }
 
-func TestLowerPublicInputRoutePlanRejectsSyntheticProjectionCollision(t *testing.T) {
+func TestPublicInputImportedBindingRejectsSyntheticProjectionCollision(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			source, endpoint := targetFreeSyntheticCollisionFixture(t, tc.mint)
-			_, issue := LowerPublicInputRoutePlan(source, endpoint)
-			if issue.Failure != ConnectFailureResolutionProjectionCollision || !strings.Contains(issue.Detail, "field chat_id conflicts") {
-				t.Fatalf("public input issue = %#v, want synthetic projection collision", issue)
+			bundle := targetFreeSyntheticProjectionBundle(t, tc.mint, true)
+			if source, err := bindTargetFreeProviderFixture(bundle); source != nil || err == nil || !strings.Contains(err.Error(), "field chat_id conflicts") {
+				t.Fatalf("public input binding = %v, %v, want no source and synthetic projection collision", source, err)
 			}
 		})
 	}
 }
 
-func TestLowerTargetFreeInputRoutePlansRejectsSyntheticProjectionCollision(t *testing.T) {
+func TestLowerTargetFreeInputRoutePlansRejectsMissingImportedBinding(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			source, _ := targetFreeSyntheticCollisionFixture(t, tc.mint)
+			bundle := targetFreeSyntheticProjectionBundle(t, tc.mint, false)
 			authorization := runtimeprovideroutput.MustAuthorization(
 				"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
 				"sha256:"+strings.Repeat("a", 64),
 				triggergeneration.FromCanonicalBytes([]byte("target-free-synthetic-collision")),
 			)
-			plans, issues := lowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{authorization})
-			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureResolutionProjectionCollision || !strings.Contains(issues[0].Detail, "field chat_id conflicts") {
-				t.Fatalf("provider plans/issues = %#v/%#v, want synthetic projection collision", plans, issues)
+			plans, issues := lowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{authorization})
+			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureProducerEventSchemaMissing {
+				t.Fatalf("provider plans/issues = %#v/%#v, want missing imported binding refusal", plans, issues)
+			}
+			collision := targetFreeSyntheticProjectionBundle(t, tc.mint, true)
+			if source, err := bindTargetFreeProviderFixture(collision); source != nil || err == nil || !strings.Contains(err.Error(), "field chat_id conflicts") {
+				t.Fatalf("provider input binding = %v, %v, want no source and synthetic projection collision", source, err)
 			}
 		})
 	}
@@ -1253,16 +1265,11 @@ func assertTargetFreeSchemaRoles(t testing.TB, plan ConnectRoutePlan) {
 
 func targetFreeSyntheticProjectionFixture(t testing.TB, mint canonicalrouting.CreateMint, collision bool) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
 	t.Helper()
-	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyProviderRollbackSyntheticProjection(t, mint)
-	if collision {
-		root = canonicalrouting.CopyProviderRollbackSyntheticCollision(t, mint)
-	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle := targetFreeSyntheticProjectionBundle(t, mint, collision)
+	source, err := bindTargetFreeProviderFixture(bundle)
 	if err != nil {
-		t.Fatalf("load target-free synthetic projection artifact: %v", err)
+		t.Fatalf("bind target-free imported schema: %v", err)
 	}
-	source := semanticview.Wrap(bundle)
 	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "inbound.telegram.text_message")
 	endpoint, ok := association.Endpoint()
 	if !ok {
@@ -1271,8 +1278,63 @@ func targetFreeSyntheticProjectionFixture(t testing.TB, mint canonicalrouting.Cr
 	return source, endpoint
 }
 
-func targetFreeSyntheticCollisionFixture(t testing.TB, mint canonicalrouting.CreateMint) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
-	return targetFreeSyntheticProjectionFixture(t, mint, true)
+func targetFreeSyntheticProjectionBundle(t testing.TB, mint canonicalrouting.CreateMint, collision bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	var root string
+	if collision {
+		root = canonicalrouting.CopyProviderRollbackSyntheticCollision(t, mint)
+	} else {
+		root = canonicalrouting.CopyProviderRollbackSyntheticProjection(t, mint)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load target-free synthetic projection artifact: %v", err)
+	}
+	return bundle
+}
+
+// These lowering-only fixtures supply an explicit external schema at the same
+// imported-pin boundary as provider admission. They do not simulate pack loading
+// or grant publication authority; the real provider-import journeys test those.
+func bindTargetFreeProviderFixture(bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, error) {
+	const event = "inbound.telegram.text_message"
+	entry, exists := bundle.Events[event]
+	if !exists {
+		return nil, fmt.Errorf("provider fixture omits schema %s", event)
+	}
+	schema, err := runtimecontracts.CompileImportedEventSchema("consumer", event, entry, runtimecontracts.CompiledEventSchemaSource{Layer: "provider_fixture"})
+	if err != nil {
+		return nil, err
+	}
+	pin, exists := bundle.FlowInputEventPin("consumer", event)
+	if !exists {
+		return nil, fmt.Errorf("provider fixture omits consumer input %s", event)
+	}
+	bound, err := pin.BindImportedEventSchema(schema)
+	if err != nil {
+		return nil, err
+	}
+	return targetFreeProviderFixtureSource{Source: semanticview.Wrap(bundle), input: bound}, nil
+}
+
+type targetFreeProviderFixtureSource struct {
+	semanticview.Source
+	input runtimecontracts.CompiledFlowInputPin
+}
+
+func (s targetFreeProviderFixtureSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
+	if flowID == "consumer" {
+		return []runtimecontracts.CompiledFlowInputPin{s.input}
+	}
+	return s.Source.FlowInputEventPins(flowID)
+}
+
+func (s targetFreeProviderFixtureSource) FlowInputEventPin(flowID, event string) (runtimecontracts.CompiledFlowInputPin, bool) {
+	if flowID == "consumer" && event == s.input.EventType() {
+		return s.input, true
+	}
+	return s.Source.FlowInputEventPin(flowID, event)
 }
 
 func TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts(t *testing.T) {

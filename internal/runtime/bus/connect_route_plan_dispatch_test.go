@@ -52,25 +52,25 @@ type providerOutputAuthorizedTestSource struct {
 	semanticview.Source
 	generation     triggergeneration.Generation
 	authorizations []runtimeprovideroutput.Authorization
+	input          runtimecontracts.CompiledFlowInputPin
 }
 
 func (s providerOutputAuthorizedTestSource) SemanticCapabilities() semanticview.Capabilities {
 	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, s.authorizations)
 }
 
-func (s providerOutputAuthorizedTestSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
-	if entry, key, ok := s.Source.ResolveFlowEventCatalogEntry(flowID, eventType); ok {
-		return entry, key, true
+func (s providerOutputAuthorizedTestSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
+	if flowID == "consumer" {
+		return []runtimecontracts.CompiledFlowInputPin{s.input}
 	}
-	eventType = strings.TrimSpace(eventType)
-	for _, authorization := range s.authorizations {
-		if authorization.Event() != eventType {
-			continue
-		}
-		entry, ok := s.Source.EventEntry(eventType)
-		return entry, eventType, ok
+	return s.Source.FlowInputEventPins(flowID)
+}
+
+func (s providerOutputAuthorizedTestSource) FlowInputEventPin(flowID, event string) (runtimecontracts.CompiledFlowInputPin, bool) {
+	if flowID == "consumer" && event == s.input.EventType() {
+		return s.input, true
 	}
-	return runtimecontracts.EventCatalogEntry{}, "", false
+	return s.Source.FlowInputEventPin(flowID, event)
 }
 
 type connectRoutePlanDescriptorStore struct {
@@ -4488,6 +4488,22 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 	source := providerOutputAuthorizedTestSource{
 		Source:     loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true)),
 		generation: generation, authorizations: []runtimeprovideroutput.Authorization{authorization},
+	}
+	entry, exists := source.Source.EventEntry(eventName)
+	if !exists {
+		t.Fatal("provider fixture is missing its explicit event schema")
+	}
+	schema, err := runtimecontracts.CompileImportedEventSchema("consumer", eventName, entry, runtimecontracts.CompiledEventSchemaSource{Layer: "provider_fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin, exists := source.Source.FlowInputEventPin("consumer", eventName)
+	if !exists {
+		t.Fatal("provider fixture is missing its exact input pin")
+	}
+	source.input, err = pin.BindImportedEventSchema(schema)
+	if err != nil {
+		t.Fatal(err)
 	}
 	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil, nil)
 	externalSource, err := events.NewExternalIngressRoutingSource("consumer", eventtest.UUID("provider-ingress"), events.RoutingSourceAuthorityProviderAdmissionPlan)
