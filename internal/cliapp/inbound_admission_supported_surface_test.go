@@ -9,14 +9,76 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
+
+func TestWorkflowModuleAdmitsProviderBindingsBeforeHandlerMaterialization(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	root := writeInboundAdmissionPolicyMatrixFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(RepoRoot()), runtimecontracts.WorkflowContractLoadOptions{
+		AdmitPackInventory: packadmission.AdmitInventory,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("directory", func(t *testing.T) {
+		requireProviderBindingsBeforeHandlerMaterialization(t, bundle)
+	})
+	t.Run("retained_artifact", func(t *testing.T) {
+		retained, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(RepoRoot(), bundle.SourceArtifact, runtimecontracts.DefaultPlatformSpecFile(RepoRoot()), runtimecontracts.WorkflowContractLoadOptions{
+			AdmitPackInventory: packadmission.AdmitInventory,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireProviderBindingsBeforeHandlerMaterialization(t, retained)
+	})
+}
+
+func requireProviderBindingsBeforeHandlerMaterialization(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
+	t.Helper()
+	if _, err := runtimepipeline.LoadWorkflowNodes(semanticview.Wrap(bundle)); err == nil {
+		t.Fatal("uncomposed source admitted provider-dependent handlers")
+	}
+	module, source, err := NewSwarmWorkflowModuleForBundle(bundle)
+	if err != nil {
+		t.Fatalf("materialize composed module: %v", err)
+	}
+	if len(module.WorkflowNodes()) == 0 {
+		t.Fatal("materialized module lost its admitted source or handlers")
+	}
+	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
+		WorkflowModule: module, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+	})
+	if err != nil {
+		t.Fatalf("runtime composition after module materialization: %v", err)
+	}
+	for _, event := range []string{"inbound.intercom", "inbound.telegram.text_message"} {
+		pin, ok := source.FlowInputEventPin("matrix", event)
+		_, bound := pin.ProducerEventSchema()
+		if !ok || !bound {
+			t.Fatalf("%s missing exact imported binding", event)
+		}
+		for _, consumer := range []semanticview.Source{module.SemanticSource(), projection.Source()} {
+			got, ok := consumer.FlowInputEventPin("matrix", event)
+			if !ok || got != pin {
+				t.Fatalf("%s module/runtime consumer replaced the admitted binding", event)
+			}
+			if _, ok := consumer.FlowInputEventPin("unrelated", event); ok {
+				t.Fatalf("%s admitted an undeclaring flow", event)
+			}
+		}
+	}
+}
 
 func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)

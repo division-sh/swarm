@@ -3,7 +3,9 @@ package cliapp
 import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -68,7 +70,22 @@ func loadConfiguredCLIWorkflowModule(repoRoot string, opts CLISourcePlatformSpec
 }
 
 func NewSwarmWorkflowModuleForBundle(bundle *runtimecontracts.WorkflowContractBundle) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
-	source := semanticview.Wrap(bundle)
+	hash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		return nil, nil, err
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(hash)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Imported bindings must exist before executable subscriptions are admitted.
+	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
+		Source: semanticview.Wrap(bundle), SourceArtifactFact: fact,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	source := projection.Source()
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		return nil, nil, err
