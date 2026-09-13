@@ -28,8 +28,7 @@ func NewEntityPredicateEnv(entity runtimecontracts.ResolvedCatalogType, extra ..
 	if !ok || provider.nodes[root.TypeName()] == nil {
 		return nil, fmt.Errorf("predicate entity must be a structural record")
 	}
-	// Bare aliases reuse the entity owner's field types, including its existing
-	// top-level nullable scalar convention; nested records remain exact.
+	// Bare aliases and the fields envelope reuse the entity owner's exact types.
 	node := provider.nodes[root.TypeName()]
 	options := []cel.EnvOption{cel.CustomTypeProvider(provider)}
 	if _, shadowsEnvelope := node.fields["fields"]; !shadowsEnvelope {

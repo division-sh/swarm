@@ -569,12 +569,16 @@ func readRuntimeStoreOrigin(ctx context.Context, q interface {
 }) (*RuntimeStoreOrigin, error) {
 	var origin RuntimeStoreOrigin
 	var createdAt any
-	err := q.QueryRowContext(ctx, `SELECT swarm_version, platform_version, created_at FROM runtime_store_metadata WHERE id = 1`).Scan(&origin.SwarmVersion, &origin.PlatformVersion, &createdAt)
+	var presenceModel string
+	err := q.QueryRowContext(ctx, `SELECT swarm_version, platform_version, created_at, entity_presence_model FROM runtime_store_metadata WHERE id = 1`).Scan(&origin.SwarmVersion, &origin.PlatformVersion, &createdAt, &presenceModel)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	if presenceModel != platformschema.EntityPresenceModel {
+		return nil, fmt.Errorf("runtime store entity_presence_model %q is unsupported; require %q", presenceModel, platformschema.EntityPresenceModel)
 	}
 	switch value := createdAt.(type) {
 	case time.Time:

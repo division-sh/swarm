@@ -236,6 +236,9 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
 	case SingletonCoordinatorPilotWrongValueShape:
 		return singletonCoordinatorFirstMapWriteYAML("set", "entity.lead_index", "key:\n              ref: payload.lead_id", `
             value:
+              status: active
+              score: 0
+              observations: []
               undeclared: true
 `)
 	case SingletonCoordinatorPilotUndeclaredTarget:

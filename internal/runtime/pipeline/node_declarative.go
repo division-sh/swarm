@@ -335,18 +335,24 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
+	materializationAdmitted := handlerExecutionEntityRequirementForNode(source, e.nodeRef, events.EventType(handlerEventKey), flowID, handler).materializes()
+	if exactDelivery {
+		materializationAdmitted = application.admitsEntityMaterialization()
+	}
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
-		EntityID:        identity.NormalizeEntityID(entityID),
-		Node:            e.nodeRef,
-		ExecutionFlowID: identity.NormalizeFlowID(flowID),
-		Route:           stateRoute,
-		Event:           evt,
-		ProducerSource:  producerSource,
-		HandlerEventKey: handlerEventKey,
-		JoinDeclaration: joinDeclaration,
-		ChainDepth:      evt.ChainDepth(),
-		Handler:         handler,
-		State:           stateSnapshot,
+		EntityMaterializationAdmitted: materializationAdmitted,
+		Preview:                       exactDelivery && application.previewOnly(),
+		EntityID:                      identity.NormalizeEntityID(entityID),
+		Node:                          e.nodeRef,
+		ExecutionFlowID:               identity.NormalizeFlowID(flowID),
+		Route:                         stateRoute,
+		Event:                         evt,
+		ProducerSource:                producerSource,
+		HandlerEventKey:               handlerEventKey,
+		JoinDeclaration:               joinDeclaration,
+		ChainDepth:                    evt.ChainDepth(),
+		Handler:                       handler,
+		State:                         stateSnapshot,
 	})
 	logComputeModuleReplayEvidence(ctx, e.coordinator.bus, e.nodeRef.Key(), evt, result.ComputeModuleTraces)
 	if err != nil {
@@ -445,7 +451,11 @@ func prepareHandlerMaterializationStateAtNode(source semanticview.Source, node i
 	if !route.Valid() {
 		return fmt.Errorf("materializing handler requires an exact workflow instance route")
 	}
-	state.Metadata = workflowMaterializeEntityFields(source, flowID, state.Metadata)
+	fields, err := workflowNormalizeEntityFields(source, flowID, state.Metadata)
+	if err != nil {
+		return err
+	}
+	state.Metadata = fields
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
 	}

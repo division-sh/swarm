@@ -1,3 +1,2 @@
 core:
-  grouped:
-  - GroupBucket
+  grouped: map[text][GroupItem]

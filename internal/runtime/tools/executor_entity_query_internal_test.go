@@ -66,14 +66,40 @@ func TestFilterEntityStateRowsCEL_RejectsUndeclaredFieldBeforeEvalOnEmptyRows(t 
 	}
 }
 
-func TestEntityFilterPreservesTopLevelNullComparisons(t *testing.T) {
+func TestEntityFilterRetiresTopLevelNullComparisons(t *testing.T) {
 	schema := testEntityFilterSchema()
-	rows := []map[string]any{{"fields": map[string]any{"status": nil, "score": nil}}}
+	rows := []map[string]any{{"fields": map[string]any{}}}
 	for _, expression := range []string{`status == null`, `score == null`} {
 		got, err := filterEntityStateRowsCEL(expression, rows, schema)
-		if err != nil || len(got) != 1 {
-			t.Fatalf("%s: rows=%v err=%v", expression, got, err)
+		if err == nil {
+			t.Fatalf("retired null comparison %s accepted: rows=%v", expression, got)
 		}
+	}
+	for _, expression := range []string{`!has(fields.status)`, `fields.?score.orValue(-1.0) == -1.0`} {
+		got, err := filterEntityStateRowsCEL(expression, rows, schema)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("presence predicate %s: rows=%v err=%v", expression, got, err)
+		}
+	}
+}
+
+func TestEntityFilterFieldsEnvelopeAndBusinessShadowing(t *testing.T) {
+	schema := testEntityFilterSchema()
+	rows := []map[string]any{{"fields": map[string]any{"metadata": map[string]any{"region": "us"}}}}
+	for _, expression := range []string{`fields.metadata.region == "us"`, `has(fields.metadata) && metadata.region == "us"`} {
+		got, err := filterEntityStateRowsCEL(expression, rows, schema)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("envelope %s: rows=%v err=%v", expression, got, err)
+		}
+	}
+	schema.Contract.Entity.Fields["fields"] = runtimecontracts.EntityFieldDecl{Type: "Metadata"}
+	rows = []map[string]any{{"fields": map[string]any{"fields": map[string]any{"region": "us"}}}}
+	got, err := filterEntityStateRowsCEL(`fields.region == "us"`, rows, schema)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("business shadow: rows=%v err=%v", got, err)
+	}
+	if _, err := filterEntityStateRowsCEL(`has(fields.score)`, rows, schema); err == nil {
+		t.Fatal("business fields record was reinterpreted as an envelope")
 	}
 }
 

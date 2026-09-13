@@ -3,11 +3,15 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -139,8 +143,14 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	ctx = runtimecorrelation.WithRunID(testAuthorActivityContext(ctx), runID)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-	createOperatorReadbackEntities(t, ctx, pg, runID, entityA, entityB, time.Now().UTC())
+	bundle := operatorEntityReadbackSource(t)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = testAuthorActivityContextForSource(ctx, fact)
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+	createOperatorReadbackEntities(t, ctx, pg, semanticview.Wrap(bundle), runID, entityA, entityB, time.Now().UTC())
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -201,8 +211,14 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
 	now := time.Unix(1700000000, 0).UTC()
-	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
-	createOperatorReadbackEntities(t, ctx, sqliteStore, runID, entityA, entityB, now)
+	bundle := operatorEntityReadbackSource(t)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = testAuthorActivityContextForSource(ctx, fact)
+	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, Artifact: bundle.SourceArtifact})
+	createOperatorReadbackEntities(t, ctx, sqliteStore, semanticview.Wrap(bundle), runID, entityA, entityB, now)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -247,7 +263,30 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 
 }
 
-func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected runtimetools.EntityPersistence, runID, entityA, entityB string, at time.Time) {
+func operatorEntityReadbackSource(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "scoring"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{
+		"schema.yaml":           "name: operator-readback\n",
+		"scoring/schema.yaml":   "name: scoring\nmode: template\ninstance: vertical_id\n",
+		"scoring/entities.yaml": "vertical:\n  vertical_id: text\n  vertical_name: text\n  review_note: text?\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := runCompletionRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bundle
+}
+
+func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected runtimetools.EntityPersistence, source semanticview.Source, runID, entityA, entityB string, at time.Time) {
 	t.Helper()
 	for _, record := range []runtimetools.EntityCreateRecord{
 		{
@@ -261,6 +300,7 @@ func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected 
 			Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "operator-readback-proof", HandlerStep: "create_entity"},
 		},
 	} {
+		record.Source = source
 		if err := selected.CreateEntity(ctx, record); err != nil {
 			t.Fatalf("create materialized entity %s: %v", record.EntityID, err)
 		}

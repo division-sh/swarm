@@ -2,10 +2,61 @@ package bootverify
 
 import (
 	"context"
-	rc "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	rc "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
+
+func TestEntityDefiniteAssignmentJoinOutcomeIdentity(t *testing.T) {
+	for _, variant := range []string{"separate destinations", "same destination missing timeout write", "same destination both write"} {
+		t.Run(variant, func(t *testing.T) {
+			root := canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
+			entityPath := filepath.Join(root, "portfolio", "entities.yaml")
+			entity, err := os.ReadFile(entityPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeBootverifyFixtureFile(t, entityPath, string(entity)+"  summary: text\n")
+			nodePath := filepath.Join(root, "portfolio", "nodes.yaml")
+			nodes, err := os.ReadFile(nodePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer := "          data_accumulation:\n            writes:\n              - {target_field: summary, value: collected}\n"
+			body := strings.Replace(string(nodes), "        on_complete:\n", "        on_complete:\n"+writer, 1)
+			if strings.HasPrefix(variant, "same destination") {
+				body = strings.Replace(body, "          advances_to: failed\n", "          advances_to: complete\n", 1)
+			}
+			if variant == "same destination both write" {
+				body = strings.Replace(body, "          after: 5m\n", "          after: 5m\n"+writer, 1)
+			}
+			writeBootverifyFixtureFile(t, nodePath, body)
+			repo := repoRootForBootverifyTest(t)
+			bundle := loadFixtureBundleAt(t, repo, root, rc.DefaultPlatformSpecFile(repo))
+			analysis, err := engine.BuildEntityAssignmentAnalysis(semanticview.Wrap(bundle), "portfolio")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if analysis.StageFacts("awaiting").Has("summary") {
+				t.Fatal("join output certified before an outcome")
+			}
+			want := variant != "same destination missing timeout write"
+			if analysis.StageFacts("complete").Has("summary") != want {
+				t.Fatalf("complete facts=%#v, want summary assigned=%v", analysis.StageFacts("complete"), want)
+			}
+			if analysis.StageFacts("failed").Has("summary") {
+				t.Fatal("timeout borrowed complete outcome's assignment")
+			}
+		})
+	}
+}
 
 func TestJoinPresenceAdmissionCompleteAndTimeout(t *testing.T) {
 	for _, phase := range []string{"complete_when", "on_complete", "timeout"} {

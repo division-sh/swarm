@@ -17,15 +17,20 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 		Module: handlerEngineProjectNodeModule(),
 	})
 
-	engine := newCoordinatorHandlerExecutionEngine(pc, pipelineNode(t, "", "node-a"))
+	node := pipelineNode(t, "", "node-a")
+	engine := newCoordinatorHandlerExecutionEngine(pc, node)
 	if engine == nil {
 		t.Fatal("expected engine")
 	}
-	outcome, err := engine.ExecuteHandlerSteps(testAuthorActivityContext(t, context.Background()), runtimecontracts.SystemNodeEventHandler{
+	ctx := withWorkflowNodeDeliveryRoute(testAuthorActivityContext(t, context.Background()), events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(node),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}),
+	})
+	outcome, err := engine.ExecuteHandlerSteps(ctx, runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, eventtest.RunCreatingRootIngress(
 		"00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1"}), time.Unix(1, 0).UTC(),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}), time.Unix(1, 0).UTC(),
 	), "custom.trigger")
 	if err != nil {
 		t.Fatalf("ExecuteHandlerSteps: %v", err)

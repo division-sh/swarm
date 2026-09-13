@@ -482,7 +482,7 @@ func TestGenerateEmitToolsForActor_GeneratedSchemaIsClosedRequiredAndRejectsUnde
 	}
 }
 
-func TestGeneratedToolSchemaClosureRejectsOpenOrPartialObjectSchemas(t *testing.T) {
+func TestGeneratedToolSchemaClosureRejectsUndeclaredRequiredAndInvalidEnums(t *testing.T) {
 	errs := validateGeneratedJSONSchema("tool.input", map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -492,14 +492,15 @@ func TestGeneratedToolSchemaClosureRejectsOpenOrPartialObjectSchemas(t *testing.
 					"mode": map[string]any{"type": "string", "enum": []any{}},
 				},
 				"additionalProperties": false,
+				"required":             []string{"undeclared"},
 			},
 		},
-		"additionalProperties": false,
+		"additionalProperties": true,
 	})
 	got := strings.Join(generatedSchemaClosureErrorStrings(errs), "\n")
 	for _, want := range []string{
-		"tool.input object schema must require declared property value",
-		"tool.input.properties.value object schema must require declared property mode",
+		"tool.input object schema must set additionalProperties=false",
+		"tool.input.properties.value required property undeclared is not declared",
 		"tool.input.properties.value.properties.mode enum schema must declare at least one allowed value",
 	} {
 		if !strings.Contains(got, want) {

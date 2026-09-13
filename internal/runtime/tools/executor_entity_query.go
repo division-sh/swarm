@@ -483,7 +483,11 @@ func validateEntityFilterSelectorReference(schema entityToolSchema, ref entityFi
 	if _, envelope := entityStateTopLevelFields[ref.Path]; envelope {
 		return nil
 	}
-	if _, err := schema.declaredField(ref.Path); err != nil {
+	path := ref.Path
+	if _, shadowsEnvelope := schema.Contract.Entity.Fields["fields"]; !shadowsEnvelope {
+		path = strings.TrimPrefix(path, "fields.")
+	}
+	if _, err := schema.declaredField(path); err != nil {
 		return decorateEntityFilterSelectorError(schema, ref, err)
 	}
 	return nil

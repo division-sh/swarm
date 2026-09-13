@@ -287,8 +287,8 @@ func mustComputeModuleReplayJSON(t *testing.T, value any) []byte {
 
 type replayStateRepo struct{}
 
-func (replayStateRepo) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
-	return runtimeengine.StateSnapshot{}, false, nil
+func (replayStateRepo) LoadState(_ context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
+	return runtimeengine.StateSnapshot{EntityID: address.EntityID, CurrentState: "pending"}, true, nil
 }
 
 func (replayStateRepo) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {

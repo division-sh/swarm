@@ -68,15 +68,19 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 						"handler_accumulators": map[string]any{nodeKey + ":work.ready": map[string]any{"items": []any{"a"}}},
 					}}
 					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-clear", runtimecontracts.SystemNodeEventHandler{
-						Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state", "pending_dedup", "revision_count"}},
+						Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}},
+						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+							{Operation: runtimecontracts.WorkflowDataOperationClear, TargetField: "entity.revision_count"},
+						}},
 					}, nil, initialMetadata, initialBuckets)
 					if !result.handled {
 						t.Fatal("clear execution was not handled")
 					}
-					for _, field := range []string{"revision_count", "dedup_key", "accumulated_count"} {
-						if _, ok := instance.Fields[field]; ok {
-							t.Fatalf("clear retained field %q in %#v", field, instance.Fields)
-						}
+					if _, ok := instance.Fields["revision_count"]; ok {
+						t.Fatalf("explicit clear retained revision_count: %#v", instance.Fields)
+					}
+					if instance.Fields["dedup_key"] != "pending-a" || asInt(instance.Fields["accumulated_count"]) != 1 {
+						t.Fatalf("private reset changed colliding business fields: %#v", instance.Fields)
 					}
 					if nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any); ok {
 						if _, retained := nodeBucket["handler_accumulators"]; retained {
@@ -279,6 +283,15 @@ func handlerEntityRequirementExecutionSource() semanticview.Source {
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": flow.Schema},
 	}
+	entity := bundle.RootEntities["test_entity"]
+	if entity.Fields == nil {
+		entity.Fields = map[string]runtimecontracts.EntityFieldDecl{}
+	}
+	entity.Fields["marker"] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	entity.Fields["revision_count"] = runtimecontracts.EntityFieldDecl{Type: "integer", IsOptional: true}
+	entity.Fields["dedup_key"] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	entity.Fields["accumulated_count"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	bundle.RootEntities["test_entity"] = entity
 	return handlerEntityRequirementSemanticSource{Source: semanticview.Wrap(bundle)}
 }
 

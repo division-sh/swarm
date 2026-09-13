@@ -293,7 +293,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		switch receiver.Policy {
 		case ForkReceiverOptionalAbsent, ForkReceiverOptionalExisting:
 		case ForkReceiverRequiredExisting, ForkReceiverRequiredMissing:
-			body = fmt.Sprintf("      guard:\n        id: exact_receiver_marker\n        check: \"entity.marker == '%s-owned'\"\n", receiver.Path)
+			body = fmt.Sprintf("      guard:\n        id: exact_receiver_marker\n        check: \"has(entity.marker) && entity.marker == '%s-owned'\"\n", receiver.Path)
 		case ForkReceiverExplicitCreate:
 			body = "      create_entity: true\n"
 			fallthrough

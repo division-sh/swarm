@@ -21,6 +21,15 @@ const semanticExecutionFixtureRunID = "00000000-0000-0000-0000-000000000001"
 // ExecuteSemanticFixture completes the durable facts that engine unit tests
 // intentionally omit while keeping the production executor fail-closed.
 func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
+	// Fixtures using the stateless repository supply their pre-existing snapshot
+	// here. Seed the repository explicitly; production must never substitute the
+	// request for a missing or successfully loaded empty snapshot. Tests of that
+	// boundary use a dedicated repository and call Execute/loadState directly.
+	if _, stateless := e.deps.StateRepo.(stubStateRepo); stateless {
+		fixture := *e
+		fixture.deps.StateRepo = sparseSnapshotRepo{snapshot: req.State}
+		e = &fixture
+	}
 	if strings.TrimSpace(req.HandlerEventKey) == "" {
 		req.HandlerEventKey = string(req.Event.Type())
 	}

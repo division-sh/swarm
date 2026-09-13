@@ -82,15 +82,15 @@ func TestMaterialize_EnforcesSchemaRefinementEquality(t *testing.T) {
 		},
 	}
 
-	if _, err := Materialize(contract, map[string]any{"component": "deploy", "owner": "deploy"}); err != nil {
+	if _, err := NormalizeState(contract, map[string]any{"component": "deploy", "owner": "deploy"}); err != nil {
 		t.Fatalf("Materialize matching equality: %v", err)
 	}
-	if _, err := Materialize(contract, map[string]any{"component": "deploy", "owner": "other"}); err == nil || !strings.Contains(err.Error(), "must equal") {
+	if _, err := NormalizeState(contract, map[string]any{"component": "deploy", "owner": "other"}); err == nil || !strings.Contains(err.Error(), "must equal") {
 		t.Fatalf("Materialize mismatched equality = %v, want equality failure", err)
 	}
 }
 
-func TestNormalizeFieldValue_RejectsIsolatedEqualityParticipants(t *testing.T) {
+func TestNormalizeFieldValueIsTypeValidationNotAssignmentProof(t *testing.T) {
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{
 			Fields: map[string]runtimecontracts.EntityFieldDecl{
@@ -104,16 +104,19 @@ func TestNormalizeFieldValue_RejectsIsolatedEqualityParticipants(t *testing.T) {
 	}
 
 	for _, field := range []string{"owner", "component"} {
-		if _, err := NormalizeFieldValue(contract, field, "deploy"); err == nil || !strings.Contains(err.Error(), "participates in equal_to") {
-			t.Fatalf("NormalizeFieldValue(%s) = %v, want isolated equality rejection", field, err)
+		if _, err := NormalizeFieldValue(contract, field, "deploy"); err != nil {
+			t.Fatalf("NormalizeFieldValue(%s): %v", field, err)
+		}
+		if _, err := ApplyMutations(contract, nil, []Mutation{{Target: "entity." + field, Value: "deploy"}}); err == nil {
+			t.Fatalf("mutation of %s bypassed final-candidate equality", field)
 		}
 	}
-	if _, err := Materialize(contract, map[string]any{"component": "deploy", "owner": "deploy"}); err != nil {
+	if _, err := NormalizeState(contract, map[string]any{"component": "deploy", "owner": "deploy"}); err != nil {
 		t.Fatalf("Materialize should still allow full-object equality proof: %v", err)
 	}
 }
 
-func TestMaterialize_EnforcesNestedDefaultRefinements(t *testing.T) {
+func TestNormalizeState_EnforcesSuppliedNestedRefinements(t *testing.T) {
 	minLength := 1
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{
@@ -135,10 +138,13 @@ func TestMaterialize_EnforcesNestedDefaultRefinements(t *testing.T) {
 		},
 	}
 
-	if _, err := Materialize(contract, nil); err == nil || !strings.Contains(err.Error(), "length must be >=") {
-		t.Fatalf("Materialize defaulted nested object = %v, want nested refinement failure", err)
+	if state, err := NormalizeState(contract, nil); err != nil || len(state) != 0 {
+		t.Fatalf("unassigned state = %#v, %v", state, err)
 	}
-	if _, err := Materialize(contract, map[string]any{"spec": map[string]any{"name": "deploy"}}); err != nil {
+	if _, err := NormalizeState(contract, map[string]any{"spec": map[string]any{"name": ""}}); err == nil || !strings.Contains(err.Error(), "length must be >=") {
+		t.Fatalf("supplied nested object = %v, want nested refinement failure", err)
+	}
+	if _, err := NormalizeState(contract, map[string]any{"spec": map[string]any{"name": "deploy"}}); err != nil {
 		t.Fatalf("Materialize explicit nested object: %v", err)
 	}
 }
@@ -156,15 +162,15 @@ func TestMaterialize_PreservesOptionalNestedFieldOmission(t *testing.T) {
 		}},
 	}
 
-	materialized, err := Materialize(contract, nil)
+	materialized, err := NormalizeState(contract, map[string]any{"spec": map[string]any{"name": "deploy"}})
 	if err != nil {
 		t.Fatalf("Materialize defaults: %v", err)
 	}
-	if got := materialized["spec"]; !reflect.DeepEqual(got, map[string]any{"name": ""}) {
-		t.Fatalf("default spec = %#v, want required name only", got)
+	if got := materialized["spec"]; !reflect.DeepEqual(got, map[string]any{"name": "deploy"}) {
+		t.Fatalf("spec = %#v, want supplied required name only", got)
 	}
 
-	explicit, err := Materialize(contract, map[string]any{"spec": map[string]any{"name": "deploy", "note": "ready"}})
+	explicit, err := NormalizeState(contract, map[string]any{"spec": map[string]any{"name": "deploy", "note": "ready"}})
 	if err != nil {
 		t.Fatalf("Materialize explicit optional field: %v", err)
 	}
@@ -190,13 +196,13 @@ func TestMaterialize_OptionalNestedEqualityRequiresMatchingPresence(t *testing.T
 		}},
 	}
 
-	if _, err := Materialize(contract, map[string]any{"spec": map[string]any{}}); err != nil {
+	if _, err := NormalizeState(contract, map[string]any{"spec": map[string]any{}}); err != nil {
 		t.Fatalf("both optional equality fields omitted: %v", err)
 	}
-	if _, err := Materialize(contract, map[string]any{"spec": map[string]any{"left": "same"}}); err == nil || !strings.Contains(err.Error(), "target is missing") {
+	if _, err := NormalizeState(contract, map[string]any{"spec": map[string]any{"left": "same"}}); err == nil || !strings.Contains(err.Error(), "target is missing") {
 		t.Fatalf("one-sided optional equality error = %v", err)
 	}
-	if _, err := Materialize(contract, map[string]any{"spec": map[string]any{"left": "same", "right": "same"}}); err != nil {
+	if _, err := NormalizeState(contract, map[string]any{"spec": map[string]any{"left": "same", "right": "same"}}); err != nil {
 		t.Fatalf("present matching optional equality fields: %v", err)
 	}
 }
@@ -229,7 +235,10 @@ func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 		},
 	}
 
-	materialized, err := Materialize(contract, nil)
+	materialized, err := NormalizeState(contract, map[string]any{
+		"tags": []any{}, "legacy_tags": []any{}, "prefixed_tags": []any{},
+		"spec": map[string]any{"features": []any{}, "legacy_features": []any{}, "notes": []any{}},
+	})
 	if err != nil {
 		t.Fatalf("Materialize defaults: %v", err)
 	}
@@ -390,12 +399,12 @@ func TestContainedOperationTarget_RejectsSetOrMergeIndex(t *testing.T) {
 	}
 }
 
-func TestEnumDefaultIsOrderInert(t *testing.T) {
+func TestExplicitEnumInitializerIsOrderInert(t *testing.T) {
 	build := func(values []string) Contract {
 		return Contract{
 			Entity: runtimecontracts.EntityContract{
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
-					"status": {Type: "order_status"},
+					"status": {Type: "order_status", Initial: "draft"},
 				},
 			},
 			Types: runtimecontracts.TypeCatalogDocument{
@@ -408,23 +417,23 @@ func TestEnumDefaultIsOrderInert(t *testing.T) {
 	original := build([]string{"archived", "draft", "published"})
 	permuted := build([]string{"published", "archived", "draft"})
 
-	got, err := defaultValue(original, "order_status", nil)
+	got, err := Initialize(original, nil)
 	if err != nil {
 		t.Fatalf("defaultValue original: %v", err)
 	}
-	gotPermuted, err := defaultValue(permuted, "order_status", nil)
+	gotPermuted, err := Initialize(permuted, nil)
 	if err != nil {
 		t.Fatalf("defaultValue permuted: %v", err)
 	}
-	if got != "draft" || gotPermuted != "draft" {
+	if got["status"] != "draft" || gotPermuted["status"] != "draft" {
 		t.Fatalf("defaults = %q and %q, want the declared default draft regardless of member order", got, gotPermuted)
 	}
-	if got != gotPermuted {
+	if !reflect.DeepEqual(got, gotPermuted) {
 		t.Fatalf("member order changed the default: %q vs %q", got, gotPermuted)
 	}
 }
 
-func TestEnumDefaultMissingFailsFast(t *testing.T) {
+func TestEnumWithoutInitializerRemainsUnassigned(t *testing.T) {
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{
 			Fields: map[string]runtimecontracts.EntityFieldDecl{
@@ -437,17 +446,17 @@ func TestEnumDefaultMissingFailsFast(t *testing.T) {
 			},
 		},
 	}
-	_, err := defaultValue(contract, "order_status", nil)
-	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared default") || !strings.Contains(err.Error(), "default: archived") {
-		t.Fatalf("missing enum default error = %v, want fail-fast invariant violation with codemod", err)
+	state, err := Initialize(contract, nil)
+	if err != nil || len(state) != 0 {
+		t.Fatalf("unassigned enum state = %#v, %v", state, err)
 	}
 }
 
-func TestEnumDefaultNonMemberFailsFast(t *testing.T) {
+func TestEnumInitializerNonMemberFailsFast(t *testing.T) {
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{
 			Fields: map[string]runtimecontracts.EntityFieldDecl{
-				"status": {Type: "order_status"},
+				"status": {Type: "order_status", Initial: "urgent"},
 			},
 		},
 		Types: runtimecontracts.TypeCatalogDocument{
@@ -456,8 +465,8 @@ func TestEnumDefaultNonMemberFailsFast(t *testing.T) {
 			},
 		},
 	}
-	_, err := defaultValue(contract, "order_status", nil)
-	if err == nil || !strings.Contains(err.Error(), `default "urgent" is not a declared member`) || !strings.Contains(err.Error(), "archived, draft") {
+	_, err := Initialize(contract, nil)
+	if err == nil || !strings.Contains(err.Error(), "declared enum value") {
 		t.Fatalf("non-member enum default error = %v, want fail-fast invariant violation naming value and members", err)
 	}
 }

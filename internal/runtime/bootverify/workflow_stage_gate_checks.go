@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
@@ -50,8 +51,12 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("terminal stage %s cannot own an actionable gate", stage)))
 		}
 		entityType, _ := semanticview.ResolveEntityStructuralType(c.source, flowID)
+		var known []string
+		if analysis := c.entityAssignmentAnalysis(flowID); analysis != nil {
+			known = engine.EntityAssignmentPresencePaths(analysis.StageFacts(stage))
+		}
 		for name, expression := range plan.Context {
-			if err := validateStageGateContextExpression(expression, entityType); err != nil {
+			if err := validateStageGateContextExpression(expression, entityType, known...); err != nil {
 				findings = append(findings, stageGateFinding(location, fmt.Sprintf("context field %s is invalid: %v", strings.TrimSpace(name), err)))
 			}
 		}
@@ -84,7 +89,7 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 	return findings
 }
 
-func validateStageGateContextExpression(expression runtimecontracts.ExpressionValue, entityType *runtimecontracts.ResolvedCatalogType) error {
+func validateStageGateContextExpression(expression runtimecontracts.ExpressionValue, entityType *runtimecontracts.ResolvedCatalogType, known ...string) error {
 	text := stageGateExpressionText(expression)
 	if text == "" {
 		return fmt.Errorf("expression is empty")
@@ -92,7 +97,10 @@ func validateStageGateContextExpression(expression runtimecontracts.ExpressionVa
 	if stageGateDecisionRefPattern.MatchString(text) {
 		return fmt.Errorf("decision.* is available only in outcome emit fields")
 	}
-	return workflowexpr.ValidateValueExpressionWithOptions(text, workflowexpr.ValueExpressionOptions{EntityType: entityType})
+	if missing := workflowexpr.RequiredEntityReferences(text, known); len(missing) != 0 {
+		return fmt.Errorf("entity paths %s are not definitely assigned at gate entry; assign on every reaching outcome or make an explicit presence decision", strings.Join(missing, ", "))
+	}
+	return workflowexpr.ValidateValueExpressionWithOptions(text, workflowexpr.ValueExpressionOptions{EntityType: entityType, KnownPresence: known})
 }
 
 func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGatePlan, verdict string, outcome runtimecontracts.WorkflowGateOutcomePlan, location string) []Finding {

@@ -55,9 +55,7 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 		EntityID: "item-123",
 		Stage:    runtimepipeline.NormalizeWorkflowStateID("collecting"),
 		Status:   "collecting",
-		Metadata: map[string]any{
-			"received_count": 1,
-		},
+		Metadata: map[string]any{},
 	}, nil)
 	if completed.Stage != runtimepipeline.NormalizeWorkflowStateID("collecting") {
 		t.Fatalf("stream arrival changed lifecycle state = %+v, want collecting", completed)

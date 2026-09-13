@@ -6,6 +6,23 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
+func TestWorkflowStageTopologyPreservesSameDestinationRuleOutcomes(t *testing.T) {
+	node := identitytest.RootNode(t, "review")
+	topology := BuildWorkflowStageTopology(".", "waiting", []string{"waiting", "done"}, []string{"done"},
+		[]HandlerTransitionSemantic{{Node: node, EventType: "review.completed", Rules: []HandlerRuleEntry{
+			{Condition: "payload.accepted", AdvancesTo: "done"},
+			{Condition: "else", AdvancesTo: "done"},
+		}}}, nil, nil)
+	if len(topology.Edges) != 2 {
+		t.Fatalf("distinct selected outcomes collapsed: %#v", topology.Edges)
+	}
+	for index, edge := range topology.Edges {
+		if edge.CarrierKind != HandlerAdvanceCarrierRules || edge.RuleIndex != index {
+			t.Fatalf("outcome provenance = %#v", edge)
+		}
+	}
+}
+
 func TestWorkflowStageTopologyPreservesHandlerOriginAndEffectiveEvent(t *testing.T) {
 	joinA := JoinSpec{
 		ID: "join-a", Stage: "awaiting-a",

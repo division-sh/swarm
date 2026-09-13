@@ -29,6 +29,15 @@ import (
 	"github.com/google/uuid"
 )
 
+type fanInStreamStateRepo struct {
+	fanOutPinRouteStateRepo
+	snapshot *runtimeengine.StateSnapshot
+}
+
+func (r fanInStreamStateRepo) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
+	return *r.snapshot, true, nil
+}
+
 func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.FanInStream)
 	ctx := testAuthorActivityContext(context.Background())
@@ -53,9 +62,10 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	state := runtimeengine.StateSnapshot{CurrentState: "active", StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil)}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 		Source:        source,
-		StateRepo:     fanOutPinRouteStateRepo{},
+		StateRepo:     fanInStreamStateRepo{snapshot: &state},
 		MutationOwner: fanOutPinRouteMutationOwner{},
 		Locker:        fanOutPinRouteLocker{},
 		Dispatcher:    fanOutPinRouteDispatcher{},
@@ -69,10 +79,6 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
 	}
 
-	state := runtimeengine.StateSnapshot{
-		CurrentState: "active",
-		StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil),
-	}
 	target := events.RouteIdentity{
 		FlowID:       templatefanin.ReceiverFlowID,
 		FlowInstance: templatefanin.ReceiverFlowInstance,
@@ -83,7 +89,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(100) {
 		t.Fatalf("last revenue after first = %#v, want 100", got)
 	}
 	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 100)
@@ -93,7 +99,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after duplicate = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(100) {
 		t.Fatalf("last revenue after duplicate = %#v, want unchanged first arrival value", got)
 	}
 	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 100)
@@ -106,7 +112,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q2"); got != 1 {
 		t.Fatalf("Q2 accumulator items = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(300) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != int64(300) {
 		t.Fatalf("last revenue after next window = %#v, want 300", got)
 	}
 	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", 300)
@@ -123,7 +129,19 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	seedFanInBarrierRun(t, ctx, backend, storetest.Database(backend), runID)
+	defer func() {
+		if t.Failed() {
+			dumpFanInBarrierEvents(t, ctx, backend, storetest.Database(backend))
+		}
+	}()
 	runtime := newFanInBarrierRuntime(t, backend, storetest.Database(backend), source)
+	defer func() {
+		if t.Failed() {
+			for _, entry := range runtime.diagnostics.snapshot() {
+				t.Logf("fan-in runtime diagnostic: %#v", entry)
+			}
+		}
+	}()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := runtime.pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(templatefanin.ReceiverFlowInstance)}, runtimepipeline.WorkflowInstance{
 		InstanceID:      templatefanin.ReceiverFlowInstance,
@@ -135,7 +153,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 		CurrentState:    "active",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
-		Fields:          map[string]any{"portfolio_id": "portfolio-default"},
+		Fields:          map[string]any{},
 		EntityType:      "portfolio_state",
 	}, enteredAt); err != nil {
 		t.Fatalf("seed fan-in stream singleton: %v", err)
@@ -225,9 +243,10 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	state := runtimeengine.StateSnapshot{CurrentState: "active", StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil)}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 		Source:        source,
-		StateRepo:     fanOutPinRouteStateRepo{},
+		StateRepo:     fanInStreamStateRepo{snapshot: &state},
 		MutationOwner: fanOutPinRouteMutationOwner{},
 		Locker:        fanOutPinRouteLocker{},
 		Dispatcher:    fanOutPinRouteDispatcher{},
@@ -241,10 +260,6 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
 	}
 
-	state := runtimeengine.StateSnapshot{
-		CurrentState: "active",
-		StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil),
-	}
 	target := events.RouteIdentity{
 		FlowID:       templatefanin.ReceiverFlowID,
 		FlowInstance: templatefanin.ReceiverFlowInstance,

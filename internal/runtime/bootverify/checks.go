@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -23,9 +24,10 @@ type Check struct {
 }
 
 type checkerContext struct {
-	ctx    context.Context
-	source semanticview.Source
-	opts   Options
+	ctx               context.Context
+	source            semanticview.Source
+	opts              Options
+	entityAssignments map[string]*runtimeengine.EntityAssignmentAnalysis
 
 	mcpDiscoveryLoaded bool
 	mcpDiscoveredTools map[string]runtimemcp.DiscoveredTool

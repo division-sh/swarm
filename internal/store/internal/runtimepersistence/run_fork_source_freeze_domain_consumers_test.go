@@ -17,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -36,8 +37,9 @@ type forkedDomainConsumerSurface interface {
 func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t *testing.T) {
 	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivitySourceArtifactContext(), fixture.sourceRun)
+			bundle := loadEntityMutationSourceFixture(t, "freeze", "work_item:\n  value: integer\n")
+			fixture := newForkedConsumerTestBackendForArtifact(t, backend, bundle.SourceArtifact)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(fixture.bundleHash), fixture.sourceRun)
 			var surface forkedDomainConsumerSurface
 			if fixture.postgres != nil {
 				surface = fixture.postgres
@@ -47,7 +49,8 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 			entityID := uuid.NewString()
 			entity := runtimetools.EntityCreateRecord{
-				RunID: fixture.sourceRun, EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "work_item",
+				Source: semanticview.Wrap(bundle),
+				RunID:  fixture.sourceRun, EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "work_item",
 				CurrentState: "active", FieldsJSON: json.RawMessage(`{"value":1}`), CreatedAt: fixture.forkedAt.Add(-time.Minute),
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
 			}
@@ -79,7 +82,8 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			lateEntity.EntityID = uuid.NewString()
 			requireForkedSourceRefusal(t, "create entity", surface.CreateEntity(ctx, lateEntity))
 			_, err := surface.SaveEntityField(ctx, runtimetools.EntityFieldUpdate{
-				RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "value", ValueJSON: json.RawMessage(`2`),
+				Source: semanticview.Wrap(bundle),
+				RunID:  fixture.sourceRun, EntityID: entityID, FieldPath: "value", Value: 2,
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
 			})
 			requireForkedSourceRefusal(t, "save entity field and mutation log", err)

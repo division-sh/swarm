@@ -43,6 +43,11 @@ func (a DeliveryTargetApplication) State() WorkflowState {
 
 func (a DeliveryTargetApplication) previewOnly() bool { return a.preview }
 
+func (a DeliveryTargetApplication) admitsEntityMaterialization() bool {
+	return !a.preview && a.presence == WorkflowTargetPersistenceAbsent &&
+		!a.owner.EntitylessReceiver() && !a.owner.ExistingEntity() && a.entityID != ""
+}
+
 func (a DeliveryTargetApplication) Validate() error {
 	if err := a.owner.Validate(); err != nil {
 		return err
@@ -323,17 +328,15 @@ func materializingDeliveryTargetState(source semanticview.Source, flowID, entity
 	if err != nil {
 		return WorkflowState{}, err
 	}
+	fields, err := workflowEntitySchemaInitialValues(source, flowID)
+	if err != nil {
+		return WorkflowState{}, err
+	}
 	state := WorkflowState{
 		EntityID: owner.Route().EntityID,
 		Stage:    NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID)),
-		Metadata: workflowMaterializeEntityFields(source, flowID, nil),
+		Metadata: fields,
 		Control:  runtimeStateControlForDeliveryTarget(route, entityType),
-	}
-	if handler.CreateEntity {
-		state.Metadata = workflowCreateEntityFields(source, flowID)
-	}
-	if state.Metadata == nil {
-		state.Metadata = map[string]any{}
 	}
 	return state, nil
 }

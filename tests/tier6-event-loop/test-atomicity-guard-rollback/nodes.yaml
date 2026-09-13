@@ -8,7 +8,7 @@ processor:
     process.requested:
       guard:
         id: must_be_ready
-        check: "entity.status == 'ready'"
+        check: "has(entity.status) && has(entity.counter) && entity.status == 'ready'"
       data_accumulation:
         writes:
           - target_field: counter

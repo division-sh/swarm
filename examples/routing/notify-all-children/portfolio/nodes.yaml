@@ -37,6 +37,8 @@ portfolio-coordinator:
           - source_field: account_ids
             target_field: account_ids
     portfolio.notify.requested:
+      guard:
+        check: has(entity.account_ids)
       fan_out:
         items_from: entity.account_ids
         as: account_id

@@ -1800,7 +1800,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 	requireMutationSurface(t, db)
 
 	createOut, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"flow_instance": "review/inst-1",
+		"flow_instance": ".",
 		"fields": map[string]any{
 			"status": "open",
 			"score":  10.0,
@@ -2135,29 +2135,26 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
-	storetest.RequirePostgresRun(t, testAuthorActivityContext(context.Background()), db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	root := t.TempDir()
+	for path, contents := range map[string]string{
+		"schema.yaml":   "initial_state: queued\nterminal_states: [done]\nstates: [queued, done]\n",
+		"entities.yaml": "accounts:\n  score: numeric(10,2)\n  status: text\n",
+		"events.yaml":   "review.completed: {}\n",
+		"nodes.yaml":    "reviewer:\n  execution_type: system_node\n  subscribes_to: [review.completed]\n  event_handlers:\n    review.completed:\n      advances_to: done\n",
+	} {
+		writeConformanceSnapshotFixture(t, root, path, contents)
+	}
+	source := loadConformanceWorkflowFixtureModule(t, root).source
+	bundle, _ := runtimesemanticview.Bundle(source)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		HumanTaskStore:                 pg,
 		AllowInternalLegacyEntityTools: true,
-		WorkflowSource: runtimesemanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			RootEntities: runtimecontracts.EntityContractsDocument{
-				"accounts": {
-					Fields: map[string]runtimecontracts.EntityFieldDecl{
-						"score":  {Type: "numeric(10,2)"},
-						"status": {Type: "text"},
-					},
-				},
-			},
-			Semantics: runtimecontracts.WorkflowSemanticView{
-				Name:         "review",
-				InitialStage: "queued",
-				FlowInitial:  map[string]string{"review": "queued"},
-			},
-		}),
+		WorkflowSource:                 source,
 	})
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	ctx = runtimetools.WithActor(ctx, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",

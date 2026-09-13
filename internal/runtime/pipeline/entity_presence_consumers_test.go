@@ -32,10 +32,6 @@ func TestEntityPresenceAtMailboxArtifactAndGateConsumers(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				fields := map[string]any{"profile": map[string]any{}}
-				if !safe {
-					// A populated sample must not authorize an optional read without a decision.
-					fields["profile"] = map[string]any{"note": "present"}
-				}
 				base := values.NewContext()
 				base.Entity = values.Wrap(fields)
 				entityID := identity.NormalizeEntityID(eventtest.UUID("presence-entity"))
@@ -64,10 +60,35 @@ func TestEntityPresenceAtMailboxArtifactAndGateConsumers(t *testing.T) {
 				if safe && (err != nil || got != "fallback") {
 					t.Fatalf("got %v, error %v", got, err)
 				}
-				if !safe && (err == nil || !strings.Contains(err.Error(), "presence decision")) {
+				if !safe && (err == nil || !strings.Contains(err.Error(), "entity.profile.note")) {
 					t.Fatalf("unsafe read error: %v", err)
 				}
 			})
 		}
+	}
+}
+
+func TestStageGateContextDoesNotBorrowEntityComputedField(t *testing.T) {
+	source := semanticview.Wrap(&rc.WorkflowContractBundle{
+		RootTypes: rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"BusinessComputed": {
+			Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text"}},
+		}}},
+		RootEntities: rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{
+			"computed": {Type: "BusinessComputed"},
+		}}},
+	})
+	entityID := identity.NormalizeEntityID(eventtest.UUID("gate-computed-collision"))
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+		StorageRef: testPipelineRunID, EntityID: entityID.String(), WorkflowName: ".",
+		EntityType: "work", CurrentState: "review",
+		Fields: map[string]any{"computed": map[string]any{"note": "business value"}},
+	})
+	route := testWorkflowInstanceRoute(testPipelineRunID)
+	got, err := evalWorkflowGateContext(rc.CELExpression("entity.computed.note"), route, entityID, instance, source, ".")
+	if err != nil || got != "business value" {
+		t.Fatalf("declared business field: value=%v error=%v", got, err)
+	}
+	if got, err := evalWorkflowGateContext(rc.CELExpression("computed.note"), route, entityID, instance, source, "."); err == nil {
+		t.Fatalf("gate borrowed handler-local computed state from entity: %v", got)
 	}
 }

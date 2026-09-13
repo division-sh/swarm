@@ -21,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -202,10 +203,10 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(_ context.Co
 		spec.Output.LastRequestID:     requestID,
 		spec.Output.LastSourceEventID: sourceEventID,
 	}
-	state := artifactRepoResultState(execCtx, fields)
+	mutations := artifactRepoResultMutations(fields)
 	failureEvent := strings.TrimSpace(spec.FailureEvent)
 	if failureEvent == "" {
-		return runtimeengine.ActionExecution{State: state}, cause
+		return runtimeengine.ActionExecution{EntityMutations: mutations}, cause
 	}
 	payload, payloadErr := artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, failureValue, executionExpressionOptions(execCtx))
 	if payloadErr != nil {
@@ -218,7 +219,7 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(_ context.Co
 	if queueErr != nil {
 		return runtimeengine.ActionExecution{}, errors.Join(cause, queueErr)
 	}
-	return runtimeengine.ActionExecution{State: state, EmitIntents: []runtimeengine.EmitIntent{intent}}, nil
+	return runtimeengine.ActionExecution{EntityMutations: mutations, EmitIntents: []runtimeengine.EmitIntent{intent}}, nil
 }
 
 func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(_ context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoURL, ref string, manifest map[string]any, requestID, sourceEventID string, successPayload map[string]any) (runtimeengine.ActionExecution, error) {
@@ -231,16 +232,16 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(_ context.Co
 		spec.Output.Failure:       map[string]any{},
 	}
 	fields[spec.Output.LastSourceEventID] = sourceEventID
-	state := artifactRepoResultState(execCtx, fields)
+	mutations := artifactRepoResultMutations(fields)
 	successEvent := strings.TrimSpace(spec.SuccessEvent)
 	if successEvent == "" {
-		return runtimeengine.ActionExecution{State: state}, nil
+		return runtimeengine.ActionExecution{EntityMutations: mutations}, nil
 	}
 	intent, err := pc.artifactRepoResultEvent(execCtx, successEvent, successPayload)
 	if err != nil {
 		return runtimeengine.ActionExecution{}, err
 	}
-	return runtimeengine.ActionExecution{State: state, EmitIntents: []runtimeengine.EmitIntent{intent}}, nil
+	return runtimeengine.ActionExecution{EntityMutations: mutations, EmitIntents: []runtimeengine.EmitIntent{intent}}, nil
 }
 
 func (pc *PipelineCoordinator) artifactRepoResultEvent(execCtx runtimeengine.ExecutionContext, eventType string, payload map[string]any) (runtimeengine.EmitIntent, error) {
@@ -486,6 +487,11 @@ func artifactRootResolveExistingPrefix(cleaned string) (string, bool) {
 func artifactRepoOutputsComplete(metadata map[string]any, spec *runtimecontracts.ArtifactRepoSpec) bool {
 	if metadata == nil || spec == nil {
 		return false
+	}
+	for _, field := range spec.Output.Fields() {
+		if _, present := metadata[field]; !present {
+			return false
+		}
 	}
 	if got := strings.TrimSpace(asString(metadata[spec.Output.Status])); got != "committed" {
 		return false
@@ -1016,31 +1022,17 @@ func commitTime(when time.Time) time.Time {
 	return when.UTC()
 }
 
-func artifactRepoResultState(execCtx runtimeengine.ExecutionContext, fields map[string]any) *runtimeengine.StateMutation {
-	metadata := cloneStringAnyMap(execCtx.Request.State.StateCarrier.Fields)
-	if metadata == nil {
-		metadata = map[string]any{}
+func artifactRepoResultMutations(fields map[string]any) []entityruntime.Mutation {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
 	}
-	for field, value := range fields {
-		field = strings.TrimSpace(field)
-		if field == "" {
-			continue
-		}
-		metadata[field] = value
+	sort.Strings(names)
+	mutations := make([]entityruntime.Mutation, 0, len(names))
+	for _, name := range names {
+		mutations = append(mutations, entityruntime.Mutation{Target: name, Value: fields[name]})
 	}
-	mutation := &runtimeengine.StateMutation{
-		StateCarrier: runtimeengine.NewStateCarrierWithOwners(
-			metadata,
-			execCtx.Request.State.StateCarrier.Bookkeeping,
-			execCtx.Request.State.StateCarrier.Control,
-			execCtx.Request.State.StateCarrier.Gates,
-			execCtx.Request.State.StateCarrier.StateBuckets,
-		),
-		TriggerEventID:   strings.TrimSpace(execCtx.Request.Event.ID()),
-		TriggerEventType: strings.TrimSpace(string(execCtx.Request.Event.Type())),
-		TriggeredAt:      execCtx.Request.Event.CreatedAt(),
-	}
-	return mutation
+	return mutations
 }
 
 type artifactRepoHistoryRecord struct {

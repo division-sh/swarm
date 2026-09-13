@@ -62,7 +62,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
@@ -146,7 +146,7 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, "producer"), runtimepipeline.WorkflowInstance{
 				InstanceID: "producer", StorageRef: "producer", EntityID: entityID, WorkflowName: "producer", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": "producer", "instance_id": "producer"},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize producer workflow instance: %v", err)
@@ -221,7 +221,7 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
@@ -299,7 +299,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize timer before restart: %v", err)
@@ -431,7 +431,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{},
 				EntityType: "timer_state",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
@@ -593,7 +593,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
@@ -677,7 +677,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)

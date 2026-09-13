@@ -16,45 +16,54 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type forkedConsumerTestBackend struct {
-	name      string
-	db        *sql.DB
-	postgres  *PostgresStore
-	sqlite    *SQLiteRuntimeStore
-	sourceRun string
-	continued string
-	forkedAt  time.Time
+	name       string
+	db         *sql.DB
+	postgres   *PostgresStore
+	sqlite     *SQLiteRuntimeStore
+	sourceRun  string
+	continued  string
+	forkedAt   time.Time
+	bundleHash string
 }
 
 func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerTestBackend {
 	t.Helper()
+	return newForkedConsumerTestBackendForArtifact(t, backend, sourceartifactfixture.Artifact())
+}
+
+func newForkedConsumerTestBackendForArtifact(t *testing.T, backend string, artifact *sourceartifact.AdmittedSourceArtifact) *forkedConsumerTestBackend {
+	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	out := &forkedConsumerTestBackend{name: backend, sourceRun: uuid.NewString(), continued: uuid.NewString(), forkedAt: now}
+	out := &forkedConsumerTestBackend{name: backend, sourceRun: uuid.NewString(), continued: uuid.NewString(), forkedAt: now, bundleHash: artifact.BundleHash()}
+	ctx := testAuthorActivityContextForBundle(out.bundleHash)
 	switch backend {
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
 		out.db = db
 		out.postgres = admitTestPostgresStore(t, db)
-		requireRunFixtureForTest(t, testAuthorActivitySourceArtifactContext(), out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
-			RunID: out.sourceRun, BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour),
+		requireRunFixtureForTest(t, ctx, out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: out.sourceRun, Artifact: artifact, StartedAt: now.Add(-time.Hour),
 		})
-		requireRunFixtureForTest(t, testAuthorActivitySourceArtifactContext(), out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		requireRunFixtureForTest(t, ctx, out.postgres, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: out.continued, State: storerunlifecycle.StatePaused,
-			BundleHash: authorActivityTestBundleHash, StartedAt: now,
+			Artifact: artifact, StartedAt: now,
 		})
 	case "sqlite":
 		out.sqlite = newBootstrappedSQLiteRuntimeStoreForTest(t)
 		out.db = out.sqlite.backend.ConstructionHandle()
-		requireRunFixtureForTest(t, testAuthorActivitySourceArtifactContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
-			RunID: out.sourceRun, BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour),
+		requireRunFixtureForTest(t, ctx, out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+			RunID: out.sourceRun, Artifact: artifact, StartedAt: now.Add(-time.Hour),
 		})
-		requireRunFixtureForTest(t, testAuthorActivitySourceArtifactContext(), out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+		requireRunFixtureForTest(t, ctx, out.sqlite, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: out.continued, State: storerunlifecycle.StatePaused,
-			BundleHash: authorActivityTestBundleHash, StartedAt: now,
+			Artifact: artifact, StartedAt: now,
 		})
 	default:
 		t.Fatalf("unknown backend %q", backend)
@@ -64,12 +73,12 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 
 func (b *forkedConsumerTestBackend) freeze(t *testing.T) {
 	t.Helper()
-	ctx := testAuthorActivitySourceArtifactContext()
+	ctx := testAuthorActivityContextForBundle(b.bundleHash)
 	if b.postgres != nil {
 		lineage := runForkActivationLineage{
 			SourceRunID: b.sourceRun, ForkRunID: b.continued, ForkEventID: uuid.NewString(),
 			ForkEventName: "consumer.freeze", ForkEventTime: b.forkedAt, SourceRunStatus: "running", ForkStatus: "paused",
-			SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
+			SourceBundleHash: b.bundleHash, ForkBundleHash: b.bundleHash,
 		}
 		if err := commitRunForkSourceFreezeForTest(ctx, b.postgres, lineage, b.forkedAt, true); err != nil {
 			t.Fatal(err)

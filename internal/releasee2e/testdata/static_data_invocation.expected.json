@@ -1,13 +1,13 @@
 {
-  "bundle_hash": "bundle-v2:sha256:3e821203c76c0213d607e448fe68ed7021b20fc83c9faeec9062f2d4d4e00443",
+  "bundle_hash": "bundle-v2:sha256:d80037d12e5c538f3abfea2fc3e9421eda3e9137b390fc61a965f941e298a61a",
   "readback": {
     "read.completed": {
       "content": "Root resume: exact admitted bytes.\n",
-      "static_id": "static-data-v1:sha256:d282b5153dd06e02d3d228a5a27d421f5c1ba0dd456bce7043ab9c9614c4c33a"
+      "static_id": "static-data-v1:sha256:b326b7cd064b910736da8d1e04c6a05364473a92cf3d72fa62faedecfb5dcce2"
     },
     "registry/child.completed": {
       "content": "Child resume: different admitted bytes.\n",
-      "static_id": "static-data-v1:sha256:fcc3e4387fd016935528f20d00885a3a547998c974526e7e3513af689bead4d7"
+      "static_id": "static-data-v1:sha256:ce836eb6b93c26ea2753552e5e167684601071a993dcf7218a5ac4453e20c7b4"
     }
   }
 }

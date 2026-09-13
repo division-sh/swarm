@@ -520,6 +520,7 @@ func admitSyntheticEntityContractsForTest(
 	base *runtimecontracts.WorkflowContractBundle,
 	rootEntityType string,
 	flowEntityTypes map[string]string,
+	entityFiles ...map[string]string,
 ) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	if base == nil {
@@ -543,6 +544,11 @@ func admitSyntheticEntityContractsForTest(
 	}
 	if rootEntityType = strings.TrimSpace(rootEntityType); rootEntityType != "" {
 		files["entities.yaml"] = fmt.Sprintf("%s: {}\n", rootEntityType)
+	}
+	for _, documents := range entityFiles {
+		for path, body := range documents {
+			files[path] = body
+		}
 	}
 
 	admitted := loadWorkflowTempBundle(t, files)

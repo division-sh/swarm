@@ -18,10 +18,6 @@ import (
 
 var (
 	workflowExpressionPlatformEntityReferencePattern = regexp.MustCompile(`(^|[^a-zA-Z0-9_])_entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityNullNotEqualPattern      = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*!=\s*null\b`)
-	workflowExpressionEntityNullEqualPattern         = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*==\s*null\b`)
-	workflowExpressionNullEntityNotEqualPattern      = regexp.MustCompile(`\bnull\s*!=\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
-	workflowExpressionNullEntityEqualPattern         = regexp.MustCompile(`\bnull\s*==\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
 	workflowExpressionLoopRootPattern                = regexp.MustCompile(`\bloop\.`)
 )
 
@@ -39,6 +35,9 @@ type ValueContext struct {
 }
 
 type ValueExpressionOptions struct {
+	// KnownPresence contains checked control-flow facts for this exact program
+	// point, never schema declarations or agent tool grants.
+	KnownPresence    []string
 	AllowBareItem    bool
 	ItemAlias        string
 	AllowJoin        bool
@@ -77,7 +76,7 @@ func ValidateValueExpression(expression string) error {
 }
 
 func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionOptions) error {
-	expression = strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
+	expression = strings.TrimSpace(expression)
 	if expression == "" {
 		return fmt.Errorf("workflow data expression is empty")
 	}
@@ -251,7 +250,7 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 }
 
 func EvalValueResultWithOptions(expression string, ctx ValueContext, opts ValueExpressionOptions) (ValueResult, error) {
-	normalized := strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
+	normalized := strings.TrimSpace(expression)
 	if normalized == "" {
 		return ValueResult{}, fmt.Errorf("workflow data expression is empty")
 	}
@@ -413,16 +412,6 @@ func expressionReferencesFanOutField(expression, field string) bool {
 		}
 	}
 	return false
-}
-
-func RewriteEntityNullPresenceChecks(expression string) string {
-	return rewriteOutsideStringLiterals(expression, func(segment string) string {
-		segment = workflowExpressionEntityNullNotEqualPattern.ReplaceAllString(segment, `has(entity.$1) && entity.$1 != null`)
-		segment = workflowExpressionNullEntityNotEqualPattern.ReplaceAllString(segment, `has(entity.$1) && entity.$1 != null`)
-		segment = workflowExpressionEntityNullEqualPattern.ReplaceAllString(segment, `!has(entity.$1) || entity.$1 == null`)
-		segment = workflowExpressionNullEntityEqualPattern.ReplaceAllString(segment, `!has(entity.$1) || entity.$1 == null`)
-		return segment
-	})
 }
 
 // RewriteLoopRoot preserves the public loop.* vocabulary while avoiding CEL's

@@ -58,10 +58,13 @@ func (pc *PipelineCoordinator) validateArtifactRepoOutputContract(execCtx engine
 			}
 		case "failure":
 			// Both {} and an arbitrary canonical failure envelope must fit this field.
-			if resolved.Kind != contracts.CatalogTypeDynamic || decl.LeafKind != "object" || !decl.Refinements.Empty() {
+			if resolved.Kind != contracts.CatalogTypeDynamic || decl.LeafKind != "object" || !decl.Refinements.Empty() || entityruntime.FieldPathParticipatesInEquality(contract, field) {
 				return invalid(fmt.Errorf("artifact output.failure requires an unrestricted JSON object"))
 			}
 		case "file_manifest":
+			if entityruntime.FieldPathParticipatesInEquality(contract, field) {
+				return invalid(fmt.Errorf("artifact provider-dependent manifest cannot participate in root equality"))
+			}
 			if resolved.Kind == contracts.CatalogTypeObject {
 				if err := artifactRepoAdmitProviderRef(contract, field+".ref"); err != nil {
 					return invalid(err)
@@ -80,6 +83,46 @@ func (pc *PipelineCoordinator) validateArtifactRepoOutputContract(execCtx engine
 			return invalid(err)
 		}
 	}
+	// A complete same-event result performs no output mutation. Missing any
+	// mapped output instead requires reconstruction and the candidate checks.
+	current := execCtx.Request.State.StateCarrier.Fields
+	if asString(current[spec.Output.LastSourceEventID]) == sourceEventID && artifactRepoOutputsComplete(current, spec) {
+		_, err := entityruntime.NormalizeState(contract, current)
+		if err != nil {
+			return invalid(err)
+		}
+		return nil
+	}
+	for _, field := range []string{spec.Output.CurrentRef, spec.Output.FileManifest} {
+		if _, present := current[field]; present && contract.Entity.Fields[field].Immutable {
+			return invalid(fmt.Errorf("artifact provider-dependent output %s cannot replace an assigned immutable field", field))
+		}
+	}
+	if strings.TrimSpace(spec.FailureEvent) != "" {
+		if _, present := current[spec.Output.Failure]; present && contract.Entity.Fields[spec.Output.Failure].Immutable {
+			return invalid(fmt.Errorf("artifact failure output cannot replace an assigned immutable field"))
+		}
+		if err := validateArtifactRepoOutputCandidate(contract, current, map[string]any{
+			spec.Output.Status: "failed", spec.Output.Failure: map[string]any{},
+			spec.Output.LastRequestID: requestID, spec.Output.LastSourceEventID: sourceEventID,
+		}); err != nil {
+			return err
+		}
+	}
+	// Known values are checked together, preserving valid paired equality.
+	// Unknown refs/failure data have unrestricted, equality-free domains above.
+	return validateArtifactRepoOutputCandidate(contract, current, map[string]any{
+		spec.Output.RepoURL: artifactRepoPublicScheme + repoID,
+		spec.Output.Status:  "committed", spec.Output.Failure: map[string]any{},
+		spec.Output.LastRequestID: requestID, spec.Output.LastSourceEventID: sourceEventID,
+	})
+}
+
+func validateArtifactRepoOutputCandidate(contract entityruntime.Contract, current, fields map[string]any) error {
+	_, err := entityruntime.ApplyMutations(contract, current, artifactRepoResultMutations(fields))
+	if err != nil {
+		return artifactRepoOutputSchemaError(err)
+	}
 	return nil
 }
 
@@ -94,7 +137,7 @@ func artifactRepoAdmitProviderRef(contract entityruntime.Contract, field string)
 	}
 	// The provider has not produced a ref yet. Do not use a sample hash to
 	// approve an enum, equality or refinement that can reject the real hash later.
-	if resolved.Kind != contracts.CatalogTypeText || resolved.Name != "" || !decl.Refinements.Empty() {
+	if resolved.Kind != contracts.CatalogTypeText || resolved.Name != "" || !decl.Refinements.Empty() || entityruntime.FieldPathParticipatesInEquality(contract, field) {
 		return fmt.Errorf("artifact provider ref field %s requires unrestricted text", field)
 	}
 	_, err = entityruntime.NormalizeFieldValue(contract, field, "")
@@ -108,8 +151,9 @@ func (pc *PipelineCoordinator) validateArtifactRepoManifestOutput(execCtx engine
 	}
 	// Only ref is not yet known, and its unrestricted text domain was admitted
 	// above. All other manifest values are the actual prepared provider inputs.
-	if _, err := entityruntime.NormalizeFieldValue(contract, spec.Output.FileManifest, manifest); err != nil {
-		return artifactRepoOutputSchemaError(err)
-	}
-	return nil
+	return validateArtifactRepoOutputCandidate(contract, execCtx.Request.State.StateCarrier.Fields, map[string]any{
+		spec.Output.RepoURL: manifest["repo_url"], spec.Output.CurrentRef: manifest["ref"],
+		spec.Output.FileManifest: manifest, spec.Output.Status: "committed", spec.Output.Failure: map[string]any{},
+		spec.Output.LastRequestID: manifest["request_id"], spec.Output.LastSourceEventID: manifest["source_event_id"],
+	})
 }

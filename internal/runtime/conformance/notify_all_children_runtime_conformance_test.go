@@ -433,7 +433,7 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 
 			items := loadNotifyAllChildrenItemEvents(t, ctx, selected, db, runID, notifyID)
 			if len(items) != len(accountIDs) {
-				t.Fatalf("fan-out item events = %#v, want %d", items, len(accountIDs))
+				t.Fatalf("fan-out item events = %#v, want %d; diagnostics=%+v", items, len(accountIDs), runtime.diagnostics.snapshot())
 			}
 			operatorStore, ok := selected.(interface {
 				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)

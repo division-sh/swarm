@@ -313,8 +313,9 @@ func seedSelectedRuntimeOutcomeSQLite(t *testing.T, ctx context.Context, selecte
 	})
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	if err := selected.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-		RunID: runID, EntityID: entityID, FlowInstance: "flow-a/1", EntityType: "test_entity", Name: "Selected Execution Entity",
-		CurrentState: "pending", FieldsJSON: json.RawMessage(`{"name":"Selected Execution Entity"}`), CreatedAt: at.Add(-time.Second),
+		Source: loaded.Source,
+		RunID:  runID, EntityID: entityID, FlowInstance: ".", EntityType: "test_entity", Name: "Selected Execution Entity",
+		CurrentState: "pending", FieldsJSON: json.RawMessage(`{}`), CreatedAt: at.Add(-time.Second),
 		Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "selected-execution-test", HandlerStep: "seed"},
 	}); err != nil {
 		t.Fatal(err)
@@ -323,9 +324,9 @@ func seedSelectedRuntimeOutcomeSQLite(t *testing.T, ctx context.Context, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), ".")
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", payload, 0, runID,
-		envelope, eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID), at, executionmode.Mock)
+		envelope, eventtest.RootRoutingSource(runID), at, executionmode.Mock)
 	event, err = eventfixture.BindPayload(event)
 	if err != nil {
 		t.Fatal(err)

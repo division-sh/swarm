@@ -13,3 +13,6 @@ expect:
   entities:
   - ref: entity
     current_state: cleared
+    fields:
+      accumulated_count: 5
+      accumulated_total: 250

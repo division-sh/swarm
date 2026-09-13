@@ -7,6 +7,7 @@ import (
 
 	corestate "github.com/division-sh/swarm/internal/runtime/core/state"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type MailboxItem = corestate.MailboxItem
@@ -23,7 +24,8 @@ type MailboxPersistence interface {
 }
 
 // EntityPersistence is the backend-neutral store owner for entity tool reads
-// and writes. Executor code owns tool semantics; store implementations own SQL.
+// and writes. Executors own tool admission; entityruntime owns typed mutations,
+// which store implementations evaluate against the locked current snapshot.
 type EntityPersistence interface {
 	LoadEntityState(ctx context.Context, identity EntityIdentity) (map[string]any, bool, error)
 	QueryEntityStates(ctx context.Context, query EntityStateQuery) ([]map[string]any, error)
@@ -63,15 +65,16 @@ type EntityMutationWriter struct {
 }
 
 type EntityFieldUpdate struct {
-	RunID        string
-	EntityID     string
-	FieldPath    string
-	PathSegments []string
-	ValueJSON    json.RawMessage
-	Writer       EntityMutationWriter
+	RunID     string
+	EntityID  string
+	FieldPath string
+	Value     any
+	Source    semanticview.Source
+	Writer    EntityMutationWriter
 }
 
 type EntityCreateRecord struct {
+	Source       semanticview.Source
 	RunID        string
 	EntityID     string
 	FlowInstance string

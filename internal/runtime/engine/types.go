@@ -264,6 +264,13 @@ type ExecutionRequest struct {
 	// InitialFieldValues is the exact authored create-entity projection that the
 	// persistence owner records separately from subsequent handler mutations.
 	InitialFieldValues map[string]any
+	// EntityMaterializationAdmitted is supplied by the canonical delivery-target
+	// application (or its direct handler-admission path), never inferred from an
+	// empty state map. Existing-owner delivery must leave this false.
+	EntityMaterializationAdmitted bool
+	// creating is set only after the repository reports not-found under the
+	// admitted creation path. An existing complete snapshot never uses it.
+	creating bool
 	// ExpectedComputeModuleTraces carries prior deterministic module evidence
 	// for supported replay. Nil means normal execution; a non-nil empty slice
 	// means replay mode with zero expected module executions. When present,

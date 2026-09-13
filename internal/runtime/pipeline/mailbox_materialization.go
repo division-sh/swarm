@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
 )
@@ -156,6 +157,7 @@ func executionExpressionOptions(execCtx runtimeengine.ExecutionContext) workflow
 	if execCtx.EntityType != nil {
 		value := execCtx.EntityType.Clone()
 		options.EntityType = &value
+		options.KnownPresence = runtimeengine.EntityAssignmentPresencePaths(entityruntime.ObservedAssignmentFacts(value, execCtx.Base.Entity.Raw()))
 	}
 	return options
 }

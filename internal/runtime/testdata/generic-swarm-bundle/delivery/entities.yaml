@@ -1,3 +1,4 @@
 item:
   item_id: string
   status: string
+  timed_out: boolean

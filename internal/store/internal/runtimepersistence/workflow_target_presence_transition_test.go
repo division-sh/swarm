@@ -12,8 +12,10 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -273,7 +275,7 @@ func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
+			selected, db, _, _ := openStateOnlyAcquisitionStore(t, backend)
 			store, ok := selected.(producerStore)
 			if !ok {
 				t.Fatalf("%s selected store does not expose supported state-only producers", backend)
@@ -281,6 +283,10 @@ func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores
 			for _, producer := range []string{"scenario_setup", "entity_tool"} {
 				t.Run(producer, func(t *testing.T) {
 					flowID := producer + "-" + uuid.NewString()
+					bundle := loadEntityMutationSourceFixture(t, flowID, "review_item:\n  account_id: text\n")
+					runID := uuid.NewString()
+					ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())), runID)
+					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact})
 					instancePath := flowID + "/receiver"
 					entityID := uuid.NewString()
 					createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
@@ -298,7 +304,8 @@ func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores
 						}
 					case "entity_tool":
 						if err := store.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-							RunID: runID, EntityID: entityID, FlowInstance: instancePath,
+							Source: semanticview.Wrap(bundle),
+							RunID:  runID, EntityID: entityID, FlowInstance: instancePath,
 							EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`),
 							CreatedAt: createdAt, Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "producer-proof", HandlerStep: "create_entity"},
 						}); err != nil {

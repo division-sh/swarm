@@ -42,7 +42,7 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				bundle.Platform.Platform.Name = "presence-proof"
 				bundle.Platform.Platform.Version = "1"
 				entity := bundle.RootEntities["items"]
-				entity.Fields["profile"] = rc.EntityFieldDecl{Type: "WorkItem"}
+				entity.Fields["profile"] = rc.EntityFieldDecl{Type: "WorkItem", Initial: map[string]any{"id": "proof", "status": "ready", "tags": []any{}}}
 				entity.Fields["captured"] = rc.EntityFieldDecl{Type: "text"}
 				for name, field := range entity.Fields {
 					field.UnusedReason = "externally populated proof fixture"
@@ -83,7 +83,7 @@ func TestStageGateContextPreservesNestedEntityPresence(t *testing.T) {
 		plan := rc.WorkflowGatePlan{FlowID: ".", Stage: "awaiting_review", Decision: "review", Context: map[string]rc.ExpressionValue{"note": rc.CELExpression(expression)}, Outcomes: map[string]rc.WorkflowGateOutcomePlan{"accept": {AdvancesTo: "complete"}}}
 		bundle := stageGateValidationBundle(plan, nil, nil)
 		bundle.RootTypes = rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}
-		bundle.RootEntities = rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}}
+		bundle.RootEntities = rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile", Initial: map[string]any{}}}}}
 		findings := checkStageGateValidation(&checkerContext{source: semanticview.Wrap(bundle)})
 		if safe && len(findings) != 0 {
 			t.Fatalf("safe gate context: %#v", findings)

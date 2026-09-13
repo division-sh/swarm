@@ -479,8 +479,8 @@ func (b *WorkflowContractBundle) FlowPrimaryEntityContract(flowID string) (strin
 	return resolved.EntityType, cloneEntityContract(resolved.Contract), true
 }
 
-// StructuralType preserves nested record edges while top-level entity fields
-// retain their existing default-present contract until the entity-presence work.
+// StructuralType preserves declaration optionality. Definite assignment is a
+// separate program-point fact, not another interpretation of the field type.
 func (p PrimaryEntityContract) StructuralType() (ResolvedCatalogType, error) {
 	fields := make([]ResolvedCatalogField, 0, len(p.Contract.Fields))
 	for _, name := range sortedEntityFieldKeys(p.Contract.Fields) {
@@ -489,7 +489,7 @@ func (p PrimaryEntityContract) StructuralType() (ResolvedCatalogType, error) {
 		if err != nil {
 			return ResolvedCatalogType{}, fmt.Errorf("entity %s field %s: %w", p.EntityType, name, err)
 		}
-		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved})
+		fields = append(fields, ResolvedCatalogField{Name: name, Type: resolved, TypeRef: decl.Type, IsOptional: decl.IsOptional, Refinements: decl.Refinements})
 	}
 	return ResolvedCatalogType{Kind: CatalogTypeObject, Name: p.FlowID + "." + p.EntityType, Fields: fields}, nil
 }

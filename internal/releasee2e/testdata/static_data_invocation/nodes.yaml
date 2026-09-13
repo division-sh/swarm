@@ -18,6 +18,8 @@ root-completion:
   produces: [child.requested]
   event_handlers:
     read.completed:
+      guard:
+        check: "_entity.current_state == 'reading'"
       advances_to: child_reading
       data_accumulation:
         writes:

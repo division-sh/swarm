@@ -127,11 +127,8 @@ func validateGeneratedJSONSchemaNode(path string, schema map[string]any, errs *[
 		if schema["additionalProperties"] != false {
 			*errs = append(*errs, fmt.Errorf("%s object schema must set additionalProperties=false", path))
 		}
-		for name := range props {
-			if _, ok := required[name]; !ok {
-				*errs = append(*errs, fmt.Errorf("%s object schema must require declared property %s", path, name))
-			}
-		}
+		// Closure forbids undeclared properties. It does not turn optional
+		// record members or progressively assigned entity roots into required values.
 		for name := range required {
 			if _, ok := props[name]; !ok {
 				*errs = append(*errs, fmt.Errorf("%s required property %s is not declared", path, name))

@@ -1,4 +1,4 @@
 name: test-clear-multiple-targets
 version: 1.0.0
-description: Clear handler with multiple targets resets all specified state buckets.
+description: Typed optional-field clears and a private accumulator reset commit together.
 platform_version: ">=0.7.0 <0.8.0"

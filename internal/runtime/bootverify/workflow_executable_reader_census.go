@@ -8,6 +8,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -314,14 +315,23 @@ func appendGuardExecutableReaders(out *[]expressionReference, guard *runtimecont
 		if len(guard.Checks) > 0 {
 			kind = fmt.Sprintf("guard.checks[%d]", i)
 		}
+		before := len(*out)
 		appendConditionExecutableReader(out, kind, check.Check, runtimepipeline.WorkflowEntityFieldLifecycleGuard, runtimepipeline.WorkflowConditionContextGuard)
+		for index := before; index < len(*out); index++ {
+			(*out)[index].GuardCheckIndex = i
+			(*out)[index].HasGuardCheckIndex = true
+		}
 	}
 }
 
 func appendDataAccumulationExecutableReaders(out *[]expressionReference, kind string, spec runtimecontracts.WorkflowDataAccumulation) {
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation
 	for i, write := range spec.Writes {
+		before := len(*out)
 		prefix := fmt.Sprintf("%s.writes[%d]", kind, i)
+		if paths := entityruntime.MutationRequiredPaths(write); len(paths) != 0 {
+			*out = append(*out, expressionReference{Kind: prefix + ".target_parent", Phase: phase, RequiredEntityPaths: paths})
+		}
 		if write.Value.IsZero() {
 			if source := strings.TrimSpace(write.Source()); source != "" {
 				expression := source
@@ -334,6 +344,10 @@ func appendDataAccumulationExecutableReaders(out *[]expressionReference, kind st
 		appendExpressionValueExecutableReaders(out, prefix+".value", write.Value, phase)
 		appendExpressionValueExecutableReaders(out, prefix+".key", write.Key, phase)
 		appendExpressionValueExecutableReaders(out, prefix+".index", write.Index, phase)
+		for index := before; index < len(*out); index++ {
+			(*out)[index].WriteIndex = i
+			(*out)[index].HasWriteIndex = true
+		}
 	}
 }
 
@@ -390,7 +404,11 @@ func appendJoinExecutableReaders(out *[]expressionReference, ctx executableReade
 		return
 	}
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
+	beforeMembers := len(*out)
 	appendExecutableReader(out, "join.members.from", join.Members.From, phase)
+	for i := beforeMembers; i < len(*out); i++ {
+		(*out)[i].CommittedStage = join.Stage
+	}
 	appendExecutableReader(out, "join.members.by", join.Members.By, phase)
 	beforeCompletion := len(*out)
 	appendExecutableReader(out, "join.complete_when", join.CompleteWhen, phase)
@@ -398,7 +416,11 @@ func appendJoinExecutableReaders(out *[]expressionReference, ctx executableReade
 		(*out)[i].AllowJoin = true
 	}
 	if join.Window != nil {
+		beforeWindow := len(*out)
 		appendExecutableReader(out, "join.window.from", join.Window.From, phase)
+		for i := beforeWindow; i < len(*out); i++ {
+			(*out)[i].CommittedStage = join.Stage
+		}
 		appendExecutableReader(out, "join.window.by", join.Window.By, phase)
 	}
 	before := len(*out)
@@ -467,11 +489,16 @@ func appendCompiledFanOutExecutableReaders(out *[]expressionReference, ctx execu
 	if !ok {
 		return
 	}
+	beforeSource := len(*out)
 	appendExecutableReader(out, kind+".items_from", plan.ItemsFrom, phase)
+	for i := beforeSource; i < len(*out); i++ {
+		(*out)[i].FanOutAfterWrites = plan.SourceAfterWrites
+	}
 	before := len(*out)
 	appendExecutableReader(out, kind+".identity", plan.Identity, phase)
 	if len(*out) > before {
 		ref := &(*out)[len(*out)-1]
+		ref.FanOutAfterWrites = true
 		ref.ItemAlias = plan.ItemAlias
 		ref.ItemType = plan.ItemType.Clone()
 		ref.HasItemType = true

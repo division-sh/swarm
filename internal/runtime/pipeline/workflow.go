@@ -39,8 +39,6 @@ type WorkflowState struct {
 	Control  runtimeengine.StateControl `json:"-"`
 }
 
-const workflowStateBucketEntityProjection = "entity_projection"
-
 func NormalizeWorkflowStateID(raw string) WorkflowStateID {
 	return WorkflowStateID(strings.TrimSpace(raw))
 }

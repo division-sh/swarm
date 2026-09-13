@@ -56,7 +56,7 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        source,
-		StateRepo:     stubStateRepo{},
+		StateRepo:     sparseSnapshotRepo{snapshot: StateSnapshot{EntityID: "entity-1", CurrentState: "pending"}},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 		Dispatcher:    stubDispatcher{},
@@ -106,7 +106,7 @@ func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
-		StateRepo:     stubStateRepo{},
+		StateRepo:     sparseSnapshotRepo{snapshot: StateSnapshot{EntityID: "entity-1", StateCarrier: NewStateCarrier(nil, map[string]bool{"gate_a": true}, nil)}},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 		Dispatcher:    stubDispatcher{},

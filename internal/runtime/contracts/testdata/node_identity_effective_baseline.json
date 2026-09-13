@@ -4208,7 +4208,22 @@
               "Fields": null
             }
           },
-          "Guard": null,
+          "Guard": {
+            "ID": "",
+            "Check": "has(entity.account_ids)",
+            "Checks": null,
+            "PolicyRef": "",
+            "OnFail": "",
+            "OnFailSpec": {
+              "AuthoredMapping": false,
+              "Action": "",
+              "Escalation": {
+                "Event": "",
+                "From": "",
+                "Fields": null
+              }
+            }
+          },
           "AdvancesTo": "",
           "SetsGate": null,
           "ClearGates": null,
@@ -5050,7 +5065,22 @@
               },
               "Filter": null,
               "GroupBy": null,
-              "Guard": null,
+              "Guard": {
+                "ID": "",
+                "Check": "has(entity.account_ids)",
+                "Checks": null,
+                "PolicyRef": "",
+                "OnFail": "",
+                "OnFailSpec": {
+                  "AuthoredMapping": false,
+                  "Action": "",
+                  "Escalation": {
+                    "Event": "",
+                    "From": "",
+                    "Fields": null
+                  }
+                }
+              },
               "Join": null,
               "Logic": "",
               "Loop": null,
@@ -5830,7 +5860,22 @@
           "Input": null,
           "Approval": null
         },
-        "Guard": null,
+        "Guard": {
+          "ID": "",
+          "Check": "has(entity.account_ids)",
+          "Checks": null,
+          "PolicyRef": "",
+          "OnFail": "",
+          "OnFailSpec": {
+            "AuthoredMapping": false,
+            "Action": "",
+            "Escalation": {
+              "Event": "",
+              "From": "",
+              "Fields": null
+            }
+          }
+        },
         "AdvancesTo": "",
         "SetsGate": null,
         "ClearGates": null,

@@ -27,8 +27,11 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 	if !hasAll(approved.Emits, "processing/item.completed") {
 		t.Fatalf("expected approval emission, got %v", approved.Emits)
 	}
-	if got := approved.Computed["score"]; got == nil {
-		t.Fatalf("expected computed score to be stored, got %+v", approved)
+	if _, present := approved.Metadata["score"]; !present {
+		t.Fatalf("expected computed result in its declared entity field, got %+v", approved)
+	}
+	if _, mirrored := approved.Computed["score"]; mirrored {
+		t.Fatal("entity score was mirrored into the private computed namespace")
 	}
 
 	rejected := previewHandler(t, bundle, "processing-node", "item.review_requested", map[string]any{

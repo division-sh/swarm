@@ -3086,7 +3086,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err != nil {
 		t.Fatalf("new gate activation: %v", err)
 	}
-	carrier := runtimeengine.NewStateCarrier(map[string]any{"run_id": runID}, nil, nil)
+	carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, nil)
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store gate activation: %v", err)
 	}
@@ -5018,10 +5018,13 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if entityViewCode != 0 {
 		t.Fatalf("entity view readback code=%d stderr=%s stdout=%s", entityViewCode, entityViewStderr, entityViewStdout)
 	}
-	for _, want := range []string{entityID, "done", "item_id  none"} {
+	for _, want := range []string{entityID, "done", "Fields  none"} {
 		if !strings.Contains(entityViewStdout, want) {
 			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
 		}
+	}
+	if strings.Contains(entityViewStdout, "item_id") {
+		t.Fatalf("entity view fabricated an unassigned item_id:\n%s", entityViewStdout)
 	}
 
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"

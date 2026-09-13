@@ -50,7 +50,10 @@ func (c *checkerContext) conditionExpressions() []Finding {
 					})
 				}
 			}
-			for _, cond := range handlerConditionExpressionsForSource(c.source, nodeRef, eventType, handler) {
+			for _, cond := range c.entityAssignmentReaders(nodeRef, eventType, handler) {
+				if !cond.HasConditionContext {
+					continue
+				}
 				expr := cond.Expression
 				options := executableReaderExpressionOptions(cond, payloadType, entityType)
 				if source := cond.ConditionCollectionSource; source != "" {
@@ -128,8 +131,11 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
 			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
-			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
+			for _, expr := range c.entityAssignmentReaders(nodeRef, eventType, handler) {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation {
+					continue
+				}
+				if len(expr.RequiredEntityPaths) != 0 {
 					continue
 				}
 				if payloadTypeErr != nil && workflowexpr.ExpressionReferencesRoot(expr.Expression, "payload") {
@@ -164,7 +170,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
 			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
-			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
+			for _, expr := range c.entityAssignmentReaders(nodeRef, eventType, handler) {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields &&
 					expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation {
 					continue
@@ -200,7 +206,7 @@ func (c *checkerContext) executableReaderExpressions() []Finding {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
 			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
-			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
+			for _, expr := range c.entityAssignmentReaders(nodeRef, eventType, handler) {
 				if executableReaderHasSpecializedExpressionCheck(expr) {
 					continue
 				}
@@ -259,7 +265,13 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
+			for _, expr := range c.entityAssignmentReaders(nodeRef, eventType, handler) {
+				if expr.AssignmentError != "" {
+					c.entityRefFindings = append(c.entityRefFindings, Finding{
+						CheckID: "expression_field_reference_validation", Severity: SeverityHardInvalidity,
+						Message: fmt.Sprintf("%s handler %s %s: %s", nodeLabel, eventType, expr.Kind, expr.AssignmentError), Location: nodeID,
+					})
+				}
 				for _, ref := range runtimepipeline.WorkflowEntityReferences(expr.Expression) {
 					ref = strings.TrimSpace(ref)
 					if ref == "" {
@@ -336,6 +348,16 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 }
 
 type expressionReference struct {
+	RequiredEntityPaths       []string
+	CommittedStage            string
+	KnownPresence             []string
+	AssignmentError           string
+	WriteIndex                int
+	HasWriteIndex             bool
+	GuardCheckIndex           int
+	HasGuardCheckIndex        bool
+	EmitSite                  *runtimecontracts.HandlerDeclarativeEmitSite
+	FanOutAfterWrites         bool
 	Kind                      string
 	Expression                string
 	Phase                     runtimepipeline.WorkflowEntityFieldLifecyclePhase
@@ -419,6 +441,9 @@ func handlerEmitExpressionsForSource(source semanticview.Source, node runtimeide
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
 		before := len(out)
 		appendSpec(site.Source, site.SiteKey, site.Spec, runtimepipeline.WorkflowEntityFieldLifecycleEmitFields, site.ItemAlias)
+		for index := before; index < len(out); index++ {
+			out[index].EmitSite = &site
+		}
 		if plan, ok := fanOutPlanForEmitSite(source, node, eventType, site); ok {
 			for index := before; index < len(out); index++ {
 				out[index].ItemType = plan.ItemType.Clone()
@@ -601,6 +626,7 @@ func executableWildcardPayloadStructuralType(source semanticview.Source, node ru
 
 func executableReaderExpressionOptions(expr expressionReference, payloadType, entityType *runtimecontracts.ResolvedCatalogType) workflowexpr.ValueExpressionOptions {
 	options := workflowexpr.ValueExpressionOptions{
+		KnownPresence: expr.KnownPresence,
 		AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias, AllowJoin: expr.AllowJoin, PayloadType: payloadType, EntityType: entityType,
 		JoinResultType: expr.JoinResultType, JoinContext: expr.JoinContext,
 	}

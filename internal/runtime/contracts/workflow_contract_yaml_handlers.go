@@ -1385,6 +1385,14 @@ func decodeClearSpecNode(node *yaml.Node) (*ClearSpec, error) {
 	if len(spec.Targets) == 0 {
 		return nil, nil
 	}
+	for _, target := range spec.Targets {
+		if strings.TrimSpace(target) == "pending_dedup" {
+			return nil, fmt.Errorf("RETIRED: clear target pending_dedup has no private effect; use op: clear with an explicitly declared optional entity field")
+		}
+		if err := ValidatePrivateClearTarget(target); err != nil {
+			return nil, err
+		}
+	}
 	return &spec, nil
 }
 
