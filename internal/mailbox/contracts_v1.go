@@ -15,6 +15,7 @@ import (
 var (
 	ErrV1NotFound      = errors.New("mailbox item not found")
 	ErrV1InvalidCursor = errors.New("invalid mailbox cursor")
+	ErrNotNotice       = errors.New("decision cards cannot be acknowledged as notices")
 )
 
 type V1ListOptions struct {

@@ -185,7 +185,7 @@ func executeOperatorEventPublication(
 	}
 	idempotency := apiidempotency.Request{
 		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
+		Actor: apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		TTL:            runStartIDempotencyTTL,

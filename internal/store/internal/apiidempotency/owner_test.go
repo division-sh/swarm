@@ -21,14 +21,15 @@ func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapaci
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS api_idempotency (
 			method TEXT NOT NULL,
-			actor_token_id TEXT NOT NULL,
+			actor_kind TEXT NOT NULL,
+			actor_id TEXT NOT NULL,
 			idempotency_key TEXT NOT NULL,
 			request_hash TEXT NOT NULL,
 			resource_id TEXT NOT NULL,
 			response JSONB NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL,
 			expires_at TIMESTAMPTZ NOT NULL,
-			PRIMARY KEY (method, actor_token_id, idempotency_key)
+			PRIMARY KEY (method, actor_kind, actor_id, idempotency_key)
 		)
 	`); err != nil {
 		t.Fatalf("create api idempotency table: %v", err)
@@ -88,7 +89,7 @@ func TestPostgresAPIIdempotencyTerminalReleaseFailuresFailClosedAndRestoreCapaci
 			}
 			req := apiidempotencycontract.Request{
 				Method:         "test.release",
-				ActorTokenID:   "actor",
+				Actor: apiidempotencycontract.BearerActor("actor"),
 				IdempotencyKey: fmt.Sprintf("terminal-%d", i),
 				RequestHash:    fmt.Sprintf("hash-%d", i),
 				ResourceID:     fmt.Sprintf("resource-%d", i),

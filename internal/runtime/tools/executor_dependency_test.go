@@ -48,7 +48,6 @@ func (*mailboxStoreStub) ExpireMailboxItems(context.Context, int) ([]MailboxItem
 func (*mailboxStoreStub) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]MailboxItem, error) {
 	return nil, nil
 }
-func (*mailboxStoreStub) MarkMailboxItemNotified(context.Context, string) error { return nil }
 
 type entityPersistenceStub struct{}
 

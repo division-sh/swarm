@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -21,8 +22,7 @@ type TestSetupStore interface {
 type DecisionCardAuthority interface {
 	CommitDecisionCardMutation(
 		context.Context,
-		runtimepipeline.DecisionCardMutationIdempotency,
-		runtimepipeline.DecisionCardMutationIdempotencyRequest,
+		apiidempotency.Request,
 		runtimepipeline.DecisionCardMutation,
 	) (json.RawMessage, bool, error)
 }
@@ -136,7 +136,6 @@ type DecisionCardHandlerOptions struct {
 	NoticeAcknowledgment MailboxNoticeAcknowledgmentStore
 	Authority            DecisionCardAuthority
 	SourceArtifact       SourceArtifactAdmitter
-	Idempotency          APIIdempotencyStore
 	RuntimeContexts      *runtime.RuntimeContextManager
 }
 

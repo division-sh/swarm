@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -18,29 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
-
-type DecisionCardMutationIdempotencyRequest struct {
-	Method         string
-	ActorTokenID   string
-	IdempotencyKey string
-	RequestHash    string
-	ResourceID     string
-	TTL            time.Duration
-	Now            time.Time
-}
-
-type DecisionCardMutationIdempotencyCompletion struct {
-	ResourceID string
-	Response   json.RawMessage
-}
-
-type DecisionCardMutationIdempotency interface {
-	WithDecisionCardMutationIdempotency(
-		context.Context,
-		DecisionCardMutationIdempotencyRequest,
-		func(context.Context) (DecisionCardMutationIdempotencyCompletion, error),
-	) (DecisionCardMutationIdempotencyCompletion, bool, error)
-}
 
 type DecisionCardMutationKind uint8
 
@@ -92,6 +70,54 @@ func (m DecisionCardMutation) InputBegin() (decisioncard.BeginInputRequest, stri
 
 func (m DecisionCardMutation) InputCancellation() (decisioncard.CancelInputRequest, bool) {
 	return m.cancelInput, m.kind == DecisionCardMutationCancelInput
+}
+
+func (m DecisionCardMutation) ValidateRequest(req apiidempotency.Request) error {
+	if err := req.Actor.ValidateMethod(req.Method); err != nil {
+		return err
+	}
+	var method, cardID, principalID string
+	switch m.kind {
+	case DecisionCardMutationDecide:
+		method, cardID, principalID = "mailbox.decide", m.decide.CardID, m.decide.PrincipalID
+	case DecisionCardMutationDefer:
+		method, cardID, principalID = "mailbox.defer", m.deferral.CardID, m.deferral.PrincipalID
+	case DecisionCardMutationBeginInput:
+		method, cardID, principalID = "mailbox.begin_input", m.beginInput.CardID, m.beginInput.PrincipalID
+	case DecisionCardMutationCancelInput:
+		method, cardID, principalID = "mailbox.cancel_input", m.cancelInput.CardID, m.cancelInput.PrincipalID
+	default:
+		return fmt.Errorf("decision-card mutation kind is required")
+	}
+	if req.Method != method || req.ResourceID == "" || req.ResourceID != cardID || req.Actor.ID != principalID || req.RequestHash == "" {
+		return fmt.Errorf("decision-card request identity contradicts its mutation")
+	}
+	return nil
+}
+
+// Planning derives only the input TTL from the current card. Every requested
+// semantic field, actor and occurrence stays bound to the acquired operation.
+func (m DecisionCardMutation) SameRequest(other DecisionCardMutation) bool {
+	if m.kind != other.kind || m.observedContentHash != other.observedContentHash {
+		return false
+	}
+	m.beginInput.TTL, other.beginInput.TTL = 0, 0
+	switch m.kind {
+	case DecisionCardMutationDecide:
+		a, b := m.decide, other.decide
+		return a.CardID == b.CardID && a.Verdict == b.Verdict && a.Fields.Equal(b.Fields) &&
+			a.PrincipalID == b.PrincipalID && a.ObservedContentHash == b.ObservedContentHash &&
+			a.DeliveryReceiptID == b.DeliveryReceiptID && a.DeliveryRenderHash == b.DeliveryRenderHash &&
+			a.InputDraftID == b.InputDraftID && a.DecisionEventID == b.DecisionEventID && a.Now.Equal(b.Now)
+	case DecisionCardMutationDefer:
+		return m.deferral == other.deferral
+	case DecisionCardMutationBeginInput:
+		return m.beginInput == other.beginInput
+	case DecisionCardMutationCancelInput:
+		return m.cancelInput == other.cancelInput
+	default:
+		return false
+	}
 }
 
 type decisionCardMutationResult struct {
@@ -159,6 +185,7 @@ func (c DecisionCardMutationCommand) Validate() error {
 }
 
 type CommittedDecisionCardMutation struct {
+	Completion     apiidempotency.Completion
 	Kind           DecisionCardMutationKind
 	Outcome        decisioncard.DecisionOutcome
 	Draft          decisioncard.InputDraft
@@ -192,45 +219,45 @@ func (r CommittedDecisionCardMutation) Validate() error {
 }
 
 type DecisionCardMutationOwner interface {
-	CommitDecisionCardOperation(context.Context, DecisionCardMutationCommand) (CommittedDecisionCardMutation, error)
+	AcquireDecisionCardMutation(context.Context, apiidempotency.Request, DecisionCardMutation) (DecisionCardMutationLease, error)
+}
+
+type DecisionCardMutationLease interface {
+	Replay() (apiidempotency.Completion, bool)
+	Commit(context.Context, DecisionCardMutationCommand) (CommittedDecisionCardMutation, error)
+	Release(context.Context) error
 }
 
 func (pc *PipelineCoordinator) CommitDecisionCardMutation(
 	ctx context.Context,
-	idempotency DecisionCardMutationIdempotency,
-	idempotencyRequest DecisionCardMutationIdempotencyRequest,
+	request apiidempotency.Request,
 	mutation DecisionCardMutation,
-) (json.RawMessage, bool, error) {
+) (response json.RawMessage, replayed bool, err error) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil, false, fmt.Errorf("decision-card mutation requires workflow persistence")
 	}
 	if pc.decisionCards == nil {
 		return nil, false, fmt.Errorf("decision-card mutation requires the decision-card owner")
 	}
-	if idempotency == nil {
-		return nil, false, fmt.Errorf("decision-card mutation requires the idempotency owner")
+	if pc.workflowStore.cardMutations == nil {
+		return nil, false, fmt.Errorf("decision-card mutation requires the selected-store operation owner")
 	}
-	completion, replayed, err := idempotency.WithDecisionCardMutationIdempotency(ctx, idempotencyRequest, func(callbackCtx context.Context) (DecisionCardMutationIdempotencyCompletion, error) {
-		result, err := pc.commitDecisionCardMutation(callbackCtx, mutation)
-		if err != nil {
-			return DecisionCardMutationIdempotencyCompletion{}, err
-		}
-		raw, err := canonicaljson.Bytes(result)
-		if err != nil {
-			return DecisionCardMutationIdempotencyCompletion{}, err
-		}
-		return DecisionCardMutationIdempotencyCompletion{ResourceID: idempotencyRequest.ResourceID, Response: raw}, nil
-	})
+	if err := mutation.ValidateRequest(request); err != nil {
+		return nil, false, err
+	}
+	lease, err := pc.workflowStore.cardMutations.AcquireDecisionCardMutation(ctx, request, mutation)
 	if err != nil {
 		return nil, false, err
 	}
-	return append(json.RawMessage(nil), completion.Response...), replayed, nil
+	defer func() { err = errors.Join(err, lease.Release(context.WithoutCancel(ctx))) }()
+	if completion, replay := lease.Replay(); replay {
+		return append(json.RawMessage(nil), completion.Response...), true, nil
+	}
+	response, err = pc.commitDecisionCardMutation(ctx, lease, mutation)
+	return response, false, err
 }
 
-func (pc *PipelineCoordinator) commitDecisionCardMutation(ctx context.Context, mutation DecisionCardMutation) (any, error) {
-	if pc.workflowStore.cardMutations == nil {
-		return nil, fmt.Errorf("decision-card mutation requires the selected-store operation owner")
-	}
+func (pc *PipelineCoordinator) commitDecisionCardMutation(ctx context.Context, lease DecisionCardMutationLease, mutation DecisionCardMutation) (json.RawMessage, error) {
 	command, plans, err := pc.prepareDecisionCardMutation(ctx, mutation)
 	if err != nil {
 		return nil, err
@@ -242,7 +269,7 @@ func (pc *PipelineCoordinator) commitDecisionCardMutation(ctx context.Context, m
 		}
 		return planner.ReleaseEnginePublications(context.WithoutCancel(ctx), values)
 	}
-	committed, err := pc.workflowStore.cardMutations.CommitDecisionCardOperation(ctx, command)
+	committed, err := lease.Commit(ctx, command)
 	if err != nil {
 		return nil, errors.Join(err, release(plans))
 	}
@@ -274,23 +301,38 @@ func (pc *PipelineCoordinator) commitDecisionCardMutation(ctx context.Context, m
 			return nil, err
 		}
 	}
+	return append(json.RawMessage(nil), committed.Completion.Response...), nil
+}
+
+// ProjectCompletion runs inside the domain transaction, after the store has
+// selected the actual result, including a forced human-task deferral.
+func (committed CommittedDecisionCardMutation) ProjectCompletion() (apiidempotency.Completion, error) {
+	if err := committed.Validate(); err != nil {
+		return apiidempotency.Completion{}, err
+	}
+	var result any
+	var cardID string
 	switch committed.Kind {
 	case DecisionCardMutationDecide:
 		outcome := committed.Outcome
-		result := decisionCardMutationResult{OK: true, CardID: outcome.Card.CardID, Status: outcome.Card.Status, ChangeID: outcome.ChangeID}
+		value := decisionCardMutationResult{OK: true, CardID: outcome.Card.CardID, Status: outcome.Card.Status, ChangeID: outcome.ChangeID}
 		if !outcome.ForcedDeferred {
-			result.Verdict = outcome.Card.Verdict
-			result.DecisionEventID = outcome.Card.DecisionEventID
+			value.Verdict = outcome.Card.Verdict
+			value.DecisionEventID = outcome.Card.DecisionEventID
 		}
-		return result, nil
+		result, cardID = value, value.CardID
 	case DecisionCardMutationDefer:
-		return decisionCardMutationResult{OK: true, CardID: committed.Outcome.Card.CardID, Status: committed.Outcome.Card.Status, ChangeID: committed.Outcome.ChangeID}, nil
+		cardID = committed.Outcome.Card.CardID
+		result = decisionCardMutationResult{OK: true, CardID: cardID, Status: committed.Outcome.Card.Status, ChangeID: committed.Outcome.ChangeID}
 	case DecisionCardMutationBeginInput, DecisionCardMutationCancelInput:
 		draft := committed.Draft
-		return decisionCardInputMutationResult{OK: true, CardID: draft.CardID, InputDraftID: draft.InputDraftID, Verdict: draft.Verdict, Status: draft.Status, ExpiresAt: draft.ExpiresAt.UTC().Format(time.RFC3339Nano)}, nil
+		cardID = draft.CardID
+		result = decisionCardInputMutationResult{OK: true, CardID: draft.CardID, InputDraftID: draft.InputDraftID, Verdict: draft.Verdict, Status: draft.Status, ExpiresAt: draft.ExpiresAt.UTC().Format(time.RFC3339Nano)}
 	default:
-		return nil, fmt.Errorf("committed decision-card mutation kind is required")
+		return apiidempotency.Completion{}, fmt.Errorf("committed decision-card mutation kind is required")
 	}
+	raw, err := canonicaljson.Bytes(result)
+	return apiidempotency.Completion{ResourceID: cardID, Response: raw}, err
 }
 
 func (pc *PipelineCoordinator) prepareDecisionCardMutation(

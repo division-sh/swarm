@@ -96,7 +96,7 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 							return err
 						}
 					case "mailbox_notify":
-						invoke = func(ctx context.Context) error { return pg.MarkMailboxItemNotified(ctx, item.ID) }
+						invoke = noticeAcknowledgmentFixture(t, pg, item.ID)
 					case "mailbox_expire":
 						invoke = func(ctx context.Context) error {
 							items, err := pg.ExpireMailboxItems(ctx, 20)

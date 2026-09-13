@@ -81,8 +81,8 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 	if err := pg.CreateDecisionCard(ctx, stageCard); err != nil {
 		t.Fatal(err)
 	}
-	draft, err := pg.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{
-		CardID: stageCard.CardID, Verdict: "revise", ActorTokenID: "operator-a", Now: now, TTL: time.Hour,
+	draft, err := DecisionCardDomainForTest(pg).BeginInputForTest(ctx, decisioncard.BeginInputRequest{
+		CardID: stageCard.CardID, Verdict: "revise", PrincipalID: "operator-a", Now: now, TTL: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,8 +92,8 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 	if err := pg.CreateHumanTaskCard(ctx, humanCard, humanContinuation); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pg.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-		CardID: humanCard.CardID, Verdict: "approve", ActorTokenID: "operator-a",
+	if _, err := DecisionCardDomainForTest(pg).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+		CardID: humanCard.CardID, Verdict: "approve", PrincipalID: "operator-a",
 		ObservedContentHash: humanCard.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(time.Second),
 	}); err != nil {
 		t.Fatal(err)

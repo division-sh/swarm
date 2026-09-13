@@ -155,7 +155,7 @@ func executeAgentRestart(ctx context.Context, req Request, opts AgentControlHand
 	}
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
+		Actor: apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		ResourceID:     agentControlResourceID(runID, agentID, flowInstance),

@@ -72,7 +72,7 @@ func (c APIEventPublicationCommand) Validate() error {
 		return fmt.Errorf("API event publication completion response is required")
 	}
 	if strings.TrimSpace(c.Idempotency.IdempotencyKey) != "" &&
-		(strings.TrimSpace(c.Idempotency.ActorTokenID) == "" || strings.TrimSpace(c.Idempotency.RequestHash) == "") {
+		(c.Idempotency.Actor.ValidateMethod(c.Idempotency.Method) != nil || strings.TrimSpace(c.Idempotency.RequestHash) == "") {
 		return fmt.Errorf("API event publication actor token and request hash are required for idempotency")
 	}
 	creating := c.Publication.Commit.Event.RunDisposition() == events.AdmittedRunCreateAuthorized

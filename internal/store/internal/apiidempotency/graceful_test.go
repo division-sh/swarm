@@ -21,7 +21,7 @@ func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			db.SetMaxOpenConns(1)
-			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_token_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_token_id,idempotency_key))`); err != nil {
+			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_kind,actor_id,idempotency_key))`); err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
@@ -70,7 +70,7 @@ func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
 			if phase == "before_admission" {
 				cancel()
 			}
-			req := apiidempotencycontract.Request{Method: "test.stop", ActorTokenID: "actor", IdempotencyKey: "key", RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
+			req := apiidempotencycontract.Request{Method: "test.stop", Actor: apiidempotencycontract.BearerActor("actor"), IdempotencyKey: "key", RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
 			calls := 0
 			_, _, err = owner.WithAPIIdempotency(ctx, req, func(callbackCtx context.Context) (apiidempotencycontract.Completion, error) {
 				calls++
@@ -121,11 +121,11 @@ func TestAPIIdempotencyGracefulSQLBoundaries(t *testing.T) {
 func TestAPIIdempotencyContendedAdmissionCancellation(t *testing.T) {
 	dsn, observer, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	if _, err := observer.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_token_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_token_id,idempotency_key))`); err != nil {
+	if _, err := observer.Exec(`CREATE TABLE IF NOT EXISTS api_idempotency(method TEXT NOT NULL, actor_kind TEXT NOT NULL, actor_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, resource_id TEXT NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(method,actor_kind,actor_id,idempotency_key))`); err != nil {
 		t.Fatal(err)
 	}
-	req := apiidempotencycontract.Request{Method: "test.wait", ActorTokenID: "actor", IdempotencyKey: "key", RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
-	key := apiIdempotencyLockKey(req.Method, req.ActorTokenID, req.IdempotencyKey)
+	req := apiidempotencycontract.Request{Method: "test.wait", Actor: apiidempotencycontract.BearerActor("actor"), IdempotencyKey: "key", RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
+	key := apiIdempotencyLockKey(req.Method, req.Actor, req.IdempotencyKey)
 	holder, err := observer.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)

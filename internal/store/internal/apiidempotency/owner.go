@@ -12,6 +12,7 @@ import (
 	"time"
 
 	apiidempotencycontract "github.com/division-sh/swarm/internal/apiidempotency"
+	storeoperatorchannel "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
@@ -26,6 +27,7 @@ type PostgresOwner struct {
 
 type PostgresRequestLease struct {
 	lease      *postgresbackend.AdvisoryLockLease
+	started    time.Time
 	req        apiidempotencycontract.Request
 	completion apiidempotencycontract.Completion
 	replay     bool
@@ -46,7 +48,9 @@ func StorePostgresCompletionTx(ctx context.Context, lease *PostgresRequestLease,
 	if err != nil {
 		return err
 	}
-	return storeAPIIdempotency(ctx, tx, lease.req, completion)
+	if err := admitPrincipalTx(ctx, tx, lease.req, true); err != nil { return err }
+	if lease.req.IdempotencyKey == "" { return nil }
+	return storeAPIIdempotency(ctx, tx, completionRequest(lease.req, lease.started), completion)
 }
 
 func (l *PostgresRequestLease) Release(ctx context.Context) error {
@@ -69,15 +73,21 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
 	if err := validateRequest(req); err != nil {
 		return nil, err
 	}
+	if req.IdempotencyKey == "" {
+		l := &PostgresRequestLease{req: req, started: time.Now()}
+		err := owner.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return admitPrincipalTx(txctx, tx, req, true) })
+		return l, err
+	}
 	acquire := owner.acquire
 	if acquire == nil {
 		acquire = acquireAPIIdempotencyLease
 	}
-	lease, err := acquire(ctx, owner.backend, apiIdempotencyLockKey(req.Method, req.ActorTokenID, req.IdempotencyKey))
+	started := time.Now()
+	lease, err := acquire(ctx, owner.backend, apiIdempotencyLockKey(req.Method, req.Actor, req.IdempotencyKey))
 	if err != nil {
 		return nil, err
 	}
-	requestLease := &PostgresRequestLease{lease: lease, req: req}
+	requestLease := &PostgresRequestLease{lease: lease, req: req, started: started}
 	session := lease.Session()
 	if session == nil {
 		return nil, errors.Join(fmt.Errorf("api idempotency authority has no current session"), requestLease.Release(ctx))
@@ -85,6 +95,7 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
 	var existing apiIdempotencyRecord
 	var found bool
 	err = postgresbackend.RunAuthorityTransaction(ctx, session, func(sqlCtx context.Context, tx *sql.Tx) error {
+		if err := admitPrincipalTx(sqlCtx, tx, req, true); err != nil { return err }
 		if err := purgeExpiredAPIIdempotency(sqlCtx, tx, req.Now); err != nil {
 			return err
 		}
@@ -96,7 +107,7 @@ func AcquirePostgresRequest(ctx context.Context, owner *PostgresOwner, req apiid
 		return nil, errors.Join(err, requestLease.Release(ctx))
 	}
 	if found {
-		if existing.RequestHash != req.RequestHash {
+		if completionConflicts(req, existing) {
 			return nil, errors.Join(conflictError(req, existing), requestLease.Release(ctx))
 		}
 		requestLease.replay = true
@@ -120,6 +131,9 @@ func (s *PostgresOwner) WithAPIIdempotency(
 	req apiidempotencycontract.Request,
 	execute func(context.Context) (apiidempotencycontract.Completion, error),
 ) (completion apiidempotencycontract.Completion, replay bool, err error) {
+	if apiidempotencycontract.IsHumanMailboxMethod(req.Method) {
+		return completion, false, fmt.Errorf("human mailbox completion requires its domain transaction owner")
+	}
 	if execute == nil {
 		return apiidempotencycontract.Completion{}, false, fmt.Errorf("api idempotency executor is required")
 	}
@@ -154,7 +168,7 @@ func (s *PostgresOwner) WithAPIIdempotency(
 		return apiidempotencycontract.Completion{}, false, err
 	}
 	if err := postgresbackend.RunAuthorityTransaction(ctx, requestLease.lease.Session(), func(sqlCtx context.Context, tx *sql.Tx) error {
-		return storeAPIIdempotency(sqlCtx, tx, requestLease.req, completion)
+		return StorePostgresCompletionTx(sqlCtx, requestLease, tx, completion)
 	}); err != nil {
 		return apiidempotencycontract.Completion{}, false, err
 	}
@@ -206,10 +220,10 @@ func loadAPIIdempotency(ctx context.Context, q execQueryer, req apiidempotencyco
 		SELECT request_hash, resource_id, response
 		FROM api_idempotency
 		WHERE method = $1
-		  AND actor_token_id = $2
-		  AND idempotency_key = $3
-		  AND expires_at > $4
-	`, req.Method, req.ActorTokenID, req.IdempotencyKey, req.Now).Scan(&record.RequestHash, &record.ResourceID, &record.Response)
+		  AND actor_kind = $2 AND actor_id = $3
+		  AND idempotency_key = $4
+		  AND expires_at > $5
+	`, req.Method, req.Actor.Kind, req.Actor.ID, req.IdempotencyKey, req.Now).Scan(&record.RequestHash, &record.ResourceID, &record.Response)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return apiIdempotencyRecord{}, false, nil
@@ -223,11 +237,11 @@ func loadAPIIdempotency(ctx context.Context, q execQueryer, req apiidempotencyco
 func storeAPIIdempotency(ctx context.Context, q execQueryer, req apiidempotencycontract.Request, completion apiidempotencycontract.Completion) error {
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO api_idempotency (
-			method, actor_token_id, idempotency_key, request_hash,
+			method, actor_kind, actor_id, idempotency_key, request_hash,
 			resource_id, response, created_at, expires_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
-	`, req.Method, req.ActorTokenID, req.IdempotencyKey, req.RequestHash, strings.TrimSpace(completion.ResourceID), string(completion.Response), req.Now, req.Now.Add(req.TTL))
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+	`, req.Method, req.Actor.Kind, req.Actor.ID, req.IdempotencyKey, req.RequestHash, strings.TrimSpace(completion.ResourceID), string(completion.Response), req.Now, req.Now.Add(req.TTL))
 	if err != nil {
 		return fmt.Errorf("store api idempotency response: %w", err)
 	}
@@ -242,12 +256,9 @@ func purgeExpiredAPIIdempotency(ctx context.Context, q execQueryer, now time.Tim
 	return nil
 }
 
-func apiIdempotencyLockKey(method, actorTokenID, idempotencyKey string) string {
-	return apiIdempotencyLockNamespace + strings.Join([]string{
-		strings.TrimSpace(method),
-		strings.TrimSpace(actorTokenID),
-		strings.TrimSpace(idempotencyKey),
-	}, "|")
+func apiIdempotencyLockKey(method string, actor apiidempotencycontract.Actor, idempotencyKey string) string {
+	raw, _ := json.Marshal([]string{method, string(actor.Kind), actor.ID, idempotencyKey})
+	return apiIdempotencyLockNamespace + string(raw)
 }
 
 type SQLiteOwner struct {
@@ -258,6 +269,7 @@ type SQLiteOwner struct {
 
 type SQLiteRequestLease struct {
 	lock       *sync.Mutex
+	started    time.Time
 	req        apiidempotencycontract.Request
 	completion apiidempotencycontract.Completion
 	replay     bool
@@ -279,7 +291,9 @@ func StoreSQLiteCompletionTx(ctx context.Context, lease *SQLiteRequestLease, tx 
 	if err != nil {
 		return err
 	}
-	return storeSQLite(ctx, tx, lease.req, completion)
+	if err := admitPrincipalTx(ctx, tx, lease.req, false); err != nil { return err }
+	if lease.req.IdempotencyKey == "" { return nil }
+	return storeSQLite(ctx, tx, completionRequest(lease.req, lease.started), completion)
 }
 
 func (l *SQLiteRequestLease) Release() {
@@ -301,12 +315,19 @@ func AcquireSQLiteRequest(ctx context.Context, owner *SQLiteOwner, req apiidempo
 	if err := validateRequest(req); err != nil {
 		return nil, err
 	}
+	if req.IdempotencyKey == "" {
+		l := &SQLiteRequestLease{req: req, started: time.Now()}
+		err := owner.backend.RunTransaction(ctx, "admit mailbox principal", func(txctx context.Context, tx *sql.Tx) error { return admitPrincipalTx(txctx, tx, req, false) })
+		return l, err
+	}
+	started := time.Now()
 	lock := sqliteLockForPath(owner.path)
 	lock.Lock()
-	requestLease := &SQLiteRequestLease{lock: lock, req: req}
+	requestLease := &SQLiteRequestLease{lock: lock, req: req, started: started}
 	var existing apiIdempotencyRecord
 	var found bool
 	err := owner.backend.RunTransaction(ctx, "sqlite api idempotency lookup", func(txCtx context.Context, tx *sql.Tx) error {
+		if err := admitPrincipalTx(txCtx, tx, req, false); err != nil { return err }
 		if err := purgeExpiredSQLite(txCtx, tx, req.Now); err != nil {
 			return err
 		}
@@ -319,7 +340,7 @@ func AcquireSQLiteRequest(ctx context.Context, owner *SQLiteOwner, req apiidempo
 		return nil, err
 	}
 	if found {
-		if existing.RequestHash != req.RequestHash {
+		if completionConflicts(req, existing) {
 			requestLease.Release()
 			return nil, conflictError(req, existing)
 		}
@@ -345,6 +366,9 @@ func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() e
 }
 
 func (s *SQLiteOwner) WithAPIIdempotency(ctx context.Context, req apiidempotencycontract.Request, execute func(context.Context) (apiidempotencycontract.Completion, error)) (apiidempotencycontract.Completion, bool, error) {
+	if apiidempotencycontract.IsHumanMailboxMethod(req.Method) {
+		return apiidempotencycontract.Completion{}, false, fmt.Errorf("human mailbox completion requires its domain transaction owner")
+	}
 	if execute == nil {
 		return apiidempotencycontract.Completion{}, false, fmt.Errorf("api idempotency executor is required")
 	}
@@ -372,7 +396,7 @@ func (s *SQLiteOwner) WithAPIIdempotency(ctx context.Context, req apiidempotency
 		return apiidempotencycontract.Completion{}, false, err
 	}
 	if err := s.backend.RunTransaction(ctx, "sqlite api idempotency completion", func(txCtx context.Context, tx *sql.Tx) error {
-		return storeSQLite(txCtx, tx, requestLease.req, completion)
+		return StoreSQLiteCompletionTx(txCtx, requestLease, tx, completion)
 	}); err != nil {
 		return apiidempotencycontract.Completion{}, false, err
 	}
@@ -381,7 +405,6 @@ func (s *SQLiteOwner) WithAPIIdempotency(ctx context.Context, req apiidempotency
 
 func normalizeRequest(req apiidempotencycontract.Request) apiidempotencycontract.Request {
 	req.Method = strings.TrimSpace(req.Method)
-	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	req.RequestHash = strings.TrimSpace(req.RequestHash)
 	req.ResourceID = strings.TrimSpace(req.ResourceID)
@@ -395,20 +418,43 @@ func normalizeRequest(req apiidempotencycontract.Request) apiidempotencycontract
 }
 
 func validateRequest(req apiidempotencycontract.Request) error {
-	if req.Method == "" || req.ActorTokenID == "" || req.RequestHash == "" || req.IdempotencyKey == "" {
-		return fmt.Errorf("method, actor token id, idempotency key, and request hash are required")
+	if err := req.Actor.ValidateMethod(req.Method); err != nil {
+		return err
+	}
+	if req.RequestHash == "" || (req.IdempotencyKey == "" && !apiidempotencycontract.IsHumanMailboxMethod(req.Method)) {
+		return fmt.Errorf("idempotency key and request hash are required")
 	}
 	return nil
 }
 
+func admitPrincipalTx(ctx context.Context, tx *sql.Tx, req apiidempotencycontract.Request, postgres bool) error {
+	if req.Actor.Kind != apiidempotencycontract.ActorOperatorPrincipal { return nil }
+	return storeoperatorchannel.RequirePrincipalTx(ctx, tx, req.Actor.ID, postgres)
+}
+
 func normalizeCompletion(req apiidempotencycontract.Request, completion apiidempotencycontract.Completion) (apiidempotencycontract.Completion, error) {
-	if len(completion.Response) == 0 {
-		return apiidempotencycontract.Completion{}, fmt.Errorf("api idempotency response is required")
+	if len(completion.Response) == 0 || !json.Valid(completion.Response) {
+		return apiidempotencycontract.Completion{}, fmt.Errorf("valid API idempotency response is required")
+	}
+	if req.Actor.Kind == apiidempotencycontract.ActorOperatorPrincipal && (req.ResourceID == "" || completion.ResourceID != req.ResourceID) {
+		return apiidempotencycontract.Completion{}, fmt.Errorf("mailbox completion must name the exact request resource")
 	}
 	if strings.TrimSpace(completion.ResourceID) == "" {
 		completion.ResourceID = req.ResourceID
 	}
 	return cloneCompletion(completion), nil
+}
+
+func completionConflicts(req apiidempotencycontract.Request, existing apiIdempotencyRecord) bool {
+	return existing.RequestHash != req.RequestHash ||
+		(req.Actor.Kind == apiidempotencycontract.ActorOperatorPrincipal && existing.ResourceID != req.ResourceID)
+}
+
+// Preserve a caller-supplied admission clock while including lease wait and
+// execution time. Retention starts at completion, not request preparation.
+func completionRequest(req apiidempotencycontract.Request, started time.Time) apiidempotencycontract.Request {
+	req.Now = req.Now.Add(time.Since(started)).UTC()
+	return req
 }
 
 func cloneCompletion(completion apiidempotencycontract.Completion) apiidempotencycontract.Completion {
@@ -454,8 +500,8 @@ func loadSQLite(ctx context.Context, q execQueryer, req apiidempotencycontract.R
 	err := q.QueryRowContext(ctx, `
 		SELECT request_hash, resource_id, response
 		FROM api_idempotency
-		WHERE method = ? AND actor_token_id = ? AND idempotency_key = ? AND expires_at > ?
-	`, req.Method, req.ActorTokenID, req.IdempotencyKey, req.Now.UTC()).Scan(&record.RequestHash, &record.ResourceID, &response)
+		WHERE method = ? AND actor_kind = ? AND actor_id = ? AND idempotency_key = ? AND expires_at > ?
+	`, req.Method, req.Actor.Kind, req.Actor.ID, req.IdempotencyKey, req.Now.UTC()).Scan(&record.RequestHash, &record.ResourceID, &response)
 	if errors.Is(err, sql.ErrNoRows) {
 		return apiIdempotencyRecord{}, false, nil
 	}
@@ -469,10 +515,10 @@ func loadSQLite(ctx context.Context, q execQueryer, req apiidempotencycontract.R
 func storeSQLite(ctx context.Context, q execQueryer, req apiidempotencycontract.Request, completion apiidempotencycontract.Completion) error {
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO api_idempotency (
-			method, actor_token_id, idempotency_key, request_hash,
+			method, actor_kind, actor_id, idempotency_key, request_hash,
 			resource_id, response, created_at, expires_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, req.Method, req.ActorTokenID, req.IdempotencyKey, req.RequestHash, strings.TrimSpace(completion.ResourceID), string(completion.Response), req.Now.UTC(), req.Now.Add(req.TTL).UTC())
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, req.Method, req.Actor.Kind, req.Actor.ID, req.IdempotencyKey, req.RequestHash, strings.TrimSpace(completion.ResourceID), string(completion.Response), req.Now.UTC(), req.Now.Add(req.TTL).UTC())
 	if err != nil {
 		return fmt.Errorf("store sqlite api idempotency response: %w", err)
 	}

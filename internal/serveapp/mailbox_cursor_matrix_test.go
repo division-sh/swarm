@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/servedparity"
+	storetest "github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +30,6 @@ type cursorMailboxStore interface {
 	decisioncard.HumanTaskStore
 	InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error)
 	CountUnreadInformationalNotices(context.Context) (int, error)
-	MarkMailboxItemNotified(context.Context, string) error
 }
 
 type cursorMailboxFixture struct {
@@ -403,10 +403,10 @@ func TestServedMailboxCursorLiveContinuationParity(t *testing.T) {
 				params := map[string]any{"entity_id": entity, "run_id": f.base.RunID, "status": "pending", "anchor_kind": "stage_gate", "limit": 1}
 				first := f.list(t, params)
 				now := time.Now().UTC()
-				if _, err := f.store.DeferDecisionCard(f.ctx, decisioncard.DeferRequest{CardID: cards[1].CardID, ActorTokenID: "cursor-proof", Until: now.Add(time.Hour), Now: now}); err != nil {
+				if _, err := storetest.DecisionCardDomain(f.store).ApplyDeferralForTest(f.ctx, decisioncard.DeferRequest{CardID: cards[1].CardID, PrincipalID: "cursor-proof", Until: now.Add(time.Hour), Now: now}); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.store.DecideDecisionCard(f.ctx, decisioncard.DecideRequest{CardID: cards[2].CardID, ActorTokenID: "cursor-proof", Verdict: "approve", ObservedContentHash: cards[2].CardContentHash, DecisionEventID: uuid.NewString(), Now: now}); err != nil {
+				if _, err := storetest.DecisionCardDomain(f.store).ApplyDecisionForTest(f.ctx, decisioncard.DecideRequest{CardID: cards[2].CardID, PrincipalID: "cursor-proof", Verdict: "approve", ObservedContentHash: cards[2].CardContentHash, DecisionEventID: uuid.NewString(), Now: now}); err != nil {
 					t.Fatal(err)
 				}
 				anchor, _ := cards[3].Anchor.StageGate()
@@ -445,9 +445,7 @@ func TestServedMailboxCursorLiveContinuationParity(t *testing.T) {
 					t.Fatalf("filtered mixed=%v", cursorRowKeys(rows))
 				}
 				before := f.list(t, params)
-				if err := f.store.MarkMailboxItemNotified(f.ctx, n.Notice.MailboxID); err != nil {
-					t.Fatal(err)
-				}
+				requireServedOKJSONRPC(t, f.rt.Endpoint, "mailbox.acknowledge", map[string]any{"mailbox_id": n.Notice.MailboxID})
 				params["anchor_kind"] = "stage_gate"
 				after := f.list(t, params)
 				if after.Unread != before.Unread-1 {

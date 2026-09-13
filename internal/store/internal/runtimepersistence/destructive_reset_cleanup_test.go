@@ -1533,8 +1533,8 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed run control: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO api_idempotency (method, actor_token_id, idempotency_key, request_hash, resource_id, response, expires_at)
-		VALUES ('runtime.nuke', 'operator', 'idem', 'hash', 'runtime', '{}'::jsonb, now() + interval '1 hour')
+		INSERT INTO api_idempotency (method, actor_kind, actor_id, idempotency_key, request_hash, resource_id, response, expires_at)
+		VALUES ('runtime.nuke', 'bearer_token', 'operator', 'idem', 'hash', 'runtime', '{}'::jsonb, now() + interval '1 hour')
 	`); err != nil {
 		t.Fatalf("seed api idempotency: %v", err)
 	}

@@ -135,7 +135,7 @@ func (c testOperatorCapabilities) decisionCards() DecisionCardHandlerOptions {
 		Now: c.Now, Cards: c.DecisionCards, ProposedEffects: proposedEffects,
 		Mailbox: c.Mailbox, NoticeAcknowledgment: noticeAcknowledgment,
 		Authority: c.DecisionAuthority, SourceArtifact: bundleSource,
-		Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts,
+		RuntimeContexts:      c.RuntimeContexts,
 		SelectedForkControls: c.SelectedForkControls,
 	}
 }

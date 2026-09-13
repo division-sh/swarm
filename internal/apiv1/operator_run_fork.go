@@ -158,7 +158,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
+		Actor: apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: params.IdempotencyKey,
 		RequestHash:    req.RequestHash,
 		ResourceID:     params.SourceRunID,

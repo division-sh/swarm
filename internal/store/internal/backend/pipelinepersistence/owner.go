@@ -34,6 +34,7 @@ import (
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
 	"github.com/google/uuid"
+	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 )
 
 type CompletionCandidateRequester interface {
@@ -147,6 +148,7 @@ func nullUUIDString(raw string) string {
 }
 
 type PipelinePostgresOwner struct {
+	apiIdempotency         *storeapiidempotency.PostgresOwner
 	*storerunlifecycle.RunLifecyclePostgresOwner
 	*storedecision.DecisionPostgresOwner
 	*storedelivery.DeliveryPostgresOwner
@@ -164,6 +166,7 @@ type PipelinePostgresOwner struct {
 }
 
 type PipelineSQLiteOwner struct {
+	apiIdempotency         *storeapiidempotency.SQLiteOwner
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedecision.DecisionSQLiteOwner
 	*storedelivery.DeliverySQLiteOwner
@@ -250,21 +253,22 @@ func (s *PipelineSQLiteOwner) BindSelectedForkWriter(owner SelectedForkCommitTxO
 	return nil
 }
 
-func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, lifecycle *storerunlifecycle.RunLifecyclePostgresOwner, candidates *runhandoff.CandidateCoordinator, decision *storedecision.DecisionPostgresOwner, delivery *storedelivery.DeliveryPostgresOwner, reply *storereplycontext.ReplyPostgresOwner, entityQueries *storeworkflowentityquery.Postgres, routes *storeworkflowroute.Postgres, events EventCommitOwner) (*PipelinePostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || decision == nil || delivery == nil || reply == nil || entityQueries == nil || routes == nil || events == nil {
+func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, lifecycle *storerunlifecycle.RunLifecyclePostgresOwner, candidates *runhandoff.CandidateCoordinator, decision *storedecision.DecisionPostgresOwner, delivery *storedelivery.DeliveryPostgresOwner, reply *storereplycontext.ReplyPostgresOwner, entityQueries *storeworkflowentityquery.Postgres, routes *storeworkflowroute.Postgres, events EventCommitOwner, idempotency *storeapiidempotency.PostgresOwner) (*PipelinePostgresOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || decision == nil || delivery == nil || reply == nil || entityQueries == nil || routes == nil || events == nil || idempotency == nil {
 		return nil, errors.New("pipeline PostgreSQL owner dependencies are required")
 	}
-	return &PipelinePostgresOwner{RunLifecyclePostgresOwner: lifecycle, DecisionPostgresOwner: decision, DeliveryPostgresOwner: delivery, ReplyPostgresOwner: reply, backend: backend, requireCurrent: requireCurrent, candidateRequests: lifecycle, runLifecycleCandidates: candidates, workflowEntityQueries: entityQueries, workflowRoutes: routes, events: events}, nil
+	return &PipelinePostgresOwner{apiIdempotency: idempotency, RunLifecyclePostgresOwner: lifecycle, DecisionPostgresOwner: decision, DeliveryPostgresOwner: delivery, ReplyPostgresOwner: reply, backend: backend, requireCurrent: requireCurrent, candidateRequests: lifecycle, runLifecycleCandidates: candidates, workflowEntityQueries: entityQueries, workflowRoutes: routes, events: events}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, lifecycle *storerunlifecycle.RunLifecycleSQLiteOwner, candidates *runhandoff.CandidateCoordinator, decision *storedecision.DecisionSQLiteOwner, delivery *storedelivery.DeliverySQLiteOwner, reply *storereplycontext.ReplySQLiteOwner, entityQueries *storeworkflowentityquery.SQLite, routes *storeworkflowroute.SQLite, events EventCommitOwner, now func() time.Time) (*PipelineSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || decision == nil || delivery == nil || reply == nil || entityQueries == nil || routes == nil || events == nil {
+func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, lifecycle *storerunlifecycle.RunLifecycleSQLiteOwner, candidates *runhandoff.CandidateCoordinator, decision *storedecision.DecisionSQLiteOwner, delivery *storedelivery.DeliverySQLiteOwner, reply *storereplycontext.ReplySQLiteOwner, entityQueries *storeworkflowentityquery.SQLite, routes *storeworkflowroute.SQLite, events EventCommitOwner, idempotency *storeapiidempotency.SQLiteOwner, now func() time.Time) (*PipelineSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || decision == nil || delivery == nil || reply == nil || entityQueries == nil || routes == nil || events == nil || idempotency == nil {
 		return nil, errors.New("pipeline SQLite owner dependencies are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
 	return &PipelineSQLiteOwner{
+		apiIdempotency: idempotency,
 		RunLifecycleSQLiteOwner: lifecycle, DecisionSQLiteOwner: decision, DeliverySQLiteOwner: delivery, ReplySQLiteOwner: reply,
 		backend: backend, requireCurrent: requireCurrent, candidateRequests: lifecycle, runLifecycleCandidates: candidates, workflowEntityQueries: entityQueries, workflowRoutes: routes, events: events, nowFn: now,
 		pipelineClaimIssuer: runtimepipelineobligation.NewClaimIssuer(), pipelineClaims: map[string]*pipelineClaimState{},

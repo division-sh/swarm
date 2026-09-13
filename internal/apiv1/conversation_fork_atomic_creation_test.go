@@ -39,7 +39,7 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 			ctx, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
 			req := runfork.APIConversationForkCreateRequest{
 				Creation:    runfork.ConversationForkCreateRequest{SourceSessionID: sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: turnID}, CreatedBy: "actor", Now: now},
-				Idempotency: apiidempotency.Request{Method: "conversation.fork", ActorTokenID: "actor", IdempotencyKey: "same-key", RequestHash: "same-hash", ResourceID: sessionID, Now: now, TTL: 24 * time.Hour},
+				Idempotency: apiidempotency.Request{Method: "conversation.fork", Actor: apiidempotency.BearerActor("actor"), IdempotencyKey: "same-key", RequestHash: "same-hash", ResourceID: sessionID, Now: now, TTL: 24 * time.Hour},
 			}
 			t.Run("precommit_refusal", func(t *testing.T) {
 				canceled, cancel := context.WithCancel(ctx)
@@ -131,7 +131,7 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 			})
 			t.Run("actor_key_and_unkeyed_distinct", func(t *testing.T) {
 				actor := req
-				actor.Creation.CreatedBy, actor.Idempotency.ActorTokenID = "other-actor", "other-actor"
+				actor.Creation.CreatedBy, actor.Idempotency.Actor = "other-actor", apiidempotency.BearerActor("other-actor")
 				key := req
 				key.Idempotency.IdempotencyKey = "other-key"
 				unkeyed := req

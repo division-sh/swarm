@@ -77,7 +77,7 @@ func (a directOperatorChannelDestructiveTestAdapter) RevokeProof(ctx context.Con
 }
 
 func (s *recordingOperatorChannelIdempotency) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
-	s.actors = append(s.actors, req.ActorTokenID)
+	s.actors = append(s.actors, req.Actor.ID)
 	return s.delegate.WithAPIIdempotency(ctx, req, execute)
 }
 

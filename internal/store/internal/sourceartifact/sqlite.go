@@ -65,6 +65,12 @@ type sqliteSourceArtifactQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+func RequireSQLiteSourceArtifactTx(ctx context.Context, tx *sql.Tx, bundleHash string) error {
+	if tx == nil { return fmt.Errorf("source artifact transaction is required") }
+	_, err := loadSQLiteSourceArtifact(ctx, tx, bundleHash)
+	return err
+}
+
 func loadSQLiteSourceArtifact(ctx context.Context, queryer sqliteSourceArtifactQueryer, bundleHash string) (sourceartifact.Persisted, error) {
 	var out sourceartifact.Persisted
 	var created any

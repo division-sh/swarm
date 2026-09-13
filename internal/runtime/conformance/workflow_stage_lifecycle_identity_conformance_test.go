@@ -129,8 +129,8 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			if err := runtime.Pipeline.CommitDecision(runCtx, card, decisionEventID, decidedAt); err != nil {
 				t.Fatalf("commit gate decision route: %v", err)
 			}
-			decided, err := lifecycleStore.DecideDecisionCard(runCtx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+			decided, err := storetest.DecisionCardDomain(lifecycleStore).ApplyDecisionForTest(runCtx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", PrincipalID: "operator",
 				ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: decidedAt,
 			})
 			if err != nil {

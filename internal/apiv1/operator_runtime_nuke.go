@@ -69,7 +69,7 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 	operationID := uuid.NewString()
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
+		Actor: apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		ResourceID:     destructivereset.DefaultOperationName,

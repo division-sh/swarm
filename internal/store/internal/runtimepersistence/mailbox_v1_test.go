@@ -18,7 +18,7 @@ func TestPostgresStore_APIIdempotencyReplaysAndConflicts(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	req := apiidempotency.Request{
-		Method: "mailbox.decide", ActorTokenID: "actor-1", IdempotencyKey: "idem-1",
+		Method: "event.publish", Actor: apiidempotency.BearerActor("actor-1"), IdempotencyKey: "idem-1",
 		RequestHash: "sha256:first", ResourceID: "card-1", Now: now,
 	}
 	calls := 0

@@ -34,8 +34,8 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 			decisionEventID := uuid.NewString()
 			decisionAt := now.Add(time.Minute).Add(789 * time.Nanosecond)
 			wantDecisionAt := decisioncard.CanonicalTimestamp(decisionAt)
-			outcome, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: approved.CardID, Verdict: "approve", ActorTokenID: "operator-a",
+			outcome, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: approved.CardID, Verdict: "approve", PrincipalID: "operator-a",
 				ObservedContentHash: approved.CardContentHash, DecisionEventID: decisionEventID, Now: decisionAt,
 			})
 			if err != nil || outcome.ForcedDeferred || outcome.Card.Status != decisioncard.StatusDecided || !outcome.Card.DecidedAt.Equal(wantDecisionAt) || !outcome.Card.UpdatedAt.Equal(wantDecisionAt) {
@@ -70,8 +70,8 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 			if err := humanStore.CreateHumanTaskCard(ctx, budgeted, budgetedContinuation); err != nil {
 				t.Fatalf("CreateHumanTaskCard budgeted: %v", err)
 			}
-			forced, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: budgeted.CardID, Verdict: "approve", ActorTokenID: "operator-a",
+			forced, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: budgeted.CardID, Verdict: "approve", PrincipalID: "operator-a",
 				ObservedContentHash: budgeted.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(5 * time.Minute),
 			})
 			if err != nil || !forced.ForcedDeferred || forced.Card.Status != decisioncard.StatusPending {
@@ -106,14 +106,14 @@ func TestHumanTaskMutationsRejectForeignRequesterOwnerBeforeStateChange(t *testi
 				t.Fatalf("tamper requester owner: %v", err)
 			}
 
-			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator-a",
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", PrincipalID: "operator-a",
 				ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(2 * time.Hour),
 			}); err == nil || !strings.Contains(err.Error(), "requester owner") {
 				t.Fatalf("DecideDecisionCard foreign owner error = %v", err)
 			}
-			if _, err := cardStore.DeferDecisionCard(ctx, decisioncard.DeferRequest{
-				CardID: card.CardID, ActorTokenID: "operator-a", Until: now.Add(4 * time.Hour), Now: now.Add(2 * time.Hour),
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDeferralForTest(ctx, decisioncard.DeferRequest{
+				CardID: card.CardID, PrincipalID: "operator-a", Until: now.Add(4 * time.Hour), Now: now.Add(2 * time.Hour),
 			}); err == nil || !strings.Contains(err.Error(), "requester owner") {
 				t.Fatalf("DeferDecisionCard foreign owner error = %v", err)
 			}
@@ -179,8 +179,8 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 				switch testCase.continuation {
 				case string(decisioncard.HumanTaskContinuationDecisionCommitted), string(decisioncard.HumanTaskContinuationOutcomeDispatched), "outcome_dispatched_without_event":
 					outcomeEventID = uuid.NewString()
-					if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-						CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator-a",
+					if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+						CardID: card.CardID, Verdict: "approve", PrincipalID: "operator-a",
 						ObservedContentHash: card.CardContentHash, DecisionEventID: outcomeEventID, Now: now.Add(time.Minute),
 					}); err != nil {
 						t.Fatalf("DecideDecisionCard: %v", err)
@@ -282,8 +282,8 @@ func TestPostgresHumanTaskWeeklyBudgetSerializesConcurrentApprovals(t *testing.T
 		go func() {
 			defer workers.Done()
 			<-start
-			outcome, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator-a",
+			outcome, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", PrincipalID: "operator-a",
 				ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(),
 				Now: now.Add(time.Duration(index+1) * time.Minute),
 			})
@@ -357,7 +357,7 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 
 			deferredUntil := now.Add(30 * time.Minute).Add(789 * time.Nanosecond)
 			wantDeferredUntil := decisioncard.CanonicalTimestamp(deferredUntil)
-			if _, err := cardStore.DeferDecisionCard(ctx, decisioncard.DeferRequest{CardID: due.CardID, ActorTokenID: "operator-a", Until: deferredUntil, Now: now.Add(3 * time.Minute)}); err != nil {
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDeferralForTest(ctx, decisioncard.DeferRequest{CardID: due.CardID, PrincipalID: "operator-a", Until: deferredUntil, Now: now.Add(3 * time.Minute)}); err != nil {
 				t.Fatalf("DeferDecisionCard: %v", err)
 			}
 			deferred, err := humanStore.LoadHumanTaskContinuation(ctx, due.CardID)
@@ -399,7 +399,7 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 			if err != nil || supersededContinuation.State != decisioncard.HumanTaskContinuationSuperseded || !supersededContinuation.UpdatedAt.Equal(wantSupersededAt) {
 				t.Fatalf("run-superseded continuation = %#v, %v", supersededContinuation, err)
 			}
-			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: pending.CardID, Verdict: "approve", ObservedContentHash: pending.CardContentHash}); !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: pending.CardID, Verdict: "approve", ObservedContentHash: pending.CardContentHash}); !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
 				t.Fatalf("decision after run supersession error = %v", err)
 			}
 		})

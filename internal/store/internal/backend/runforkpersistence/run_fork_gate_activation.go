@@ -112,7 +112,7 @@ func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecis
 				return fmt.Errorf("source decision card %s lacks committed verdict evidence", sourceCard.CardID)
 			}
 			if _, err := decisions.DecideTx(ctx, story, tx, decisioncard.DecideRequest{
-				CardID: forkCard.CardID, Verdict: sourceVerdict, Fields: sourceFields, ActorTokenID: sourceActor,
+				CardID: forkCard.CardID, Verdict: sourceVerdict, Fields: sourceFields, PrincipalID: sourceActor,
 				ObservedContentHash: forkCard.CardContentHash, DeliveryReceiptID: sourceReceipt, DeliveryRenderHash: sourceRenderHash,
 				DecisionEventID: binding.Fork.DecisionEventID, Now: now,
 			}); err != nil {

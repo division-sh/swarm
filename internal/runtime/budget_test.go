@@ -309,7 +309,3 @@ func (*budgetMailboxCapture) ExpireMailboxItems(context.Context, int) ([]runtime
 func (*budgetMailboxCapture) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
-
-func (*budgetMailboxCapture) MarkMailboxItemNotified(context.Context, string) error {
-	return nil
-}

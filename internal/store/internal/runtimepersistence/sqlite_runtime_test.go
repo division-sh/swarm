@@ -137,7 +137,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if item.Status != "pending" || item.Type != runtimetools.NotifyHumanMailboxItemType {
 		t.Fatalf("mailbox item status=%q type=%q, want pending operator notice", item.Status, item.Type)
 	}
-	if err := store.MarkMailboxItemNotified(ctx, itemID); err != nil {
+	if err := noticeAcknowledgmentFixture(t, store, itemID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge informational notice: %v", err)
 	}
 	if unread, err := store.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {
@@ -212,8 +212,8 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 
 	req := apiidempotency.Request{
-		Method:         "mailbox.decide",
-		ActorTokenID:   "token-1",
+		Method:         "event.publish",
+		Actor: apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-1",
 		RequestHash:    "hash-1",
 		Now:            time.Now().UTC(),
@@ -276,7 +276,7 @@ func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t 
 	if err != nil || len(listed) != 1 || listed[0].ID != noticeID {
 		t.Fatalf("reopened pending informational notices = %#v, err=%v", listed, err)
 	}
-	if err := reopened.MarkMailboxItemNotified(ctx, noticeID); err != nil {
+	if err := noticeAcknowledgmentFixture(t, reopened, noticeID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge reopened informational notice: %v", err)
 	}
 	if unread, countErr := reopened.CountUnreadInformationalNotices(ctx); countErr != nil || unread != 0 {
@@ -1076,7 +1076,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 	entityID := "11111111-1111-1111-1111-111111111111"
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		ActorTokenID:   "token-1",
+		Actor: apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-nested-publish",
 		RequestHash:    "hash-nested-publish",
 		Now:            time.Now().UTC(),
@@ -1154,7 +1154,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 	eventID := uuid.NewString()
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		ActorTokenID:   "token-1",
+		Actor: apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-failed-publish",
 		RequestHash:    "hash-failed-publish",
 		Now:            time.Now().UTC(),
@@ -1196,7 +1196,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutat
 
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		ActorTokenID:   "token-1",
+		Actor: apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-concurrent-completion",
 		RequestHash:    "hash-concurrent-completion",
 		Now:            time.Now().UTC(),
@@ -1217,10 +1217,10 @@ func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutat
 				holderDone <- selected.backend.RunTransaction(ctx, "sqlite idempotency overlap proof", func(txCtx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(txCtx, `
 						INSERT INTO api_idempotency (
-							method, actor_token_id, idempotency_key, request_hash,
+							method, actor_kind, actor_id, idempotency_key, request_hash,
 							resource_id, response, created_at, expires_at
-						) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-					`, "proof.holder", "token-1", "holder", "holder-hash", "holder-resource", `{}`, req.Now, req.Now.Add(time.Hour))
+						) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+					`, "proof.holder", "bearer_token", "token-1", "holder", "holder-hash", "holder-resource", `{}`, req.Now, req.Now.Add(time.Hour))
 					if err != nil {
 						return err
 					}
@@ -1288,7 +1288,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	storeB := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
 	req := apiidempotency.Request{
 		Method:         "event.publish",
-		ActorTokenID:   "token-1",
+		Actor: apiidempotency.BearerActor("token-1"),
 		IdempotencyKey: "idem-shared-path",
 		RequestHash:    "hash-shared-path",
 		Now:            time.Now().UTC(),

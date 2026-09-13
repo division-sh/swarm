@@ -1159,7 +1159,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	if !foundNotice {
 		t.Fatalf("reopened pending mailbox list omitted informational notice %s: %#v", noticeID, listed)
 	}
-	if err := reopened.MarkMailboxItemNotified(ctx, noticeID); err != nil {
+	if err := noticeAcknowledgmentFixture(t, reopened, noticeID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("acknowledge informational notice: %v", err)
 	}
 	if unread, err := reopened.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {
@@ -1223,7 +1223,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	if !foundCritical {
 		t.Fatalf("expected critical mailbox item %q in unnotified list", critID)
 	}
-	if err := s.MarkMailboxItemNotified(ctx, critID); err != nil {
+	if err := noticeAcknowledgmentFixture(t, s, critID)(testAuthorActivityContext()); err != nil {
 		t.Fatalf("mark notified: %v", err)
 	}
 	crit2, err := s.ListUnnotifiedCriticalMailboxItems(ctx, 10)

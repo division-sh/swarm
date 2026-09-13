@@ -570,8 +570,8 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 				t.Fatalf("reloaded typed human-task ownership: %v; route=%#v", err, persistedContinuation.RequesterRoute)
 			}
 			deferredAt := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
-			deferred, err := cards.DeferDecisionCard(ctx, decisioncard.DeferRequest{
-				CardID: card.CardID, ActorTokenID: "operator", Until: deferredAt.Add(10 * time.Minute), Now: deferredAt,
+			deferred, err := storetest.DecisionCardDomain(cards).ApplyDeferralForTest(ctx, decisioncard.DeferRequest{
+				CardID: card.CardID, PrincipalID: "operator", Until: deferredAt.Add(10 * time.Minute), Now: deferredAt,
 			})
 			if err != nil {
 				t.Fatalf("defer typed human-task card: %v", err)
@@ -588,8 +588,8 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 
 			decisionAt := deferredAt.Add(time.Second)
 			decisionEventID := uuid.NewString()
-			decided, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+			decided, err := storetest.DecisionCardDomain(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", PrincipalID: "operator",
 				ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: decisionAt,
 			})
 			if err != nil {
@@ -658,8 +658,8 @@ func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend d
 	resumedBus, outcomes := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
 	decisionAt := time.Now().UTC()
 	decisionEventID := uuid.NewString()
-	decided, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-		CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+	decided, err := storetest.DecisionCardDomain(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+		CardID: card.CardID, Verdict: "approve", PrincipalID: "operator",
 		ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: decisionAt,
 	})
 	if err != nil {

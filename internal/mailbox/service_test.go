@@ -26,7 +26,6 @@ func (fakeStore) ExpireMailboxItems(context.Context, int) ([]runtimetools.Mailbo
 func (fakeStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
-func (fakeStore) MarkMailboxItemNotified(context.Context, string) error { return nil }
 func (fakeStore) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
 	return []runtimetools.MailboxItem{
 		{ID: "m1", Priority: "critical", Type: "manual_review"},

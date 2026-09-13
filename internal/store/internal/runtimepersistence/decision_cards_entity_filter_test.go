@@ -50,9 +50,9 @@ func TestDecisionCardEntityFilterParity(t *testing.T) {
 				}
 			}
 			decided := seed(decisioncard.AnchorKindStageGate, runID, entityID, now, false)
-			if _, err := store.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+			if _, err := DecisionCardDomainForTest(store).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
 				CardID: decided.CardID, Verdict: "approve", ObservedContentHash: decided.CardContentHash,
-				ActorTokenID: "operator", DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
+				PrincipalID: "operator", DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			}); err != nil {
 				t.Fatal(err)
 			}

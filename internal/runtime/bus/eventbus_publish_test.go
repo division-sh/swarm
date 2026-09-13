@@ -2303,8 +2303,8 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 		if err := selected.CreateDecisionCard(testAuthorActivityContext(context.Background()), card); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := selected.DecideDecisionCard(testAuthorActivityContext(context.Background()), decisioncard.DecideRequest{
-			CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash,
+		if _, err := storetest.DecisionCardDomain(selected).ApplyDecisionForTest(testAuthorActivityContext(context.Background()), decisioncard.DecideRequest{
+			CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash,
 			DecisionEventID: eventID, Now: time.Now().UTC(),
 		}); err != nil {
 			t.Fatal(err)

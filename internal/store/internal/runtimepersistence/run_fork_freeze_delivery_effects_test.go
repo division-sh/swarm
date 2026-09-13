@@ -42,7 +42,7 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 				if err := store.CreateDecisionCard(ctx, card); err != nil {
 					t.Fatal(err)
 				}
-				draft, err := store.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "freeze-proof", Now: time.Now().UTC(), TTL: time.Hour})
+				draft, err := DecisionCardDomainForTest(store).BeginInputForTest(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", PrincipalID: "freeze-proof", Now: time.Now().UTC(), TTL: time.Hour})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -14,8 +14,8 @@ import (
 )
 
 func validateAPIConversationFork(req runfork.APIConversationForkCreateRequest) error {
-	if req.Idempotency.Method != "conversation.fork" || strings.TrimSpace(req.Idempotency.ActorTokenID) == "" ||
-		strings.TrimSpace(req.Idempotency.ActorTokenID) != strings.TrimSpace(req.Creation.CreatedBy) {
+	if req.Idempotency.Method != "conversation.fork" || req.Idempotency.Actor.ValidateMethod(req.Idempotency.Method) != nil ||
+		req.Idempotency.Actor.ID != strings.TrimSpace(req.Creation.CreatedBy) {
 		return fmt.Errorf("conversation.fork requires its exact method and creator request identity")
 	}
 	return nil

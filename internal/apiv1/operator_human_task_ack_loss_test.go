@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -30,6 +32,8 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			fact := sourceArtifactFactForTestBundle(t, bundle)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			cardStore, humanStore, idempotency, mailbox, workflowStore, db := newHumanTaskAckLossOwners(t, ctx, backend)
+			principal, err := cardStore.(interface { EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error) }).EnsureOperatorPrincipal(ctx, time.Now())
+			if err != nil { t.Fatal(err) }
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			if backend == "postgres" {
@@ -44,6 +48,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 
 			authority := &humanTaskAckLossAuthority{delegate: workflowStore}
 			handler := testHandler(t, Options{
+				OperatorPrincipalID: principal.ID,
 				AuthTokens: []string{testToken},
 				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					Now: func() time.Time { return now.Add(time.Minute) }, Ready: func() bool { return true }, Database: fakePinger{},
@@ -201,11 +206,10 @@ type humanTaskAckLossAuthority struct {
 
 func (a *humanTaskAckLossAuthority) CommitDecisionCardMutation(
 	ctx context.Context,
-	idempotency runtimepipeline.DecisionCardMutationIdempotency,
-	idempotencyRequest runtimepipeline.DecisionCardMutationIdempotencyRequest,
+	idempotencyRequest apiidempotency.Request,
 	mutation runtimepipeline.DecisionCardMutation,
 ) (json.RawMessage, bool, error) {
-	completion, replayed, err := a.delegate.CommitDecisionCardMutation(ctx, idempotency, idempotencyRequest, mutation)
+	completion, replayed, err := a.delegate.CommitDecisionCardMutation(ctx, idempotencyRequest, mutation)
 	if err != nil {
 		return nil, false, err
 	}

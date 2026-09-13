@@ -107,7 +107,7 @@ func TestServePostgresGracefulContract(t *testing.T) {
 				}
 			})
 			var callbacks atomic.Int32
-			request := apiidempotency.Request{Method: "proof.graceful", ActorTokenID: "actor", IdempotencyKey: phase, RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
+			request := apiidempotency.Request{Method: "proof.graceful", Actor: apiidempotency.BearerActor("actor"), IdempotencyKey: phase, RequestHash: "hash", ResourceID: "resource", Now: time.Now().UTC(), TTL: time.Hour}
 			if phase == "result_drain" {
 				rows, err := selectedStore.db.QueryContext(opCtx, "SELECT i, repeat('x', 8192), pg_sleep(0.01) FROM generate_series(1, 30) i")
 				if err != nil {

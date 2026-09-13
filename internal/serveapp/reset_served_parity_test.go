@@ -230,7 +230,7 @@ func expireServedResetTransportCache(t *testing.T, proof servedControlProofRunti
 	// Exercise the cache owner's expiry transaction, rather than racing a raw
 	// fixture DELETE against the selected runtime's SQLite write owner.
 	_, _, err := owner.WithAPIIdempotency(context.Background(), apiidempotency.Request{
-		Method: "test.expire-transport-cache", ActorTokenID: "expiry-proof",
+		Method: "test.expire-transport-cache", Actor: apiidempotency.BearerActor("expiry-proof"),
 		IdempotencyKey: uuid.NewString(), RequestHash: "expiry-proof",
 		Now: time.Now().UTC().Add(48 * time.Hour), TTL: time.Minute,
 	}, func(context.Context) (apiidempotency.Completion, error) {

@@ -4653,7 +4653,7 @@ func TestAPIEventPublicationCommittedCompletionSurvivesPostCommitLocalFailures(t
 			)
 			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
 			committed, replay, err := eventBus.PublishAPIEventAcknowledged(ctx, evt, &apiEndpoint, apiidempotency.Request{
-				Method: "event.publish", ActorTokenID: "operator", IdempotencyKey: "post-commit-" + strings.ReplaceAll(test.name, " ", "-"), RequestHash: "request-hash",
+				Method: "event.publish", Actor: apiidempotency.BearerActor("operator"), IdempotencyKey: "post-commit-" + strings.ReplaceAll(test.name, " ", "-"), RequestHash: "request-hash",
 			}, completion)
 			if err != nil {
 				t.Fatalf("PublishAPIEventAcknowledged after committed completion: %v", err)

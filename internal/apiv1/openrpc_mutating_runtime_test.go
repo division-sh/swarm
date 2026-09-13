@@ -889,7 +889,7 @@ func newMutatingRuntimeProbeHandler(t *testing.T, methodName string, modifiers .
 			return handler(ctx, req)
 		}
 	}
-	return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: handlers}), calls, state
+	return testHandler(t, Options{AuthTokens: []string{testToken}, OperatorPrincipalID: "f46131e8-a81f-48a5-82b0-7c184ebf37f0", Handlers: handlers}), calls, state
 }
 
 type mutatingRuntimeProbeState struct {
@@ -1169,7 +1169,7 @@ func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
 		completion, err := execute(ctx)
 		return completion, false, err
 	}
-	key := strings.Join([]string{req.Method, req.ActorTokenID, strings.TrimSpace(req.IdempotencyKey)}, "|")
+	key := strings.Join([]string{req.Method, string(req.Actor.Kind), req.Actor.ID, strings.TrimSpace(req.IdempotencyKey)}, "|")
 	if completion, ok := s.records[key]; ok {
 		if s.hashes[key] != req.RequestHash {
 			return apiidempotency.Completion{}, false, &apiidempotency.ConflictError{
@@ -1599,15 +1599,18 @@ func (*mutatingProbeMailboxStore) CountUnreadInformationalNotices(context.Contex
 	return 0, nil
 }
 
-func (s *mutatingProbeMailboxStore) MarkMailboxItemNotified(_ context.Context, mailboxID string) error {
+func (s *mutatingProbeMailboxStore) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return s.state.idempotency.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
 	if s.notifyErr != nil {
-		return s.notifyErr
+		return apiidempotency.Completion{}, s.notifyErr
 	}
-	if strings.TrimSpace(mailboxID) != s.item.MailboxID {
-		return mailbox.ErrV1NotFound
+	if req.ResourceID != s.item.MailboxID {
+		return apiidempotency.Completion{}, mailbox.ErrV1NotFound
 	}
 	s.state.recordEffect()
-	return nil
+	raw, err := canonicaljson.Bytes(map[string]any{"ok": true, "mailbox_id": req.ResourceID, "kind": decisioncard.KindNotice})
+	return apiidempotency.Completion{ResourceID: req.ResourceID, Response: raw}, err
+	})
 }
 
 type mutatingProbeDecisionWorkflowStore struct {
@@ -1619,25 +1622,24 @@ type mutatingProbeDecisionWorkflowStore struct {
 
 func (s *mutatingProbeDecisionWorkflowStore) CommitDecisionCardMutation(
 	ctx context.Context,
-	idempotency runtimepipeline.DecisionCardMutationIdempotency,
-	idempotencyRequest runtimepipeline.DecisionCardMutationIdempotencyRequest,
+	idempotencyRequest apiidempotency.Request,
 	mutation runtimepipeline.DecisionCardMutation,
 ) (json.RawMessage, bool, error) {
 	if s.err != nil {
 		return nil, false, s.err
 	}
-	completion, replayed, err := idempotency.WithDecisionCardMutationIdempotency(ctx, idempotencyRequest, func(callbackCtx context.Context) (runtimepipeline.DecisionCardMutationIdempotencyCompletion, error) {
+	completion, replayed, err := s.state.idempotency.WithAPIIdempotency(ctx, idempotencyRequest, func(callbackCtx context.Context) (apiidempotency.Completion, error) {
 		result, event, err := s.apply(callbackCtx, mutation)
 		if err != nil {
-			return runtimepipeline.DecisionCardMutationIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		if event.Type() != "" {
 			if err := s.events.PublishInMutation(callbackCtx, event); err != nil {
-				return runtimepipeline.DecisionCardMutationIdempotencyCompletion{}, err
+				return apiidempotency.Completion{}, err
 			}
 		}
 		raw, err := canonicaljson.Bytes(result)
-		return runtimepipeline.DecisionCardMutationIdempotencyCompletion{ResourceID: idempotencyRequest.ResourceID, Response: raw}, err
+		return apiidempotency.Completion{ResourceID: idempotencyRequest.ResourceID, Response: raw}, err
 	})
 	return completion.Response, replayed, err
 }
@@ -1810,7 +1812,7 @@ func (s *mutatingProbeDecisionCardStore) BeginDecisionCardInput(_ context.Contex
 		return decisioncard.InputDraft{}, s.err
 	}
 	s.state.recordEffect()
-	return decisioncard.InputDraft{InputDraftID: "draft-1", CardID: req.CardID, ActorTokenID: req.ActorTokenID, Verdict: req.Verdict, Status: decisioncard.DraftStatusActive, ExpiresAt: req.Now.Add(req.TTL)}, nil
+	return decisioncard.InputDraft{InputDraftID: "draft-1", CardID: req.CardID, PrincipalID: req.PrincipalID, Verdict: req.Verdict, Status: decisioncard.DraftStatusActive, ExpiresAt: req.Now.Add(req.TTL)}, nil
 }
 
 func (s *mutatingProbeDecisionCardStore) CancelDecisionCardInput(_ context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
@@ -1818,7 +1820,7 @@ func (s *mutatingProbeDecisionCardStore) CancelDecisionCardInput(_ context.Conte
 		return decisioncard.InputDraft{}, s.err
 	}
 	s.state.recordEffect()
-	return decisioncard.InputDraft{InputDraftID: req.InputDraftID, CardID: req.CardID, ActorTokenID: req.ActorTokenID, Verdict: "reject", Status: decisioncard.DraftStatusCancelled, ExpiresAt: req.Now.Add(time.Minute)}, nil
+	return decisioncard.InputDraft{InputDraftID: req.InputDraftID, CardID: req.CardID, PrincipalID: req.PrincipalID, Verdict: "reject", Status: decisioncard.DraftStatusCancelled, ExpiresAt: req.Now.Add(time.Minute)}, nil
 }
 
 func (s *mutatingProbeDecisionCardStore) ListDecisionCardChanges(context.Context, decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
