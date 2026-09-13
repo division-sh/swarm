@@ -5515,13 +5515,15 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 		json.RawMessage(`{"batch_count":1,"items":[{"id":"company-1","eng_roles":9007199254740991,"gem_score":7.25,"exponent_score":1e3}]}`),
 		0, semanticExecutionFixtureRunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
+	liveFields := map[string]any{"threshold": int64(75)}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", Node: node, Event: trigger, Handler: qualified,
-		State: testStateSnapshot("pending", map[string]any{"threshold": int64(75)}, nil, map[string]map[string]any{}),
+		State: testStateSnapshot("pending", liveFields, nil, map[string]map[string]any{}),
 	})
 	if err != nil || result.FanOutIntent == nil {
 		t.Fatalf("create numeric fan-out intent: result=%#v err=%v", result, err)
 	}
+	liveFields["threshold"] = int64(0)
 	now := time.Now().UTC()
 	intent := fanoutobligation.Intent{
 		Request: *result.FanOutIntent, Source: result.FanOutIntent.Source,
@@ -5571,6 +5573,23 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 	}
 	if persisted["eng_roles"] != float64(9007199254740991) || persisted["gem_score"] != float64(7.25) || persisted["batch_count"] != float64(1) || persisted["exponent_score"] != float64(1000) {
 		t.Fatalf("persisted numeric emit = %#v", persisted)
+	}
+	for _, mismatch := range []string{"bundle", "plan"} {
+		t.Run("reject_wrong_"+mismatch, func(t *testing.T) {
+			hostile := intent
+			if mismatch == "bundle" {
+				hostile.Request.PlanRef.BundleHash = "wrong-pinned-source"
+			} else {
+				hostile.Request.PlanRef.SemanticDigest = "wrong-pinned-plan"
+			}
+			shaper.lastPayload = nil
+			if _, err := exec.EvaluateFanOutOrdinal(context.Background(), hostile, trigger, item, 0); err == nil {
+				t.Fatal("wrong pinned evidence was accepted")
+			}
+			if shaper.lastPayload != nil {
+				t.Fatal("wrong pinned evidence reached payload shaping")
+			}
+		})
 	}
 }
 

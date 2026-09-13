@@ -656,21 +656,17 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	}
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
-	payloadType := e.executionPayloadType(req)
-	entityType, _ := semanticview.ResolveEntityStructuralType(e.deps.Source, req.Node.FlowPath())
 	collectionPlan, err := e.resolveHandlerCollectionPlan(req)
 	if err != nil {
 		return executionFrame{}, err
 	}
 	delivery, deliveryPresent := runtimedelivery.RouteFromContext(ctx)
-	return executionFrame{
+	frame := executionFrame{
 		ctx:                      ctx,
 		deliveryTarget:           runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent),
 		req:                      req,
 		base:                     base,
 		payload:                  payload,
-		payloadType:              payloadType,
-		entityType:               entityType,
 		collectionPlan:           collectionPlan,
 		topLevelDataAccumulation: req.Handler.DataAccumulation,
 		state: ExecutionState{
@@ -690,7 +686,9 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 			HandlerRuleSelection: handlerselection.NotReached(),
 		},
 		ruleIndex: -1,
-	}, nil
+	}
+	e.bindFrameExpressionSchemas(&frame)
+	return frame, nil
 }
 
 func (e *Executor) resolveHandlerCollectionPlan(req ExecutionRequest) (runtimecontracts.WorkflowHandlerCollectionPlan, error) {
@@ -2160,6 +2158,14 @@ func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOp
 		options.JoinContext = workflowexpr.JoinContextFanOutDelivery
 	}
 	return options
+}
+
+func (e *Executor) bindFrameExpressionSchemas(frame *executionFrame) {
+	frame.payloadType = e.executionPayloadType(frame.req)
+	// Entity values may be frozen, but their meaning belongs to the pinned node
+	// declaration, not a live entity or the runtime instance's name. An absent
+	// schema remains absent; expression admission rejects entity reads without it.
+	frame.entityType, _ = semanticview.ResolveEntityStructuralType(e.deps.Source, frame.req.Node.FlowPath())
 }
 
 func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {

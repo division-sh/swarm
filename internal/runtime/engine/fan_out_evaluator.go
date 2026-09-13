@@ -87,7 +87,7 @@ func (e *Executor) EvaluateFanOutOrdinal(ctx context.Context, intent fanoutoblig
 		base: base, state: state, payload: payload,
 		fanOutEmission: &emission,
 	}
-	frame.payloadType = e.executionPayloadType(frame.req)
+	e.bindFrameExpressionSchemas(frame)
 	emitSpec := plan.Emit
 	eventType, err := admittedDeclarativeEmitEventType(frame, emitSpec.EventType())
 	if err != nil {

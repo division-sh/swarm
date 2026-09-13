@@ -292,6 +292,13 @@ contract_formats:
       it through a generic float64 decode or an integral-float JSON encoding.
       The kind-bearing writer rejects unprojected semantic Values, including
       nested ones; semantic projection is not a second writer interpretation.
+      Runtime payload admission validates the original bytes through strict
+      canonical admission before independently decoding their execution kinds.
+      Schema validation and optional-null omission preserve those kinds; they
+      are not another semantic-to-execution projection. Duplicate keys, invalid
+      UTF-8, trailing content and out-of-domain numbers cannot be hidden by a
+      transport decode. Selected-fork admission validates the pinned schema
+      without rewriting the frozen historical payload bytes.
       Exact numeric spelling is not retained, and semantic canonicalization for
       resource-version identity remains governed by semantic_json.contract.
       Malformed or unsafe numbers fail before evaluation with the
@@ -3847,6 +3854,11 @@ handler_specification:
           Live-intent persistence and fork projection use the workflow/CEL runtime-carrier JSON writer; both preserve
           integer-versus-double kind for every dynamic capsule map and may not use semantic canonicalization or a generic
           JSON encoder that collapses integral doubles.
+          Ordinary and deferred frames share expression-schema binding from the
+          pinned semantic source and exact executable node declaration scope.
+          Entity values remain the captured values; concrete instance names and
+          live state cannot select a replacement entity schema. An absent schema
+          forbids entity reads, not entityless execution that never reads entity.
         semantic_value_projection: >-
           Event-payload, persisted and fork-projected fan-out capsules, exact entity-revision, and pinned resource-version sources enter deferred emit evaluation only
           through contract_formats.semantic_json.workflow_cel_projection. Eager and deferred evaluation consume the same

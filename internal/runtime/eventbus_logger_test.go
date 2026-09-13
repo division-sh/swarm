@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -111,6 +112,15 @@ func TestRuntimePayloadAdmitter_ClassifiesGeneratedActivitySchema(t *testing.T) 
 
 	repo := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyGeneratedActivity(t, false, true)
+	toolPath := filepath.Join(root, "tools.yaml")
+	tool, err := os.ReadFile(toolPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool = bytes.Replace(tool, []byte("      delivered: {type: boolean}"), []byte("      delivered: {type: boolean}\n      explicit_double: {type: number}"), 1)
+	if err := os.WriteFile(toolPath, tool, 0600); err != nil {
+		t.Fatal(err)
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("load generated activity fixture: %v", err)
@@ -120,7 +130,7 @@ func TestRuntimePayloadAdmitter_ClassifiesGeneratedActivitySchema(t *testing.T) 
 		"tool":"send",
 		"effect_class":"read_only",
 		"attempt":1,
-		"result":{"delivered":true}
+		"result":{"delivered":true,"explicit_double":8.0}
 	}`))
 	if err != nil {
 		t.Fatalf("admit generated activity payload: %v", err)
@@ -128,6 +138,13 @@ func TestRuntimePayloadAdmitter_ClassifiesGeneratedActivitySchema(t *testing.T) 
 	admission, ok := event.PayloadAdmission()
 	if !ok || admission.Binding().SchemaClass() != events.PayloadSchemaGenerated {
 		t.Fatalf("generated payload schema class = %q/%v", admission.Binding().SchemaClass(), ok)
+	}
+	var executionPayload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(admission.Payload(), &executionPayload); err != nil {
+		t.Fatal(err)
+	}
+	if executionPayload["result"].(map[string]any)["explicit_double"] != json.Number("8.0") {
+		t.Fatalf("generated result schema erased execution kind: %s", admission.Payload())
 	}
 }
 
