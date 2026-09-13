@@ -137,11 +137,15 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 	if !ok {
 		liveRecipients := normalizeDeliveryRecipientCandidates(recipients)
 		persistedRecipients := persistedDeliveryRecipientCandidates(liveRecipients)
+		routes, err := agentDeliveryRoutesForCandidates(evt, persistedRecipients, projection)
+		if err != nil {
+			return deliveryRecipientManifest{}, err
+		}
 		manifest := deliveryRecipientManifest{
 			LiveRecipients:      liveRecipients,
 			Recipients:          deliveryRecipientIDs(recipients),
 			PersistedRecipients: deliveryRecipientIDs(persistedRecipients),
-			DeliveryRoutes:      agentDeliveryRoutesForCandidates(evt, persistedRecipients),
+			DeliveryRoutes:      routes,
 			AgentLifecycles:     agentLifecycleAdmissionsForCandidates(persistedRecipients),
 		}
 		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(manifest.Recipients) == 0 {
@@ -149,7 +153,10 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 		}
 		return manifest, nil
 	}
-	manifest := filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors)
+	manifest, err := filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors, projection)
+	if err != nil {
+		return deliveryRecipientManifest{}, err
+	}
 	return admitPendingStaticAgentRecipients(evt, recipients, descriptors, projection, manifest)
 }
 
@@ -809,7 +816,8 @@ func filterDeliveryRecipientCandidates(
 	recipients []deliveryRecipientCandidate,
 	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
 	targetDescriptors []ActiveTargetDescriptor,
-) deliveryRecipientManifest {
+	projection selectedRunTargetOwnerProjection,
+) (deliveryRecipientManifest, error) {
 	recipients = normalizeDeliveryRecipientCandidates(recipients)
 	targetFailureDescriptors := append([]ActiveTargetDescriptor(nil), targetDescriptors...)
 	targetFailureDescriptors = append(targetFailureDescriptors, activeTargetDescriptorsFromAgents(descriptors)...)
@@ -818,7 +826,7 @@ func filterDeliveryRecipientCandidates(
 	if len(recipients) == 0 {
 		return deliveryRecipientManifest{
 			TargetFailure: targetDeliveryFailure(evt, targetFailureDescriptors),
-		}
+		}, nil
 	}
 	singularTarget := evt.TargetRoute()
 	allowed := make([]string, 0, len(recipients))
@@ -850,9 +858,9 @@ func filterDeliveryRecipientCandidates(
 			allowed = append(allowed, scoped.ID)
 			allowedCandidates = append(allowedCandidates, scoped)
 			persisted = append(persisted, scoped.ID)
-			owner := events.DeliveryTargetOwnership{}
-			if !target.Empty() {
-				owner = events.MustExistingEntityTarget(target)
+			owner, err := projection.resolveActiveAgentTarget(descriptor, target)
+			if err != nil {
+				return deliveryRecipientManifest{}, err
 			}
 			deliveryRoutes = append(deliveryRoutes, events.DeliveryRoute{
 				Recipient:     events.MustAgentDeliveryRecipient(scoped.ID),
@@ -871,7 +879,7 @@ func filterDeliveryRecipientCandidates(
 	if len(targets) > 0 && len(manifest.LiveRecipients) == 0 {
 		manifest.TargetFailure = targetDeliveryFailure(evt, targetFailureDescriptors)
 	}
-	return manifest
+	return manifest, nil
 }
 
 func matchingAgentDescriptors(
@@ -902,10 +910,11 @@ func matchingAgentDescriptors(
 func agentDeliveryRoutesForCandidates(
 	evt events.Event,
 	recipients []deliveryRecipientCandidate,
-) []events.DeliveryRoute {
+	projection selectedRunTargetOwnerProjection,
+) ([]events.DeliveryRoute, error) {
 	recipients = persistedDeliveryRecipientCandidates(recipients)
 	if len(recipients) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]events.DeliveryRoute, 0, len(recipients))
 	target := evt.TargetRoute().Normalized()
@@ -915,7 +924,11 @@ func agentDeliveryRoutesForCandidates(
 		}
 		owner := events.DeliveryTargetOwnership{}
 		if !target.Empty() {
-			owner = events.MustExistingEntityTarget(target)
+			var err error
+			owner, err = projection.resolveSelectedRoute(target)
+			if err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, events.DeliveryRoute{
 			Recipient:     events.MustAgentDeliveryRecipient(recipient.ID),
@@ -923,7 +936,7 @@ func agentDeliveryRoutesForCandidates(
 			Target:        owner,
 		})
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return events.NormalizeDeliveryRoutes(out), nil
 }
 
 func targetedRoutedNodeDeliveryIntents(source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {

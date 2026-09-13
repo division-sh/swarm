@@ -81,33 +81,9 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 					}
 					return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: exact active agent identity is missing", intent.Recipient.ID())
 				}
-				descriptor = descriptor.Normalized()
-				ownerRoute := intent.TargetBlueprint.Normalized()
-				if instance := descriptor.Identity.FlowInstance(); instance != "" && ownerRoute.FlowInstance != instance {
-					return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: target flow instance %q disagrees with exact agent identity %q", intent.Recipient.ID(), ownerRoute.FlowInstance, instance)
-				}
-				var (
-					owner events.DeliveryTargetOwnership
-					err   error
-				)
-				if descriptor.EntityID == "" {
-					owner, err = p.resolveSelectedRoute(ownerRoute)
-				} else {
-					if ownerRoute.EntityID != "" && ownerRoute.EntityID != descriptor.EntityID {
-						return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: target entity %q disagrees with exact active agent entity %q", intent.Recipient.ID(), ownerRoute.EntityID, descriptor.EntityID)
-					}
-					ownerRoute.EntityID = descriptor.EntityID
-					if p.targetsAvailable {
-						owner, err = p.resolveSelectedRoute(ownerRoute)
-					} else {
-						owner, err = events.NewExistingEntityTarget(ownerRoute)
-					}
-				}
+				owner, err := p.resolveActiveAgentTarget(descriptor, intent.TargetBlueprint)
 				if err != nil {
 					return RoutePlan{}, fmt.Errorf("resolve delivery target for %s from exact agent identity: %w", intent.Recipient.ID(), err)
-				}
-				if !owner.ExistingEntity() && !owner.MaterializingEntity() {
-					return RoutePlan{}, fmt.Errorf("resolve delivery target for %s from exact agent identity: targeted agent requires entity ownership", intent.Recipient.ID())
 				}
 				intent.TargetOwnership = owner
 				intent.TargetBlueprint = owner.Route()
@@ -141,6 +117,44 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 		return RoutePlan{}, err
 	}
 	return plan.Normalized(), nil
+}
+
+// Active-agent ownership comes from the exact admitted descriptor. A flow-only
+// requester is not permission to borrow another entity in the same instance.
+func (p selectedRunTargetOwnerProjection) resolveActiveAgentTarget(descriptor ActiveAgentDescriptor, blueprint events.RouteIdentity) (events.DeliveryTargetOwnership, error) {
+	if blueprint.Empty() {
+		return events.DeliveryTargetOwnership{}, nil
+	}
+	descriptor = descriptor.Normalized()
+	if err := descriptor.Identity.Validate(); err != nil {
+		return events.DeliveryTargetOwnership{}, err
+	}
+	route := blueprint.Normalized()
+	if instance := descriptor.Identity.FlowInstance(); instance != "" && route.FlowInstance != instance {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("target flow instance %q disagrees with exact agent identity %q", route.FlowInstance, instance)
+	}
+	if route.FlowID != "" && descriptor.Identity.Route.Presence == agentidentity.RoutePresent && runtimeflowidentity.ScopeKey(p.source, route.FlowID) != descriptor.Identity.Route.ScopeKey {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("target flow %q disagrees with exact agent identity scope %q", route.FlowID, descriptor.Identity.Route.ScopeKey)
+	}
+	if descriptor.EntityID == "" && route.EntityID == "" {
+		if route.FlowID == "" {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("entityless active agent target requires exact flow identity")
+		}
+		return events.NewEntitylessReceiverTarget(route)
+	}
+	if descriptor.EntityID == "" {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("target entity %q disagrees with entityless active agent", route.EntityID)
+	}
+	if descriptor.EntityID != "" {
+		if route.EntityID != "" && route.EntityID != descriptor.EntityID {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("target entity %q disagrees with exact active agent entity %q", route.EntityID, descriptor.EntityID)
+		}
+		route.EntityID = descriptor.EntityID
+	}
+	if p.targetsAvailable {
+		return p.resolveSelectedRoute(route)
+	}
+	return events.NewExistingEntityTarget(route)
 }
 
 func validateAgentLifecycleTargetOwnership(intent RoutePlanDeliveryIntent) error {

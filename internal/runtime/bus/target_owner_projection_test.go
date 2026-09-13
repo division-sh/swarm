@@ -214,7 +214,7 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 	}
 }
 
-func TestExplicitAgentTargetRequiresSelectedEntityOwner(t *testing.T) {
+func TestExplicitAgentTargetPreservesEntitylessAndSelectedEntityOwners(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "reviewer", "entityless-target-proof", "review", "one", "review/one")
 	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
@@ -228,13 +228,28 @@ func TestExplicitAgentTargetRequiresSelectedEntityOwner(t *testing.T) {
 		required: true,
 	}
 
-	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
-		t.Fatalf("missing selected agent target error = %v, want target owner rejection", err)
+	assertEntityless := func() {
+		t.Helper()
+		resolved, err := projection.resolveRoutePlan(plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routes := resolved.DeliveryRoutes()
+		if len(routes) != 1 || !routes[0].Target.EntitylessReceiver() || routes[0].Target.Route() != plan.DeliveryIntents[0].TargetBlueprint {
+			t.Fatalf("resolved routes = %#v, want exact entityless agent target", routes)
+		}
 	}
+	assertEntityless()
 
 	selectedOwner := eventtest.UUID("review-one-selected-owner")
 	projection.descriptors = []ActiveTargetDescriptor{{ID: "review-one", FlowInstance: "review/one", EntityID: selectedOwner}}
 	projection.targetsAvailable = true
+	assertEntityless()
+	plan.DeliveryIntents[0].TargetBlueprint.EntityID = selectedOwner
+	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "disagrees with entityless active agent") {
+		t.Fatalf("borrowed entity target error = %v, want rejection", err)
+	}
+	projection.agents[identity] = ActiveAgentDescriptor{Identity: identity, EntityID: selectedOwner}
 	resolved, err := projection.resolveRoutePlan(plan)
 	if err != nil {
 		t.Fatalf("resolve selected agent target: %v", err)
@@ -249,6 +264,16 @@ func TestExplicitAgentTargetRequiresSelectedEntityOwner(t *testing.T) {
 	contradictory.DeliveryIntents[0].TargetBlueprint.FlowInstance = "review/other"
 	if _, err := projection.resolveRoutePlan(contradictory); err == nil || !strings.Contains(err.Error(), "disagrees with exact agent identity") {
 		t.Fatalf("contradictory agent target error = %v, want exact identity disagreement", err)
+	}
+	contradictory.DeliveryIntents[0].TargetBlueprint = plan.DeliveryIntents[0].TargetBlueprint
+	contradictory.DeliveryIntents[0].TargetBlueprint.FlowID = "foreign"
+	if _, err := projection.resolveRoutePlan(contradictory); err == nil || !strings.Contains(err.Error(), "disagrees with exact agent identity scope") {
+		t.Fatalf("foreign flow target error = %v, want exact scope disagreement", err)
+	}
+	contradictory.DeliveryIntents[0].TargetBlueprint = plan.DeliveryIntents[0].TargetBlueprint
+	contradictory.DeliveryIntents[0].TargetBlueprint.EntityID = eventtest.UUID("foreign-agent-entity")
+	if _, err := projection.resolveRoutePlan(contradictory); err == nil || !strings.Contains(err.Error(), "disagrees with exact active agent entity") {
+		t.Fatalf("foreign entity target error = %v, want exact ownership disagreement", err)
 	}
 }
 
