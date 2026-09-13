@@ -114,7 +114,7 @@ func TestGeneratedInputFixturePlanResolvesExactEventAndIsContextDeterministic(t 
 	if err != nil {
 		t.Fatalf("materialize beta: %v", err)
 	}
-	if !reflect.DeepEqual(betaPayload, map[string]any{"beta": float64(2)}) {
+	if !reflect.DeepEqual(betaPayload, map[string]any{"beta": int64(2)}) {
 		t.Fatalf("beta payload = %#v, want isolated beta schema", betaPayload)
 	}
 	if first.identity == beta.identity || first.eventKey == beta.eventKey {

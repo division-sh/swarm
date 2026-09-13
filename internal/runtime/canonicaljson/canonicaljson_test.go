@@ -25,10 +25,6 @@ func TestDecodePreservingNumberLexemesRetainsTransportKinds(t *testing.T) {
 }
 
 func TestMarshalPreservingNumberKindsRetainsRuntimeCarrierKinds(t *testing.T) {
-	semanticNumber, err := semanticvalue.Number(75)
-	if err != nil {
-		t.Fatal(err)
-	}
 	value := map[string]any{
 		"array": []any{int64(75), float64(75), json.Number("75e0")},
 		"float": float64(75),
@@ -36,14 +32,13 @@ func TestMarshalPreservingNumberKindsRetainsRuntimeCarrierKinds(t *testing.T) {
 		"nested": map[string]any{
 			"decimal":  json.Number("75.0"),
 			"fraction": float32(1.25),
-			"semantic": semanticNumber,
 		},
 	}
 	raw, err := MarshalPreservingNumberKinds(value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"array":[75,75.0,75.0],"float":75.0,"int":75,"nested":{"decimal":75.0,"fraction":1.25,"semantic":75.0}}`
+	want := `{"array":[75,75.0,75.0],"float":75.0,"int":75,"nested":{"decimal":75.0,"fraction":1.25}}`
 	if string(raw) != want {
 		t.Fatalf("kind-preserving JSON = %s, want %s", raw, want)
 	}
@@ -52,9 +47,8 @@ func TestMarshalPreservingNumberKindsRetainsRuntimeCarrierKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	for path, got := range map[string]any{
-		"int":      decoded["int"],
-		"float":    decoded["float"],
-		"semantic": decoded["nested"].(map[string]any)["semantic"],
+		"int":   decoded["int"],
+		"float": decoded["float"],
 	} {
 		number, ok := got.(json.Number)
 		if !ok {
@@ -62,6 +56,20 @@ func TestMarshalPreservingNumberKindsRetainsRuntimeCarrierKinds(t *testing.T) {
 		}
 		if path == "int" && number.String() != "75" || path != "int" && number.String() != "75.0" {
 			t.Fatalf("decoded %s = %q", path, number)
+		}
+	}
+}
+
+func TestKindTransportRejectsUnprojectedSemanticValues(t *testing.T) {
+	for _, raw := range []string{`7`, `7.0`, `7e0`, `7.5`, `null`, `true`, `"text"`, `[7]`, `{"n":7}`} {
+		admitted, err := Decode([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range []any{admitted, &admitted, []any{admitted}, map[string]any{"nested": []any{admitted}}} {
+			if _, err := MarshalPreservingNumberKinds(value); err == nil || !strings.Contains(err.Error(), "explicit workflow projection") {
+				t.Fatalf("unprojected %s (%T) error = %v", raw, value, err)
+			}
 		}
 	}
 }

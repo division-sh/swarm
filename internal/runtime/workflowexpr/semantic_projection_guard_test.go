@@ -64,7 +64,6 @@ func TestWorkflowCELProjectionJSONSourcesPreserveNumberLexemes(t *testing.T) {
 		{name: "run-fork fan-out capsule projection", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_fan_out_projection.go"), function: "loadRunForkFanOutObligationsFromRevision"},
 		{name: "materialized fork fan-out capsule verification", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_fan_out_materializer.go"), function: "requireExactMaterializedRunForkFanOut"},
 		{name: "exact entity revision", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "collectionRangeFromJSON", streaming: true},
-		{name: "pinned resource version", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "collectionRangeFromJSONL", streaming: true},
 	}
 	for _, boundary := range boundaries {
 		t.Run(boundary.name, func(t *testing.T) {
@@ -117,8 +116,10 @@ func TestWorkflowCELProjectionJSONWritersPreserveNumberKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, obligation := range []string{
-		"production runtime-carrier JSON writer feeding this",
-		"preserves integer-versus-double kind",
+		"Kind-bearing transport integers use integer",
+		"writer rejects unprojected semantic Values",
+		"Direct Go adapters of public",
+		"ProjectSemanticValue",
 		"integral-float JSON encoding",
 		"resource-version identity remains governed by semantic_json.contract",
 		"Live-intent persistence and fork projection use",

@@ -1714,6 +1714,19 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("import resource fan-out source: %v", err)
 			}
+			for _, spelling := range []string{".0", "e0"} {
+				var rows strings.Builder
+				for i, slug := range []string{"alpha", "bravo", "charlie", "delta", "echo"} {
+					fmt.Fprintf(&rows, "{\"slug\":%q,\"score\":%d%s}\n", slug, i+1, spelling)
+				}
+				equivalent, err := owner.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: fixture.bundleHash,
+					Declaration: ref, ExpectedHead: durabledata.VersionHead(imported.Candidate.VersionID), InputFormat: "jsonl", Input: []byte(rows.String()),
+				})
+				if err != nil || equivalent.Candidate.VersionID != imported.Candidate.VersionID {
+					t.Fatalf("equivalent resource %s changed version: %#v err=%v", spelling, equivalent, err)
+				}
+			}
 			if _, err := db.ExecContext(ctx, `INSERT INTO resource_version_pins (run_id,flow_path,event_name,schema_digest,version_id,selection,pinned_at) VALUES ($1,$2,$3,$4,$5,'explicit',$6)`, fixture.runID, ref.FlowPath, ref.EventName, imported.SchemaDigest, imported.Candidate.VersionID, createdAt); err != nil {
 				t.Fatalf("pin resource fan-out version: %v", err)
 			}
@@ -1727,7 +1740,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				t.Fatalf("bind resource fan-out source: %v", err)
 			}
 
-			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "resource-worker", BundleHash: fixture.bundleHash, Now: createdAt.Add(time.Second), Lease: time.Minute})
+			intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "resource-worker", BundleHash: fixture.bundleHash, Now: createdAt.Add(time.Second), Lease: time.Minute})
 			if err != nil || !found {
 				t.Fatalf("claim resource fan-out: found=%v err=%v", found, err)
 			}
@@ -1738,7 +1751,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if len(input.Items) != 4 || input.Items[0].(map[string]any)["slug"] != "alpha" || input.Items[3].(map[string]any)["slug"] != "delta" {
 				t.Fatalf("canonical bounded resource items = %#v", input.Items)
 			}
-			if input.Items[0].(map[string]any)["score"] != json.Number("1") {
+			if input.Items[0].(map[string]any)["score"] != int64(1) {
 				t.Fatalf("resource numeric carrier = %#v", input.Items[0])
 			}
 			projectedResourceScore, err := workflowexpr.EvalValueExpressionWithOptions(
@@ -1748,6 +1761,20 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			)
 			if err != nil || projectedResourceScore != int64(1) {
 				t.Fatalf("resource projected score = %#v err=%v", projectedResourceScore, err)
+			}
+			for _, proof := range []struct {
+				expression string
+				want       any
+			}{
+				{"item.score + entity.integer + 1", int64(77)},
+				{"double(item.score) + entity.decimal", float64(76)},
+			} {
+				got, err := workflowexpr.EvalValueExpressionWithOptions(proof.expression,
+					workflowexpr.ValueContext{Entity: intent.Request.Capsule.StateFields, FanOut: map[string]any{"item": input.Items[0]}},
+					workflowexpr.ValueExpressionOptions{AllowBareItem: true})
+				if err != nil || got != proof.want {
+					t.Fatalf("mixed resource/capsule %s: got %#v want %#v err=%v", proof.expression, got, proof.want, err)
+				}
 			}
 			if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)

@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
@@ -226,7 +228,15 @@ func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (ru
 }
 
 func scenarioSetupEntityJSON(entity runtimepipeline.ScenarioSetupEntityRequest) (json.RawMessage, json.RawMessage, map[string]any, map[string]any, error) {
-	fieldsJSON, err := json.Marshal(entity.Fields)
+	admitted, err := canonicaljson.FromGo(entity.Fields)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("admit setup entity fields: %w", err)
+	}
+	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("project setup entity fields: %w", err)
+	}
+	fieldsJSON, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("marshal setup entity fields: %w", err)
 	}
@@ -234,10 +244,7 @@ func scenarioSetupEntityJSON(entity runtimepipeline.ScenarioSetupEntityRequest) 
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("marshal setup entity gates: %w", err)
 	}
-	fieldsAny := make(map[string]any, len(entity.Fields))
-	for key, value := range entity.Fields {
-		fieldsAny[key] = value
-	}
+	fieldsAny := projected.(map[string]any)
 	gatesAny := make(map[string]any, len(entity.Gates))
 	for key, value := range entity.Gates {
 		gatesAny[key] = value

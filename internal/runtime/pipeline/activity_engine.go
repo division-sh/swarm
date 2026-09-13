@@ -34,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 const activityRequestEventType = events.EventType("platform.activity_requested")
@@ -1524,7 +1525,15 @@ func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, i
 
 func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any) error {
 	ctx = events.WithDeliveryContext(ctx, intent.Context)
-	raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)
+	admitted, err := canonicaljson.FromGo(payload)
+	if err != nil {
+		return err
+	}
+	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	if err != nil {
+		return err
+	}
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
 		return err
 	}

@@ -39,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
@@ -595,6 +596,9 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 			if handled, _, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
 				t.Fatalf("first handle = %v, err=%v", handled, err)
 			}
+			// Reconstruct the consumer before replay: no in-memory result may satisfy
+			// this attempt; the selected-store journal must supply it.
+			pc = newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 			if handled, _, err := pc.handleEventResult(ctx, request.Event); err != nil || !handled {
 				t.Fatalf("replay handle = %v, err=%v", handled, err)
 			}
@@ -611,6 +615,24 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 			want := map[string]any{"delivery_reference": map[string]any{"id": float64(42)}}
 			if !reflect.DeepEqual(payload["result"], want) {
 				t.Fatalf("journaled channel result = %#v, want %#v", payload["result"], want)
+			}
+			for _, published := range bus.publishes {
+				var executionPayload map[string]any
+				if err := canonicaljson.DecodePreservingNumberLexemes(published.Payload(), &executionPayload); err != nil {
+					t.Fatal(err)
+				}
+				for _, proof := range []struct {
+					expression string
+					want       any
+				}{
+					{"payload.result.delivery_reference.id + 1", int64(43)},
+					{"double(payload.result.delivery_reference.id) + 1.0", float64(43)},
+				} {
+					got, err := workflowexpr.EvalValueExpression(proof.expression, workflowexpr.ValueContext{Payload: executionPayload})
+					if err != nil || got != proof.want {
+						t.Fatalf("journal numeric expression %s: got %#v want %#v err=%v", proof.expression, got, proof.want, err)
+					}
+				}
 			}
 		})
 	}

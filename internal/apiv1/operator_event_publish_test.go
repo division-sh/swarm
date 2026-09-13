@@ -46,7 +46,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestEventPublicationPayloadPreservesNumericKinds(t *testing.T) {
+func TestEventPublicationPayloadProjectsSemanticNumbers(t *testing.T) {
 	payload, _, err := eventPublicationPayload(map[string]any{
 		"payload": map[string]any{
 			"integer": int64(75), "double": float64(75),
@@ -56,7 +56,7 @@ func TestEventPublicationPayloadPreservesNumericKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(payload), `{"decimal":75.0,"double":75.0,"exponent":75.0,"integer":75}`; got != want {
+	if got, want := string(payload), `{"decimal":75,"double":75,"exponent":75,"integer":75}`; got != want {
 		t.Fatalf("event publication payload = %s, want %s", got, want)
 	}
 }

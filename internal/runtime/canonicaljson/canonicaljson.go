@@ -133,7 +133,7 @@ func appendTransportValue(dst []byte, value reflect.Value, seen map[visit]struct
 			}
 			return appendTransportValue(dst, reflect.ValueOf(decoded), seen)
 		case semanticvalue.Value:
-			return appendTransportSemanticValue(dst, typed, seen)
+			return nil, fmt.Errorf("runtime transport requires explicit workflow projection of semantic values")
 		}
 	}
 
@@ -223,14 +223,6 @@ func appendTransportFloat(dst []byte, value float64, bits int) ([]byte, error) {
 		raw += ".0"
 	}
 	return append(dst, raw...), nil
-}
-
-func appendTransportSemanticValue(dst []byte, value semanticvalue.Value, seen map[visit]struct{}) ([]byte, error) {
-	if value.Kind() == semanticvalue.KindNumber {
-		number, _ := value.Number()
-		return appendTransportFloat(dst, number, 64)
-	}
-	return appendTransportValue(dst, reflect.ValueOf(value.Interface()), seen)
 }
 
 func appendTransportArray(dst []byte, value reflect.Value, seen map[visit]struct{}) ([]byte, error) {

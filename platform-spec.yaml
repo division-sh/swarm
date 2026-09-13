@@ -266,19 +266,32 @@ contract_formats:
       readback consume the same admitted value. This section does not claim
       that the deferred #2046 boundaries already consume this owner.
     workflow_cel_projection: >
-      `internal/runtime/workflowexpr.ProjectCELValue` is the sole checked
-      recursive projection from admitted runtime carriers into workflow/CEL
-      values. It calls `canonicaljson.NormalizeNumber` for every number and
-      never owns a parser, safe-range constant, or fallback number policy.
-      Lexical JSON integers inside the I-JSON safe range project to exact CEL
-      integers. Decimal and exponent spellings project to CEL doubles even
-      when mathematically integral. Native floating-point values remain CEL
-      doubles. Every production runtime-carrier JSON writer feeding this
-      projection preserves integer-versus-double kind: integers use integer
+      `internal/runtime/workflowexpr.ProjectSemanticValue` is the canonical
+      recursive projection of admitted semantic JSON into workflow/CEL values.
+      A semantic number carries value, not authored CEL kind: within the admitted
+      safe range, mathematically integral values project to CEL int and fractional
+      values to CEL double. Integrality is determined from the admitted numeric
+      value, not its shortest canonical text. Equivalent admitted spellings such
+      as 7, 7.0 and 7e0 have identical execution values, persisted execution values
+      and existing semantic operation hashes. Direct Go adapters of public
+      operations use the same semantic admission and projection as each operation's
+      supported transport. Command execution remains HTTP-only; WebSocket
+      subscriptions project semantic output and do not admit those commands.
+      Setup, scenario materialization, resource rows, activity/module results and
+      semantic decision/schedule payloads cross this owner before execution.
+      Generic semantic DTO projection does not establish execution intent;
+      reconstructing wire spelling after admission is forbidden.
+      `internal/runtime/workflowexpr.ProjectCELValue` delegates semantic Values
+      to that owner, while preserving genuinely kind-bearing workflow carriers.
+      Both projections consume canonical numeric admission, not a separate parser,
+      safe-range constant or fallback policy. Explicit native/CEL doubles remain
+      doubles, including integral doubles. Kind-bearing transport integers use integer
       tokens, while native floating-point and lexical decimal or exponent
       values use a durable double token containing a decimal point or exponent.
       Readers preserve that token until this owner runs; no boundary may erase
       it through a generic float64 decode or an integral-float JSON encoding.
+      The kind-bearing writer rejects unprojected semantic Values, including
+      nested ones; semantic projection is not a second writer interpretation.
       Exact numeric spelling is not retained, and semantic canonicalization for
       resource-version identity remains governed by semantic_json.contract.
       Malformed or unsafe numbers fail before evaluation with the

@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
@@ -367,10 +368,12 @@ func collectionRangeFromJSONL(raw []byte, want, start, end int) ([]any, error) {
 	scanner.Buffer(make([]byte, 64*1024), durabledata.MaxCanonicalRowBytes+1)
 	count := 0
 	for scanner.Scan() {
-		var item any
-		decoder := json.NewDecoder(strings.NewReader(scanner.Text()))
-		decoder.UseNumber()
-		if err := decoder.Decode(&item); err != nil {
+		admitted, err := canonicaljson.Decode(scanner.Bytes())
+		if err != nil {
+			return nil, err
+		}
+		item, err := workflowexpr.ProjectSemanticValue(admitted)
+		if err != nil {
 			return nil, err
 		}
 		if count >= start && count < end {

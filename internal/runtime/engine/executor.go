@@ -1499,11 +1499,16 @@ func (e *Executor) recordComputeModuleFailure(frame *executionFrame, trace Compu
 }
 
 func decodeComputeModuleOutput(moduleID, rowID string, raw []byte, schema map[string]any) (map[string]any, error) {
-	var output map[string]any
-	if err := json.Unmarshal(raw, &output); err != nil {
+	admitted, err := canonicaljson.Decode(raw)
+	if err != nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not exactly one JSON object: %w", err)}
 	}
-	if output == nil {
+	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	if err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err}
+	}
+	output, ok := projected.(map[string]any)
+	if !ok {
 		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not JSON object")}
 	}
 	if err := eventschema.ValidatePayloadAgainstSchema(schema, output); err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -1027,9 +1028,8 @@ func (e *CELProjectionError) Unwrap() error {
 	return e.Cause
 }
 
-// ProjectCELValue is the sole checked projection from persisted semantic JSON
-// carriers into workflow/CEL values. It preserves lexical integer intent while
-// keeping decimal and exponent spellings as CEL doubles.
+// ProjectCELValue projects kind-bearing workflow carriers. Semantic values use
+// ProjectSemanticValue instead of inferring execution intent from their Go DTO.
 func ProjectCELValue(value any) (any, error) {
 	return projectCELValue("$", value)
 }
@@ -1133,17 +1133,53 @@ func projectCELValue(path string, value any) (any, error) {
 		}
 		return number, nil
 	case semanticvalue.Value:
-		number, isNumber := typed.Number()
-		if !isNumber {
-			return projectCELValue(path, typed.Interface())
-		}
-		projected, err := canonicaljson.NormalizeNumber(number)
+		return projectSemanticValue(path, typed)
+	default:
+		return typed, nil
+	}
+}
+
+// ProjectSemanticValue gives admitted JSON values canonical execution kinds.
+// Semantic numbers carry a value, not authored int/double intent.
+func ProjectSemanticValue(value semanticvalue.Value) (any, error) {
+	return projectSemanticValue("$", value)
+}
+
+func projectSemanticValue(path string, value semanticvalue.Value) (any, error) {
+	switch value.Kind() {
+	case semanticvalue.KindNumber:
+		number, _ := value.Number()
+		number, err := canonicaljson.NormalizeNumber(number)
 		if err != nil {
 			return nil, projectionNumberError(path, err)
 		}
-		return projected, nil
+		if math.Trunc(number) == number {
+			return int64(number), nil
+		}
+		return number, nil
+	case semanticvalue.KindArray:
+		out := make([]any, value.Len())
+		for index := range out {
+			item, _ := value.At(index)
+			projected, err := projectSemanticValue(fmt.Sprintf("%s[%d]", path, index), item)
+			if err != nil {
+				return nil, err
+			}
+			out[index] = projected
+		}
+		return out, nil
+	case semanticvalue.KindObject:
+		out := make(map[string]any, value.Len())
+		for _, member := range value.Members() {
+			projected, err := projectSemanticValue(projectionChildPath(path, member.Name), member.Value)
+			if err != nil {
+				return nil, err
+			}
+			out[member.Name] = projected
+		}
+		return out, nil
 	default:
-		return typed, nil
+		return value.Interface(), nil
 	}
 }
 
