@@ -37,6 +37,14 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
 		if !intent.TargetOwnership.Empty() {
+			if err := p.prospective.ValidateTarget(intent.TargetOwnership.Route()); err != nil {
+				return RoutePlan{}, err
+			}
+			if !p.prospective.Empty() && !intent.TargetOwnership.EntitylessReceiver() && intent.TargetOwnership.Route() == p.prospective.Candidate().Route {
+				if err := p.prospective.Candidate().Availability.Validate(p.source, intent.TargetOwnership.Route().FlowID); err != nil {
+					return RoutePlan{}, err
+				}
+			}
 			if err := intent.TargetOwnership.Validate(); err != nil {
 				return RoutePlan{}, fmt.Errorf("validate admitted delivery target for %s: %w", intent.Recipient.ID(), err)
 			}
