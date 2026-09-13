@@ -1413,7 +1413,13 @@ func testFlowBundleWithTwoAgents(t *testing.T, autoEmit string) *runtimecontract
 
 func testFlowBundleWithAutoEmitEntry(t *testing.T, autoEmit string, entry runtimecontracts.EventCatalogEntry) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
+	return testFlowBundleWithTypedAutoEmitEntry(t, autoEmit, entry, runtimecontracts.TypeCatalogDocument{})
+}
+
+func testFlowBundleWithTypedAutoEmitEntry(t *testing.T, autoEmit string, entry runtimecontracts.EventCatalogEntry, types runtimecontracts.TypeCatalogDocument) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	bundle := testFlowBundle(t, autoEmit)
+	bundle.RootTypes = types
 	reviewFlow := bundle.FlowTree.ByID["review"]
 	if reviewFlow == nil {
 		return bundle
@@ -3919,7 +3925,7 @@ func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigFi
 }
 
 func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
-	bundle := testFlowBundleWithAutoEmitEntry(t, "task.started", runtimecontracts.EventCatalogEntry{
+	bundle := testFlowBundleWithTypedAutoEmitEntry(t, "task.started", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"instance_id":      {Type: "string"},
@@ -3930,12 +3936,11 @@ func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
 			},
 			Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "sources"},
 		},
-	})
-	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
+	}, runtimecontracts.TypeCatalogDocument{
 		Scalars: map[string]runtimecontracts.ScalarTypeDecl{
 			"SourceID": {Base: "text"},
 		},
-	}
+	})
 
 	err := validateAutoEmitPayload(semanticview.Wrap(bundle), "review", "task.started", map[string]any{
 		"instance_id":      "inst-1",
@@ -3953,7 +3958,7 @@ func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
 }
 
 func TestValidateAutoEmitPayload_AllowsNamedTypeThroughCanonicalSchema(t *testing.T) {
-	bundle := testFlowBundleWithAutoEmitEntry(t, "task.started", runtimecontracts.EventCatalogEntry{
+	bundle := testFlowBundleWithTypedAutoEmitEntry(t, "task.started", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"instance_id":      {Type: "string"},
@@ -3964,8 +3969,7 @@ func TestValidateAutoEmitPayload_AllowsNamedTypeThroughCanonicalSchema(t *testin
 			},
 			Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "details"},
 		},
-	})
-	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
+	}, runtimecontracts.TypeCatalogDocument{
 		Types: map[string]runtimecontracts.NamedTypeDecl{
 			"ReviewDetails": {
 				Fields: map[string]runtimecontracts.TypeFieldSpec{
@@ -3973,7 +3977,7 @@ func TestValidateAutoEmitPayload_AllowsNamedTypeThroughCanonicalSchema(t *testin
 				},
 			},
 		},
-	}
+	})
 
 	err := validateAutoEmitPayload(semanticview.Wrap(bundle), "review", "task.started", map[string]any{
 		"instance_id":      "inst-1",
