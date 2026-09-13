@@ -165,6 +165,12 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			updated_at TIMESTAMP NOT NULL,
 			UNIQUE (event_id, route_identity)
 		)`,
+		`CREATE TABLE event_delivery_handler_rule_selections (
+			delivery_id TEXT PRIMARY KEY REFERENCES event_deliveries(delivery_id),
+			selection_context TEXT NOT NULL, disposition TEXT NOT NULL,
+			flow_path TEXT, declaration_family TEXT, semantic_path TEXT,
+			display_label TEXT NOT NULL DEFAULT ''
+		)`,
 		`CREATE TABLE event_delivery_attempts (
 			delivery_id TEXT NOT NULL,
 			claim_version INTEGER NOT NULL,
