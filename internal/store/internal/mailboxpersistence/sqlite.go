@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	mailboxcontract "github.com/division-sh/swarm/internal/mailbox"
-
 	"github.com/division-sh/swarm/internal/events"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -184,28 +182,6 @@ func (s *MailboxSQLiteOwner) ListUnnotifiedCriticalMailboxItems(ctx context.Cont
 	}
 	defer rows.Close()
 	return scanSpecMailboxItems(rows)
-}
-
-func (s *MailboxSQLiteOwner) MarkMailboxItemNotified(ctx context.Context, id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return fmt.Errorf("mailbox id is required")
-	}
-	if err := s.backend.RunTransaction(ctx, "sqlite mailbox notified", func(txctx context.Context, tx *sql.Tx) error {
-		result, err := tx.ExecContext(txctx, `UPDATE mailbox SET notified = true WHERE item_id = ?`, id)
-		if err != nil {
-			return err
-		}
-		if rows, err := result.RowsAffected(); err != nil {
-			return err
-		} else if rows == 0 {
-			return mailboxcontract.ErrV1NotFound
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("mark sqlite mailbox item notified: %w", err)
-	}
-	return nil
 }
 
 func sqliteMailboxSelectSQL(where string) string {

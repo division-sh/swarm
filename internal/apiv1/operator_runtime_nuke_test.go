@@ -481,7 +481,7 @@ func (s *recordingAPIIdempotencyStore) WithAPIIdempotency(
 		completion, err := execute(ctx)
 		return completion, false, err
 	}
-	key := strings.Join([]string{req.Method, req.ActorTokenID, req.IdempotencyKey}, "|")
+	key := strings.Join([]string{req.Method, string(req.Actor.Kind), req.Actor.ID, req.IdempotencyKey}, "|")
 	if completion, ok := s.records[key]; ok {
 		if s.hashes[key] != req.RequestHash {
 			return apiidempotency.Completion{}, false, &apiidempotency.ConflictError{

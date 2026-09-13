@@ -371,9 +371,9 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err := coordinator.CommitDecision(pipelineCtx, forkStageCard, stageDecisionEventID, decisionAt); err != nil {
 				t.Fatalf("commit fork root gate activation decision: %v", err)
 			}
-			if _, err := selected.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+			if _, err := DecisionCardDomainForTest(selected).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
 				CardID: forkStageCard.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{}),
-				ActorTokenID: "operator", ObservedContentHash: forkStageCard.CardContentHash,
+				PrincipalID: "operator", ObservedContentHash: forkStageCard.CardContentHash,
 				DecisionEventID: stageDecisionEventID, Now: decisionAt,
 			}); err != nil {
 				t.Fatalf("execute fork root stage authority: %v", err)
@@ -465,9 +465,9 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				t.Fatalf("fork root proposed-effect authority retained source identity: anchor=%#v source=%#v", forkEffectAnchor, effectSourceRoute)
 			}
 			effectDecisionEventID := uuid.NewString()
-			if _, err := selected.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+			if _, err := DecisionCardDomainForTest(selected).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
 				CardID: forkEffectCard.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{}),
-				ActorTokenID: "operator", ObservedContentHash: forkEffectCard.CardContentHash,
+				PrincipalID: "operator", ObservedContentHash: forkEffectCard.CardContentHash,
 				DecisionEventID: effectDecisionEventID, Now: now.Add(4 * time.Minute),
 			}); err != nil {
 				t.Fatalf("decide fork root proposed effect: %v", err)
@@ -610,9 +610,9 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 		t.Fatalf("create source card: %v", err)
 	}
 	decisionEventID := uuid.NewString()
-	if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+	if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
 		CardID: sourceCard.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{"score": safeInteger}),
-		ActorTokenID: "operator", ObservedContentHash: sourceCard.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
+		PrincipalID: "operator", ObservedContentHash: sourceCard.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
 	}); err != nil {
 		t.Fatalf("decide source card: %v", err)
 	}
@@ -758,8 +758,8 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					t.Fatal(err)
 				}
 				decisionEventID := uuid.NewString()
-				if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-					CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+				if _, err := DecisionCardDomainForTest(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+					CardID: card.CardID, Verdict: "approve", PrincipalID: "operator",
 					ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
 				}); err != nil {
 					t.Fatal(err)

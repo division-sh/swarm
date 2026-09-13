@@ -67,8 +67,8 @@ func TestProposedEffectCardLifecycleParity(t *testing.T) {
 					fields, _ = canonicaljson.FromGo(map[string]any{"reason": "Not authorized."})
 				}
 				decisionEventID := uuid.NewString()
-				if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-					CardID: card.CardID, Verdict: verdict, Fields: fields, ActorTokenID: "operator",
+				if _, err := DecisionCardDomainForTest(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+					CardID: card.CardID, Verdict: verdict, Fields: fields, PrincipalID: "operator",
 					ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
 				}); err != nil {
 					t.Fatalf("DecideDecisionCard: %v", err)
@@ -145,8 +145,8 @@ func TestNormalRunCompletionRequiresSettledProposedEffectsParity(t *testing.T) {
 						verdict = "reject"
 					}
 					decisionEventID := uuid.NewString()
-					if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-						CardID: card.CardID, Verdict: verdict, Fields: semanticvalue.EmptyObject(), ActorTokenID: "operator",
+					if _, err := DecisionCardDomainForTest(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+						CardID: card.CardID, Verdict: verdict, Fields: semanticvalue.EmptyObject(), PrincipalID: "operator",
 						ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
 					}); err != nil {
 						t.Fatalf("DecideDecisionCard: %v", err)
@@ -317,8 +317,8 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 					t.Fatal(err)
 				}
 				decisionEventID := uuid.NewString()
-				if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-					CardID: card.CardID, Verdict: "approve", Fields: semanticvalue.EmptyObject(), ActorTokenID: "operator",
+				if _, err := DecisionCardDomainForTest(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+					CardID: card.CardID, Verdict: "approve", Fields: semanticvalue.EmptyObject(), PrincipalID: "operator",
 					ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
 				}); err != nil {
 					t.Fatal(err)
@@ -417,8 +417,8 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 					t.Fatal(err)
 				}
 				decide := func() error {
-					_, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-						CardID: card.CardID, Verdict: "approve", Fields: semanticvalue.EmptyObject(), ActorTokenID: "operator",
+					_, err := DecisionCardDomainForTest(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+						CardID: card.CardID, Verdict: "approve", Fields: semanticvalue.EmptyObject(), PrincipalID: "operator",
 						ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 					})
 					return err

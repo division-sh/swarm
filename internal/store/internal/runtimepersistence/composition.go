@@ -132,7 +132,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.managedCapabilityPostgresOwner = managedCapabilities
-	mailbox, err := storemailbox.NewPostgres(backend, store.requireCurrentSchema)
+	mailbox, err := storemailbox.NewPostgres(backend, store.requireCurrentSchema, apiIdempotency)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +208,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
-	pipelineOwner, err := storepipeline.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner)
+	pipelineOwner, err := storepipeline.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, apiIdempotency)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +397,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.managedCapabilitySQLiteOwner = managedCapabilities
-	mailbox, err := storemailbox.NewSQLite(backend, store.requireCurrentSchema)
+	mailbox, err := storemailbox.NewSQLite(backend, store.requireCurrentSchema, apiIdempotency)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +463,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
-	pipelineOwner, err := storepipeline.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, store.now)
+	pipelineOwner, err := storepipeline.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, apiIdempotency, store.now)
 	if err != nil {
 		return nil, err
 	}

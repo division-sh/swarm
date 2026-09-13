@@ -874,6 +874,17 @@ func requirePrincipal(ctx context.Context, db queryer, d dialect, principalID st
 	return nil
 }
 
+// RequirePrincipalTx admits an existing selected-store human identity without
+// bootstrapping or changing it. Callers retain ownership of their domain transaction.
+func RequirePrincipalTx(ctx context.Context, tx *sql.Tx, principalID string, postgres bool) error {
+	if tx == nil || strings.TrimSpace(principalID) == "" {
+		return fmt.Errorf("principal admission requires a transaction and principal")
+	}
+	d := dialectSQLite
+	if postgres { d = dialectPostgres }
+	return requirePrincipal(ctx, tx, d, principalID)
+}
+
 const operationSelect = `SELECT operation_id, operation_kind, principal_id, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, provider_credential_key, provider_credential_value_seal, onboarding_operation_id, request_hash, expected_binding_revision, challenge, state, operation_revision, binding_revision, external_account_reference, conversation_reference, conversation_scope, account_presentation, claim_disposition, save_proof, planned_proof_id, planned_proof_revision, proof_id, proof_revision, proof_status, requested_at, expires_at, claimed_at, completed_at FROM operator_channel_operations`
 
 func loadOperationByRequestKey(ctx context.Context, db queryer, d dialect, key string, forUpdate bool) (domain.Operation, bool, error) {

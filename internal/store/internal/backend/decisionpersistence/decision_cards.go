@@ -427,7 +427,7 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 	return results, next, nil
 }
 
-func (s *DecisionPostgresOwner) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
+func (s *DecisionPostgresOwner) ApplyDecisionForTest(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
 	var out decisioncard.DecisionOutcome
 	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
@@ -437,7 +437,7 @@ func (s *DecisionPostgresOwner) DecideDecisionCard(ctx context.Context, req deci
 	return out, err
 }
 
-func (s *DecisionSQLiteOwner) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
+func (s *DecisionSQLiteOwner) ApplyDecisionForTest(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
 	var out decisioncard.DecisionOutcome
 	err := s.runDecisionCardMutation(ctx, "sqlite decide decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
@@ -512,7 +512,7 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 		if err != nil {
 			return decisioncard.DecisionOutcome{}, err
 		}
-		if draft.CardID != card.CardID || draft.ActorTokenID != strings.TrimSpace(req.ActorTokenID) || draft.Verdict != strings.TrimSpace(req.Verdict) || draft.Status != decisioncard.DraftStatusActive || !draft.ExpiresAt.After(now) {
+		if draft.CardID != card.CardID || draft.PrincipalID != strings.TrimSpace(req.PrincipalID) || draft.Verdict != strings.TrimSpace(req.Verdict) || draft.Status != decisioncard.DraftStatusActive || !draft.ExpiresAt.After(now) {
 			return decisioncard.DecisionOutcome{}, decisioncard.ErrDraftNotAuthority
 		}
 		if err := updateDecisionCardDraftStatus(ctx, tx, draft.InputDraftID, decisioncard.DraftStatusConsumed, now, postgres); err != nil {
@@ -532,7 +532,7 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 	query := `UPDATE decision_cards SET status = ?, verdict = ?, fields = ?, decided_by = ?, decided_at = ?, deferred_until = NULL,
 		decision_event_id = ?, delivery_receipt_id = NULLIF(?, ''), delivery_render_hash = NULLIF(?, ''), updated_at = ?
 		WHERE card_id = ? AND status = 'pending'`
-	args := []any{decisioncard.StatusDecided, strings.TrimSpace(req.Verdict), string(fields), strings.TrimSpace(req.ActorTokenID), now,
+	args := []any{decisioncard.StatusDecided, strings.TrimSpace(req.Verdict), string(fields), strings.TrimSpace(req.PrincipalID), now,
 		strings.TrimSpace(req.DecisionEventID), strings.TrimSpace(req.DeliveryReceiptID), strings.TrimSpace(req.DeliveryRenderHash), now, card.CardID}
 	if postgres {
 		query = numberPostgresPlaceholders(strings.ReplaceAll(query, "?", "$%d"))
@@ -547,7 +547,7 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 	card.Status = decisioncard.StatusDecided
 	card.Verdict = strings.TrimSpace(req.Verdict)
 	card.Fields = req.Fields
-	card.DecidedBy = strings.TrimSpace(req.ActorTokenID)
+	card.DecidedBy = strings.TrimSpace(req.PrincipalID)
 	card.DecidedAt = now
 	card.DeferredUntil = time.Time{}
 	card.DecisionEventID = strings.TrimSpace(req.DecisionEventID)
@@ -574,7 +574,7 @@ func (s *DecisionSQLiteOwner) DecideTx(ctx context.Context, story runtimeauthora
 	return decideDecisionCardWithStory(ctx, story, tx, req, false)
 }
 
-func (s *DecisionPostgresOwner) DeferDecisionCard(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
+func (s *DecisionPostgresOwner) ApplyDeferralForTest(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
 	var out decisioncard.DecisionOutcome
 	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
@@ -584,7 +584,7 @@ func (s *DecisionPostgresOwner) DeferDecisionCard(ctx context.Context, req decis
 	return out, err
 }
 
-func (s *DecisionSQLiteOwner) DeferDecisionCard(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
+func (s *DecisionSQLiteOwner) ApplyDeferralForTest(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
 	var out decisioncard.DecisionOutcome
 	err := s.runDecisionCardMutation(ctx, "sqlite defer decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
@@ -642,7 +642,7 @@ func (s *DecisionSQLiteOwner) DeferTx(ctx context.Context, story runtimeauthorac
 	return deferDecisionCardWithStory(ctx, story, tx, req, false)
 }
 
-func (s *DecisionPostgresOwner) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
+func (s *DecisionPostgresOwner) BeginInputForTest(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
 	var draft decisioncard.InputDraft
 	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
@@ -652,7 +652,7 @@ func (s *DecisionPostgresOwner) BeginDecisionCardInput(ctx context.Context, req 
 	return draft, err
 }
 
-func (s *DecisionSQLiteOwner) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
+func (s *DecisionSQLiteOwner) BeginInputForTest(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
 	var draft decisioncard.InputDraft
 	err := s.runDecisionCardMutation(ctx, "sqlite begin decision card input", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
@@ -691,28 +691,28 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	if !requiresInput {
 		return decisioncard.InputDraft{}, fmt.Errorf("verdict %s does not require an input draft", req.Verdict)
 	}
-	actor := strings.TrimSpace(req.ActorTokenID)
+	actor := strings.TrimSpace(req.PrincipalID)
 	if actor == "" {
-		return decisioncard.InputDraft{}, fmt.Errorf("actor token id is required")
+		return decisioncard.InputDraft{}, fmt.Errorf("operator principal id is required")
 	}
 	if _, err := transitionDecisionCardDrafts(ctx, tx, draftTransitionFilter{cardID: card.CardID, actor: actor}, now, false, postgres); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
 	draft := decisioncard.InputDraft{
-		InputDraftID: uuid.NewString(), RunID: card.RunID, CardID: card.CardID, ActorTokenID: actor,
+		InputDraftID: uuid.NewString(), RunID: card.RunID, CardID: card.CardID, PrincipalID: actor,
 		Verdict: strings.TrimSpace(req.Verdict), DeliveryReceiptID: strings.TrimSpace(req.DeliveryReceiptID), Status: decisioncard.DraftStatusActive,
 		ExpiresAt: decisioncard.CanonicalTimestamp(now.Add(req.TTL)), CreatedAt: now, UpdatedAt: now,
 	}
-	query := `INSERT INTO decision_card_input_drafts (input_draft_id, run_id, card_id, actor_token_id, verdict, delivery_receipt_id, status, expires_at, created_at, updated_at)
+	query := `INSERT INTO decision_card_input_drafts (input_draft_id, run_id, card_id, principal_id, verdict, delivery_receipt_id, status, expires_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if postgres {
 		query = numberPostgresPlaceholders(strings.ReplaceAll(query, "?", "$%d"))
 	}
-	if _, err := tx.ExecContext(ctx, query, draft.InputDraftID, draft.RunID, draft.CardID, draft.ActorTokenID, draft.Verdict, nullString(draft.DeliveryReceiptID), draft.Status, draft.ExpiresAt, draft.CreatedAt, draft.UpdatedAt); err != nil {
+	if _, err := tx.ExecContext(ctx, query, draft.InputDraftID, draft.RunID, draft.CardID, draft.PrincipalID, draft.Verdict, nullString(draft.DeliveryReceiptID), draft.Status, draft.ExpiresAt, draft.CreatedAt, draft.UpdatedAt); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
 	_, err = appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDraftStarted, map[string]any{
-		"input_draft_id": draft.InputDraftID, "verdict": draft.Verdict, "actor_token_id": draft.ActorTokenID, "expires_at": draft.ExpiresAt,
+		"input_draft_id": draft.InputDraftID, "verdict": draft.Verdict, "principal_id": draft.PrincipalID, "expires_at": draft.ExpiresAt,
 	}, now, postgres)
 	return draft, err
 }
@@ -725,7 +725,7 @@ func (s *DecisionSQLiteOwner) BeginInputTx(ctx context.Context, tx *sql.Tx, req 
 	return beginDecisionCardInput(ctx, tx, req, false)
 }
 
-func (s *DecisionPostgresOwner) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
+func (s *DecisionPostgresOwner) CancelInputForTest(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
 	var draft decisioncard.InputDraft
 	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
@@ -735,7 +735,7 @@ func (s *DecisionPostgresOwner) CancelDecisionCardInput(ctx context.Context, req
 	return draft, err
 }
 
-func (s *DecisionSQLiteOwner) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
+func (s *DecisionSQLiteOwner) CancelInputForTest(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
 	var draft decisioncard.InputDraft
 	err := s.runDecisionCardMutation(ctx, "sqlite cancel decision card input", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
@@ -757,7 +757,7 @@ func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.C
 	if err != nil {
 		return decisioncard.InputDraft{}, err
 	}
-	if draft.CardID != strings.TrimSpace(req.CardID) || draft.ActorTokenID != strings.TrimSpace(req.ActorTokenID) || draft.Status != decisioncard.DraftStatusActive || !draft.ExpiresAt.After(now) {
+	if draft.CardID != strings.TrimSpace(req.CardID) || draft.PrincipalID != strings.TrimSpace(req.PrincipalID) || draft.Status != decisioncard.DraftStatusActive || !draft.ExpiresAt.After(now) {
 		return decisioncard.InputDraft{}, decisioncard.ErrDraftNotAuthority
 	}
 	if err := updateDecisionCardDraftStatus(ctx, tx, draft.InputDraftID, decisioncard.DraftStatusCancelled, now, postgres); err != nil {
@@ -778,13 +778,13 @@ func (s *DecisionSQLiteOwner) CancelInputTx(ctx context.Context, tx *sql.Tx, req
 }
 
 func loadDecisionCardDraft(ctx context.Context, db decisionCardSQL, id string, postgres bool) (decisioncard.InputDraft, error) {
-	query := `SELECT input_draft_id, run_id, card_id, actor_token_id, verdict, COALESCE(delivery_receipt_id, ''), status, expires_at, created_at, updated_at FROM decision_card_input_drafts WHERE input_draft_id = ?`
+	query := `SELECT input_draft_id, run_id, card_id, principal_id, verdict, COALESCE(delivery_receipt_id, ''), status, expires_at, created_at, updated_at FROM decision_card_input_drafts WHERE input_draft_id = ?`
 	if postgres {
 		query = strings.Replace(query, "?", "$1", 1) + ` FOR UPDATE`
 	}
 	var draft decisioncard.InputDraft
 	var expires, created, updated any
-	err := db.QueryRowContext(ctx, query, strings.TrimSpace(id)).Scan(&draft.InputDraftID, &draft.RunID, &draft.CardID, &draft.ActorTokenID, &draft.Verdict, &draft.DeliveryReceiptID, &draft.Status, &expires, &created, &updated)
+	err := db.QueryRowContext(ctx, query, strings.TrimSpace(id)).Scan(&draft.InputDraftID, &draft.RunID, &draft.CardID, &draft.PrincipalID, &draft.Verdict, &draft.DeliveryReceiptID, &draft.Status, &expires, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return decisioncard.InputDraft{}, decisioncard.ErrDraftNotFound
 	}
@@ -858,7 +858,7 @@ func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftT
 		add("card_id", value, false)
 	}
 	if value := strings.TrimSpace(filter.actor); value != "" {
-		add("actor_token_id", value, false)
+		add("principal_id", value, false)
 	}
 	if value := strings.TrimSpace(filter.excludeID); value != "" {
 		add("input_draft_id", value, true)

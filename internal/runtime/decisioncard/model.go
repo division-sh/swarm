@@ -106,10 +106,6 @@ type Store interface {
 	CreateDecisionCard(context.Context, Card) error
 	ListDecisionCards(context.Context, ListOptions) ([]ListItem, string, error)
 	GetDecisionCard(context.Context, string) (Card, error)
-	DecideDecisionCard(context.Context, DecideRequest) (DecisionOutcome, error)
-	DeferDecisionCard(context.Context, DeferRequest) (DecisionOutcome, error)
-	BeginDecisionCardInput(context.Context, BeginInputRequest) (InputDraft, error)
-	CancelDecisionCardInput(context.Context, CancelInputRequest) (InputDraft, error)
 	ListDecisionCardChanges(context.Context, SubscriptionOptions) ([]Change, error)
 	SupersedeDecisionCardsForStage(context.Context, string, string, string, string, time.Time) error
 }
@@ -272,7 +268,7 @@ type InputDraft struct {
 	InputDraftID      string    `json:"input_draft_id"`
 	RunID             string    `json:"run_id"`
 	CardID            string    `json:"card_id"`
-	ActorTokenID      string    `json:"actor_token_id"`
+	PrincipalID      string    `json:"principal_id"`
 	Verdict           string    `json:"verdict"`
 	DeliveryReceiptID string    `json:"delivery_receipt_id,omitempty"`
 	Status            string    `json:"status"`
@@ -343,7 +339,7 @@ type DecideRequest struct {
 	CardID              string
 	Verdict             string
 	Fields              semanticvalue.Value
-	ActorTokenID        string
+	PrincipalID        string
 	ObservedContentHash string
 	DeliveryReceiptID   string
 	DeliveryRenderHash  string
@@ -354,7 +350,7 @@ type DecideRequest struct {
 
 type DeferRequest struct {
 	CardID       string
-	ActorTokenID string
+	PrincipalID string
 	Until        time.Time
 	Now          time.Time
 }
@@ -362,7 +358,7 @@ type DeferRequest struct {
 type BeginInputRequest struct {
 	CardID            string
 	Verdict           string
-	ActorTokenID      string
+	PrincipalID      string
 	DeliveryReceiptID string
 	Now               time.Time
 	TTL               time.Duration
@@ -371,7 +367,7 @@ type BeginInputRequest struct {
 type CancelInputRequest struct {
 	CardID       string
 	InputDraftID string
-	ActorTokenID string
+	PrincipalID string
 	Now          time.Time
 }
 

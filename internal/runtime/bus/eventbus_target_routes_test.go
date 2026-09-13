@@ -2865,7 +2865,7 @@ func TestEventBusRootInputAPIExplicitTargetPersistsOnlySelectedSameIDScopedRoute
 	}
 	completion, replay, err := eventBus.PublishAPIEventAcknowledged(
 		testAuthorActivityContext(context.Background()), event, &endpoint,
-		apiidempotency.Request{Method: "event.publish", ActorTokenID: "operator", IdempotencyKey: "duplicate-id-api", RequestHash: "duplicate-id-api-request"},
+		apiidempotency.Request{Method: "event.publish", Actor: apiidempotency.BearerActor("operator"), IdempotencyKey: "duplicate-id-api", RequestHash: "duplicate-id-api-request"},
 		apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)},
 	)
 	if err != nil {
@@ -2963,7 +2963,7 @@ func TestEventBusRootInputFlowAcceptsExactOperatorAPIAdmission(t *testing.T) {
 			completion, replay, err := eventBus.PublishAPIEventAcknowledged(
 				testAuthorActivityContext(context.Background()), event, &endpoint,
 				apiidempotency.Request{
-					Method: "event.publish", ActorTokenID: "operator", IdempotencyKey: "root-input-" + name, RequestHash: "root-input-request-" + name,
+					Method: "event.publish", Actor: apiidempotency.BearerActor("operator"), IdempotencyKey: "root-input-" + name, RequestHash: "root-input-request-" + name,
 				},
 				apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)},
 			)

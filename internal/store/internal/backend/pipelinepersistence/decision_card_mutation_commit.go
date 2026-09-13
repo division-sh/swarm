@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -31,6 +33,7 @@ func commitDecisionCardOperation(
 	effects *revisionEffects,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	command runtimepipeline.DecisionCardMutationCommand,
+	storeCompletion func(context.Context, *sql.Tx, apiidempotency.Completion) error,
 ) (runtimepipeline.CommittedDecisionCardMutation, error) {
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedDecisionCardMutation{}, err
@@ -104,9 +107,7 @@ func commitDecisionCardOperation(
 		default:
 			return fmt.Errorf("decision-card mutation kind is required")
 		}
-		if selected == nil {
-			return nil
-		}
+		if selected != nil {
 		plan, ok := selected.(runtimebus.EnginePublicationPlan)
 		if !ok {
 			return fmt.Errorf("decision-card publication has unexpected type %T", selected)
@@ -121,6 +122,11 @@ func commitDecisionCardOperation(
 		}
 		result.Publication = evidence
 		result.HasPublication = true
+		}
+		completion, err := result.ProjectCompletion()
+		if err != nil { return err }
+		if err := storeCompletion(txctx, tx, completion); err != nil { return err }
+		result.Completion = completion
 		return nil
 	})
 	if err != nil {
@@ -174,20 +180,6 @@ func commitDecisionCardGateState(
 		return err
 	}
 	return commitWorkflowEngineMutationLog(ctx, tx, story, store, postgres, effects, record, before)
-}
-
-func (s *PipelinePostgresOwner) CommitDecisionCardOperation(ctx context.Context, command runtimepipeline.DecisionCardMutationCommand) (runtimepipeline.CommittedDecisionCardMutation, error) {
-	effects := newRevisionEffects()
-	return commitDecisionCardOperation(ctx, s, s.DecisionPostgresOwner, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
-	}, command)
-}
-
-func (s *PipelineSQLiteOwner) CommitDecisionCardOperation(ctx context.Context, command runtimepipeline.DecisionCardMutationCommand) (runtimepipeline.CommittedDecisionCardMutation, error) {
-	effects := newRevisionEffects()
-	return commitDecisionCardOperation(ctx, s, s.DecisionSQLiteOwner, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite decision-card operation", effects, fn)
-	}, command)
 }
 
 var _ runtimepipeline.DecisionCardMutationOwner = (*PipelinePostgresOwner)(nil)

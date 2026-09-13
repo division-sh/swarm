@@ -15353,7 +15353,9 @@ platform_tables:
         from its typed owner; lifecycle consumers revalidate static/singleton stage instances against the authoritative workflow
         row and continuation-backed anchors against their complete persisted owner before emission. Partial or foreign flow,
         instance, or entity provenance fails closed. Unknown anchor kinds fail closed;
-        proposed_effect execution is owned separately by proposed_effect_continuations.'
+        proposed_effect execution is owned separately by proposed_effect_continuations. DecidedBy is the admitted
+        selected-store operator principal, not the transporting bearer credential. Historical fork materialization preserves
+        the original principal evidence under its existing source-authority transaction and creates no fresh API completion.'
       ddl: |
         CREATE TABLE decision_cards (
             card_id                UUID PRIMARY KEY,
@@ -15459,30 +15461,33 @@ platform_tables:
             INDEX idx_human_task_budget (budget_bundle_hash, budget_window_start, state)
         );
     decision_card_input_drafts:
-      description: 'Durable actor/card/verdict-scoped half-input owner. An active draft is not a verdict. It is cancellable,
+      description: 'Durable operator-principal/card/verdict-scoped half-input owner. An active draft is not a verdict. It is cancellable,
         TTL-expiring, and consumed only by a complete mailbox.decide in the same card mutation. Replaced, expired, foreign,
         or already-consumed drafts fail closed. Replacement, cancellation, consumption, expiry, stage supersession, and run
-        supersession close every affected active draft and append an exact decision_card_changes cursor row in the same mutation.'
+        supersession close every affected active draft and append an exact decision_card_changes cursor row in the same mutation.
+        Storage, request and JSON readback use principal_id; changing a bearer credential for the same principal does not
+        change draft authority. No token-shaped draft decoder or compatibility alias is supported.'
       ddl: |
         CREATE TABLE decision_card_input_drafts (
             input_draft_id UUID PRIMARY KEY,
             run_id         UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             card_id        UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
-            actor_token_id TEXT NOT NULL,
+            principal_id   TEXT NOT NULL,
             verdict        TEXT NOT NULL,
             delivery_receipt_id TEXT,
             status         TEXT NOT NULL CHECK (status IN ('active', 'cancelled', 'consumed', 'expired')),
             expires_at     TIMESTAMPTZ NOT NULL,
             created_at     TIMESTAMPTZ NOT NULL,
             updated_at     TIMESTAMPTZ NOT NULL,
-            INDEX idx_decision_card_drafts_active (card_id, actor_token_id, status, expires_at),
+            INDEX idx_decision_card_drafts_active (card_id, principal_id, status, expires_at),
             INDEX idx_decision_card_drafts_run (run_id, created_at)
         );
     decision_card_changes:
       description: 'Append-only transactional cursor owner for resumable at-least-once decision-card subscription. Consumers
         reconnect from change_id and must reconcile through mailbox.list; timestamps are evidence and never ordering authority.
         Run-terminal and pre-runtime quiescence supersession commits exactly one superseded change per transitioned card in
-        the selected-store terminal transaction and creates no executable event or delivery work.'
+        the selected-store terminal transaction and creates no executable event or delivery work. Draft changes carry
+        principal_id as the actor evidence; human mutation changes and their exact API completion commit together.'
       ddl: |
         CREATE TABLE decision_card_changes (
             change_id  BIGSERIAL PRIMARY KEY,
@@ -15526,13 +15531,28 @@ platform_tables:
             INDEX idx_decision_route_due (status, attempt_count, next_attempt_at, created_at)
         );
     api_idempotency:
-      description: 'Reusable v1 API idempotency replay store. One row per (method, actor token id, idempotency key). Stores
-        the canonical request hash and original completed response for the TTL window required by api_specification.conventions.idempotency.'
-      ddl: "CREATE TABLE api_idempotency (\n    method            TEXT NOT NULL,\n    actor_token_id    TEXT NOT NULL,\n\
-        \    idempotency_key   TEXT NOT NULL,\n    request_hash      TEXT NOT NULL,\n    resource_id       TEXT NOT NULL,\n\
-        \    response          JSONB NOT NULL,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    expires_at\
-        \        TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (method, actor_token_id, idempotency_key),\n    INDEX idx_api_idempotency_expires\
-        \ (expires_at)\n);"
+      description: >-
+        One response per exact (method, actor_kind, actor_id, idempotency_key). The five human mailbox
+        mutations use the selected-store operator principal; other methods retain bearer-token identity.
+        Mailbox domain changes and the actual serialized response commit in one transaction, before
+        finalization or dispatch. Real transport tokens are optional audit evidence, never principal aliases.
+        The canonical request hash and original response are retained for 24 hours from first completion;
+        request preparation and execution do not shorten that window and replay does not extend it.
+      ddl: |
+        CREATE TABLE api_idempotency (
+            method            TEXT NOT NULL,
+            actor_kind        TEXT NOT NULL CHECK (actor_kind IN ('bearer_token', 'operator_principal')),
+            actor_id          TEXT NOT NULL,
+            idempotency_key   TEXT NOT NULL,
+            request_hash      TEXT NOT NULL,
+            resource_id       TEXT NOT NULL,
+            response          JSONB NOT NULL,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at        TIMESTAMPTZ NOT NULL,
+            CHECK ((method IN ('mailbox.decide', 'mailbox.defer', 'mailbox.begin_input', 'mailbox.cancel_input', 'mailbox.acknowledge') AND actor_kind = 'operator_principal') OR (method NOT IN ('mailbox.decide', 'mailbox.defer', 'mailbox.begin_input', 'mailbox.cancel_input', 'mailbox.acknowledge') AND actor_kind = 'bearer_token')),
+            PRIMARY KEY (method, actor_kind, actor_id, idempotency_key),
+            INDEX idx_api_idempotency_expires (expires_at)
+        );
     conversation_forks:
       description: 'Canonical forkchat lifecycle store for conversation.fork, conversation.fork_list, conversation.fork_view,
         conversation.fork_chat, and conversation.fork_delete. Rows record source session/run/exact-agent lineage, the validated
@@ -27470,24 +27490,22 @@ api_specification:
         reset: Runtime reset consumes a safety-trigger gate or reset-specific entrypoint and remains separate from public
           runtime.pause/runtime.resume API semantics.
     idempotency:
-      one_rule: "All mutating methods accept an optional `idempotency_key` parameter.\nIf provided, the runtime stores `(method,\
-        \ actor_token, idempotency_key)\n\u2192 original_response` for a TTL window of 24 hours starting after the\nfirst\
-        \ completed response is stored. Replay with the same triple and\nthe same request body returns the stored response.\
-        \ Replay with the\nsame triple and a DIFFERENT request body returns IDEMPOTENCY_CONFLICT.\n"
+      one_rule: >-
+        All mutating methods accept an optional idempotency_key. Keyed completion stores
+        (method, actor_kind, actor_id, idempotency_key) and the exact request hash, resource
+        evidence and original response for 24 hours from first completion. mailbox.decide,
+        mailbox.defer, mailbox.begin_input, mailbox.cancel_input and mailbox.acknowledge
+        require operator_principal identity; unrelated methods use the real bearer_token
+        identity. Current authority is admitted before replay. The same identity/key and
+        request returns the stored response before fresh resource-state planning; a changed
+        request returns IDEMPOTENCY_CONFLICT. Replay never extends retention. Waiting for
+        a lease or preparing a mutation must not shorten the first-completion TTL.
       conflict_response_shape: See components.errors.IDEMPOTENCY_CONFLICT for the canonical schema.
-      without_key: 'Methods called without `idempotency_key` are treated as fresh. Natural
-
-        resource-state semantics still apply (e.g., mailbox.decide on an
-
-        already-decided item returns MAILBOX_ALREADY_DECIDED regardless of
-
-        idempotency_key). Idempotency keys protect against client retries;
-
-        resource-state errors protect against logic violations. Two separate
-
-        layers, both useful, neither overlapping.
-
-        '
+      without_key: >-
+        Without idempotency_key the same authority and domain checks apply, but the call
+        is fresh and creates no replay row. Natural resource-state rules govern a fresh
+        call, including calls after expiry; a valid unexpired keyed replay instead returns
+        its original response even when the resource is now terminal.
       ttl: 24 hours after first completed response stored.
       mutating_methods:
         - event.publish
@@ -27521,6 +27539,24 @@ api_specification:
         - channel.proof_revoke
         - test.setup_entities
     mailbox:
+      principal_completion: >
+        The authenticated selected-store operator principal owns all five
+        human mailbox operations, draft ownership and decided_by. Credentials
+        carrying the same principal share replay and draft authority; a channel
+        caller does not manufacture a bearer token. Principal and selected
+        source/runtime admission precede replay and fresh preparation, and are
+        revalidated at the domain commit. A completed response is not authority
+        to bypass current admission. Existing replay precedes terminal card or
+        draft planning. The exact typed request, actual selected result and
+        serialized response commit in one private selected-store transaction.
+        Begin/cancel have no publication but still commit completion. Forced
+        human-task budget deferral returns the actual deferred result. Notice
+        eligibility, notified update and completion belong to the notice
+        transaction, not the card owner. Without a key the same admission and
+        domain transaction apply without a replay row. Post-commit dispatch,
+        finalization, transport loss or lease-release failure cannot erase
+        completion or authorize another mutation. Historical fork materialization
+        preserves source principal evidence without creating an API invocation.
       tagged_projection: 'mailbox.list/get are a read-only tagged union of notice and decision_card. Generic mailbox rows own
         notices only and cannot be decided or deferred. decision_cards is the sole mutable decision owner.'
       status_storage_model: 'Typed cards are pending, decided, or superseded. Defer is non-terminal: status remains pending and
@@ -34254,6 +34290,9 @@ api_specification:
         registered anchor authority, typed verdict/fields, change cursor,
         mailbox.card_decided event, and idempotency response commit atomically.
         Outcome routing consumes the frozen card snapshot after commit.
+        The admitted operator principal owns the decision and replay, independent
+        of the carrying token or channel. Budget-forced deferral projects the
+        actual committed outcome rather than the requested approval.
       scope:
         required:
         - decide:mailbox
@@ -34307,6 +34346,8 @@ api_specification:
         remains pending and only deferred_until changes. It never chooses a
         verdict or routes the stage. The admitted decision time and until value
         use the decision-card UTC-microsecond timestamp contract.
+        Principal-scoped replay completion, card change and deferral publication
+        commit together before outcome dispatch.
       scope:
         required:
         - decide:mailbox
@@ -34336,7 +34377,10 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     mailbox.begin_input:
       tier: must_have
-      description: Start a durable actor/card/verdict-scoped input draft. This operation never creates a verdict.
+      description: >-
+        Start a durable operator-principal/card/verdict-scoped input draft.
+        Replacement, draft change cursor and principal-scoped completion commit
+        together. This operation never creates a verdict or publication.
       scope: {required: ['decide:mailbox']}
       idempotency: per the convention.
       params:
@@ -34349,7 +34393,11 @@ api_specification:
       errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_STALE_CARD, MAILBOX_INVALID_VERDICT, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
     mailbox.cancel_input:
       tier: must_have
-      description: Cancel the caller's still-active durable input draft. Foreign, stale, expired, replaced, or consumed drafts fail closed.
+      description: >-
+        Cancel the admitted principal's still-active durable input draft.
+        Foreign, stale, expired, replaced, or consumed drafts fail closed on
+        fresh execution. Cancellation, its change cursor and exact completion
+        commit together; matching replay does not re-plan the cancelled draft.
       scope: {required: ['decide:mailbox']}
       idempotency: per the convention.
       params:
@@ -34360,7 +34408,12 @@ api_specification:
       errors: [SELECTED_FORK_CONTROL_UNSUPPORTED, MAILBOX_NOT_FOUND, MAILBOX_INPUT_DRAFT_NOT_AUTHORITY, IDEMPOTENCY_CONFLICT]
     mailbox.acknowledge:
       tier: must_have
-      description: Acknowledge a notice. Decision cards reject this operation with a teaching error.
+      description: >-
+        Acknowledge a notice as the admitted operator principal. Notice-only
+        eligibility, notified update and exact principal-scoped completion
+        commit in the same notice transaction. Decision cards reject this
+        operation with a teaching error; missing notices cannot create a success
+        completion. No decision event is produced.
       scope: {required: ['acknowledge:mailbox']}
       idempotency: per the convention.
       params:

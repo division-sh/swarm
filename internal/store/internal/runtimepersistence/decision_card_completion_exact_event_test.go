@@ -60,8 +60,8 @@ func TestNormalRunCompletionRequiresExactDecisionOutcomeEventIDParity(t *testing
 						if testCase.verdict == "reject" {
 							fields, _ = canonicaljson.FromGo(map[string]any{"reason": "not approved"})
 						}
-						if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-							CardID: card.CardID, Verdict: testCase.verdict, Fields: fields, ActorTokenID: "operator",
+						if _, err := DecisionCardDomainForTest(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+							CardID: card.CardID, Verdict: testCase.verdict, Fields: fields, PrincipalID: "operator",
 							ObservedContentHash: card.CardContentHash, DecisionEventID: sourceEventID, Now: now.Add(time.Minute),
 						}); err != nil {
 							t.Fatalf("DecideDecisionCard: %v", err)
@@ -89,8 +89,8 @@ func TestNormalRunCompletionRequiresExactDecisionOutcomeEventIDParity(t *testing
 						fields, _ = canonicaljson.FromGo(map[string]any{"reason": "not approved"})
 					}
 					sourceEventID = uuid.NewString()
-					if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-						CardID: card.CardID, Verdict: testCase.verdict, Fields: fields, ActorTokenID: "operator",
+					if _, err := DecisionCardDomainForTest(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+						CardID: card.CardID, Verdict: testCase.verdict, Fields: fields, PrincipalID: "operator",
 						ObservedContentHash: card.CardContentHash, DecisionEventID: sourceEventID, Now: now.Add(time.Minute),
 					}); err != nil {
 						t.Fatalf("DecideDecisionCard: %v", err)

@@ -57,7 +57,7 @@ func executeStandingServiceOperation(ctx context.Context, req Request, opts Stan
 	}
 	now := time.Now().UTC()
 	completion, _, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
-		Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: idempotencyKey,
+		Method: req.Method, Actor: apiidempotency.BearerActor(req.ActorTokenID), IdempotencyKey: idempotencyKey,
 		RequestHash: req.RequestHash, ResourceID: serviceID, TTL: standingServiceIdempotencyTTL, Now: now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		operation := runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "api.v1", Reason: reason}

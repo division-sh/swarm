@@ -23,7 +23,7 @@ import (
 const decisionCardEventName = "mailbox.card_decided"
 
 type MailboxNoticeAcknowledgmentStore interface {
-	MarkMailboxItemNotified(context.Context, string) error
+	AcknowledgeMailboxNotice(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
 }
 
 type mailboxProjectionListResult struct {
@@ -73,7 +73,7 @@ func OperatorDecisionCardHandlers(opts DecisionCardHandlerOptions) map[string]Me
 			return map[string]any{"kind": decisioncard.KindNotice, "notice": detail}, nil
 		}
 	}
-	if opts.Cards != nil && opts.Authority != nil && opts.SourceArtifact != nil && opts.Idempotency != nil {
+	if opts.Cards != nil && opts.Authority != nil && opts.SourceArtifact != nil {
 		for name, handler := range map[string]MethodHandler{
 			"mailbox.decide": func(ctx context.Context, req Request) (any, error) {
 				fields, err := optionalSemanticObject(req.SemanticParams, "fields")
@@ -88,7 +88,7 @@ func OperatorDecisionCardHandlers(opts DecisionCardHandlerOptions) map[string]Me
 				}
 				eventID := uuid.NewString()
 				return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, runtimepipeline.NewDecisionCardDecision(decisioncard.DecideRequest{
-					CardID: cardID, Verdict: verdict, Fields: fields, ActorTokenID: req.ActorTokenID,
+					CardID: cardID, Verdict: verdict, Fields: fields, PrincipalID: req.OperatorPrincipalID,
 					ObservedContentHash: observedHash, DeliveryReceiptID: stringParam(req.Params, "delivery_receipt_id"),
 					DeliveryRenderHash: stringParam(req.Params, "delivery_render_hash"), InputDraftID: stringParam(req.Params, "input_draft_id"),
 					DecisionEventID: eventID, Now: now().UTC(),
@@ -101,7 +101,7 @@ func OperatorDecisionCardHandlers(opts DecisionCardHandlerOptions) map[string]Me
 					return nil, err
 				}
 				return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, runtimepipeline.NewDecisionCardDeferral(decisioncard.DeferRequest{
-					CardID: cardID, ActorTokenID: req.ActorTokenID, Until: until, Now: now().UTC(),
+					CardID: cardID, PrincipalID: req.OperatorPrincipalID, Until: until, Now: now().UTC(),
 				}))
 			},
 			"mailbox.begin_input": func(ctx context.Context, req Request) (any, error) {
@@ -109,21 +109,21 @@ func OperatorDecisionCardHandlers(opts DecisionCardHandlerOptions) map[string]Me
 				verdict := strings.TrimSpace(stringParam(req.Params, "verdict"))
 				observedHash := strings.TrimSpace(stringParam(req.Params, "observed_content_hash"))
 				return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, runtimepipeline.NewDecisionCardInputBegin(decisioncard.BeginInputRequest{
-					CardID: cardID, Verdict: verdict, ActorTokenID: req.ActorTokenID,
+					CardID: cardID, Verdict: verdict, PrincipalID: req.OperatorPrincipalID,
 					DeliveryReceiptID: stringParam(req.Params, "delivery_receipt_id"), Now: now().UTC(),
 				}, observedHash))
 			},
 			"mailbox.cancel_input": func(ctx context.Context, req Request) (any, error) {
 				cardID := strings.TrimSpace(stringParam(req.Params, "card_id"))
 				return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, runtimepipeline.NewDecisionCardInputCancellation(decisioncard.CancelInputRequest{
-					CardID: cardID, InputDraftID: stringParam(req.Params, "input_draft_id"), ActorTokenID: req.ActorTokenID, Now: now().UTC(),
+					CardID: cardID, InputDraftID: stringParam(req.Params, "input_draft_id"), PrincipalID: req.OperatorPrincipalID, Now: now().UTC(),
 				}))
 			},
 		} {
 			handlers[name] = handler
 		}
 	}
-	if opts.Cards != nil && opts.NoticeAcknowledgment != nil && opts.SourceArtifact != nil && opts.Idempotency != nil {
+	if opts.NoticeAcknowledgment != nil && opts.SourceArtifact != nil {
 		handlers["mailbox.acknowledge"] = func(ctx context.Context, req Request) (any, error) {
 			id := strings.TrimSpace(stringParam(req.Params, "mailbox_id"))
 			return executeIdempotentMailboxNoticeAcknowledgment(ctx, req, opts, id, opts.NoticeAcknowledgment)
@@ -286,9 +286,6 @@ func encodeMailboxProjectionCursor(cursor mailboxProjectionCursor) string {
 }
 
 func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opts DecisionCardHandlerOptions, cardID string, mutation runtimepipeline.DecisionCardMutation) (any, error) {
-	if opts.Idempotency == nil {
-		return nil, fmt.Errorf("decision card mutation idempotency owner is required")
-	}
 	card, err := opts.Cards.GetDecisionCard(ctx, cardID)
 	if err != nil && !errors.Is(err, decisioncard.ErrNotFound) {
 		return nil, decisionCardAPIError(cardID, err)
@@ -329,8 +326,8 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	response, replayed, err := authority.CommitDecisionCardMutation(ctx, decisionCardMutationIdempotencyAdapter{owner: opts.Idempotency}, runtimepipeline.DecisionCardMutationIdempotencyRequest{
-		Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: idempotencyKey,
+	response, replayed, err := authority.CommitDecisionCardMutation(ctx, apiidempotency.Request{
+		Method: req.Method, Actor: apiidempotency.PrincipalActor(req.OperatorPrincipalID), IdempotencyKey: idempotencyKey,
 		RequestHash: req.RequestHash, ResourceID: cardID, TTL: 24 * time.Hour, Now: now,
 	}, mutation)
 	if err != nil {
@@ -347,27 +344,6 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	return result, nil
 }
 
-type decisionCardMutationIdempotencyAdapter struct {
-	owner APIIdempotencyStore
-}
-
-func (a decisionCardMutationIdempotencyAdapter) WithDecisionCardMutationIdempotency(
-	ctx context.Context,
-	req runtimepipeline.DecisionCardMutationIdempotencyRequest,
-	execute func(context.Context) (runtimepipeline.DecisionCardMutationIdempotencyCompletion, error),
-) (runtimepipeline.DecisionCardMutationIdempotencyCompletion, bool, error) {
-	completion, replayed, err := a.owner.WithAPIIdempotency(ctx, apiidempotency.Request{
-		Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: req.IdempotencyKey,
-		RequestHash: req.RequestHash, ResourceID: req.ResourceID, TTL: req.TTL, Now: req.Now,
-	}, func(callbackCtx context.Context) (apiidempotency.Completion, error) {
-		result, err := execute(callbackCtx)
-		return apiidempotency.Completion{ResourceID: result.ResourceID, Response: result.Response}, err
-	})
-	return runtimepipeline.DecisionCardMutationIdempotencyCompletion{
-		ResourceID: completion.ResourceID, Response: completion.Response,
-	}, replayed, err
-}
-
 func executeIdempotentMailboxNoticeAcknowledgment(
 	ctx context.Context,
 	req Request,
@@ -375,9 +351,6 @@ func executeIdempotentMailboxNoticeAcknowledgment(
 	mailboxID string,
 	writer MailboxNoticeAcknowledgmentStore,
 ) (any, error) {
-	if opts.Idempotency == nil {
-		return nil, fmt.Errorf("mailbox notice idempotency owner is required")
-	}
 	if opts.SourceArtifact == nil {
 		return nil, fmt.Errorf("mailbox notice bundle source owner is required")
 	}
@@ -390,24 +363,10 @@ func executeIdempotentMailboxNoticeAcknowledgment(
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	completion, replayed, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
-		Method: req.Method, ActorTokenID: req.ActorTokenID,
+	completion, replayed, err := writer.AcknowledgeMailboxNotice(ctx, apiidempotency.Request{
+		Method: req.Method, Actor: apiidempotency.PrincipalActor(req.OperatorPrincipalID),
 		IdempotencyKey: strings.TrimSpace(stringParam(req.Params, "idempotency_key")),
 		RequestHash:    req.RequestHash, ResourceID: mailboxID, TTL: 24 * time.Hour, Now: now,
-	}, func(callbackCtx context.Context) (apiidempotency.Completion, error) {
-		if _, err := opts.Cards.GetDecisionCard(callbackCtx, mailboxID); err == nil {
-			return apiidempotency.Completion{}, NewInvalidParamsError(map[string]any{"mailbox_id": mailboxID, "reason": "decision cards use decide or defer; acknowledge is notice-only"})
-		} else if !errors.Is(err, decisioncard.ErrNotFound) {
-			return apiidempotency.Completion{}, err
-		}
-		if err := writer.MarkMailboxItemNotified(callbackCtx, mailboxID); err != nil {
-			if errors.Is(err, mailbox.ErrV1NotFound) {
-				return apiidempotency.Completion{}, decisioncard.ErrNotFound
-			}
-			return apiidempotency.Completion{}, err
-		}
-		raw, err := canonicaljson.Bytes(map[string]any{"ok": true, "mailbox_id": mailboxID, "kind": decisioncard.KindNotice})
-		return apiidempotency.Completion{ResourceID: mailboxID, Response: raw}, err
 	})
 	if err != nil {
 		return nil, decisionCardAPIError(mailboxID, err)
@@ -425,7 +384,9 @@ func executeIdempotentMailboxNoticeAcknowledgment(
 
 func decisionCardAPIError(cardID string, err error) error {
 	switch {
-	case errors.Is(err, decisioncard.ErrNotFound):
+	case errors.Is(err, mailbox.ErrNotNotice):
+		return NewInvalidParamsError(map[string]any{"field": "mailbox_id", "reason": err.Error(), "remediation": "use mailbox.decide for a decision card"})
+	case errors.Is(err, decisioncard.ErrNotFound), errors.Is(err, mailbox.ErrV1NotFound):
 		return NewApplicationError(MailboxNotFoundCode, false, map[string]any{"card_id": cardID})
 	case errors.Is(err, decisioncard.ErrAlreadyTerminal):
 		return NewApplicationError(MailboxAlreadyDecidedCode, false, map[string]any{"card_id": cardID})

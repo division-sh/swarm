@@ -158,7 +158,7 @@ func operatorChannelOperationResult(operation operatorchannel.Operation, binding
 
 func executeOperatorChannelIdempotent(ctx context.Context, req Request, opts OperatorChannelHandlerOptions, resourceID, idempotencyKey string, now time.Time, execute func(context.Context) (any, error)) (any, error) {
 	completion, _, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
-		Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: idempotencyKey,
+		Method: req.Method, Actor: apiidempotency.BearerActor(req.ActorTokenID), IdempotencyKey: idempotencyKey,
 		RequestHash: req.RequestHash, ResourceID: strings.TrimSpace(resourceID), TTL: operatorChannelIdempotencyTTL, Now: now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		result, err := execute(ctx)

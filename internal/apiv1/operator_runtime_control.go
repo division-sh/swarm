@@ -50,7 +50,7 @@ func executeRuntimeIngressControl(ctx context.Context, req Request, opts Runtime
 	}
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
-		ActorTokenID:   req.ActorTokenID,
+		Actor: apiidempotency.BearerActor(req.ActorTokenID),
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		TTL:            runtimeControlIdempotencyTTL,

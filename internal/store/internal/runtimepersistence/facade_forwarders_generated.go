@@ -57,8 +57,16 @@ import (
 	time "time"
 )
 
+func (s *PostgresStore) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return s.mailboxPostgresOwner.AcknowledgeMailboxNotice(ctx, req)
+}
+
 func (s *PostgresStore) Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, error) {
 	return s.lLMPostgresOwner.Acquire(ctx, identity, lockOwner)
+}
+
+func (s *PostgresStore) AcquireDecisionCardMutation(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) (pipeline.DecisionCardMutationLease, error) {
+	return s.pipelinePostgresOwner.AcquireDecisionCardMutation(ctx, req, mutation)
 }
 
 func (s *PostgresStore) AcquireDestructiveReset(ctx context.Context) (destructivereset.LockLease, bool, error) {
@@ -141,10 +149,6 @@ func (s *PostgresStore) BeginChannelBinding(ctx context.Context, req operatorcha
 	return s.operatorChannelPostgresOwner.BeginChannelBinding(ctx, req)
 }
 
-func (s *PostgresStore) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	return s.decisionPostgresOwner.BeginDecisionCardInput(ctx, req)
-}
-
 func (s *PostgresStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.Snapshot, error) {
 	return s.deliveryPostgresOwner.BindAgentSession(ctx, claim, sessionID)
 }
@@ -155,10 +159,6 @@ func (s *PostgresStore) BindOperatorChannelFromProof(ctx context.Context, req op
 
 func (s *PostgresStore) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) error {
 	return s.pipelinePostgresOwner.BlockFanOutClaim(ctx, request)
-}
-
-func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	return s.decisionPostgresOwner.CancelDecisionCardInput(ctx, req)
 }
 
 func (s *PostgresStore) CancelRunFanOut(ctx context.Context, runID string, reason string, at time.Time) error {
@@ -191,10 +191,6 @@ func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context
 
 func (s *PostgresStore) CommitAPIEventPublication(ctx context.Context, command bus.APIEventPublicationCommand) (bus.CommittedAPIEventPublication, error) {
 	return s.eventPostgresOwner.CommitAPIEventPublication(ctx, command)
-}
-
-func (s *PostgresStore) CommitDecisionCardOperation(ctx context.Context, command pipeline.DecisionCardMutationCommand) (pipeline.CommittedDecisionCardMutation, error) {
-	return s.pipelinePostgresOwner.CommitDecisionCardOperation(ctx, command)
 }
 
 func (s *PostgresStore) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {
@@ -327,14 +323,6 @@ func (s *PostgresStore) CreateReplyContext(ctx context.Context, record replycont
 
 func (s *PostgresStore) CreateRun(ctx context.Context, request runlifecycle.CreateRequest) (runlifecycle.MutationDisposition, error) {
 	return s.runLifecyclePostgresOwner.CreateRun(ctx, request)
-}
-
-func (s *PostgresStore) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	return s.decisionPostgresOwner.DecideDecisionCard(ctx, req)
-}
-
-func (s *PostgresStore) DeferDecisionCard(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	return s.decisionPostgresOwner.DeferDecisionCard(ctx, req)
 }
 
 func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
@@ -881,10 +869,6 @@ func (s *PostgresStore) MarkExternalAttemptResponseObserved(ctx context.Context,
 	return s.effectPostgresOwner.MarkExternalAttemptResponseObserved(ctx, attempt, evidence, now)
 }
 
-func (s *PostgresStore) MarkMailboxItemNotified(ctx context.Context, id string) error {
-	return s.mailboxPostgresOwner.MarkMailboxItemNotified(ctx, id)
-}
-
 func (s *PostgresStore) MarkTerminalRun(ctx context.Context, request runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
 	return s.runLifecyclePostgresOwner.MarkTerminalRun(ctx, request)
 }
@@ -1313,8 +1297,16 @@ func (s *PostgresStore) WithAPIIdempotency(ctx context.Context, req apiidempoten
 	return s.postgresOwner.WithAPIIdempotency(ctx, req, execute)
 }
 
+func (s *SQLiteRuntimeStore) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return s.mailboxSQLiteOwner.AcknowledgeMailboxNotice(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, error) {
 	return s.lLMSQLiteOwner.Acquire(ctx, identity, lockOwner)
+}
+
+func (s *SQLiteRuntimeStore) AcquireDecisionCardMutation(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) (pipeline.DecisionCardMutationLease, error) {
+	return s.pipelineSQLiteOwner.AcquireDecisionCardMutation(ctx, req, mutation)
 }
 
 func (s *SQLiteRuntimeStore) AcquireDestructiveReset(ctx context.Context) (destructivereset.LockLease, bool, error) {
@@ -1393,10 +1385,6 @@ func (s *SQLiteRuntimeStore) BeginChannelBinding(ctx context.Context, req operat
 	return s.operatorChannelSQLiteOwner.BeginChannelBinding(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	return s.decisionSQLiteOwner.BeginDecisionCardInput(ctx, req)
-}
-
 func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.Snapshot, error) {
 	return s.deliverySQLiteOwner.BindAgentSession(ctx, claim, sessionID)
 }
@@ -1407,10 +1395,6 @@ func (s *SQLiteRuntimeStore) BindOperatorChannelFromProof(ctx context.Context, r
 
 func (s *SQLiteRuntimeStore) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) error {
 	return s.pipelineSQLiteOwner.BlockFanOutClaim(ctx, request)
-}
-
-func (s *SQLiteRuntimeStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	return s.decisionSQLiteOwner.CancelDecisionCardInput(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) CancelRunFanOut(ctx context.Context, runID string, reason string, at time.Time) error {
@@ -1443,10 +1427,6 @@ func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx co
 
 func (s *SQLiteRuntimeStore) CommitAPIEventPublication(ctx context.Context, command bus.APIEventPublicationCommand) (bus.CommittedAPIEventPublication, error) {
 	return s.eventSQLiteOwner.CommitAPIEventPublication(ctx, command)
-}
-
-func (s *SQLiteRuntimeStore) CommitDecisionCardOperation(ctx context.Context, command pipeline.DecisionCardMutationCommand) (pipeline.CommittedDecisionCardMutation, error) {
-	return s.pipelineSQLiteOwner.CommitDecisionCardOperation(ctx, command)
 }
 
 func (s *SQLiteRuntimeStore) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {
@@ -1579,14 +1559,6 @@ func (s *SQLiteRuntimeStore) CreateReplyContext(ctx context.Context, record repl
 
 func (s *SQLiteRuntimeStore) CreateRun(ctx context.Context, request runlifecycle.CreateRequest) (runlifecycle.MutationDisposition, error) {
 	return s.runLifecycleSQLiteOwner.CreateRun(ctx, request)
-}
-
-func (s *SQLiteRuntimeStore) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	return s.decisionSQLiteOwner.DecideDecisionCard(ctx, req)
-}
-
-func (s *SQLiteRuntimeStore) DeferDecisionCard(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	return s.decisionSQLiteOwner.DeferDecisionCard(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
@@ -2103,10 +2075,6 @@ func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, at
 
 func (s *SQLiteRuntimeStore) MarkExternalAttemptResponseObserved(ctx context.Context, attempt effects.Attempt, evidence map[string]any, now time.Time) error {
 	return s.effectSQLiteOwner.MarkExternalAttemptResponseObserved(ctx, attempt, evidence, now)
-}
-
-func (s *SQLiteRuntimeStore) MarkMailboxItemNotified(ctx context.Context, id string) error {
-	return s.mailboxSQLiteOwner.MarkMailboxItemNotified(ctx, id)
 }
 
 func (s *SQLiteRuntimeStore) MarkTerminalRun(ctx context.Context, request runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {

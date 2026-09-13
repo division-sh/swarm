@@ -324,7 +324,7 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 			t.Fatal(err)
 		}
 		decisionID = uuid.NewString()
-		if _, err := fixture.store.(decisioncard.Store).DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionID, Now: at.Add(time.Minute)}); err != nil {
+		if _, err := DecisionCardDomainForTest(fixture.store.(decisioncard.Store)).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionID, Now: at.Add(time.Minute)}); err != nil {
 			t.Fatal(err)
 		}
 	}

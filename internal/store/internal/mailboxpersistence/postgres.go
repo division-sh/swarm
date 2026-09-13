@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	mailboxcontract "github.com/division-sh/swarm/internal/mailbox"
 
 	"github.com/division-sh/swarm/internal/events"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -171,19 +170,6 @@ func (s *MailboxPostgresOwner) ListUnnotifiedCriticalMailboxItems(ctx context.Co
 
 func coalesceMailboxEntityID(item runtimetools.MailboxItem) string {
 	return strings.TrimSpace(item.EntityID)
-}
-
-func (s *MailboxPostgresOwner) MarkMailboxItemNotified(ctx context.Context, id string) error {
-	if s == nil || s.backend == nil {
-		return fmt.Errorf("postgres store is required")
-	}
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("mailbox id is required")
-	}
-	return s.markMailboxItemNotifiedSpec(ctx, id)
 }
 
 func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item runtimetools.MailboxItem) (bool, error) {
@@ -371,25 +357,6 @@ func (s *MailboxPostgresOwner) listUnnotifiedCriticalMailboxItemsSpec(ctx contex
 	}
 	defer rows.Close()
 	return scanSpecMailboxItems(rows)
-}
-
-func (s *MailboxPostgresOwner) markMailboxItemNotifiedSpec(ctx context.Context, id string) error {
-	return s.backend.RunTransaction(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
-		result, err := tx.ExecContext(sqlCtx, `
-		UPDATE mailbox
-		SET notified = true
-		WHERE item_id = $1::uuid
-	`, id)
-		if err != nil {
-			return fmt.Errorf("mark mailbox item notified: %w", err)
-		}
-		if rows, err := result.RowsAffected(); err != nil {
-			return err
-		} else if rows == 0 {
-			return mailboxcontract.ErrV1NotFound
-		}
-		return nil
-	})
 }
 
 func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {

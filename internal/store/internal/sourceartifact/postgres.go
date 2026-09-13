@@ -65,6 +65,12 @@ type postgresSourceArtifactQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+func RequirePostgresSourceArtifactTx(ctx context.Context, tx *sql.Tx, bundleHash string) error {
+	if tx == nil { return fmt.Errorf("source artifact transaction is required") }
+	_, err := loadPostgresSourceArtifact(ctx, tx, bundleHash)
+	return err
+}
+
 func loadPostgresSourceArtifact(ctx context.Context, queryer postgresSourceArtifactQueryer, bundleHash string) (sourceartifact.Persisted, error) {
 	var out sourceartifact.Persisted
 	err := queryer.QueryRowContext(ctx, `

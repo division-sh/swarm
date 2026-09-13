@@ -19,7 +19,6 @@ type MailboxPersistence interface {
 	GetMailboxItem(ctx context.Context, id string) (MailboxItem, error)
 	ExpireMailboxItems(ctx context.Context, limit int) ([]MailboxItem, error)
 	ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]MailboxItem, error)
-	MarkMailboxItemNotified(ctx context.Context, id string) error
 }
 
 // EntityPersistence is the backend-neutral store owner for entity tool reads

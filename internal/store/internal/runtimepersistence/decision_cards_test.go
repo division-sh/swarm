@@ -78,18 +78,18 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 				t.Fatalf("GetDecisionCard = %#v, %v", loaded, err)
 			}
 
-			draft, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-a", Now: now, TTL: 10 * time.Minute})
+			draft, err := DecisionCardDomainForTest(cardStore).BeginInputForTest(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", PrincipalID: "operator-a", Now: now, TTL: 10 * time.Minute})
 			if err != nil {
 				t.Fatalf("BeginDecisionCardInput: %v", err)
 			}
-			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "revise", Fields: admitDecisionCardTestObject(t, map[string]any{"feedback": "fix tests"}), ActorTokenID: "operator-a",
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "revise", Fields: admitDecisionCardTestObject(t, map[string]any{"feedback": "fix tests"}), PrincipalID: "operator-a",
 				ObservedContentHash: "sha256:stale", InputDraftID: draft.InputDraftID, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			}); !errors.Is(err, decisioncard.ErrStaleContent) {
 				t.Fatalf("stale decide error = %v", err)
 			}
-			outcome, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "revise", Fields: admitDecisionCardTestObject(t, map[string]any{"feedback": "fix tests"}), ActorTokenID: "operator-a",
+			outcome, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "revise", Fields: admitDecisionCardTestObject(t, map[string]any{"feedback": "fix tests"}), PrincipalID: "operator-a",
 				ObservedContentHash: card.CardContentHash, InputDraftID: draft.InputDraftID, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			})
 			if err != nil {
@@ -98,7 +98,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 			if outcome.Card.Status != decisioncard.StatusDecided || outcome.Card.Verdict != "revise" || outcome.ChangeID < 1 {
 				t.Fatalf("decision outcome = %#v", outcome)
 			}
-			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ObservedContentHash: card.CardContentHash}); !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ObservedContentHash: card.CardContentHash}); !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
 				t.Fatalf("second decide error = %v", err)
 			}
 			changes, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 20})
@@ -304,9 +304,9 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 			assertStoreSnapshotNumber(t, "provenance.subnormal", provenanceSubnormal.Interface(), math.SmallestNonzeroFloat64)
 
 			decisionEventID := uuid.NewString()
-			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
 				CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{"score": safeInteger}),
-				ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID,
+				PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID,
 				Now: card.CreatedAt.Add(time.Minute),
 			}); err != nil {
 				t.Fatalf("DecideDecisionCard with safe field: %v", err)
@@ -446,9 +446,9 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
 				t.Fatal(err)
 			}
-			_, err = cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+			_, err = DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
 				CardID: card.CardID, Verdict: "approve", Fields: admitDecisionCardTestObject(t, map[string]any{"code": 7, "component": "api", "owner": "worker"}),
-				ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
+				PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			})
 			if !errors.Is(err, decisioncard.ErrInvalidFields) {
 				t.Fatalf("invalid frozen outcome error = %v, want ErrInvalidFields", err)
@@ -521,15 +521,15 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
 				t.Fatalf("CreateDecisionCard: %v", err)
 			}
-			deferred, err := cardStore.DeferDecisionCard(ctx, decisioncard.DeferRequest{CardID: card.CardID, ActorTokenID: "operator-a", Until: now.Add(time.Hour), Now: now})
+			deferred, err := DecisionCardDomainForTest(cardStore).ApplyDeferralForTest(ctx, decisioncard.DeferRequest{CardID: card.CardID, PrincipalID: "operator-a", Until: now.Add(time.Hour), Now: now})
 			if err != nil || deferred.Card.Status != decisioncard.StatusPending || !deferred.Card.DeferredUntil.Equal(now.Add(time.Hour)) {
 				t.Fatalf("DeferDecisionCard = %#v, %v", deferred, err)
 			}
-			draft, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-a", Now: now, TTL: 10 * time.Minute})
+			draft, err := DecisionCardDomainForTest(cardStore).BeginInputForTest(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", PrincipalID: "operator-a", Now: now, TTL: 10 * time.Minute})
 			if err != nil {
 				t.Fatalf("BeginDecisionCardInput: %v", err)
 			}
-			cancelled, err := cardStore.CancelDecisionCardInput(ctx, decisioncard.CancelInputRequest{CardID: card.CardID, InputDraftID: draft.InputDraftID, ActorTokenID: "operator-a", Now: now.Add(time.Minute)})
+			cancelled, err := DecisionCardDomainForTest(cardStore).CancelInputForTest(ctx, decisioncard.CancelInputRequest{CardID: card.CardID, InputDraftID: draft.InputDraftID, PrincipalID: "operator-a", Now: now.Add(time.Minute)})
 			if err != nil || cancelled.Status != decisioncard.DraftStatusCancelled {
 				t.Fatalf("CancelDecisionCardInput = %#v, %v", cancelled, err)
 			}
@@ -541,7 +541,7 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 			if err != nil || loaded.Status != decisioncard.StatusSuperseded || loaded.SupersededReason != "stage_exited" {
 				t.Fatalf("superseded card = %#v, %v", loaded, err)
 			}
-			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ObservedContentHash: card.CardContentHash}); !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ObservedContentHash: card.CardContentHash}); !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
 				t.Fatalf("decide superseded card error = %v", err)
 			}
 		})
@@ -559,11 +559,11 @@ func TestDecisionCardDraftReplacementExpiryAndSupersessionAreCursorVisibleOnBoth
 			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
 				t.Fatal(err)
 			}
-			first, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-a", Now: now, TTL: 5 * time.Minute})
+			first, err := DecisionCardDomainForTest(cardStore).BeginInputForTest(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", PrincipalID: "operator-a", Now: now, TTL: 5 * time.Minute})
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-a", Now: now.Add(time.Minute), TTL: 5 * time.Minute})
+			second, err := DecisionCardDomainForTest(cardStore).BeginInputForTest(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", PrincipalID: "operator-a", Now: now.Add(time.Minute), TTL: 5 * time.Minute})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -579,7 +579,7 @@ func TestDecisionCardDraftReplacementExpiryAndSupersessionAreCursorVisibleOnBoth
 			if count, err := expirer.ExpireDecisionCardInputDrafts(ctx, now.Add(7*time.Minute)); err != nil || count != 1 {
 				t.Fatalf("ExpireDecisionCardInputDrafts = %d, %v", count, err)
 			}
-			if _, err := cardStore.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", ActorTokenID: "operator-b", Now: now.Add(8 * time.Minute), TTL: 5 * time.Minute}); err != nil {
+			if _, err := DecisionCardDomainForTest(cardStore).BeginInputForTest(ctx, decisioncard.BeginInputRequest{CardID: card.CardID, Verdict: "revise", PrincipalID: "operator-b", Now: now.Add(8 * time.Minute), TTL: 5 * time.Minute}); err != nil {
 				t.Fatal(err)
 			}
 			anchor := mustDecisionCardTestStageAnchor(t, card)
@@ -688,7 +688,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute)}); err != nil {
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute)}); err != nil {
 				t.Fatal(err)
 			}
 			seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
@@ -734,7 +734,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute)}); err != nil {
+			if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute)}); err != nil {
 				t.Fatal(err)
 			}
 			seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
@@ -917,7 +917,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 					t.Fatal(err)
 				}
 				if decisionEventID != "" {
-					if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute)}); err != nil {
+					if _, err := DecisionCardDomainForTest(cardStore).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "accept", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute)}); err != nil {
 						t.Fatal(err)
 					}
 				}

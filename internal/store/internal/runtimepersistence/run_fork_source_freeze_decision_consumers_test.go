@@ -47,8 +47,8 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 			if err := surface.CreateDecisionCard(ctx, stageCard); err != nil {
 				t.Fatal(err)
 			}
-			draft, err := surface.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{
-				CardID: stageCard.CardID, Verdict: "revise", ActorTokenID: "operator", Now: now, TTL: time.Hour,
+			draft, err := DecisionCardDomainForTest(surface).BeginInputForTest(ctx, decisioncard.BeginInputRequest{
+				CardID: stageCard.CardID, Verdict: "revise", PrincipalID: "operator", Now: now, TTL: time.Hour,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -60,8 +60,8 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 			}
 			decisionEventID := uuid.NewString()
 			insertForkedConsumerEvent(t, fixture, decisionEventID, "mailbox.item_"+"decided", now)
-			if _, err := surface.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: humanCard.CardID, Verdict: "approve", ActorTokenID: "operator",
+			if _, err := DecisionCardDomainForTest(surface).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: humanCard.CardID, Verdict: "approve", PrincipalID: "operator",
 				ObservedContentHash: humanCard.CardContentHash, DecisionEventID: decisionEventID, Now: now,
 			}); err != nil {
 				t.Fatal(err)
@@ -108,22 +108,22 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 			newEffect, newEffectContinuation := newProposedEffectTestCard(t, fixture.sourceRun, now.Add(time.Minute), attemptgeneration.Generation{})
 			requireForkedSourceRefusal(t, "create proposed effect", surface.CreateProposedEffectCard(ctx, newEffect, newEffectContinuation))
 
-			_, err = surface.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: stageCard.CardID, Verdict: "accept", ActorTokenID: "operator",
+			_, err = DecisionCardDomainForTest(surface).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: stageCard.CardID, Verdict: "accept", PrincipalID: "operator",
 				ObservedContentHash: stageCard.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(time.Minute),
 			})
 			if !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
 				t.Fatalf("decide frozen card error = %v, want typed terminal refusal", err)
 			}
-			_, err = surface.DeferDecisionCard(ctx, decisioncard.DeferRequest{CardID: stageCard.CardID, Now: now.Add(time.Minute), Until: now.Add(time.Hour)})
+			_, err = DecisionCardDomainForTest(surface).ApplyDeferralForTest(ctx, decisioncard.DeferRequest{CardID: stageCard.CardID, Now: now.Add(time.Minute), Until: now.Add(time.Hour)})
 			if !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
 				t.Fatalf("defer frozen card error = %v, want typed terminal refusal", err)
 			}
-			_, err = surface.BeginDecisionCardInput(ctx, decisioncard.BeginInputRequest{CardID: stageCard.CardID, Verdict: "revise", ActorTokenID: "operator", Now: now.Add(time.Minute), TTL: time.Hour})
+			_, err = DecisionCardDomainForTest(surface).BeginInputForTest(ctx, decisioncard.BeginInputRequest{CardID: stageCard.CardID, Verdict: "revise", PrincipalID: "operator", Now: now.Add(time.Minute), TTL: time.Hour})
 			if !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
 				t.Fatalf("begin input on frozen card error = %v, want typed terminal refusal", err)
 			}
-			_, err = surface.CancelDecisionCardInput(ctx, decisioncard.CancelInputRequest{InputDraftID: draft.InputDraftID, CardID: stageCard.CardID, ActorTokenID: "operator", Now: now.Add(time.Minute)})
+			_, err = DecisionCardDomainForTest(surface).CancelInputForTest(ctx, decisioncard.CancelInputRequest{InputDraftID: draft.InputDraftID, CardID: stageCard.CardID, PrincipalID: "operator", Now: now.Add(time.Minute)})
 			if !errors.Is(err, decisioncard.ErrDraftNotAuthority) {
 				t.Fatalf("cancel frozen input error = %v, want draft-not-authority", err)
 			}

@@ -464,8 +464,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				t.Fatal("provider credential leaked into the immutable effect or decision snapshot")
 			}
 			decisionEventID := uuid.NewString()
-			if _, err := selected.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator",
+			if _, err := storetest.DecisionCardDomain(selected.cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", PrincipalID: "operator",
 				ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: time.Now().UTC(),
 			}); err != nil {
 				t.Fatalf("approve proposed effect: %v", err)
@@ -589,8 +589,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					t.Fatal(routeErr)
 				}
 				decisionID := uuid.NewString()
-				if _, routeErr = selected.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-					CardID: pendingCard.CardID, Verdict: verdict, Fields: admittedFields, ActorTokenID: "operator",
+				if _, routeErr = storetest.DecisionCardDomain(selected.cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+					CardID: pendingCard.CardID, Verdict: verdict, Fields: admittedFields, PrincipalID: "operator",
 					ObservedContentHash: pendingCard.CardContentHash, DecisionEventID: decisionID, Now: time.Now().UTC(),
 				}); routeErr != nil {
 					t.Fatalf("decide %s: %v", verdict, routeErr)
@@ -708,8 +708,8 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					fields, _ = canonicaljson.FromGo(map[string]any{"reason": "Do not send."})
 				}
 				decisionEventID := uuid.NewString()
-				if _, err := selected.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-					CardID: card.CardID, Verdict: verdict, Fields: fields, ActorTokenID: "operator",
+				if _, err := storetest.DecisionCardDomain(selected.cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+					CardID: card.CardID, Verdict: verdict, Fields: fields, PrincipalID: "operator",
 					ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
 				}); err != nil {
 					t.Fatal(err)
@@ -1114,8 +1114,8 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	if err := setupCoordinator.CommitDecision(ctx, card, eventID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-		CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash,
+	if _, err := storetest.DecisionCardDomain(tc.cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+		CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash,
 		DecisionEventID: eventID, Now: at,
 	}); err != nil {
 		t.Fatal(err)
@@ -1153,7 +1153,7 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 		t.Fatal(err)
 	}
 	eventID := uuid.NewString()
-	if _, err := tc.cards.DecideDecisionCard(testAuthorActivityContext(t, context.Background()), decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: at}); err != nil {
+	if _, err := storetest.DecisionCardDomain(tc.cards).ApplyDecisionForTest(testAuthorActivityContext(t, context.Background()), decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: at}); err != nil {
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
@@ -1223,7 +1223,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	if err := matching.CommitDecision(ctx, card, eventID, decidedAt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: decidedAt}); err != nil {
+	if _, err := storetest.DecisionCardDomain(tc.cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: decidedAt}); err != nil {
 		t.Fatal(err)
 	}
 	bus.SetInterceptors(newCoordinator(otherGateBundle))
@@ -1323,8 +1323,8 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	if err := matching.CommitDecision(ctx, card, decisionEventID, decidedAt); err != nil {
 		t.Fatalf("CommitDecision: %v", err)
 	}
-	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
-		CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator-1",
+	if _, err := storetest.DecisionCardDomain(tc.cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
+		CardID: card.CardID, Verdict: "approve", PrincipalID: "operator-1",
 		ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: decidedAt,
 	}); err != nil {
 		t.Fatalf("DecideDecisionCard: %v", err)
