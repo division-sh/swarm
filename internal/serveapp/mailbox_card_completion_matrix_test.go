@@ -84,8 +84,8 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 							t.Fatalf("partial response: %d %v", count, err)
 						}
 						remove()
-						var original, replay map[string]any
-						requireServedJSONRPCResult(t, f.rt.Endpoint, method, params, &original)
+						original := mailboxCompletionLoseHTTPResponse(t, f.rt.Endpoint, method, params)
+						var replay map[string]any
 						waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, card.RunID)
 						domain := read()
 						effects := mailboxCompletionRunEffects(t, f.rt, card.RunID)

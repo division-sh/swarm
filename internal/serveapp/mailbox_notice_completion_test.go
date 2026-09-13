@@ -43,8 +43,8 @@ func TestMailboxNoticeAtomicCompletionBothStores(t *testing.T) {
 				t.Fatalf("partial notice commit: notified=%t completion=%d", notified, rows)
 			}
 			remove()
-			var original, replay map[string]any
-			requireServedJSONRPCResult(t, f.rt.Endpoint, "mailbox.acknowledge", params, &original)
+			original := mailboxCompletionLoseHTTPResponse(t, f.rt.Endpoint, "mailbox.acknowledge", params)
+			var replay map[string]any
 			requireServedJSONRPCResult(t, f.rt.Endpoint, "mailbox.acknowledge", params, &replay)
 			if original["idempotency_replayed"] != false || replay["idempotency_replayed"] != true {
 				t.Fatalf("replay markers: %v %v", original, replay)
