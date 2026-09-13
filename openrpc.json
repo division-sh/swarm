@@ -6124,6 +6124,10 @@
                   "event_name": {
                     "type": "string"
                   },
+                  "flow_id": {
+                    "description": "Exact flow owning the terminal receiver, present for receiver_entity_terminal.",
+                    "type": "string"
+                  },
                   "phase": {
                     "enum": [
                       "publish"
@@ -6131,10 +6135,15 @@
                     "type": "string"
                   },
                   "reason": {
+                    "description": "A proven terminal receiver entity is receiver_entity_terminal and retryable is false. Lifecycle inactivity and infrastructure failures are not classified as terminal by message matching. Terminal run admission retains the distinct RUN_ALREADY_TERMINAL code.",
                     "type": "string"
                   },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "stage": {
+                    "description": "Proven terminal receiver stage, present for receiver_entity_terminal.",
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -10572,6 +10581,10 @@
                   "event_name": {
                     "type": "string"
                   },
+                  "flow_id": {
+                    "description": "Exact flow owning the terminal receiver, present for receiver_entity_terminal.",
+                    "type": "string"
+                  },
                   "phase": {
                     "enum": [
                       "publish"
@@ -10579,10 +10592,15 @@
                     "type": "string"
                   },
                   "reason": {
+                    "description": "A proven terminal receiver entity is receiver_entity_terminal and retryable is false. Lifecycle inactivity and infrastructure failures are not classified as terminal by message matching. Terminal run admission retains the distinct RUN_ALREADY_TERMINAL code.",
                     "type": "string"
                   },
                   "run_id": {
                     "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "stage": {
+                    "description": "Proven terminal receiver stage, present for receiver_entity_terminal.",
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -22799,6 +22817,10 @@
                 "event_name": {
                   "type": "string"
                 },
+                "flow_id": {
+                  "description": "Exact flow owning the terminal receiver, present for receiver_entity_terminal.",
+                  "type": "string"
+                },
                 "phase": {
                   "enum": [
                     "publish"
@@ -22806,10 +22828,15 @@
                   "type": "string"
                 },
                 "reason": {
+                  "description": "A proven terminal receiver entity is receiver_entity_terminal and retryable is false. Lifecycle inactivity and infrastructure failures are not classified as terminal by message matching. Terminal run admission retains the distinct RUN_ALREADY_TERMINAL code.",
                   "type": "string"
                 },
                 "run_id": {
                   "$ref": "#/components/schemas/OpaqueId"
+                },
+                "stage": {
+                  "description": "Proven terminal receiver stage, present for receiver_entity_terminal.",
+                  "type": "string"
                 }
               },
               "required": [
