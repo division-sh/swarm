@@ -421,19 +421,21 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 			}
 			action := selectedActionSpec(handler, outcome.rule, ruleSource)
 			if action.ArtifactRepo != nil {
-				// Artifact success, handled failure and duplicate recovery have
-				// different outputs. None preserves optional descendants of a
-				// replaced value merely because they existed before the action.
+				beforeAction := facts.Clone()
 				for _, target := range action.ArtifactRepo.Output.Fields() {
-					path, owned, err := entityruntime.EntityWritePath(target)
-					if err != nil || !owned {
-						continue
-					}
-					present := facts.Has(path)
-					facts.Forget(path)
-					if present {
+					assign(target)
+				}
+				// Fresh success and complete duplicate recovery provide every
+				// output. Only a declared handled failure can commit without the
+				// provider outputs; it still assigns the common result envelope.
+				if strings.TrimSpace(action.ArtifactRepo.FailureEvent) != "" {
+					success := facts
+					facts = beforeAction
+					output := action.ArtifactRepo.Output
+					for _, target := range []string{output.Status, output.Failure, output.LastRequestID, output.LastSourceEventID} {
 						assign(target)
 					}
+					facts = facts.Intersect(success)
 				}
 			}
 		case StepClear:

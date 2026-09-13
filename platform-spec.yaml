@@ -2405,7 +2405,9 @@ entity_contracts:
     - 'A trailing ? marks an optional field edge, not a nullable value. Bare entity roots may remain progressively
       unassigned until a proven write; supplied named records still require every bare member.'
     - 'Explicit initial values apply once at creation and never during reads, reload, retry, replay or fork hydration.
-      Creation inputs overlay explicit initial values before complete candidate validation. Null initial values reject.'
+      Confirmed first materialization by an admitted entity-writing handler or action follows the same creation plan
+      as explicit create_entity. Creation inputs overlay explicit initial values before complete candidate validation.
+      A successfully loaded empty snapshot is existing state, never a creation miss. Null initial values reject.'
   sparse_refinements: |
     Entity-root equal_to pairs may both remain unassigned, establishing no assignment fact.
     Exactly one present participant rejects. Two present participants must satisfy the existing typed equality.
@@ -4163,6 +4165,17 @@ handler_specification:
             that could reject the provider's eventual value. The failure field admits unrestricted JSON objects; prepared
             manifest values and both status outcomes are checked before provider access. current_ref updates only after
             git commit/ref verification succeeds.
+            Preflight validates each possible committed output candidate through the entity mutation owner, including
+            equality between known outputs and existing state, before Git initialization or writes. Known paired IDs may
+            satisfy equality when their actual values match. Provider-dependent current_ref and file_manifest, and the
+            arbitrary failure envelope, cannot participate in incoming or outgoing root equality. Replacing an assigned
+            immutable provider-dependent output, or an assigned immutable failure when handled failure is possible,
+            rejects before provider access; a complete same-event duplicate performs no replacement. Completeness requires
+            every mapped output, including both request and source IDs. Incomplete results use normal history reconstruction.
+            Assignment analysis follows committed outcomes; success and complete duplicate recovery provide all seven
+            outputs; a declared handled failure assigns status, failure, last_request_id and last_source_event_id while
+            retaining prior provider outputs. With failure_event absent, failed execution aborts rather than certifying a
+            post-action path. Required named-record members follow their declared type; optional descendants are not inferred.
             Provider history must record every accepted request_id and content/tree identity durably enough to reject historical
             request-id conflicts after intervening commits, including accepted same-tree/no-op requests. If git history contains
             the accepted request but entity output persistence is missing or stale, retry reconstructs and persists the

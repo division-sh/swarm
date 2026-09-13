@@ -78,3 +78,36 @@ func TestEntityEmitPrerequisitesConsumeExecutedMutationPlan(t *testing.T) {
 		t.Fatalf("prerequisites = %#v", got)
 	}
 }
+
+func TestEntityArtifactCommittedOutcomeAssignments(t *testing.T) {
+	outputs := rc.ArtifactRepoOutputSpec{RepoURL: "url", CurrentRef: "ref", FileManifest: "manifest", Status: "status", Failure: "failure", LastRequestID: "request", LastSourceEventID: "source"}
+	fields := map[string]rc.EntityFieldDecl{}
+	for _, path := range outputs.Fields() {
+		fields[path] = rc.EntityFieldDecl{Type: "text"}
+	}
+	source := semanticview.Wrap(&rc.WorkflowContractBundle{RootEntities: rc.EntityContractsDocument{"work": {Fields: fields}}})
+	typ, err := semanticview.ResolveEntityStructuralType(source, ".")
+	if err != nil || typ == nil {
+		t.Fatalf("missing entity type: %v", err)
+	}
+	analysis := &EntityAssignmentAnalysis{source: source, entity: *typ}
+	for _, failureEvent := range []string{"", "artifact.failed"} {
+		for _, previouslyPresent := range []bool{false, true} {
+			before := entityruntime.AssignmentFacts{}
+			if previouslyPresent {
+				for _, path := range outputs.Fields() {
+					before[path] = struct{}{}
+				}
+			}
+			handler := rc.SystemNodeEventHandler{Action: rc.ActionSpec{ID: "artifact_repo_commit", ArtifactRepo: &rc.ArtifactRepoSpec{Output: outputs, FailureEvent: failureEvent}}}
+			facts := analysis.transfer(testRootExecutableNode(t, "worker"), "work.received", handler, entityAssignmentOutcome{}, before, nil)
+			for name, path := range outputs.Fields() {
+				common := name == "status" || name == "failure" || name == "last_request_id" || name == "last_source_event_id"
+				want := common || failureEvent == "" || previouslyPresent
+				if facts.Has(path) != want {
+					t.Fatalf("failure=%q prior=%v field=%s assigned=%v want=%v", failureEvent, previouslyPresent, path, facts.Has(path), want)
+				}
+			}
+		}
+	}
+}

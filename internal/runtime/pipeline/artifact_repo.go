@@ -488,6 +488,11 @@ func artifactRepoOutputsComplete(metadata map[string]any, spec *runtimecontracts
 	if metadata == nil || spec == nil {
 		return false
 	}
+	for _, field := range spec.Output.Fields() {
+		if _, present := metadata[field]; !present {
+			return false
+		}
+	}
 	if got := strings.TrimSpace(asString(metadata[spec.Output.Status])); got != "committed" {
 		return false
 	}

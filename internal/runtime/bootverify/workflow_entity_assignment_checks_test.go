@@ -179,6 +179,69 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 	}
 }
 
+func TestEntityArtifactOutputAssignmentAtSourceLoadedStageRead(t *testing.T) {
+	for _, handledFailure := range []bool{false, true} {
+		for _, field := range []string{"repo_url", "current_ref", "status", "last_request_id", "last_source_event_id"} {
+			name := "success_only/" + field
+			failure := ""
+			if handledFailure {
+				name = "handled_failure/" + field
+				failure = "          failure_event: artifact.failed\n"
+			}
+			t.Run(name, func(t *testing.T) {
+				root := t.TempDir()
+				writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: artifact-assignment\nstages:\n  ready: {initial: true}\n  done: {}\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "work:\n  repo_url: text\n  current_ref: text\n  file_manifest: json\n  status: text\n  failure: json\n  last_request_id: uuid\n  last_source_event_id: uuid\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested: {}\nwork.observe: {}\nwork.observed: {}\nartifact.failed: {}\n")
+				writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `owner:
+  execution_type: system_node
+  subscribes_to: [work.requested, work.observe]
+  event_handlers:
+    work.requested:
+      guard: {check: "_entity.current_state == 'ready'"}
+      action:
+        id: artifact_repo_commit
+        artifact_repo:
+          provider: local_git
+          repo_id: {literal: "11111111-1111-1111-1111-111111111111"}
+          request_id: {literal: "22222222-2222-2222-2222-222222222222"}
+          allowed_paths: [note.txt]
+          files:
+            - path: {literal: note.txt}
+              content: {literal: proof}
+              content_type: text
+          output:
+            repo_url: repo_url
+            current_ref: current_ref
+            file_manifest: file_manifest
+            status: status
+            failure: failure
+            last_request_id: last_request_id
+            last_source_event_id: last_source_event_id
+`+failure+`      advances_to: done
+    work.observe:
+      guard: {check: "_entity.current_state == 'done'"}
+      emit:
+        event: work.observed
+        fields:
+          observed: {expression: "string(entity.`+field+`)"}
+`)
+				bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, c.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+				checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}
+				findings := checker.expressionFieldReferences()
+				missing := false
+				for _, finding := range findings {
+					missing = missing || strings.Contains(finding.Message, "not definitely assigned")
+				}
+				wantMissing := handledFailure && (field == "repo_url" || field == "current_ref" || field == "file_manifest")
+				if missing != wantMissing || !wantMissing && len(findings) != 0 {
+					t.Fatalf("post-action emit missing=%v want=%v: %#v", missing, wantMissing, findings)
+				}
+			})
+		}
+	}
+}
+
 func TestEntityDefiniteAssignmentStages(t *testing.T) {
 	for _, variant := range []string{"all paths write", "guard stage then value", "guard short circuit", "bypass", "same destination outcomes", "on_complete outcomes", "same event different node", "zero trip", "backedge cannot prove first entry"} {
 		t.Run(variant, func(t *testing.T) {

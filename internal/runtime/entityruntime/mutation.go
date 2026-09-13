@@ -85,7 +85,14 @@ func NewMutationPlan(contract Contract, state map[string]any) (*MutationPlan, er
 // snapshot. Cross-root equality is checked with the creation binding list's
 // final candidate; supplied records still undergo complete type validation now.
 func NewCreationMutationPlan(contract Contract, initial map[string]any) (*MutationPlan, error) {
-	normalized, err := normalizeAssignedFields(contract, initial)
+	values, err := InitialValues(contract)
+	if err != nil {
+		return nil, err
+	}
+	for field, value := range initial {
+		values[field] = cloneValue(value)
+	}
+	normalized, err := normalizeAssignedFields(contract, values)
 	if err != nil {
 		return nil, err
 	}

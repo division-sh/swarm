@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"reflect"
 	"strings"
@@ -222,6 +223,95 @@ func artifactRepoNamedOutputFixture(bundle *contracts.WorkflowContractBundle) {
 	bundle.RootEntities["test_entity"] = entity
 }
 
+func TestArtifactRepoPairedOutputsAndIncompleteRecoveryBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, store := openHandlerEntityRequirementStore(t, backend)
+			ctx := context.Background()
+			if backend == "sqlite" {
+				ctx = sqliteExactOnceRunContext(t, db)
+			} else {
+				ctx = testPipelineRunContext(t, db)
+			}
+			source := testArtifactRepoResultEventSource(t)
+			bundle, _ := semanticview.Bundle(source)
+			artifactRepoNamedOutputFixture(bundle)
+			decl := bundle.RootEntities["test_entity"].Fields["last_request_id"]
+			decl.Refinements.EqualTo = "last_source_event_id"
+			bundle.RootEntities["test_entity"].Fields["last_request_id"] = decl
+			root := t.TempDir()
+			bus := &recordingPipelineBus{}
+			pc := &PipelineCoordinator{workflowStore: store, artifactRoot: root, bus: bus,
+				module: handlerTestWorkflowModuleWithBundle(bundle, "artifact-repo", "artifact-node"), entityLocks: map[string]*sync.Mutex{}}
+			entityID := eventtest.UUID("paired-artifact-receiver")
+			ctx = deliverylifecycle.WithRoute(ctx, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(pipelineSourceNode(t, source, ".", "artifact-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID})})
+			initial := testArtifactRepoEntityFieldsForSource(source, entityID)
+			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: artifactRepoFixtureRoute(initial), StorageRef: artifactRepoFixtureRoute(initial), EntityID: entityID,
+				WorkflowName: ".", WorkflowVersion: "1.0.0", CurrentState: "ready", EntityType: "test_entity", Fields: initial,
+			})
+			if err := store.upsert(ctx, instance); err != nil {
+				t.Fatal(err)
+			}
+			read := func() WorkflowInstance {
+				t.Helper()
+				got, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.InstanceID))
+				if err != nil || !found {
+					t.Fatalf("read: found=%v err=%v", found, err)
+				}
+				return got
+			}
+			run := func(id string, invalid bool) {
+				t.Helper()
+				action, execution := testArtifactRepoActionAndContext(entityID, read().Fields, eventtest.UUID(id), eventtest.UUID(id), "name: Demo\n")
+				if invalid {
+					action.ArtifactRepo.Files[0].Path = contracts.LiteralExpression("../escape.yaml")
+				}
+				seedExactOnceEvent(t, store, ctx, execution.Request.Event)
+				if _, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, source, ".", "artifact-node"), contracts.SystemNodeEventHandler{Action: action}, workflowTriggerContext{Event: execution.Request.Event}, false); err != nil {
+					t.Fatal(err)
+				}
+				fields := read().Fields
+				if fields["last_request_id"] != eventtest.UUID(id) || fields["last_source_event_id"] != eventtest.UUID(id) {
+					t.Fatalf("paired writes not committed: %v", fields)
+				}
+			}
+			run("paired-success", false)
+			committed := read().Fields
+			ref := committed["current_ref"]
+			action, _ := testArtifactRepoActionAndContext(entityID, committed, eventtest.UUID("paired-success"), eventtest.UUID("paired-success"), "name: Demo\n")
+			if !artifactRepoOutputsComplete(committed, action.ArtifactRepo) {
+				t.Fatal("fresh result not complete")
+			}
+			for _, field := range action.ArtifactRepo.Output.Fields() {
+				incomplete := maps.Clone(committed)
+				delete(incomplete, field)
+				if artifactRepoOutputsComplete(incomplete, action.ArtifactRepo) {
+					t.Fatalf("missing %s incorrectly treated as complete duplicate", field)
+				}
+			}
+			run("paired-failure", true)
+			if read().Fields["status"] != "failed" || read().Fields["current_ref"] != ref {
+				t.Fatal("handled failure lost prior provider output")
+			}
+			run("paired-success", false)
+			if read().Fields["status"] != "committed" || read().Fields["current_ref"] != ref {
+				t.Fatal("paired history recovery did not reuse ref")
+			}
+			incomplete := read()
+			delete(incomplete.Fields, "last_request_id")
+			delete(incomplete.Fields, "last_source_event_id")
+			if err := store.upsert(ctx, incomplete); err != nil {
+				t.Fatal(err)
+			}
+			run("paired-success", false)
+			if read().Fields["current_ref"] != ref {
+				t.Fatal("incomplete output reconstruction changed provider ref")
+			}
+		})
+	}
+}
+
 func TestArtifactRepoOutputContractRejectsBeforeProvider(t *testing.T) {
 	type mutation func(*contracts.WorkflowContractBundle, *contracts.ArtifactRepoSpec)
 	cases := map[string]mutation{}
@@ -264,6 +354,28 @@ func TestArtifactRepoOutputContractRejectsBeforeProvider(t *testing.T) {
 		decl.Refinements.EqualTo = "current_ref"
 		bundle.RootEntities["test_entity"].Fields["repo_url"] = decl
 	}
+	cases["request_source_equality"] = func(bundle *contracts.WorkflowContractBundle, _ *contracts.ArtifactRepoSpec) {
+		decl := bundle.RootEntities["test_entity"].Fields["last_request_id"]
+		decl.Refinements.EqualTo = "last_source_event_id"
+		bundle.RootEntities["test_entity"].Fields["last_request_id"] = decl
+	}
+	cases["source_request_equality"] = func(bundle *contracts.WorkflowContractBundle, _ *contracts.ArtifactRepoSpec) {
+		decl := bundle.RootEntities["test_entity"].Fields["last_source_event_id"]
+		decl.Refinements.EqualTo = "last_request_id"
+		bundle.RootEntities["test_entity"].Fields["last_source_event_id"] = decl
+	}
+	for _, field := range []string{"failure", "file_manifest"} {
+		cases[field+"_incoming_equality"] = func(bundle *contracts.WorkflowContractBundle, _ *contracts.ArtifactRepoSpec) {
+			bundle.RootEntities["test_entity"].Fields["mirror"] = contracts.EntityFieldDecl{Type: "json", Refinements: contracts.SchemaRefinements{EqualTo: field}}
+		}
+	}
+	for _, field := range []string{"current_ref", "file_manifest", "failure"} {
+		cases["immutable_"+field] = func(bundle *contracts.WorkflowContractBundle, _ *contracts.ArtifactRepoSpec) {
+			decl := bundle.RootEntities["test_entity"].Fields[field]
+			decl.Immutable = true
+			bundle.RootEntities["test_entity"].Fields[field] = decl
+		}
+	}
 	cases["manifest_wrong_member"] = func(bundle *contracts.WorkflowContractBundle, _ *contracts.ArtifactRepoSpec) {
 		artifactRepoNamedOutputFixture(bundle)
 		decl := bundle.RootTypes.Types["ArtifactManifest"].Fields["namespace"]
@@ -282,25 +394,34 @@ func TestArtifactRepoOutputContractRejectsBeforeProvider(t *testing.T) {
 		decl.Refinements.EqualTo = "ref"
 		bundle.RootTypes.Types["ArtifactManifest"].Fields["tree_hash"] = decl
 	}
-	for name, mutate := range cases {
-		t.Run(name, func(t *testing.T) {
-			source := testArtifactRepoResultEventSource(t)
-			bundle, _ := semanticview.Bundle(source)
-			_, store := openHandlerEntityRequirementStore(t, "sqlite")
-			root := t.TempDir()
-			pc := &PipelineCoordinator{workflowStore: store, artifactRoot: root, module: &pipelineFixtureWorkflowModule{source: source}}
-			initial := testArtifactRepoEntityFieldsForSource(source, eventtest.UUID("hostile-artifact-entity"))
-			action, execution := testArtifactRepoActionAndContext(eventtest.UUID("hostile-artifact-entity"), initial, eventtest.UUID("hostile-event"), eventtest.UUID("hostile-request"), "name: Demo\n")
-			mutate(bundle, action.ArtifactRepo)
-			result, err := pc.commitArtifactRepo(context.Background(), action, execution)
-			failure := failures.Normalize(err, "artifact-repo", "commit")
-			if err == nil || failure.Detail.Code != "artifact_repo_output_schema_invalid" || result.State != nil || len(result.EmitIntents) != 0 {
-				t.Fatalf("incompatible output admitted: %+v %v", result, err)
-			}
-			entries, readErr := os.ReadDir(root)
-			if readErr != nil || len(entries) != 0 {
-				t.Fatalf("invalid output touched provider: %v %v", entries, readErr)
-			}
-		})
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for name, mutate := range cases {
+			t.Run(backend+"/"+name, func(t *testing.T) {
+				source := testArtifactRepoResultEventSource(t)
+				bundle, _ := semanticview.Bundle(source)
+				_, store := openHandlerEntityRequirementStore(t, backend)
+				root := t.TempDir()
+				pc := &PipelineCoordinator{workflowStore: store, artifactRoot: root, module: &pipelineFixtureWorkflowModule{source: source}}
+				initial := testArtifactRepoEntityFieldsForSource(source, eventtest.UUID("hostile-artifact-entity"))
+				action, execution := testArtifactRepoActionAndContext(eventtest.UUID("hostile-artifact-entity"), initial, eventtest.UUID("hostile-event"), eventtest.UUID("hostile-request"), "name: Demo\n")
+				mutate(bundle, action.ArtifactRepo)
+				if field, immutable := strings.CutPrefix(name, "immutable_"); immutable {
+					var value any = map[string]any{}
+					if field == "current_ref" {
+						value = strings.Repeat("a", 40)
+					}
+					execution.Request.State.StateCarrier.Fields[field] = value
+				}
+				result, err := pc.commitArtifactRepo(context.Background(), action, execution)
+				failure := failures.Normalize(err, "artifact-repo", "commit")
+				if err == nil || failure.Detail.Code != "artifact_repo_output_schema_invalid" || result.State != nil || len(result.EmitIntents) != 0 {
+					t.Fatalf("incompatible output admitted: %+v %v", result, err)
+				}
+				entries, readErr := os.ReadDir(root)
+				if readErr != nil || len(entries) != 0 {
+					t.Fatalf("invalid output touched provider: %v %v", entries, readErr)
+				}
+			})
+		}
 	}
 }

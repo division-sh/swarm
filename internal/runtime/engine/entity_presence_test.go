@@ -172,6 +172,44 @@ func TestEntityReloadNotFoundRequiresCreationOrPreview(t *testing.T) {
 	}
 }
 
+func TestEntityImplicitCreationInitializesAtConfirmedMiss(t *testing.T) {
+	source := semanticview.Wrap(&rc.WorkflowContractBundle{RootEntities: rc.EntityContractsDocument{
+		"work": {Fields: map[string]rc.EntityFieldDecl{
+			"note":     {Type: "text", IsOptional: true, Initial: "seeded"},
+			"provided": {Type: "text", Initial: "initial"},
+		}},
+	}})
+	for _, found := range []bool{false, true} {
+		for _, explicit := range []bool{false, true} {
+			exec := &Executor{deps: RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}}}
+			if found {
+				exec.deps.StateRepo = sparseSnapshotRepo{snapshot: testStateSnapshot("ready", nil, nil, nil)}
+			}
+			req := ExecutionRequest{EntityID: "entity-1", EntityMaterializationAdmitted: !explicit,
+				Handler: rc.SystemNodeEventHandler{CreateEntity: explicit},
+				State:   testStateSnapshot("ready", map[string]any{"provided": "actual"}, nil, nil),
+			}
+			var err error
+			req.State, req.creating, err = exec.loadState(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame, err := exec.newExecutionFrame(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields := frame.state.State.StateCarrier.Fields
+			if found {
+				if len(fields) != 0 {
+					t.Fatalf("stored empty state resurrected: %#v", fields)
+				}
+			} else if fields["note"] != "seeded" || fields["provided"] != "actual" {
+				t.Fatalf("explicit=%v creation missed initial/supplied values: %#v", explicit, fields)
+			}
+		}
+	}
+}
+
 func TestEntityStepWriteRejectsMetadataAlias(t *testing.T) {
 	exec, frame := sparseMutationFrame()
 	before := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)

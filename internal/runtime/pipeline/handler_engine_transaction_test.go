@@ -1483,6 +1483,56 @@ func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testin
 	}
 }
 
+func TestImplicitEntityCreationPersistsInitialsBeforeGuardOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, store := openHandlerEntityRequirementStore(t, backend)
+			ctx := context.Background()
+			if backend == "sqlite" {
+				ctx = sqliteExactOnceRunContext(t, db)
+			} else {
+				ctx = testPipelineRunContext(t, db)
+			}
+			source := loadWorkflowTempSource(t, map[string]string{
+				"schema.yaml":              "name: runtime-test\n",
+				"validation/schema.yaml":   "name: validation\nmode: static\ninitial_state: queued\nstates: [queued]\n",
+				"validation/entities.yaml": "validation_entity:\n  revision_count:\n    type: integer\n    initial: 0\n  name: text\n  kill_reason: text\n",
+				"validation/nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+			})
+			bundle, _ := semanticview.Bundle(source)
+			bus := &recordingPipelineBus{}
+			pc := &PipelineCoordinator{
+				bus: bus, workflowStore: store, expressionEval: newWorkflowExpressionEvaluator(),
+				entityLocks: map[string]*sync.Mutex{},
+				module:      &previewWorkflowModule{bundle: bundle, workflow: NewWorkflowDefinition("validation", []WorkflowStage{{Name: "queued"}}, nil)},
+			}
+			trigger := handlerTestRootIngress(uuid.NewString(), events.EventType("candidate.discovered"), "", "", nil, 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
+			seedExactOnceEvent(t, store, ctx, trigger)
+			result, err := pc.executeNodeContractHandler(ctx, pipelineOnlySourceNode(t, source, "node-a"), runtimecontracts.SystemNodeEventHandler{
+				Guard: &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && !has(entity.kill_reason)`},
+				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+					{TargetField: "name", Value: runtimecontracts.LiteralExpression("materialized")},
+				}},
+				Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
+			}, workflowTriggerContext{Event: trigger}, false)
+			if err != nil || !result.Handled || bus.publishedCount() != 1 {
+				t.Fatalf("implicit creation failed before initial-valued guard: result=%+v emitted=%d err=%v", result, bus.publishedCount(), err)
+			}
+			emitted := bus.publishedEvent(0)
+			instance, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, emitted.FlowInstance()))
+			if err != nil || !found || instance.Fields["name"] != "materialized" {
+				t.Fatalf("implicit creation persistence: found=%v fields=%v err=%v", found, instance.Fields, err)
+			}
+			if value, present := instance.Fields["revision_count"]; !present || asString(value) != "0" {
+				t.Fatalf("initial zero absent from persisted creation: %v", instance.Fields)
+			}
+			if _, present := instance.Fields["kill_reason"]; present {
+				t.Fatal("uninitialized field was materialized")
+			}
+		})
+	}
+}
+
 func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
