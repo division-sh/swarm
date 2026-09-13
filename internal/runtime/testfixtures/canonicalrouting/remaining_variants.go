@@ -222,6 +222,8 @@ dispatcher:
   subscribes_to: [order.dispatched]
   event_handlers:
     order.dispatched:
+      guard:
+        check: _entity.current_state == 'dispatching'
       advances_to: awaiting
 join-node:
   execution_type: system_node

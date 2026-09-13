@@ -102,7 +102,7 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 					t.Fatal(err)
 				}
 				result, err := executor.Execute(ctx, runtimeengine.ExecutionRequest{
-					EntityID: runtimeidentity.NormalizeEntityID(uuid.NewString()), ExecutionFlowID: runtimeidentity.NormalizeFlowID("child"), Node: node,
+					ExecutionFlowID: runtimeidentity.NormalizeFlowID("child"), Node: node,
 					HandlerEventKey: "test.node_emitted",
 					Event:           eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted", "", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC()),
 					Handler:         runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Entities: "review_item", Count: true}},
