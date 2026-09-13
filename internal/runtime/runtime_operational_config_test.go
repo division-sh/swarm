@@ -24,7 +24,6 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
@@ -315,7 +314,7 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 		"persisted-agent": testRuntimeWorkflowValidationAgent("persisted-agent"),
 	}
-	module := semanticOnlyWorkflowRuntime{source: semanticviewtest.WrapRootAgents(bundle)}
+	module := semanticOnlyWorkflowRuntime{source: compiledRuntimeValidationSource(t, bundle)}
 	eventStore := &recoveryGuardEventStore{
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress("evt-1",

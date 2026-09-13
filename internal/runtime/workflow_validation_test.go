@@ -841,7 +841,7 @@ func workflowValidationTestProfile(t *testing.T) llmselection.Profile {
 func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	validModule := semanticOnlyWorkflowRuntime{source: semanticview.Wrap(testRuntimeWorkflowValidationBundle())}
+	validModule := semanticOnlyWorkflowRuntime{source: compiledRuntimeValidationSource(t, testRuntimeWorkflowValidationBundle())}
 
 	cases := []struct {
 		name        string
@@ -918,7 +918,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	module := semanticOnlyWorkflowRuntime{source: semanticview.Wrap(testRuntimeWorkflowValidationBundle())}
+	module := semanticOnlyWorkflowRuntime{source: compiledRuntimeValidationSource(t, testRuntimeWorkflowValidationBundle())}
 
 	boot, err := (RuntimeDeps{
 		Config: &config.Config{Runtime: config.RuntimeConfig{}},

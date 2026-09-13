@@ -43,11 +43,15 @@ func runtimeTestSubscriptionSource(eventNames ...string) semanticview.Source {
 	for _, eventName := range eventNames {
 		events[eventName] = runtimecontracts.EventCatalogEntry{}
 	}
-	root := runtimecontracts.FlowContractView{Path: ".", Events: events}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Events: events}
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
