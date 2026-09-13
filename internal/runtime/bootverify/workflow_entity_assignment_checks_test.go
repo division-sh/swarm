@@ -14,6 +14,7 @@ import (
 )
 
 func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("tests/conformance/entity-progressive-presence"))
 	for _, variant := range []string{"ruled", "missing assessment write", "read before write", "retired stage spelling", "naive optional without decision", "naive optional fallback"} {
 		t.Run(variant, func(t *testing.T) {
 			repo := repoRootForBootverifyTest(t)

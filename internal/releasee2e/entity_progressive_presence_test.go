@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/apiv1"
 )
 
 func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T) {
@@ -127,15 +125,17 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				// The frontier was published after clear committed. Fork reconstructs
 				// that history and executes the real completed handler in a new run.
 				params := map[string]any{"source_run_id": runID, "fork_event_id": done.EventID, "allow_source_freeze": true, "idempotency_key": "presence-fork"}
-				var fork apiv1.RunForkExecutionResult
+				var fork map[string]any
 				ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 				err = process.rpc.call(ctx, "run.fork", params, &fork)
 				cancel()
-				if err != nil || fork.ForkRunID == "" || fork.ForkRunID == runID || fork.ExecutedEventCount < 1 {
+				forkRunID, _ := fork["fork_run_id"].(string)
+				executed, _ := fork["executed_event_count"].(float64)
+				if err != nil || forkRunID == "" || forkRunID == runID || executed < 1 {
 					t.Fatalf("reconstruct and execute fork: result=%+v err=%v", fork, err)
 				}
-				waitForPresenceEntity(t, process, fork.ForkRunID, "done", completed)
-				var retried apiv1.RunForkExecutionResult
+				waitForPresenceEntity(t, process, forkRunID, "done", completed)
+				var retried map[string]any
 				ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 				err = process.rpc.call(ctx, "run.fork", params, &retried)
 				cancel()
@@ -147,7 +147,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 					t.Fatal(err)
 				}
 				process = start()
-				waitForPresenceEntity(t, process, fork.ForkRunID, "done", completed)
+				waitForPresenceEntity(t, process, forkRunID, "done", completed)
 				waitForPresenceEntity(t, process, runID, "done", completed)
 				if err := process.stopAndWait(10 * time.Second); err != nil {
 					t.Fatal(err)

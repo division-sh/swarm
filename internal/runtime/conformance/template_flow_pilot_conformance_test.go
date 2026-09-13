@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *testing.T) {
@@ -283,12 +284,15 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		t.Fatal("portfolio-coordinator notify handler missing")
 	}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:        source,
-		StateRepo:     fanOutPinRouteStateRepo{},
+		Source: source,
+		StateRepo: fanOutPinRouteStateRepo{state: runtimeengine.StateSnapshot{
+			EntityID: runtimeidentity.EntityID(portfolioEntityID), CurrentState: "active",
+			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"account_ids": []any{"acct-a", "acct-b"}}, nil, nil),
+		}},
 		MutationOwner: fanOutPinRouteMutationOwner{},
 		Locker:        fanOutPinRouteLocker{},
 		Dispatcher:    fanOutPinRouteDispatcher{},
-	}, nil)
+	}, fanOutPinRouteEvaluator{})
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
@@ -603,10 +607,27 @@ func templateFlowPilotConformanceFindingContains(findings []runtimebootverify.Fi
 	return false
 }
 
-type fanOutPinRouteStateRepo struct{}
+type fanOutPinRouteStateRepo struct{ state runtimeengine.StateSnapshot }
 
-func (fanOutPinRouteStateRepo) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
-	return runtimeengine.StateSnapshot{}, false, nil
+type fanOutPinRouteEvaluator struct{ runtimeengine.NoopEvaluator }
+
+func (fanOutPinRouteEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext, options workflowexpr.ValueExpressionOptions) (bool, error) {
+	options.RequireBool = true
+	value, err := workflowexpr.EvalValueExpressionWithOptions(expression, workflowexpr.ValueContext{
+		Entity: ctx.Entity.Raw(), PlatformEntity: ctx.PlatformEntity.Raw(), Payload: ctx.Payload.Raw(),
+	}, options)
+	if err != nil {
+		return false, err
+	}
+	accepted, ok := value.(bool)
+	if !ok {
+		return false, fmt.Errorf("guard returned %T, want bool", value)
+	}
+	return accepted, nil
+}
+
+func (r fanOutPinRouteStateRepo) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
+	return r.state, r.state.EntityID != "", nil
 }
 
 func (fanOutPinRouteStateRepo) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {

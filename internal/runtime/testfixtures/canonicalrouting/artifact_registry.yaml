@@ -1,4 +1,5 @@
 artifacts:
+  - {root: tests/conformance/entity-progressive-presence, disposition: different-concept, owner: entityruntime.progressive_presence, proof: internal/runtime/bootverify/workflow_entity_assignment_checks_test.go:TestEntityProgressivePresenceSourceLoadedFullVerify}
   - {root: internal/runtime/cataloge2e/testdata/scatter-gather-safety, disposition: canonical-owner, owner: runtime.scatter_gather_safety, proof: internal/runtime/cataloge2e/scatter_gather_safety_test.go:TestScatterGatherSafetyBothStores}
   - {root: internal/releasee2e/testdata/node_identity, disposition: canonical-overlay, owner: releasee2e.node_identity, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestNodeIdentityFixtureLoadsAndVerifies}
   - {root: internal/releasee2e/testdata/node_identity_activity, disposition: different-concept, owner: releasee2e.node_identity_activity, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestNodeIdentityActivityFixtureLoadsAndVerifies}

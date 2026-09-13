@@ -118,6 +118,14 @@ auto_emit_on_create:
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
+		// A finite join owns its outcome and cannot carry a handler guard.
+		// This variant explicitly starts with an empty membership list.
+		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "entities.yaml"), `  account_ids: "[text]"
+`, `  account_ids:
+    type: "[text]"
+    initial: []
+`)
+		applyClosedReplacement(t, ownerNodes, "      guard:\n        check: has(entity.account_ids)\n", "")
 		applyClosedReplacement(t, ownerNodes, `            command: payload.command
 `, `            command: payload.command
       join:

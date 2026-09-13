@@ -1,5 +1,5 @@
 {
-  "bundle_hash": "bundle-v2:sha256:3e821203c76c0213d607e448fe68ed7021b20fc83c9faeec9062f2d4d4e00443",
+  "bundle_hash": "bundle-v2:sha256:d80037d12e5c538f3abfea2fc3e9421eda3e9137b390fc61a965f941e298a61a",
   "readback": {
     "read.completed": {
       "content": "Root resume: exact admitted bytes.\n",

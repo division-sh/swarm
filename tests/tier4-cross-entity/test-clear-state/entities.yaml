@@ -1,1 +1,7 @@
-test_entity: {}
+test_entity:
+  accumulated_count:
+    type: integer
+    initial: 5
+  accumulated_total:
+    type: integer
+    initial: 250

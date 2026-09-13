@@ -66,12 +66,7 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 		WriterType, WriterID, Step string
 	}
 	wantMutations := []markerMutation{{nil, "consumer-created", "platform", "workflow_engine", "create"}}
-	if policy == canonicalrouting.ForkReceiverExplicitCreate {
-		wantMutations = []markerMutation{
-			{nil, "", "platform", "entity_initial_value", "create_entity"},
-			{"", "consumer-created", "platform", "workflow_engine", "create"},
-		}
-	} else if policy != canonicalrouting.ForkReceiverAutoMaterializing {
+	if policy != canonicalrouting.ForkReceiverExplicitCreate && policy != canonicalrouting.ForkReceiverAutoMaterializing {
 		t.Fatalf("unsupported supplemental test policy %d", policy)
 	}
 	rows, err := rt.DB.Query(`SELECT COALESCE(CAST(old_value AS TEXT),'null'),CAST(new_value AS TEXT),writer_type,writer_id,handler_step FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND domain='authored_field' AND path='marker'`, runID, entityID, eventID)
