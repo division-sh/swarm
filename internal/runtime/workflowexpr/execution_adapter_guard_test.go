@@ -42,11 +42,12 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 		}
 		if relative == "engine/fan_out_evaluator.go" {
 			source += "\nfunc hostileLocalSchema(arbitrary *executionFrame) { arbitrary.entityType = nil }\n"
+			source += "\nfunc hostileConstructor() executionFrame { return executionFrame{} }\n"
 		}
 		overlay[path] = []byte(source)
 	}
 	findings := strings.Join(executionAdapterFindings(t, overlay), "\n")
-	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer"} {
+	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor"} {
 		if !strings.Contains(findings, want) {
 			t.Fatalf("missing %q: %s", want, findings)
 		}
@@ -82,6 +83,20 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 				calls := map[string]bool{}
 				var strictInput types.Object
 				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					if literal, ok := n.(*ast.CompositeLit); ok {
+						if typ := pkg.TypesInfo.TypeOf(literal); typ != nil && typ.String() == base+"engine.executionFrame" {
+							if !constructor {
+								findings = append(findings, fn.Name.Name+" unaccounted frame constructor")
+							}
+							for _, element := range literal.Elts {
+								if entry, ok := element.(*ast.KeyValueExpr); ok {
+									if key, ok := entry.Key.(*ast.Ident); ok && (key.Name == "entityType" || key.Name == "payloadType") {
+										findings = append(findings, fn.Name.Name+" competing literal schema writer")
+									}
+								}
+							}
+						}
+					}
 					if assign, ok := n.(*ast.AssignStmt); ok {
 						for _, lhs := range assign.Lhs {
 							field, ok := lhs.(*ast.SelectorExpr)

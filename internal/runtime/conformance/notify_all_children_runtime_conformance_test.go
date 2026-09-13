@@ -2518,10 +2518,10 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 		var terminalFailure string
 		err := db.QueryRowContext(ctx, `SELECT CAST(d.failure AS TEXT) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE CAST(e.run_id AS TEXT)=$1 LIMIT 1`, runID).Scan(&terminalFailure)
 		if err == nil {
-			t.Fatalf("fan-out producer terminally failed before expected cardinality: total=%d cursor=%d want=%d failure=%s", total, cursor, cardinality, terminalFailure)
+			t.Fatalf("fan-out run has a terminally failed delivery before expected cursor: total=%d cursor=%d want=%d failure=%s", total, cursor, cardinality, terminalFailure)
 		}
 		if err != sql.ErrNoRows {
-			t.Fatalf("diagnose terminal fan-out producer: %v", err)
+			t.Fatalf("diagnose terminal fan-out delivery: %v", err)
 		}
 		if owed > 0 {
 			summary, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
