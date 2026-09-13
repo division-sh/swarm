@@ -4619,6 +4619,14 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 	}
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
+	root := &runtimecontracts.FlowContractView{
+		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Events: bundle.Events, Nodes: bundle.Nodes,
+	}
+	bundle.FlowTree = runtimecontracts.FlowTree{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 
 	err := validateExecutionFixture(context.Background(), semanticview.Wrap(bundle), executionposture.Live)
 	if err == nil {

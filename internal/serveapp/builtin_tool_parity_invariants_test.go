@@ -66,6 +66,9 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 				},
 			}
 			source := semanticviewtest.WrapRootAgents(bundle)
+			if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+				t.Fatal(err)
+			}
 
 			directReport := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 			assertToolResolutionFinding(t, directReport.Errors(), tc.configuredTool, tc.wantReject)

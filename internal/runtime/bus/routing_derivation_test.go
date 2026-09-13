@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
@@ -366,6 +367,9 @@ func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []
 		ref := runtimecontracts.ContractURIRef{Kind: "agent", FlowID: "child", LocalID: "observer", Full: "test://fixture/child/observer"}
 		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{"child/observer": ref}
 		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{ref.Full: ref}
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
 	}
 	return semanticview.Wrap(bundle)
 }
@@ -1070,14 +1074,18 @@ func routeMaterializationNodeSource(flowID string, node runtimecontracts.SystemN
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"materialized-node": node},
 	}
 	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "route-materialization", Version: "1.0.0"},
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		SourceArtifact: sourceartifactfixture.Artifact(),
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: {Mode: "template"}},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBundle {
@@ -1106,11 +1114,8 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
-	return &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "route-materialization",
-			Version: "1.0.0",
-		},
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		SourceArtifact: sourceartifactfixture.Artifact(),
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"operating/ceo": agentRef,
@@ -1132,6 +1137,10 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }
 
 func routeMaterializationAgentRoute(
@@ -1252,6 +1261,9 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -1310,6 +1322,9 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 				},
 			},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {
@@ -1485,6 +1500,9 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -1523,6 +1541,9 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 				"scoring": &root.Children[0],
 			},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {
@@ -1601,7 +1622,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Version: "1.0.0"},
+		SourceArtifact: sourceartifactfixture.Artifact(),
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -1609,6 +1630,9 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 				"grandchild": &root.Children[0].Children[0],
 			},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
 	}
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {

@@ -51,7 +51,11 @@ func CopyCompositionConnect(t testing.TB, variant CompositionConnectVariant) str
 	default:
 		t.Fatalf("unsupported composition-connect variant %d", variant)
 	}
-	return writeCompositionConnectFixture(t, opts)
+	root := writeCompositionConnectFixture(t, opts)
+	if variant == CompositionConnectMissingReceiverPin {
+		writeClosedVariantFile(t, root, "consumer/events.yaml", "deploy.completed:\n  vertical_id: string\n")
+	}
+	return root
 }
 
 func writeCompositionConnectFixture(t testing.TB, opts compositionConnectFixtureOptions) string {
