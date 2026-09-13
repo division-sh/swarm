@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -201,8 +202,9 @@ required: [result]
 			t.Fatalf("%s rejected typed nested enum payload: %v", name, err)
 		}
 		rejected := map[string]any{"result": map[string]any{"approved": false, "code": float64(1)}}
-		if err := eventschema.ValidatePayloadAgainstSchema(projected, rejected); err == nil || !strings.Contains(err.Error(), "$.result.approved has invalid enum value false") {
-			t.Fatalf("%s enum rejection = %v", name, err)
+		var violation *eventschema.Violation
+		if err := eventschema.ValidatePayloadAgainstSchema(projected, rejected); !errors.As(err, &violation) || violation.Path != "$.result.approved" || violation.Constraint != "enum" || violation.Actual != "boolean" || violation.Detail != "$.result.approved has invalid enum value of type boolean" {
+			t.Fatalf("%s enum rejection = %#v, error = %v", name, violation, err)
 		}
 	}
 }

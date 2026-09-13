@@ -28,6 +28,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -1031,7 +1032,7 @@ func TestExecutor_ValidateRequestRejectsPlatformEntityWriteTargets(t *testing.T)
 }
 
 func TestExecutionScopeResolveOperand_AllowsSupportedEventRouteRoot(t *testing.T) {
-	scope := newExecutionScope(
+	scope, err := newExecutionScope(
 		nil,
 		map[string]any{"entity_id": "payload-entity"},
 		map[string]any{"source": map[string]any{"entity_id": "source-entity"}},
@@ -1039,6 +1040,9 @@ func TestExecutionScopeResolveOperand_AllowsSupportedEventRouteRoot(t *testing.T
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("newExecutionScope error: %v", err)
+	}
 
 	got, err := scope.resolveOperand("event.source.entity_id", executionOperandDefaultNone)
 	if err != nil {
@@ -1050,7 +1054,7 @@ func TestExecutionScopeResolveOperand_AllowsSupportedEventRouteRoot(t *testing.T
 }
 
 func TestExecutionScopeResolveOperand_RejectsLegacyEventReceiverProjection(t *testing.T) {
-	scope := newExecutionScope(
+	scope, err := newExecutionScope(
 		nil,
 		nil,
 		map[string]any{"entity_id": "legacy-entity"},
@@ -1058,8 +1062,11 @@ func TestExecutionScopeResolveOperand_RejectsLegacyEventReceiverProjection(t *te
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("newExecutionScope error: %v", err)
+	}
 
-	_, err := scope.resolveOperand("event.entity_id", executionOperandDefaultNone)
+	_, err = scope.resolveOperand("event.entity_id", executionOperandDefaultNone)
 	if err == nil {
 		t.Fatal("expected event.entity_id to fail closed")
 	}
@@ -1074,7 +1081,7 @@ func TestCompiledExecutionCondition_AllowsSupportedEventRouteRoot(t *testing.T) 
 		t.Fatalf("compileExecutionCondition error: %v", err)
 	}
 
-	scope := newExecutionScope(
+	scope, err := newExecutionScope(
 		nil,
 		map[string]any{"entity_id": "payload-entity"},
 		map[string]any{"source": map[string]any{"entity_id": "source-entity"}},
@@ -1082,6 +1089,9 @@ func TestCompiledExecutionCondition_AllowsSupportedEventRouteRoot(t *testing.T) 
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("newExecutionScope error: %v", err)
+	}
 
 	ok, err := compiled.Eval(scope)
 	if err != nil {
@@ -1110,7 +1120,7 @@ func TestCompiledExecutionCondition_RejectsLegacyEventReceiverProjection(t *test
 }
 
 func TestExecutionScopeResolveOperand_AllowsPlatformEntityRoot(t *testing.T) {
-	scope := newExecutionScope(
+	scope, err := newExecutionScope(
 		nil,
 		nil,
 		nil,
@@ -1118,6 +1128,9 @@ func TestExecutionScopeResolveOperand_AllowsPlatformEntityRoot(t *testing.T) {
 		map[string]any{"id": "platform-id"},
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("newExecutionScope error: %v", err)
+	}
 
 	got, err := scope.resolveOperand("_entity.id", executionOperandDefaultNone)
 	if err != nil {
@@ -1336,7 +1349,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("emit intents = %d, want 1", len(result.EmitIntents))
 	}
-	if got := shaper.lastReq.State.StateCarrier.Fields["composite_score"]; got != 80.0 && got != 80 {
+	if got := shaper.lastReq.State.StateCarrier.Fields["composite_score"]; got != int64(80) {
 		t.Fatalf("payload shaper saw composite_score = %#v, want 80", got)
 	}
 }
@@ -3513,6 +3526,227 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	}
 }
 
+func TestExecutorOrdinaryEventPayloadPreservesIntegerForCELArithmetic(t *testing.T) {
+	order := []string{}
+	repo := &orderedStateRepo{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: numericProjectionSource(), StateRepo: repo, MutationOwner: stubMutationOwner{state: repo},
+		Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		Node:     testRootExecutableNode(t, "node-1"),
+		Event: eventtest.RunCreatingRootIngress(
+			"evt-integer", "scores.ready", "", "", json.RawMessage(`{"items":[{"integer":75,"decimal":75.0,"exponent":75e0}]}`),
+			0, "", "", events.EventEnvelope{}, time.Time{},
+		),
+		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+			Source:  "payload.items",
+			Filter:  "item.integer + 1 == 76 && item.decimal + 1.0 == 76.0 && item.exponent + 1.0 == 76.0",
+			StoreAs: "entity.matches",
+		}},
+		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("ordinary event integer arithmetic: %v", err)
+	}
+	rows, ok := repo.mutation.Fields["matches"].([]any)
+	if !ok || len(rows) != 1 {
+		t.Fatalf("integer arithmetic rows = %#v", repo.mutation.Fields["matches"])
+	}
+	item, _ := rows[0].(map[string]any)
+	if item["integer"] != int64(75) || item["decimal"] != float64(75) || item["exponent"] != float64(75) {
+		t.Fatalf("integer arithmetic rows = %#v", rows)
+	}
+}
+
+func TestExecutorOrdinaryEventPayloadRejectsUnsafeIntegerBeforeMutation(t *testing.T) {
+	order := []string{}
+	repo := &orderedStateRepo{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: numericProjectionSource(), StateRepo: repo, MutationOwner: stubMutationOwner{state: repo},
+		Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		Node:     testRootExecutableNode(t, "node-1"),
+		Event: eventtest.RunCreatingRootIngress(
+			"evt-unsafe", "scores.ready", "", "", json.RawMessage(`{"score":9007199254740992}`),
+			0, "", "", events.EventEnvelope{}, time.Time{},
+		),
+		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	var projection *workflowexpr.CELProjectionError
+	if !errors.As(err, &projection) || projection.Path != "$.score" || !strings.Contains(projection.Remediation, "declare the field as string") {
+		t.Fatalf("unsafe ordinary event error = %#v, want typed $.score remediation", err)
+	}
+	if len(order) != 0 || len(repo.mutation.Fields) != 0 {
+		t.Fatalf("unsafe ordinary event mutated runtime: order=%v mutation=%#v", order, repo.mutation)
+	}
+}
+
+func TestExecutorNumericProjectionCoversAllFiveListConsumers(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+		run     func(*Executor, *executionFrame) error
+		assert  func(*testing.T, map[string]any)
+	}{
+		{
+			name: "query filter",
+			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+				Source: "payload.items", Filter: "item.score > payload.threshold", StoreAs: "computed.result",
+			}},
+			run: func(e *Executor, frame *executionFrame) error { return e.stepQuery(frame) },
+			assert: func(t *testing.T, computed map[string]any) {
+				rows, _ := computed["result"].([]any)
+				if len(rows) != 1 || rows[0].(map[string]any)["score"] != float64(7.25) {
+					t.Fatalf("query filter result = %#v", computed["result"])
+				}
+			},
+		},
+		{
+			name: "query group by",
+			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+				Source: "payload.items", GroupBy: "item.category", StoreAs: "computed.result",
+			}},
+			run: func(e *Executor, frame *executionFrame) error { return e.stepQuery(frame) },
+			assert: func(t *testing.T, computed map[string]any) {
+				groups, _ := computed["result"].(map[string]any)
+				if groups["1"] != 1 || groups["2"] != 1 {
+					t.Fatalf("query groups = %#v", groups)
+				}
+			},
+		},
+		{
+			name: "standalone filter",
+			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
+				ItemsFrom: "payload.items", Condition: "item.score > payload.threshold", StoreAs: "computed.result",
+			}},
+			run: func(e *Executor, frame *executionFrame) error { return e.stepFilter(frame) },
+			assert: func(t *testing.T, computed map[string]any) {
+				rows, _ := computed["result"].([]any)
+				if len(rows) != 1 {
+					t.Fatalf("standalone filter result = %#v", computed["result"])
+				}
+			},
+		},
+		{
+			name: "standalone conditional count",
+			handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{
+				ItemsFrom: "payload.items", Condition: "item.score > payload.threshold", StoreAs: "computed.result",
+			}},
+			run: func(e *Executor, frame *executionFrame) error { return e.stepCount(frame) },
+			assert: func(t *testing.T, computed map[string]any) {
+				if computed["result"] != 1 {
+					t.Fatalf("conditional count = %#v", computed["result"])
+				}
+			},
+		},
+		{
+			name: "standalone group by",
+			handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{
+				ItemsFrom: "payload.items", Key: "category", StoreAs: "computed.result",
+			}},
+			run: func(e *Executor, frame *executionFrame) error { return e.stepGroupBy(frame) },
+			assert: func(t *testing.T, computed map[string]any) {
+				groups, _ := computed["result"].(map[string]any)
+				if len(groups["1"].([]any)) != 1 || len(groups["2"].([]any)) != 1 {
+					t.Fatalf("standalone groups = %#v", groups)
+				}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			frame, err := numericProjectionExecutionFrame(t, test.handler, json.Number("7.25"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := test.run(&Executor{}, frame); err != nil {
+				t.Fatalf("execute consumer: %v", err)
+			}
+			test.assert(t, frame.state.Computed)
+		})
+	}
+}
+
+func TestExecutorNumericProjectionRejectsHostileCarrierAtAllFiveConsumers(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+		run     func(*Executor, *executionFrame) error
+		path    string
+	}{
+		{name: "query filter", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", Filter: "item.score > 1", StoreAs: "computed.result"}}, run: func(e *Executor, frame *executionFrame) error { return e.stepQuery(frame) }, path: "$.item.score"},
+		{name: "query group by", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", GroupBy: "item.score", StoreAs: "computed.result"}}, run: func(e *Executor, frame *executionFrame) error { return e.stepQuery(frame) }, path: "$.item.score"},
+		{name: "standalone filter", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{ItemsFrom: "payload.items", Condition: "item.score > 1", StoreAs: "computed.result"}}, run: func(e *Executor, frame *executionFrame) error { return e.stepFilter(frame) }, path: "$.item.score"},
+		{name: "standalone conditional count", handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "payload.items", Condition: "item.score > 1", StoreAs: "computed.result"}}, run: func(e *Executor, frame *executionFrame) error { return e.stepCount(frame) }, path: "$.item.score"},
+		{name: "standalone group by", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "payload.items", Key: "score", StoreAs: "computed.result"}}, run: func(e *Executor, frame *executionFrame) error { return e.stepGroupBy(frame) }, path: "$.item.score"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			frame, err := numericProjectionExecutionFrame(t, test.handler, json.Number("9007199254740992"))
+			if err == nil {
+				err = test.run(&Executor{}, frame)
+			}
+			var projection *workflowexpr.CELProjectionError
+			if !errors.As(err, &projection) || projection.Path != "$.items[0].score" {
+				t.Fatalf("hostile consumer error = %#v, want exact ingress path $.items[0].score", err)
+			}
+			if frame != nil && len(frame.state.Computed) != 0 {
+				t.Fatalf("hostile consumer mutated computed state: %#v", frame.state.Computed)
+			}
+		})
+	}
+}
+
+func numericProjectionExecutionFrame(t *testing.T, handler runtimecontracts.SystemNodeEventHandler, firstScore json.Number) (*executionFrame, error) {
+	t.Helper()
+	payload := map[string]any{
+		"threshold": json.Number("5.0"),
+		"items": []any{
+			map[string]any{"score": firstScore, "category": json.Number("1")},
+			map[string]any{"score": json.Number("3"), "category": json.Number("2")},
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := &Executor{deps: RuntimeDependencies{Source: numericProjectionSource()}}
+	frame, err := exec.newExecutionFrame(context.Background(), ExecutionRequest{
+		Node: testRootExecutableNode(t, "node-1"), ExecutionFlowID: identity.NormalizeFlowID("."),
+		Event:   eventtest.RunCreatingRootIngress("", "items.ready", "", "", raw, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: handler, State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	return &frame, err
+}
+
+func numericProjectionSource() semanticview.Source {
+	item := runtimecontracts.NamedTypeDecl{Fields: map[string]runtimecontracts.TypeFieldSpec{
+		"score": {Type: "number"}, "category": {Type: "integer"},
+		"integer": {Type: "integer"}, "decimal": {Type: "number"}, "exponent": {Type: "number"},
+	}}
+	entry := requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[NumericItem]"}, "threshold": {Type: "number"}})
+	source := sourceWithFixtureStages(mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
+		RootTypes:    runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{"NumericItem": item}},
+		Events:       map[string]runtimecontracts.EventCatalogEntry{"items.ready": entry, "scores.ready": entry},
+		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{"matches": {Type: "[NumericItem]"}}}},
+	}), ".", "pending", "pending", "ready")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.Semantics.StageTopologies["."] = runtimecontracts.BuildWorkflowStageTopology(".", "pending", []string{"pending", "ready"}, nil, nil, nil, nil)
+	return source
+}
+
 func TestExecutor_QueryEntityTableUsesAdmittedSourceExactlyOnce(t *testing.T) {
 	runID := eventtest.UUID("entity-collection-execution-run")
 	reader := &stubEntityCollectionReader{rows: []map[string]any{
@@ -3768,7 +4002,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 		t.Fatalf("query_rows = %#v", result.StateMutation.Fields["query_rows"])
 	}
 	item, _ := rows[0].(map[string]any)
-	if item["score"] != 7.0 {
+	if item["score"] != int64(7) {
 		t.Fatalf("query_rows[0] = %#v", item)
 	}
 }
@@ -5184,7 +5418,16 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 			"batch.ready": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[FanItem]"}}}},
 		},
 	}
-	shaper := &recordingPayloadShaper{err: errors.Join(ErrEmitPayloadContractViolation, errors.New("undeclared fan-out field"))}
+	shaper := &recordingPayloadShaper{err: &EmitPayloadContractError{
+		Event:      "item.emitted",
+		Kind:       EmitPayloadSchemaMismatch,
+		Path:       "$.extra",
+		Constraint: "additionalProperties",
+		Expected:   "declared payload fields",
+		Actual:     "extra",
+		Detail:     "undeclared fan-out field",
+		Cause:      errors.New("undeclared fan-out field"),
+	}}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: sourceWithFixtureStages(fanOutSourceWithBundleIdentity(t, bundle), ".", "pending", "pending"), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{},
 		Locker: stubLocker{}, Dispatcher: stubDispatcher{}, PayloadShaper: shaper,
@@ -5216,6 +5459,93 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 	_, err = exec.EvaluateFanOutOrdinal(context.Background(), intent, trigger, map[string]any{"label": "x"}, 0)
 	if !errors.Is(err, ErrEmitPayloadContractViolation) {
 		t.Fatalf("deferred fan-out payload error = %v, want %v", err, ErrEmitPayloadContractViolation)
+	}
+}
+
+func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T) {
+	node := testRootExecutableNode(t, "numeric-fan-out-node")
+	handler := runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
+		ItemsFrom: "payload.items", As: "company", Identity: "company.id",
+		Emit: runtimecontracts.EmitSpec{Event: "company.registered", Fields: map[string]runtimecontracts.ExpressionValue{
+			"id":             runtimecontracts.CELExpression("company.id"),
+			"eng_roles":      runtimecontracts.CELExpression("company.eng_roles"),
+			"gem_score":      runtimecontracts.CELExpression("company.gem_score"),
+			"batch_count":    runtimecontracts.CELExpression("payload.batch_count"),
+			"exponent_score": runtimecontracts.CELExpression("company.exponent_score"),
+		}},
+	}}
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"numeric-fan-out-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.ready": qualified}},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+			"numeric-fan-out-node": {"batch.ready": qualified},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"batch.ready": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[json]"}, "batch_count": {Type: "integer"}}}},
+			"company.registered": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+				"id": {Type: "text"}, "eng_roles": {Type: "integer"}, "gem_score": {Type: "number"}, "batch_count": {Type: "integer"}, "exponent_score": {Type: "number"},
+			}}},
+		},
+	}
+	shaper := &recordingPayloadShaper{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: fanOutSourceWithBundleIdentity(t, bundle), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{},
+		Locker: stubLocker{}, Dispatcher: stubDispatcher{}, PayloadShaper: shaper,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("numeric-deferred-fan-out"), "batch.ready", "", "",
+		json.RawMessage(`{"batch_count":1,"items":[{"id":"company-1","eng_roles":9007199254740991,"gem_score":7.25,"exponent_score":1e3}]}`),
+		0, semanticExecutionFixtureRunID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", Node: node, Event: trigger, Handler: qualified,
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil || result.FanOutIntent == nil {
+		t.Fatalf("create numeric fan-out intent: result=%#v err=%v", result, err)
+	}
+	now := time.Now().UTC()
+	intent := fanoutobligation.Intent{
+		Request: *result.FanOutIntent, Source: result.FanOutIntent.Source,
+		Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	item := map[string]any{
+		"id": "company-1", "eng_roles": json.Number("9007199254740991"),
+		"gem_score": json.Number("7.25"), "exponent_score": json.Number("1e3"),
+	}
+	eagerBase := values.NewContext().WithPayload(map[string]any{"batch_count": json.Number("1")})
+	eagerPayload, err := emitFieldsPayload(eagerBase, ExecutionState{FanOut: map[string]any{"item": item}}, handler.FanOut.Emit, workflowexpr.ValueExpressionOptions{
+		AllowBareItem: true,
+		ItemAlias:     "company",
+	}, nil)
+	if err != nil {
+		t.Fatalf("eager numeric emit fields: %v", err)
+	}
+	emit, err := exec.EvaluateFanOutOrdinal(context.Background(), intent, trigger, item, 0)
+	if err != nil {
+		t.Fatalf("EvaluateFanOutOrdinal numeric item: %v", err)
+	}
+	if shaper.lastPayload["eng_roles"] != int64(9007199254740991) || shaper.lastPayload["gem_score"] != float64(7.25) || shaper.lastPayload["batch_count"] != int64(1) || shaper.lastPayload["exponent_score"] != float64(1000) {
+		t.Fatalf("deferred numeric payload = %#v", shaper.lastPayload)
+	}
+	if !reflect.DeepEqual(eagerPayload, shaper.lastPayload) {
+		t.Fatalf("numeric eager/deferred payloads disagree: eager=%#v deferred=%#v", eagerPayload, shaper.lastPayload)
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal(emit.Event.Payload(), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted["eng_roles"] != float64(9007199254740991) || persisted["gem_score"] != float64(7.25) || persisted["batch_count"] != float64(1) || persisted["exponent_score"] != float64(1000) {
+		t.Fatalf("persisted numeric emit = %#v", persisted)
 	}
 }
 

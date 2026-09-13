@@ -67,17 +67,19 @@ func NormalizeFailure(err error, component, operation string) *failures.Error {
 			err,
 		).(*failures.Error)
 	}
-
-	switch {
-	case errors.Is(err, ErrEmitPayloadContractViolation):
+	var emitContractErr *EmitPayloadContractError
+	if errors.As(err, &emitContractErr) && emitContractErr != nil {
 		return failures.Wrap(
 			failures.ClassSchemaInvalid,
 			"emit_payload_contract_violation",
 			component,
 			operation,
-			nil,
+			emitContractErr.Attributes(),
 			err,
 		).(*failures.Error)
+	}
+
+	switch {
 	case errors.Is(err, ErrMissingStateRepo),
 		errors.Is(err, ErrMissingMutationOwner),
 		errors.Is(err, ErrMissingEntityLocker),

@@ -246,6 +246,7 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 	})
 
 	t.Run("status", func(t *testing.T) {
+		runID := "11111111-1111-4111-8111-111111111111"
 		for _, tc := range []struct {
 			args      []string
 			method    string
@@ -253,19 +254,19 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 			assertion func(*testing.T, string)
 		}{
 			{
-				args:   []string{"run", "status", "run-1", "--json"},
+				args:   []string{"run", "status", runID, "--json"},
 				method: "run.diagnose",
 				assertion: func(t *testing.T, raw string) {
 					result := decodeOutputJSON[DiagnosticRunDiagnosisResult](t, raw)
-					if result.Run.RunID != "run-1" || stringPointerValue(result.OperationalState) != "stalled" {
+					if result.Run.RunID != runID || stringPointerValue(result.OperationalState) != "stalled" {
 						t.Fatalf("status json = %#v, want diagnosis", result)
 					}
 				},
 			},
 			{
-				args:   []string{"run", "status", "run-1", "--quiet"},
+				args:   []string{"run", "status", runID, "--quiet"},
 				method: "run.diagnose",
-				quiet:  "run-1 stalled\n",
+				quiet:  runID + " stalled\n",
 			},
 			{
 				args:   []string{"run", "status", "run-1", "--no-diagnose", "--json"},
@@ -290,7 +291,7 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 				if tc.method == "run.get" {
 					return map[string]any{"run": validDiagnosticRunHeader("run-1")}
 				}
-				return validDiagnosticRunDiagnosis("run-1", "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"})
+				return validDiagnosticRunDiagnosis(runID, "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"})
 			})
 			defer server.Close()
 
@@ -381,9 +382,9 @@ func TestCLIOutputNoColorForSharedRendererConsumers(t *testing.T) {
 		},
 		{
 			name:   "status",
-			args:   func(*testing.T) []string { return []string{"run", "status", "run-1"} },
+			args:   func(*testing.T) []string { return []string{"run", "status", "11111111-1111-4111-8111-111111111111"} },
 			method: "run.diagnose",
-			result: validDiagnosticRunDiagnosis("run-1", "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"}),
+			result: validDiagnosticRunDiagnosis("11111111-1111-4111-8111-111111111111", "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"}),
 		},
 		{
 			name:   "conversations list",

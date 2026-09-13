@@ -19,6 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
@@ -202,7 +203,15 @@ func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, con
 	default:
 		return noEvent, fmt.Errorf("proposed-effect outcome verdict %q is unsupported", card.Verdict)
 	}
-	raw, err := canonicaljson.Bytes(payloadValues)
+	admitted, err := canonicaljson.FromGo(payloadValues)
+	if err != nil {
+		return noEvent, err
+	}
+	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	if err != nil {
+		return noEvent, err
+	}
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
 		return noEvent, err
 	}
@@ -435,12 +444,20 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 	default:
 		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("human-task card verdict %q is unsupported", card.Verdict)
 	}
-	payload, err := canonicaljson.Bytes(map[string]any{
+	admitted, err := canonicaljson.FromGo(map[string]any{
 		"card_id": card.CardID, "requester_agent_id": anchor.RequesterAgentID,
 		"status": strings.TrimPrefix(string(eventType), "human_task."),
 		"fields": card.Fields.Interface(), "decided_by": card.DecidedBy,
 		"decided_at": card.DecidedAt.UTC().Format(time.RFC3339Nano),
 	})
+	if err != nil {
+		return nil, runtimepipelineobligation.Continue(), err
+	}
+	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	if err != nil {
+		return nil, runtimepipelineobligation.Continue(), err
+	}
+	payload, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
@@ -639,7 +656,11 @@ func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, route
 	if err != nil {
 		return nil, err
 	}
-	raw, err := canonicaljson.Encode(payload)
+	projected, err := workflowexpr.ProjectSemanticValue(payload)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
 		return nil, err
 	}

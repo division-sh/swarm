@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -609,8 +610,8 @@ func (r scenarioRunner) prepareScenario(file scenarioTestFile) (preparedScenario
 		if err != nil {
 			return preparedScenario{}, fmt.Errorf("%s: %w", file.Path, err)
 		}
-		payload := map[string]any{}
-		if err := canonicaljson.DecodeInto(plans[0].Payload, &payload); err != nil {
+		payload, err := materializeScenarioSemanticPayload(plans[0].Payload)
+		if err != nil {
 			return preparedScenario{}, fmt.Errorf("%s: materialize derived payload: %w", file.Path, err)
 		}
 		doc.Steps = []scenarioStep{{Action: "publish", PublishEvent: plans[0].EventKey, Payload: payload}}
@@ -699,8 +700,8 @@ func prepareScenarioTestFiles(files []scenarioTestFile) ([]scenarioTestFile, err
 }
 
 func (r scenarioRunner) runDerivedPlan(ctx context.Context, plan scenarioderivation.Plan) error {
-	payload := map[string]any{}
-	if err := canonicaljson.DecodeInto(plan.Payload, &payload); err != nil {
+	payload, err := materializeScenarioSemanticPayload(plan.Payload)
+	if err != nil {
 		return scenarioTestValidationError{err: fmt.Errorf("materialize derived payload: %w", err)}
 	}
 	selector, err := scenarioexecution.NewSelector(plan.Profile)
@@ -2005,12 +2006,28 @@ func (p generatedInputFixturePlan) materializePayload() (map[string]any, error) 
 	if len(p.payload) == 0 {
 		return nil, fmt.Errorf("generated input fixture plan has no admitted payload")
 	}
-	var payload map[string]any
-	if err := canonicaljson.DecodeInto(p.payload, &payload); err != nil {
+	payload, err := materializeScenarioSemanticPayload(p.payload)
+	if err != nil {
 		return nil, fmt.Errorf("materialize generated input fixture plan: %w", err)
 	}
 	if payload == nil {
 		return nil, fmt.Errorf("generated input fixture plan payload must be an object")
+	}
+	return payload, nil
+}
+
+func materializeScenarioSemanticPayload(raw []byte) (map[string]any, error) {
+	admitted, err := canonicaljson.Decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	if err != nil {
+		return nil, err
+	}
+	payload, ok := projected.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("scenario payload must be an object")
 	}
 	return payload, nil
 }

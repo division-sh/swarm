@@ -26,6 +26,7 @@ import (
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
 )
 
@@ -631,7 +632,15 @@ func eventPublicationPayload(params map[string]any) (json.RawMessage, bool, erro
 	}
 	entityID, supplied := cloned["entity_id"]
 	payloadEntityIDPresent := supplied && !isEmptyParam(entityID)
-	encoded, err := json.Marshal(cloned)
+	admitted, err := canonicaljson.FromGo(cloned)
+	if err != nil {
+		return nil, false, err
+	}
+	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	if err != nil {
+		return nil, false, err
+	}
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
 		return nil, false, err
 	}
