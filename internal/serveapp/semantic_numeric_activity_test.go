@@ -21,7 +21,7 @@ func TestActivitySemanticResultExecutionParity(t *testing.T) {
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
 				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, `{"value":7e0,"nested":{"numbers":[7.0,7.5]}}`)
+				fmt.Fprint(w, `{"value":7e0,"nested":{"numbers":[7.0],"fraction":7.5}}`)
 			}))
 			defer provider.Close()
 			root := semanticNumericIngressFixture(t)
@@ -59,15 +59,17 @@ func TestActivitySemanticResultExecutionParity(t *testing.T) {
       value: {type: integer}
       nested:
         type: object
-        required: [numbers]
+        required: [numbers, fraction]
         properties:
-          numbers: {type: array, items: {type: number}}
+          numbers: {type: array, items: {type: integer}}
+          fraction: {type: number}
   response_success: {kind: http_status_2xx}
 `, provider.URL)
 			if err := os.WriteFile(filepath.Join(root, "tools.yaml"), []byte(tool), 0600); err != nil {
 				t.Fatal(err)
 			}
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
+			// Exercise the real HTTP activity dispatcher, not the mock-only scenario lifetime.
+			rt := startSemanticNumericScenarioRuntime(t, backend, root)
 			key := uuid.NewString()
 			first := semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7"))
 			if first.Error != nil {

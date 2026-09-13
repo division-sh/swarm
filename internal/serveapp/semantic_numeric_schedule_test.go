@@ -75,7 +75,7 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			var activationID, fingerprint string
 			admit := func(number string) {
 				t.Helper()
-				value, err := canonicaljson.Decode([]byte(`{"value":` + number + `,"nested":{"numbers":[` + number + `,7.5]}}`))
+				value, err := canonicaljson.Decode([]byte(`{"value":` + number + `,"nested":{"numbers":[` + number + `],"fraction":7.5}}`))
 				if err != nil {
 					t.Fatal(err)
 				}

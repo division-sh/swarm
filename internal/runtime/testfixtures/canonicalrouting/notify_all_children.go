@@ -171,6 +171,15 @@ portfolio.notify.completed:
 `)
 	}
 	if opts.NumericRegistrationRows {
+		// Keep row fields addressable under the compiled structural-type contract.
+		// gem_score is deliberately JSON so hostile values reach emitted-schema admission.
+		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `types:
+  NumericAccount:
+    account_id: text
+    eng_roles: integer
+    gem_score: json
+    external_id: text?
+`)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `portfolio.opened:
   portfolio_id: text
 `, `portfolio.opened:
@@ -178,14 +187,14 @@ portfolio.notify.completed:
   threshold: integer
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `  account_ids: "[text]"
-`, `  account_ids: "[json]"
+`, `  account_ids: "[NumericAccount]"
 `)
 		applyClosedReplacement(t, ownerEntities, `  portfolio_id: text
 `, `  portfolio_id: text
   threshold: integer
 `)
 		applyClosedReplacement(t, ownerEntities, `  account_ids: "[text]"
-`, `  account_ids: "[json]"
+`, `  account_ids: "[NumericAccount]"
 `)
 		applyClosedReplacement(t, ownerNodes, `          - source_field: portfolio_id
             target_field: portfolio_id
@@ -264,6 +273,25 @@ portfolio.notify.completed:
   eligible: boolean
   last_command: text
 `)
+		if opts.NumericReporterSink || opts.NumericInternalSettlement {
+			applyClosedReplacement(t, accountNodes, "    - account.registered\n", "")
+			applyClosedReplacement(t, accountNodes, `    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+          - source_field: eng_roles
+            target_field: eng_roles
+          - source_field: gem_score
+            target_field: gem_score
+          - source_field: eligible
+            target_field: eligible
+`, "")
+			applyClosedReplacement(t, accountSchema, `      - event: account.registered
+        resolution:
+          mode: select-or-create
+`, "")
+		}
 		if opts.NumericReporterSink {
 			applyClosedReplacement(t, connectFile, `  - event: account.registered
     from: portfolio
@@ -283,7 +311,6 @@ portfolio.notify.completed:
     to: account
 `, "")
 			applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", `numeric-registration-observer:
-  id: numeric-registration-observer
   execution_type: system_node
   subscribes_to:
     - account.registered

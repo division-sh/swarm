@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/google/uuid"
@@ -55,7 +54,7 @@ pins:
 			}
 			nodes := strings.ReplaceAll(string(raw), "numeric.requested", "numeric.approved")
 			nodes = strings.ReplaceAll(nodes, "payload.nested.numbers[?0].value()", "payload.value")
-			nodes = strings.ReplaceAll(nodes, "payload.nested.numbers[?1].value()", "7.5")
+			nodes = strings.ReplaceAll(nodes, "payload.nested.fraction", "7.5")
 			nodes = strings.ReplaceAll(nodes, "      create_entity: true\n", "")
 			nodes += `requester:
   execution_type: system_node
@@ -69,30 +68,10 @@ pins:
 				t.Fatal(err)
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "numeric.requested", "idempotency_key": uuid.NewString(), "payload": map[string]any{"value": 7, "nested": map[string]any{"numbers": []any{7, 7.5}}}})
-			var cardID, hash string
-			deadline := time.Now().Add(10 * time.Second)
-			for time.Now().Before(deadline) {
-				var listed map[string]any
-				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.list", map[string]any{"run_id": published.RunID, "status": "pending"}, &listed)
-				items, _ := listed["items"].([]any)
-				for _, item := range items {
-					entry := servedAnyMap(t, item)
-					if entry["kind"] != "decision_card" {
-						continue
-					}
-					card := servedAnyMap(t, entry["decision_card"])
-					cardID, _ = card["card_id"].(string)
-					hash, _ = card["content_hash"].(string)
-				}
-				if cardID != "" && hash != "" {
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			if cardID == "" || hash == "" {
-				t.Fatal("real workflow gate did not produce a decidable card")
-			}
+			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "numeric.requested", "idempotency_key": uuid.NewString(), "payload": map[string]any{"value": 7, "nested": map[string]any{"numbers": []any{7}, "fraction": 7.5}}})
+			cardID := waitLifecycleGateCard(t, rt, published.RunID)
+			params := lifecycleDecisionParamsForCard(t, rt, cardID, "approve")
+			hash := params["observed_content_hash"].(string)
 			key := uuid.NewString()
 			body := func(number string) string {
 				return fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"observed_content_hash":%q,"verdict":"approve","fields":{"score":%s},"idempotency_key":%q}}`, cardID, hash, number, key)

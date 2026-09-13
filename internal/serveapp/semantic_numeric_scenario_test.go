@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"os"
@@ -74,12 +73,12 @@ collector:
 					}
 				}
 				rt := startSemanticNumericScenarioRuntime(t, backend, root)
-				args := []string{"test", root, "--api-server", strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "--config", writeServeRuntimeTestConfig(t), "--timeout", "10s", "--poll-interval", "10ms"}
+				args := []string{"test", root, "--config", writeServeRuntimeTestConfig(t), "--timeout", "10s", "--poll-interval", "10ms"}
 				if mode == "automatic_derived" {
 					args = append(args, "--derive", "fulfillment", "--input", "fulfillment.requested")
 				}
 				var stdout, stderr bytes.Buffer
-				if code := executeCLIFrom(context.Background(), repoRootForTest(), args, &stdout, &stderr, nil); code != 0 {
+				if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), args, rt.Endpoint, &stdout, &stderr); code != 0 {
 					t.Fatalf("numeric scenario code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 				}
 				if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {

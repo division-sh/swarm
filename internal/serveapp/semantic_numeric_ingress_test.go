@@ -245,7 +245,7 @@ func semanticNumericRequest(bundleHash, method, run, key, number string) string 
 	if method == "event.publish" {
 		run = ""
 	}
-	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"numeric","method":%q,"params":{"bundle_hash":%q,"run_id":%q,"idempotency_key":%q,"event_name":"numeric.requested","payload":{"value":%s,"nested":{"numbers":[%s,7.5]}}}}`, method, bundleHash, run, key, number, number)
+	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"numeric","method":%q,"params":{"bundle_hash":%q,"run_id":%q,"idempotency_key":%q,"event_name":"numeric.requested","payload":{"value":%s,"nested":{"numbers":[%s],"fraction":7.5}}}}`, method, bundleHash, run, key, number, number)
 }
 
 func semanticNumericRPC(t *testing.T, endpoint, transport, body string) servedJSONRPCEnvelope {

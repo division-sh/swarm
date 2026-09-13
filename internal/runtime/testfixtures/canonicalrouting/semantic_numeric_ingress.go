@@ -29,7 +29,7 @@ numeric.completed:
   fraction: numeric
   explicit_double: numeric
 `,
-		"types.yaml": "types:\n  NumericInput:\n    numbers: list<numeric>\n",
+		"types.yaml": "types:\n  NumericInput:\n    numbers: list<integer>\n    fraction: numeric\n",
 		"nodes.yaml": `numeric:
   execution_type: system_node
   subscribes_to: [numeric.requested]
@@ -40,7 +40,7 @@ numeric.completed:
         event: numeric.completed
         fields:
           value: {cel: 'payload.value + payload.nested.numbers[?0].value() + 1'}
-          fraction: {cel: 'payload.nested.numbers[?1].value() + 0.5'}
+          fraction: {cel: 'double(payload.nested.fraction) + 0.5'}
           explicit_double: {cel: 'double(payload.value) + 1.0'}
 collector:
   execution_type: system_node
