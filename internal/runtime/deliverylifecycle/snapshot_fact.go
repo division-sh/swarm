@@ -30,6 +30,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		ConnectClaim              events.ConnectExecutionClaim     `json:"connect_execution_claim"`
 		ReceiverMaterialization   json.RawMessage                  `json:"receiver_materialization_plan"`
 		Status                    string                           `json:"status"`
+		FinalSelection            SelectionPresence                `json:"final_selection"`
 		RetryCount                int                              `json:"retry_count"`
 		MaxRetries                int                              `json:"max_retries"`
 		NextEligibleAt            *time.Time                       `json:"next_eligible_at"`
@@ -104,7 +105,8 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		DeliveryID: fact.DeliveryID, EventID: fact.EventID, RunID: fact.RunID,
 		RouteIdentity: identity, Route: route, SubscriberClass: class, SubscriberID: route.Recipient.ID(),
 		Status: status, RetryCount: fact.RetryCount, MaxRetries: fact.MaxRetries,
-		ClaimVersion: fact.ClaimVersion, ActiveSessionID: strings.TrimSpace(fact.ActiveSessionID),
+		FinalSelection: fact.FinalSelection,
+		ClaimVersion:   fact.ClaimVersion, ActiveSessionID: strings.TrimSpace(fact.ActiveSessionID),
 		ReasonCode: strings.TrimSpace(fact.ReasonCode), Failure: runtimefailures.CloneEnvelope(fact.Failure),
 		CreatedAt: fact.CreatedAt.UTC(), UpdatedAt: fact.UpdatedAt.UTC(),
 	}
@@ -127,6 +129,9 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 }
 
 func validateHistoricalSnapshot(snapshot Snapshot) error {
+	if err := ValidateSelectionPresence(snapshot.Status, snapshot.FinalSelection); err != nil {
+		return fmt.Errorf("%w: historical final selection: %v", ErrConflict, err)
+	}
 	if snapshot.SubscriberID == "" || snapshot.MaxRetries != snapshot.SubscriberClass.MaxRetries() ||
 		snapshot.RetryCount < 0 || snapshot.RetryCount > snapshot.MaxRetries ||
 		snapshot.CreatedAt.IsZero() || snapshot.UpdatedAt.IsZero() || snapshot.ClaimVersion < 0 {

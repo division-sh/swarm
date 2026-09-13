@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -23,20 +24,32 @@ import (
 
 func TestPipelineCompiledTimerTransitionEvidenceOnBothStores(t *testing.T) {
 	for _, storeCase := range workflowJoinStoreCases() {
-		for _, operation := range []string{"advance", "emit and advance", "emit only"} {
+		for _, operation := range []string{"advance", "emit and advance", "emit only", "self advance", "emit and self advance", "loop self advance", "loop emit and self advance"} {
 			t.Run(storeCase.name+"/"+operation, func(t *testing.T) {
 				store, ctx := storeCase.open(t)
 				timer := "        advances_to: done\n"
-				if operation == "emit only" {
+				loopOwned := strings.HasPrefix(operation, "loop ")
+				plainOperation := strings.TrimPrefix(operation, "loop ")
+				if plainOperation == "self advance" {
+					timer = "        advances_to: waiting\n"
+				} else if plainOperation == "emit and self advance" {
+					timer = "        advances_to: waiting\n        emit: review.expired\n"
+				} else if operation == "emit only" {
 					timer = "        emit: review.expired\n"
 				} else if operation == "emit and advance" {
 					timer += "        emit: review.expired\n"
 				}
-				bundle := loadWorkflowTempBundle(t, map[string]string{
+				files := map[string]string{
 					"schema.yaml":   "name: timer-evidence\nstages:\n  waiting:\n    initial: true\n    timers:\n      - after: 1h\n" + timer + "  done: {terminal: true}\n",
 					"entities.yaml": "test_entity: {}\n",
 					"events.yaml":   "review.expired: {}\n",
-				})
+				}
+				if loopOwned {
+					files["schema.yaml"] += "  ready: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n"
+					files["events.yaml"] += "loop.start: {}\nloop.repeat:\n  revision_id: text\n"
+					files["nodes.yaml"] = "owner:\n  execution_type: system_node\n  event_handlers:\n    loop.start:\n      loop: {start: revision, from: ready}\n      advances_to: waiting\n    loop.repeat:\n      loop: {repeat: revision, from: waiting}\n      advances_to: waiting\n"
+				}
+				bundle := loadWorkflowTempBundle(t, files)
 				source := semanticview.Wrap(bundle)
 				bus := &recordingPipelineBus{}
 				owner := pipelineTestWorkOwner(t)
@@ -50,6 +63,17 @@ func TestPipelineCompiledTimerTransitionEvidenceOnBothStores(t *testing.T) {
 				instance := workflowTimerMaterializedInstance(ctx, entityID, route.InstancePath, WorkflowInstance{
 					WorkflowVersion: "1", CurrentState: "waiting", CreatedAt: now, EntityType: "test_entity",
 				})
+				if loopOwned {
+					activation, err := loopruntime.New(runtimecorrelation.RunIDFromContext(ctx), entityID, ".", "revision", "revision_id", uuid.NewString(), "waiting", 3, now)
+					if err != nil {
+						t.Fatal(err)
+					}
+					carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{})
+					if err := loopruntime.Store(carrier.StateBuckets, activation); err != nil {
+						t.Fatal(err)
+					}
+					instance.StateBuckets = carrier.PersistedStateBuckets()
+				}
 				if _, err := pc.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), instance, now); err != nil {
 					t.Fatal(err)
 				}
@@ -79,7 +103,7 @@ func TestPipelineCompiledTimerTransitionEvidenceOnBothStores(t *testing.T) {
 				if err != nil || !found {
 					t.Fatalf("reload = %v, %v", found, err)
 				}
-				if operation == "emit only" {
+				if operation == "emit only" || strings.Contains(operation, "self advance") {
 					if loaded.CurrentState != "waiting" || len(loaded.TransitionHistory) != 0 || !loaded.EnteredStageAt.Equal(now) {
 						t.Fatalf("emit-only timer changed lifecycle: %#v", loaded)
 					}
@@ -101,8 +125,61 @@ func TestPipelineCompiledTimerTransitionEvidenceOnBothStores(t *testing.T) {
 						t.Fatalf("duplicate occurrence changed history: %v, %v", found, err)
 					}
 				}
-				if operation != "advance" && string(accepted.Type()) != "review.expired" {
+				if plainOperation != "advance" && plainOperation != "self advance" && string(accepted.Type()) != "review.expired" {
 					t.Fatalf("public timer output = %s", accepted.Type())
+				}
+				// Reconstruct the timer owner from the same store, not cached activation state.
+				restarted := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
+					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
+					WorkOwner: owner,
+				})
+				for _, consumer := range []*PipelineCoordinator{pc, restarted} {
+					if outcome, err := fireWorkflowTimerTestWakeup(ctx, consumer, activations[0]); err != nil || outcome != WorkflowTimerFireTerminal {
+						t.Fatalf("duplicate wakeup = %s, %v", outcome, err)
+					}
+					if recognized, _, err := consumer.handleWorkflowStageTimerFire(ctx, accepted); err != nil || !recognized {
+						t.Fatalf("duplicate accepted occurrence = %v, %v", recognized, err)
+					}
+				}
+				after, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, route.InstancePath))
+				if err != nil || !found || !reflect.DeepEqual(loaded, after) {
+					t.Fatalf("duplicate/reconstructed owner changed workflow: before=%#v after=%#v err=%v", loaded, after, err)
+				}
+				if active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true); len(active) != 0 || len(bus.publishes) != 1 {
+					t.Fatalf("occurrence rearmed or republished: %#v, publications=%d", active, len(bus.publishes))
+				}
+				if loopOwned {
+					if err := store.mutateE(ctx, testRunScopedWorkflowInstanceFromContext(ctx, route.InstancePath), func(current *WorkflowInstance) error {
+						carrier, err := workflowInstanceStateCarrier(*current)
+						if err != nil {
+							return err
+						}
+						activation, found, err := loopruntime.Load(carrier.StateBuckets, ".", "revision")
+						if err != nil || !found {
+							t.Fatalf("missing current loop: %v", err)
+						}
+						if _, err := activation.Repeat("waiting", uuid.NewString(), now.Add(time.Hour)); err != nil {
+							return err
+						}
+						if err := loopruntime.Store(carrier.StateBuckets, activation); err != nil {
+							return err
+						}
+						current.StateBuckets = carrier.PersistedStateBuckets()
+						return nil
+					}); err != nil {
+						t.Fatal(err)
+					}
+					before, _, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, route.InstancePath))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if recognized, fired, err := restarted.handleWorkflowStageTimerFire(ctx, accepted); err != nil || !recognized || fired {
+						t.Fatalf("stale same-stage occurrence bypassed generation: %v/%v %v", recognized, fired, err)
+					}
+					after, _, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, route.InstancePath))
+					if err != nil || !reflect.DeepEqual(before, after) || bus.publishedCount() != 1 {
+						t.Fatalf("stale same-stage occurrence changed lifecycle: %v", err)
+					}
 				}
 			})
 		}

@@ -101,7 +101,7 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 	if len(result.EmitIntents) != 0 {
 		t.Fatalf("cap escape emitted ordinary repeat work: %#v", result.EmitIntents)
 	}
-	if result.HandlerRuleSelection.Context() != handlerselection.ContextNone || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionNotApplicable || result.HandlerRuleSelection.Ref().Valid() {
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextNone || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionNotApplicable || requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("synthetic loop escape fabricated authored rule identity: %#v", result.HandlerRuleSelection)
 	}
 	closedState := loopTestNextState(result)
@@ -327,7 +327,7 @@ func TestExecutorCompiledLoopOperationsRetainExactCarrier(t *testing.T) {
 		if err := cause.ValidateAgainst(graph); err != nil {
 			t.Fatal(err)
 		}
-		if result.HandlerRuleSelection.Ref().Valid() && !compiled.Edge().RuleRef.Equal(result.HandlerRuleSelection.Ref()) {
+		if requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() && !compiled.Edge().RuleRef.Equal(requireResolvedSelection(t, result.HandlerRuleSelection).Ref()) {
 			t.Fatalf("%s lost underlying selected rule: %#v", event, compiled.Edge())
 		}
 		return result

@@ -135,7 +135,7 @@ func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
 				reader.failure, reader.before = nil, nil
 				if fault == "newer_claim" {
 					failure := runtimefailures.FromError(errors.New("controlled original-claim handoff"), "receiver-test", "handoff")
-					if _, err := owner.SettleFailure(ctx, *claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, ReasonCode: "receiver_test_handoff", Failure: &failure.Failure, RetryBase: time.Millisecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection()}); err != nil {
+					if _, err := owner.SettleFailure(ctx, *claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, ReasonCode: "receiver_test_handoff", Failure: &failure.Failure, RetryBase: time.Millisecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation()}); err != nil {
 						t.Fatal(err)
 					}
 					if err := owner.makeRetryEligible(ctx, id); err != nil {

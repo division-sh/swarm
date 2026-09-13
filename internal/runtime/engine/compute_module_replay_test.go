@@ -72,7 +72,7 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 		t.Fatalf("scoped replay evidence = %#v, want only matching envelope %#v", loaded, persisted.Normalized())
 	}
 
-	_, err = exec.ExecuteWithPersistedComputeModuleReplayEvidence(ctx, sqliteStore, runID, req)
+	failed, err := exec.ExecuteWithPersistedComputeModuleReplayEvidence(ctx, sqliteStore, runID, req)
 	if err == nil {
 		t.Fatal("persisted replay Execute error = nil, want result divergence")
 	}
@@ -84,6 +84,9 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 		moduleErr.Finding.Kind != computemodule.ReplayFindingResultDivergence ||
 		moduleErr.Finding.Field != "output_hash" {
 		t.Fatalf("persisted replay finding = %#v, want result divergence on output_hash", moduleErr.Finding)
+	}
+	if failed.HandlerRuleSelection.Validate() != nil || failed.HandlerRuleSelection.Reached() || failed.Committed || len(failed.EmitIntents) != 0 {
+		t.Fatalf("preselection module replay failure fabricated selection/effects: %+v", failed)
 	}
 }
 

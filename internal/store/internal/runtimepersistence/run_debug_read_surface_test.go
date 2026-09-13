@@ -443,7 +443,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 		Disposition: runtimedelivery.FailureRetry,
 		ReasonCode:  "handler_error",
 		Failure:     &failure,
-		RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+		RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 	})
 	if err != nil {
 		t.Fatalf("settle delivery failure: %v", err)

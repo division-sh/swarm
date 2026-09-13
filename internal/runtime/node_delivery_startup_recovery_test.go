@@ -426,7 +426,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							if _, settleErr := selected.SettleFailure(eventCtx, claimed.Claim, runtimedelivery.Settlement{
 								Disposition: runtimedelivery.FailureRetry,
 								Failure:     &failure.Failure,
-								RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+								RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 							}); settleErr != nil {
 								t.Fatalf("settle future-failed startup delivery: %v", settleErr)
 							}
@@ -1140,7 +1140,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			retrying, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 				Disposition: runtimedelivery.FailureRetry,
 				Failure:     &failure.Failure,
-				RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+				RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 			})
 			if err != nil || retrying.Status != runtimedelivery.StatusFailed {
 				t.Fatalf("schedule node retry = %#v, err=%v", retrying, err)

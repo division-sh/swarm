@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 )
 
 type ComputeModuleReplayEvidenceLoader interface {
@@ -14,32 +15,32 @@ type ComputeModuleReplayEvidenceLoader interface {
 
 func (e *Executor) ExecuteWithPersistedComputeModuleReplayEvidence(ctx context.Context, loader ComputeModuleReplayEvidenceLoader, runID string, req ExecutionRequest) (ExecutionResult, error) {
 	if e == nil {
-		return ExecutionResult{}, fmt.Errorf("compute_module persisted replay requires executor")
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, fmt.Errorf("compute_module persisted replay requires executor")
 	}
 	if loader == nil {
-		return ExecutionResult{}, fmt.Errorf("compute_module persisted replay requires evidence loader")
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, fmt.Errorf("compute_module persisted replay requires evidence loader")
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return ExecutionResult{}, fmt.Errorf("compute_module persisted replay requires run id")
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, fmt.Errorf("compute_module persisted replay requires run id")
 	}
 	eventID := strings.TrimSpace(req.Event.ID())
 	if eventID == "" {
-		return ExecutionResult{}, fmt.Errorf("compute_module persisted replay requires request event id")
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, fmt.Errorf("compute_module persisted replay requires request event id")
 	}
 	nodeID := req.Node.Key()
 	if nodeID == "" {
-		return ExecutionResult{}, fmt.Errorf("compute_module persisted replay requires request node id")
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, fmt.Errorf("compute_module persisted replay requires request node id")
 	}
 	if req.ExpectedComputeModuleTraces != nil {
-		return ExecutionResult{}, &computemodule.Error{
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, &computemodule.Error{
 			Code: computemodule.CodeReplay,
 			Err:  fmt.Errorf("compute_module persisted replay cannot combine loaded evidence with explicit expected traces"),
 		}
 	}
 	evidence, err := loader.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, eventID, nodeID)
 	if err != nil {
-		return ExecutionResult{}, fmt.Errorf("load compute_module replay evidence for run %s event %s node %s: %w", runID, eventID, nodeID, err)
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, fmt.Errorf("load compute_module replay evidence for run %s event %s node %s: %w", runID, eventID, nodeID, err)
 	}
 	req.ExpectedComputeModuleTraces = make([]ComputeModuleTrace, 0, len(evidence))
 	for _, trace := range evidence {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -31,12 +32,12 @@ func (n *DeclarativeNode) NodeID() string {
 
 func (n *DeclarativeNode) handle(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
 	if !n.node.Valid() || !req.Node.Valid() || !n.node.Equal(req.Node) {
-		return ExecutionResult{}, ErrMissingNodeID
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, ErrMissingNodeID
 	}
 	if isZeroHandler(req.Handler) {
 		resolved := resolvedExecutionHandler(n.executor.deps.Source, req.Node, string(req.Event.Type()))
 		if !resolved.matched {
-			return ExecutionResult{}, ErrMissingNodeHandler
+			return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, ErrMissingNodeHandler
 		}
 		req.Handler = resolved.handler
 		if strings.TrimSpace(req.HandlerEventKey) == "" {
@@ -54,7 +55,7 @@ func (n *DeclarativeNode) handle(ctx context.Context, req ExecutionRequest) (Exe
 
 func (n *DeclarativeNode) Handle(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
 	if n == nil || n.executor == nil {
-		return ExecutionResult{}, ErrNotImplemented
+		return ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}, ErrNotImplemented
 	}
 	return n.handle(ctx, req)
 }

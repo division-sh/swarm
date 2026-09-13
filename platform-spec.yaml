@@ -325,6 +325,10 @@ contract_formats:
         guard name or another declared stage is not termination authority.
         A self transition or no advance creates no transition
         history or stage-entry lifecycle effect.
+        Stage timers apply this same no-op law only after exact compiled
+        carrier, accepted occurrence, current stage and loop generation
+        admission. An emit-plus-self or advance-only-self occurrence completes
+        once without re-entry, rearming or a fabricated transition cause.
       persistence: >
         The selected execution fact, state transition, accepted event, and
         transition-bearing lifecycle effect must agree before mutation. A
@@ -5293,6 +5297,13 @@ engine:
         the same atomic boundary but delivered AFTER commit (step 7). Durable activity handlers persist
         platform.activity_requested within the same atomic boundary; external activity tool execution starts only when that
         persisted request event is processed after commit and outside the entity lock.'
+      rule_selection_finality: >-
+        An attempt carries exactly NotReached or Resolved(valid handler-rule fact). Validation, receiver preparation,
+        locking and state-loading failures before rule evaluation remain NotReached, never an inferred NotApplicable.
+        A retry observes current state under the existing exact target lock/revision contract and may select another
+        rule; event, source and route authority do not change. Only final delivery settlement persists rule selection.
+        Post-commit dispatch consumes the already-settled claim and cannot reclassify a committed success as a failed
+        attempt. There is no durable exact-rule history for unsuccessful attempts.
     - step: 6
       name: agent_delivery
       action: 'For each subscribing agent: place the event in the agent''s inbox. Agent processes it asynchronously. No lock,
@@ -6160,6 +6171,15 @@ engine:
         owner: internal/runtime/deliverylifecycle.Store
         sqlite_owner: internal/runtime/deliverylifecycle SQLite private adapter behind SQLiteRuntimeStore
         postgres_owner: internal/runtime/deliverylifecycle PostgreSQL private adapter behind PostgresStore
+        selection_finality: >-
+          The owner resolves attempt-local NotReached or Resolved(valid fact) only after calculating the effective
+          settlement status, including retry exhaustion. Pending, in_progress and failed require Absent final selection;
+          delivered and dead_letter require Present(valid fact). Delivered forbids evaluation_failed and requires a
+          resolved observation. A dead-letter resolution before selection, including parent terminalization, records
+          NotApplicable for that final resolution, not a claim about every previous attempt. Status, final selection,
+          outcomes, diagnostics and author activity commit or roll back together under the existing exact claim fence.
+          Live, transactional and historical readers validate the same closed status/presence matrix. Malformed
+          present evidence is corruption, not absence. A final fact is immutable; duplicate equality is strict.
         process_local_coordinator_lifetime: |
           The existing deliverycontinuation.Coordinator owns startup, retirement and its exact terminal result.
           Startup publishes its cancellation authority with the started transition before acquiring a standing lease.
@@ -14996,7 +15016,18 @@ platform_tables:
         CREATE INDEX idx_deliveries_agent_failure_page ON event_deliveries (subscriber_type, subscriber_id, status, updated_at DESC, delivery_id DESC);
         CREATE INDEX idx_deliveries_agent_dead_letter_page ON event_deliveries (subscriber_type, subscriber_id, status, settled_at DESC, delivery_id DESC);
     event_delivery_handler_rule_selections:
-      description: Singular durable handler-rule evaluation fact for one exact executable delivery. The delivery row remains the canonical owner of run, event, route, node, and handler-event identity; this projection is keyed only by delivery_id and records whether the delivery selected one authored handler rule, evaluated an executable rule context without a match, failed while evaluating one exact authored rule, or did not execute an authored rule context. Authored identity is the exact path-derived declaration identity and display_label is presentation only. The lifecycle settlement or terminalization transaction writes this row exactly once and exact replay must agree with it. Inspection and dry-run paths never write it. Existing stores are unsupported; no ordinal, ordered fact set, current-contract lookup, label authority, fallback, or compatibility interpretation exists.
+      description: >-
+        Singular final-resolution handler-rule fact for one exact executable delivery, keyed only by delivery_id.
+        The delivery row owns run, event, route, node and handler-event identity. Pending, in_progress and failed
+        deliveries have no row; delivered and dead_letter have exactly one valid row. Only the final settlement or
+        terminalization transaction inserts it, atomically with the effective terminal status. Retryable failure never
+        freezes a fact, even after evaluation selected a rule. The final resolution records selected, no_match,
+        evaluation_failed (dead_letter only), or not_applicable. A never-reached final failure or parent terminalization
+        records not_applicable for that resolution and does not describe previous unsuccessful attempts.
+        Authored identity is the exact path-derived declaration identity; display_label is presentation only.
+        Final replay equality remains strict. Inspection and dry-run never write; no unsuccessful-attempt rule ledger,
+        ordinal, ordered set, current-contract lookup, label authority, fallback or compatibility interpretation exists.
+        Existing selected stores are unsupported.
       ddl: |
         CREATE TABLE event_delivery_handler_rule_selections (
             delivery_id        UUID PRIMARY KEY REFERENCES event_deliveries(delivery_id),
@@ -15019,6 +15050,7 @@ platform_tables:
         to be active. Only memory-enabled agents bind this persisted session fact; stateless provider sessions are process-local
         and must leave the complete session projection null. Attempt rows are evidence and never independently select or mutate
         delivery work.
+      rule_selection: Exact selections observed by unsuccessful attempts are deliberately not persisted in this ledger.
       ddl: |
         CREATE TABLE event_delivery_attempts (
             delivery_id      UUID NOT NULL REFERENCES event_deliveries(delivery_id),
@@ -17066,6 +17098,9 @@ run_model:
         identity, agent identity, target ownership, delivery context, payload projection, and connect_execution_claim.
         Stored connect execution evidence is part of route identity and is captured in the same revision as the delivery;
         it is not a live worker claim token. Historical projection excludes live worker tokens and execution capabilities.
+        The same event_deliveries fact carries mandatory closed final_selection evidence: absent or present with one
+        valid handler-rule fact. Its presence and effective status are captured atomically and validated together;
+        no additional history family or attempt-selection ledger is introduced.
         Fact keys are constructed by the same closed family identity owner used for historical admission, with unchanged
         key bytes. Fan-out intent, outcome and barrier keys use their exact typed coordinates and outcome ordinal;
         readers do not parse or infer a new composite-key grammar.
@@ -17085,6 +17120,9 @@ run_model:
         missing or contradictory evidence for a connected route cannot be repaired from current delivery or topology rows.
         Planning and stamped frontier/history recipient consumers retain that validated evidence. Historical evidence never
         grants a live delivery lease or permits copying a source worker capability into a new fork-local delivery.
+        Historical final selection is read only from that revisioned delivery payload, never joined from today's
+        selection table. Missing tags, malformed facts and contradictory status/presence pairs fail closed. Fresh
+        fork-local pending deliveries start with absent selection; source final-selection history remains unchanged.
         Every surviving present fact retains its ledger run, family, key and revision context until typed admission.
         Admission requires the selected run, a known family, the canonical key matching the body's primary identity,
         and positive ordered first/fact revisions no later than R. Embedded owning run IDs in deliveries, committed

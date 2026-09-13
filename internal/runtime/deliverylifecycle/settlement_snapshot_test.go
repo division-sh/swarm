@@ -30,11 +30,14 @@ func TestSnapshotMatchesSettlementClaim(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			base := Snapshot{DeliveryID: deliveryID, RunID: runID, EventID: eventID, Route: route, RouteIdentity: routeID, SubscriberClass: class, SubscriberID: route.Recipient.ID(), ClaimVersion: 3, Status: StatusDelivered}
+			base := Snapshot{DeliveryID: deliveryID, RunID: runID, EventID: eventID, Route: route, RouteIdentity: routeID, SubscriberClass: class, SubscriberID: route.Recipient.ID(), ClaimVersion: 3, Status: StatusDelivered, FinalSelection: PresentSelection(NotApplicableHandlerRuleSelection())}
 			for _, status := range []Status{StatusDelivered, StatusDeadLetter, StatusFailed, StatusPending, StatusInProgress, "unknown"} {
 				t.Run(string(status), func(t *testing.T) {
 					snapshot := base
 					snapshot.Status = status
+					if !status.Terminal() {
+						snapshot.FinalSelection = AbsentSelection()
+					}
 					want := status == StatusDelivered || status == StatusDeadLetter || status == StatusFailed
 					if snapshot.MatchesSettlementClaim(claim) != want {
 						t.Fatalf("status=%s match want=%t", status, want)
@@ -42,14 +45,16 @@ func TestSnapshotMatchesSettlementClaim(t *testing.T) {
 				})
 			}
 			for name, mutate := range map[string]func(*Snapshot){
-				"delivery":       func(s *Snapshot) { s.DeliveryID = uuid.NewString() },
-				"run":            func(s *Snapshot) { s.RunID = uuid.NewString() },
-				"event":          func(s *Snapshot) { s.EventID = uuid.NewString() },
-				"version":        func(s *Snapshot) { s.ClaimVersion++ },
-				"subscriber":     func(s *Snapshot) { s.SubscriberID = "foreign" },
-				"class":          func(s *Snapshot) { s.SubscriberClass = "foreign" },
-				"route":          func(s *Snapshot) { s.Route = events.DeliveryRoute{} },
-				"route_identity": func(s *Snapshot) { s.RouteIdentity = events.DeliveryRouteIdentity{} },
+				"missing_selection": func(s *Snapshot) { s.FinalSelection = AbsentSelection() },
+				"invalid_selection": func(s *Snapshot) { s.FinalSelection = SelectionPresence{} },
+				"delivery":          func(s *Snapshot) { s.DeliveryID = uuid.NewString() },
+				"run":               func(s *Snapshot) { s.RunID = uuid.NewString() },
+				"event":             func(s *Snapshot) { s.EventID = uuid.NewString() },
+				"version":           func(s *Snapshot) { s.ClaimVersion++ },
+				"subscriber":        func(s *Snapshot) { s.SubscriberID = "foreign" },
+				"class":             func(s *Snapshot) { s.SubscriberClass = "foreign" },
+				"route":             func(s *Snapshot) { s.Route = events.DeliveryRoute{} },
+				"route_identity":    func(s *Snapshot) { s.RouteIdentity = events.DeliveryRouteIdentity{} },
 			} {
 				t.Run(name, func(t *testing.T) {
 					snapshot := base

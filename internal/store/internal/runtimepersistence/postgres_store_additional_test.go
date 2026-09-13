@@ -2849,7 +2849,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	retrying, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureRetry,
 		Failure:     testRetryableFailure(),
-		RetryBase:   time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+		RetryBase:   time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 	})
 	if err != nil || retrying.Status != runtimedelivery.StatusFailed || !retrying.RetryScheduled {
 		t.Fatalf("SettleFailure retry snapshot=%#v err=%v", retrying, err)

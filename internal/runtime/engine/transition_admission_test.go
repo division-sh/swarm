@@ -219,6 +219,9 @@ func TestExecutorCompiledGuardDispositionHasExplicitCause(t *testing.T) {
 			if len(result.EmitIntents) != 0 {
 				t.Fatal("failed guard emitted ordinary work")
 			}
+			if !requireResolvedSelection(t, result.HandlerRuleSelection).Equal(handlerselection.NotApplicable()) {
+				t.Fatal("definitive guard outcome invented a rule observation")
+			}
 			cause := result.StateMutation.Transition
 			if disposition != "kill" {
 				if cause != nil || result.NextState != "ready" {

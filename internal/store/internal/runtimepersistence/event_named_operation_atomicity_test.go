@@ -106,6 +106,14 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				}
 				want := selectedForkOperationCounts{event: 1, lineage: 1, deliveries: 1, stories: 1}
 				assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), want)
+				fresh := loadDeliverySnapshotFixture(t, ctx, fixture.store, req.Commit.Event.ID(), req.Commit.DeliveryRoutes[0])
+				if fresh.Status != runtimedelivery.StatusPending || fresh.FinalSelection.Present() || fresh.ClaimVersion != 0 {
+					t.Fatalf("fresh selected-fork obligation inherited final execution evidence: %+v", fresh)
+				}
+				freshHistory := routeEvidenceSnapshot(t, ctx, fixture.db, fresh.RunID, fresh.DeliveryID, routeEvidenceHead(t, ctx, fixture.db, fresh.RunID))
+				if freshHistory.Status != runtimedelivery.StatusPending || freshHistory.FinalSelection.Present() {
+					t.Fatalf("fresh child revision inherited final selection: %+v", freshHistory)
+				}
 
 				duplicate := req
 				duplicate.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, duplicate.Commit.Event.Event().RunID(), "must-not-appear", "fixture/must-not-appear")}

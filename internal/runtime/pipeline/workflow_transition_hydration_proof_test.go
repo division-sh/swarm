@@ -46,7 +46,7 @@ stages:
 			record := before.TransitionHistory[0]
 			if record.TriggerEventID != event.ID() || record.From != "ready" || record.To != "waiting" ||
 				!reflect.DeepEqual(record.GuardsEvaluated, []string{"admitted-check"}) ||
-				!record.Evidence.RuleSelection().Ref().Equal(result.RuleSelection.Ref()) || result.RuleSelection.DisplayLabel() != "selected" {
+				!record.Evidence.RuleSelection().Ref().Equal(requireResolvedSelection(t, result.RuleSelection).Ref()) || requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "selected" {
 				t.Fatalf("lost executed rule/guard/event coordinates: %#v", record)
 			}
 			timers := listWorkflowTimerOwnerActivations(t, f.store, f.ctx, f.entityID, true)

@@ -498,7 +498,7 @@ func (e *Executor) SupportsStep(step Step) bool {
 
 func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
 	if err := e.ValidateRequest(req); err != nil {
-		result := ExecutionResult{Status: OutcomeRejected, HandlerRuleSelection: handlerselection.NotApplicable()}
+		result := ExecutionResult{Status: OutcomeRejected, HandlerRuleSelection: handlerselection.NotReached()}
 		SetExecutionFailure(&result, err, "runtime.engine", "validate_request")
 		return result, err
 	}
@@ -513,7 +513,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	req.EntityID = entityID
 
 	var (
-		result          ExecutionResult
+		result          = ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}
 		intents         []EmitIntent
 		activityIntents []ActivityIntent
 		postCommitErr   error
@@ -684,7 +684,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 			CurrentState:         currentState,
 			NextState:            currentState,
 			Computed:             map[string]any{},
-			HandlerRuleSelection: handlerselection.NotApplicable(),
+			HandlerRuleSelection: handlerselection.NotReached(),
 		},
 		ruleIndex: -1,
 	}, nil
@@ -710,10 +710,18 @@ func (e *Executor) runSteps(frame *executionFrame) error {
 		}
 		frame.result.ExecutedSteps = append(frame.result.ExecutedSteps, step)
 		if stop {
+			frame.resolveNonRuleObservation()
 			return nil
 		}
 	}
+	frame.resolveNonRuleObservation()
 	return nil
+}
+
+func (frame *executionFrame) resolveNonRuleObservation() {
+	if !frame.result.HandlerRuleSelection.Reached() {
+		frame.result.HandlerRuleSelection = handlerselection.Resolved(handlerselection.NotApplicable())
+	}
 }
 
 func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
@@ -747,6 +755,7 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 	case StepRules:
 		return false, e.stepRules(frame)
 	case StepAdvancesTo:
+		frame.resolveNonRuleObservation()
 		return false, e.stepAdvancesTo(frame)
 	case StepSetsGate:
 		return false, e.stepSetsGate(frame)
@@ -1886,6 +1895,9 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 			frame.result.FanOutBarrier = &registration
 		}
 	}
+	// Fan-out completes before the ordinary rule/advance steps. Preserve an
+	// actual selected rule, or resolve this completed non-rule path explicitly.
+	frame.resolveNonRuleObservation()
 	if err := e.stepAdvancesTo(frame); err != nil {
 		return false, err
 	}
@@ -2847,10 +2859,14 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 	if len(frame.result.EmitIntents) > 0 {
 		prerequisites = e.emitPersistencePrerequisites(frame)
 	}
+	selection, err := frame.result.HandlerRuleSelection.ResolvedFact()
+	if err != nil {
+		return CommittedEngineMutation{}, err
+	}
 	return e.deps.MutationOwner.CommitEngineMutation(ctx, EngineMutation{
 		Address:                 frame.req.StateAddress(),
 		State:                   frame.result.StateMutation,
-		HandlerRuleSelection:    frame.result.HandlerRuleSelection,
+		HandlerRuleSelection:    selection,
 		LifecycleEffects:        effects,
 		ActivityIntents:         append([]ActivityIntent(nil), frame.result.ActivityIntents...),
 		EmitIntents:             append([]EmitIntent(nil), frame.result.EmitIntents...),
@@ -3220,7 +3236,7 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 			if factErr != nil {
 				return nil, -1, factErr
 			}
-			frame.result.HandlerRuleSelection = fact
+			frame.result.HandlerRuleSelection = handlerselection.Resolved(fact)
 			return nil, -1, err
 		}
 		if passed {
@@ -3236,7 +3252,7 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 		if err != nil {
 			return nil, -1, err
 		}
-		frame.result.HandlerRuleSelection = fact
+		frame.result.HandlerRuleSelection = handlerselection.Resolved(fact)
 	}
 	return nil, -1, nil
 }
@@ -3260,7 +3276,7 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	if err != nil {
 		return err
 	}
-	frame.result.HandlerRuleSelection = fact
+	frame.result.HandlerRuleSelection = handlerselection.Resolved(fact)
 	return nil
 }
 

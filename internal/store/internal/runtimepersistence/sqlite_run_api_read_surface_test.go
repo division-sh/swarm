@@ -123,7 +123,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		nodeDeadDelivery, err = sqliteStore.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureRetry,
 			Failure:     &nodeFailure,
-			RetryBase:   time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+			RetryBase:   time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 		})
 		if err != nil {
 			t.Fatalf("settle sqlite exhausted delivery attempt %d: %v", attempt+1, err)

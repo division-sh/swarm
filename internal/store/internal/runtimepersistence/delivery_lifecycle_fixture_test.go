@@ -133,7 +133,7 @@ func seedDeliveryStateFixture(
 		snapshot, err := store.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureRetry,
 			Failure:     failure,
-			RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+			RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 		})
 		if err != nil {
 			t.Fatalf("settle retrying delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
@@ -152,7 +152,7 @@ func seedDeliveryStateFixture(
 		snapshot, err := store.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureDeadLetter,
 			ReasonCode:  failure.Detail.Code,
-			Failure:     failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+			Failure:     failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 		})
 		if err != nil {
 			t.Fatalf("settle exhausted delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)

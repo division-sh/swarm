@@ -594,7 +594,7 @@ func requireForkReceiverStaleClaimStoreFence(t *testing.T, rt servedControlProof
 	failure := runtimefailures.FromError(errors.New("stale receiver attempt must not settle successor"), "fork-receiver-test", "settlement")
 	if _, err := owner.SettleFailure(observation.ctx, old, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "stale_receiver_test",
-		Failure: &failure.Failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+		Failure: &failure.Failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 	}); !errors.Is(err, runtimedelivery.ErrConflict) {
 		t.Fatalf("stale failure settlement was not fenced: %v", err)
 	}

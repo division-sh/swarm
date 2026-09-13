@@ -361,7 +361,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 				Disposition: runtimedelivery.FailureRetry,
 				ReasonCode:  "handler_error",
 				Failure:     &failure,
-				RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+				RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 			})
 		default:
 			t.Fatalf("trace fixture state %q is unsupported", state)

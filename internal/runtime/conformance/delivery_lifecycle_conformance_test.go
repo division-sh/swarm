@@ -144,7 +144,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 			})
 
-			t.Run("singular_handler_rule_selection_persists_and_replay_must_agree", func(t *testing.T) {
+			t.Run("singular_final_selection_allows_new_attempt_and_fences_terminal_rewrite", func(t *testing.T) {
 				facts := []handlerselection.HandlerRuleSelectionFact{
 					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, `nodes["conformance"].handlers["proof"].rules[0]`, "rules-label"),
 					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextOnComplete, `nodes["conformance"].handlers["proof"].on_complete[0]`, "complete-label"),
@@ -186,37 +186,38 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					Disposition:   runtimedelivery.FailureRetry,
 					Failure:       testFailure("selection_retry"),
 					RetryBase:     time.Nanosecond,
-					RuleSelection: firstFact,
+					RuleSelection: handlerselection.Resolved(firstFact),
 				})
 				if err != nil || failed.Status != runtimedelivery.StatusFailed {
 					t.Fatalf("first selection settlement = %#v, %v", failed, err)
 				}
+				assertDeliveryHandlerRuleSelectionMissing(t, ctx, backend, firstClaim.Snapshot.DeliveryID)
 				makeDeliveryImmediatelyEligible(t, ctx, backend, firstClaim.Snapshot.DeliveryID)
 				secondClaim, err := storetest.ClaimDelivery(ctx, backend.restart, event, route)
 				if err != nil {
 					t.Fatal(err)
 				}
 				contradiction := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, `nodes["conformance"].handlers["proof"].rules[2]`, "changed")
-				if _, err := backend.restart.SettleSuccess(ctx, secondClaim.Claim, nil, 0, contradiction); !errors.Is(err, runtimedelivery.ErrConflict) {
-					t.Fatalf("contradictory replay error = %v, want ErrConflict", err)
+				if _, err := backend.restart.SettleSuccess(ctx, secondClaim.Claim, nil, 0, contradiction); err != nil {
+					t.Fatalf("valid new attempt could not commit its actual selection: %v", err)
 				}
-				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, firstClaim.Snapshot.DeliveryID); !got.Equal(firstFact) {
-					t.Fatalf("contradictory replay replaced fact: %#v", got)
+				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, firstClaim.Snapshot.DeliveryID); !got.Equal(contradiction) {
+					t.Fatalf("final attempt selection was not persisted: %#v", got)
 				}
 				outcomes, err := backend.restart.Outcomes(ctx, firstClaim.Snapshot.DeliveryID)
-				if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "retry_scheduled" {
-					t.Fatalf("contradictory replay outcomes = %#v, %v", outcomes, err)
+				if err != nil || len(outcomes) != 2 || outcomes[0].Outcome != "retry_scheduled" || outcomes[1].Outcome != "delivered" {
+					t.Fatalf("retry/final outcomes = %#v, %v", outcomes, err)
 				}
 				if _, err := backend.restart.SettleFailure(ctx, secondClaim.Claim, runtimedelivery.Settlement{
 					Disposition:   runtimedelivery.FailureDeadLetter,
 					ReasonCode:    "selection_evaluation_failed",
 					Failure:       testFailure("selection_evaluation_failed"),
-					RuleSelection: firstFact,
-				}); err != nil {
-					t.Fatalf("exact replay agreement: %v", err)
+					RuleSelection: handlerselection.Resolved(firstFact),
+				}); !errors.Is(err, runtimedelivery.ErrConflict) {
+					t.Fatalf("terminal rewrite must remain fenced: %v", err)
 				}
-				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, firstClaim.Snapshot.DeliveryID); !got.Equal(firstFact) {
-					t.Fatalf("terminal failed-evaluation fact = %#v, want %#v", got, firstFact)
+				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, firstClaim.Snapshot.DeliveryID); !got.Equal(contradiction) {
+					t.Fatalf("terminal rewrite changed final fact = %#v", got)
 				}
 			})
 
@@ -411,7 +412,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				deferredSnapshot, err := backend.store.SettleFailure(ctx, deferredClaim.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureRetry,
 					Failure:     testFailure("handler_failed"),
-					RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+					RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 				})
 				if err != nil || deferredSnapshot.Status != runtimedelivery.StatusFailed {
 					t.Fatalf("schedule deferred retry = %#v, err=%v", deferredSnapshot, err)
@@ -503,7 +504,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				failedSnapshot, err := backend.store.SettleFailure(ctx, failedClaim.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureRetry,
 					Failure:     testFailure("inventory_retry"),
-					RetryBase:   10 * time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+					RetryBase:   10 * time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 				})
 				if err != nil {
 					t.Fatalf("schedule inventory retry: %v", err)
@@ -660,7 +661,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					longRetry, err := adapter.SettleFailure(txctx, tx, longRetryClaim.Claim, runtimedelivery.Settlement{
 						Disposition: runtimedelivery.FailureRetry,
 						Failure:     testFailure("long_transaction_retry"),
-						RetryBase:   10 * time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+						RetryBase:   10 * time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 					})
 					if err != nil {
 						t.Fatalf("settle retry in long PostgreSQL transaction: %v", err)
@@ -902,7 +903,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 			})
 
-			t.Run("parent_terminalization_owns_pending_and_preserves_failed_selection", func(t *testing.T) {
+			t.Run("parent_terminalization_owns_pending_and_failed_resolution", func(t *testing.T) {
 				pendingEvent := deliveryLifecycleEvent("terminalize-pending-" + backend.name)
 				pendingRoute := deliveryLifecycleConformanceRoute(t, pendingEvent.RunID(), "node", "terminal-pending")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
@@ -927,16 +928,17 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				fact := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, `nodes["conformance"].handlers["proof"].rules[3]`, "preserved")
 				failed, err := backend.store.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureRetry, Failure: testFailure("retry_before_terminalization"),
-					RetryBase: time.Hour, RuleSelection: fact,
+					RetryBase: time.Hour, RuleSelection: handlerselection.Resolved(fact),
 				})
 				if err != nil || failed.Status != runtimedelivery.StatusFailed {
 					t.Fatalf("settle retry before terminalization = %#v, %v", failed, err)
 				}
+				assertDeliveryHandlerRuleSelectionMissing(t, ctx, backend, claimed.Snapshot.DeliveryID)
 				if _, err := backend.restart.TerminalizeRun(ctx, failedEvent.RunID(), "run_terminal"); err != nil {
 					t.Fatalf("terminalize failed delivery: %v", err)
 				}
-				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, claimed.Snapshot.DeliveryID); !got.Equal(fact) {
-					t.Fatalf("terminalization replaced prior selection = %#v, want %#v", got, fact)
+				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, claimed.Snapshot.DeliveryID); !got.Equal(handlerselection.NotApplicable()) {
+					t.Fatalf("terminalization must record its own resolution, not the discarded attempt: %#v", got)
 				}
 			})
 
@@ -1080,7 +1082,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 						settlement := runtimedelivery.Settlement{
 							Disposition: runtimedelivery.FailureDeadLetter,
 							ReasonCode:  "terminal_test_failure",
-							Failure:     testFailure("terminal_test_failure"), RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+							Failure:     testFailure("terminal_test_failure"), RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 						}
 						if _, err := backend.store.SettleFailure(ctx, claimed.Claim, settlement); err == nil {
 							t.Fatal("terminal settlement succeeded while required diagnostic writer was faulted")
@@ -1386,7 +1388,7 @@ func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend delive
 			Disposition: runtimedelivery.FailureRetry,
 			Failure:     testFailure("handler_failed"),
 			Duration:    time.Duration(attempt) * time.Millisecond,
-			RetryBase:   time.Nanosecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+			RetryBase:   time.Nanosecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 		})
 		if settleErr != nil {
 			t.Fatalf("settle %s attempt %d: %v", class, attempt, settleErr)

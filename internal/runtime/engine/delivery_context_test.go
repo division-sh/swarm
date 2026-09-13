@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
@@ -30,8 +31,9 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 	frame := executionFrame{
 		req: ExecutionRequest{EntityID: identity.EntityID("entity-a")},
 		result: ExecutionResult{
-			EmitIntents:     []EmitIntent{{}},
-			ActivityIntents: []ActivityIntent{{ActivityID: "provider-call", ExecutionMode: executionmode.Live}},
+			HandlerRuleSelection: handlerselection.Resolved(handlerselection.NotApplicable()),
+			EmitIntents:          []EmitIntent{{}},
+			ActivityIntents:      []ActivityIntent{{ActivityID: "provider-call", ExecutionMode: executionmode.Live}},
 		},
 	}
 	if _, err := exec.persist(ctx, frame); err != nil {

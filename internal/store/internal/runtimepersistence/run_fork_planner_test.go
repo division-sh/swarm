@@ -773,7 +773,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	}
 	captureRunForkTestRevision(t, db, runID)
 	failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retry_after_fork", nil)
-	settlement := runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, Failure: &failure, RetryBase: time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection()}
+	settlement := runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, Failure: &failure, RetryBase: time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation()}
 	if _, err := pg.SettleFailure(ctx, failedClaim.Claim, settlement); err != nil {
 		t.Fatalf("fail claimed delivery after selected revision: %v", err)
 	}

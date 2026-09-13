@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -456,7 +457,40 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 	default:
 		t.Fatalf("unsupported test status %q", status)
 	}
+	fact["final_selection"] = deliverylifecycle.AbsentSelection()
+	if status == deliverylifecycle.StatusDelivered || status == deliverylifecycle.StatusDeadLetter {
+		fact["final_selection"] = deliverylifecycle.PresentSelection(handlerselection.NotApplicable())
+	}
 	return fact
+}
+
+func TestHistoricalSelectionPresenceUsesCapturedStatus(t *testing.T) {
+	route := historicalRouteFixtures(t)[0].route
+	for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusPending, deliverylifecycle.StatusInProgress, deliverylifecycle.StatusFailed, deliverylifecycle.StatusDelivered, deliverylifecycle.StatusDeadLetter} {
+		for _, present := range []bool{false, true} {
+			fact := historicalRouteFact(t, route, status)
+			fact["final_selection"] = deliverylifecycle.AbsentSelection()
+			if present {
+				fact["final_selection"] = deliverylifecycle.PresentSelection(handlerselection.NotApplicable())
+			}
+			got, err := deliverylifecycle.DecodeHistoricalSnapshot(historicalJSON(t, fact))
+			wantErr := present != (status == deliverylifecycle.StatusDelivered || status == deliverylifecycle.StatusDeadLetter)
+			if (err != nil) != wantErr {
+				t.Fatalf("%s/present=%v: %v", status, present, err)
+			}
+			if err == nil && got.FinalSelection.Present() != present {
+				t.Fatal("historical presence changed")
+			}
+		}
+		for _, malformed := range []any{nil, map[string]any{}, map[string]any{"kind": "present"}, map[string]any{"kind": "absent", "fact": nil}} {
+			fact := historicalRouteFact(t, route, status)
+			fact["final_selection"] = malformed
+			assertHistoricalRejects(t, fact)
+		}
+		fact := historicalRouteFact(t, route, status)
+		delete(fact, "final_selection")
+		assertHistoricalRejects(t, fact)
+	}
 }
 
 func historicalClaimFields(t testing.TB, claim events.ConnectExecutionClaim) map[string]any {

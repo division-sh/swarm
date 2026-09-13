@@ -1740,6 +1740,7 @@ func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *s
 		t.Fatalf("encode fan-out trigger target: %v", err)
 	}
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_deliveries (delivery_id,run_id,event_id,route_identity,subscriber_type,subscriber_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,agent_flow_instance_path,delivery_target_route,delivery_context,delivery_payload_projection,connect_execution_claim,execution_authority_kind,authority_bundle_hash,execution_authority_id,execution_authority_generation,status,retry_count,max_retries,claim_version,settled_at,created_at,updated_at) VALUES ($1,$2,$3,$4,'node',$5,'','','','','','',$6,$7,$7,$7,'normal_runtime',$8,'fan-out-test',1,'delivered',0,3,0,$9,$9,$9)`, fixture.deliveryID, fixture.runID, fixture.eventID, events.EncodeDeliveryRouteIdentity(routeIdentity), route.Recipient.ID(), string(targetJSON), `{}`, "bundle-v2:sha256:"+strings.Repeat("1", 64), createdAt)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_delivery_handler_rule_selections (delivery_id,selection_context,disposition,display_label) VALUES ($1,'none','not_applicable','')`, fixture.deliveryID)
 	insertFanOutOwnerIntent(t, ctx, tx, fixture, cardinality, createdAt)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit fan-out fixture: %v", err)
@@ -1784,6 +1785,7 @@ func seedFanOutOwnerChildFixture(t *testing.T, ctx context.Context, db *sql.DB, 
 		t.Fatal(err)
 	}
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_deliveries (delivery_id,run_id,event_id,route_identity,subscriber_type,subscriber_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,agent_flow_instance_path,delivery_target_route,delivery_context,delivery_payload_projection,connect_execution_claim,execution_authority_kind,authority_bundle_hash,execution_authority_id,execution_authority_generation,status,retry_count,max_retries,claim_version,settled_at,created_at,updated_at) VALUES ($1,$2,$3,$4,'node',$5,'','','','','','',$6,$7,$7,$7,'normal_runtime',$8,'fan-out-test',1,'delivered',0,3,0,$9,$9,$9)`, fixture.deliveryID, fixture.runID, fixture.eventID, events.EncodeDeliveryRouteIdentity(routeIdentity), route.Recipient.ID(), string(targetJSON), `{}`, "bundle-v2:sha256:"+strings.Repeat("1", 64), createdAt)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_delivery_handler_rule_selections (delivery_id,selection_context,disposition,display_label) VALUES ($1,'none','not_applicable','')`, fixture.deliveryID)
 	producer, err := events.NewRootRoutingSource(uuid.NewString())
 	if err != nil {
 		t.Fatal(err)

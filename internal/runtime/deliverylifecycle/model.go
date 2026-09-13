@@ -342,6 +342,7 @@ func (o Obligation) MaxRetries() int                             { return o.maxR
 func (o Obligation) Authority() ExecutionAuthority               { return o.authority }
 
 type Snapshot struct {
+	FinalSelection   SelectionPresence
 	DeliveryID       string
 	EventID          string
 	RunID            string
@@ -375,7 +376,8 @@ func (s Snapshot) State() State   { return StateFromStatus(s.Status, s.ActiveSes
 // responses guarantee acknowledgement; matching arbitrary readback does not
 // prove COMMIT or validate the opaque claim token checked by the store.
 func (s Snapshot) MatchesSettlementClaim(claim Claim) bool {
-	if claim.Validate() != nil || s.DeliveryID != claim.DeliveryID() ||
+	if ValidateSelectionPresence(s.Status, s.FinalSelection) != nil ||
+		claim.Validate() != nil || s.DeliveryID != claim.DeliveryID() ||
 		s.RunID != claim.RunID() || s.ClaimVersion != claim.Version() ||
 		s.SubscriberClass != claim.SubscriberClass() || s.SubscriberID != claim.SubscriberID() ||
 		events.EncodeDeliveryRouteIdentity(s.RouteIdentity) != claim.RouteIdentity() ||
@@ -794,6 +796,10 @@ func NotApplicableHandlerRuleSelection() HandlerRuleSelectionFact {
 	return handlerselection.NotApplicable()
 }
 
+func NotApplicableHandlerRuleObservation() handlerselection.Observation {
+	return handlerselection.Resolved(handlerselection.NotApplicable())
+}
+
 type Settlement struct {
 	Disposition   FailureDisposition
 	ReasonCode    string
@@ -801,7 +807,7 @@ type Settlement struct {
 	SideEffects   []string
 	Duration      time.Duration
 	RetryBase     time.Duration
-	RuleSelection HandlerRuleSelectionFact
+	RuleSelection handlerselection.Observation
 }
 
 type Outcome struct {

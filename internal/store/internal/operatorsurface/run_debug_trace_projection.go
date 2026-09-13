@@ -2,12 +2,10 @@ package operatorsurface
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -126,7 +124,7 @@ func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, r
 		}
 		inputs.events[reference.EventID] = row
 	}
-	if err := loadPostgresRunDebugTraceSelections(ctx, db, references, inputs.selections); err != nil {
+	if err := loadRunDebugTraceSelections(references, inputs.selections); err != nil {
 		return runDebugTraceInputs{}, err
 	}
 	for _, reference := range references {
@@ -225,7 +223,7 @@ func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, run
 		row.EventCreatedAt = createdAt
 		inputs.events[reference.EventID] = row
 	}
-	if err := loadSQLiteRunDebugTraceSelections(ctx, db, references, inputs.selections); err != nil {
+	if err := loadRunDebugTraceSelections(references, inputs.selections); err != nil {
 		return runDebugTraceInputs{}, err
 	}
 
@@ -315,57 +313,27 @@ func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, run
 	return inputs, nil
 }
 
-func loadPostgresRunDebugTraceSelections(ctx context.Context, db eventReadQueryer, references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection) error {
-	return loadRunDebugTraceSelections(references, out, func(deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
-		var contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw string
-		err := db.QueryRowContext(ctx, `
-			SELECT selection_context, disposition, COALESCE(flow_path, ''),
-			       COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label
-			FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid
-		`, deliveryID).Scan(&contextRaw, &dispositionRaw, &flowRaw, &familyRaw, &semanticPathRaw, &labelRaw)
-		if err != nil {
-			return handlerselection.HandlerRuleSelectionFact{}, err
-		}
-		return handlerselection.Hydrate(contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw)
-	})
-}
-
-func loadSQLiteRunDebugTraceSelections(ctx context.Context, db eventReadQueryer, references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection) error {
-	return loadRunDebugTraceSelections(references, out, func(deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
-		var contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw string
-		err := db.QueryRowContext(ctx, `
-			SELECT selection_context, disposition, COALESCE(flow_path, ''),
-			       COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label
-			FROM event_delivery_handler_rule_selections WHERE delivery_id=?
-		`, deliveryID).Scan(&contextRaw, &dispositionRaw, &flowRaw, &familyRaw, &semanticPathRaw, &labelRaw)
-		if err != nil {
-			return handlerselection.HandlerRuleSelectionFact{}, err
-		}
-		return handlerselection.Hydrate(contextRaw, dispositionRaw, flowRaw, familyRaw, semanticPathRaw, labelRaw)
-	})
-}
-
-func loadRunDebugTraceSelections(references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection, load func(string) (handlerselection.HandlerRuleSelectionFact, error)) error {
+func loadRunDebugTraceSelections(references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection) error {
 	for _, reference := range references {
 		if reference.Delivery == nil || reference.Delivery.DeliveryID == "" {
 			continue
 		}
-		deliveryID := reference.Delivery.DeliveryID
-		if _, loaded := out[deliveryID]; loaded {
+		delivery := reference.Delivery
+		if err := runtimedelivery.ValidateSelectionPresence(delivery.Status, delivery.FinalSelection); err != nil {
+			return fmt.Errorf("load run debug trace handler rule selection %s: %w", delivery.DeliveryID, err)
+		}
+		if !delivery.FinalSelection.Present() {
 			continue
 		}
-		fact, err := load(deliveryID)
+		fact, err := delivery.FinalSelection.Fact()
 		if err != nil {
-			if err == sql.ErrNoRows && reference.Delivery.Status != runtimedelivery.StatusFailed && !reference.Delivery.Terminal() {
-				continue
-			}
-			return fmt.Errorf("load run debug trace handler rule selection %s: %w", deliveryID, err)
+			return err
 		}
 		projection, err := operatorread.ProjectHandlerRuleSelection(fact)
 		if err != nil {
-			return fmt.Errorf("project run debug trace handler rule selection %s: %w", deliveryID, err)
+			return fmt.Errorf("project run debug trace handler rule selection %s: %w", delivery.DeliveryID, err)
 		}
-		out[deliveryID] = projection
+		out[delivery.DeliveryID] = projection
 	}
 	return nil
 }

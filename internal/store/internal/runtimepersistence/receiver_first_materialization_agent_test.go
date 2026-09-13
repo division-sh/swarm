@@ -228,7 +228,7 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 							if _, err := fixture.db.ExecContext(ctx, `UPDATE event_deliveries SET receiver_materialization_plan=$1 WHERE delivery_id=$2`, string(bad), dependentID); err != nil {
 								t.Fatal(err)
 							}
-							terminal := deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "test_materializer_failed", Failure: &failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()}
+							terminal := deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "test_materializer_failed", Failure: &failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}
 							beforeSettlement := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 							if _, err := store.SettleFailure(ctx, claimed.Claim, terminal); err == nil {
 								t.Fatal("terminal settlement accepted contradictory dependent evidence")
@@ -265,7 +265,7 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 								defer workers.Done()
 								<-start
 								_, err := store.SettleFailure(ctx, claimed.Claim, deliverylifecycle.Settlement{
-									Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "test_materializer_failed", Failure: &failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection(),
+									Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "test_materializer_failed", Failure: &failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
 								})
 								results <- err
 							}()
@@ -286,7 +286,7 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 							wantReason = "receiver_materialization_missing"
 						case "retry_cancel":
 							if _, err := store.SettleFailure(ctx, claimed.Claim, deliverylifecycle.Settlement{
-								Disposition: deliverylifecycle.FailureRetry, ReasonCode: "test_materializer_retry", Failure: &failure, RetryBase: time.Hour, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection(),
+								Disposition: deliverylifecycle.FailureRetry, ReasonCode: "test_materializer_retry", Failure: &failure, RetryBase: time.Hour, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
 							}); err != nil {
 								t.Fatal(err)
 							}
@@ -308,7 +308,7 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 							wantReason = "receiver_test_cancel"
 						default:
 							if _, err := store.SettleFailure(ctx, claimed.Claim, deliverylifecycle.Settlement{
-								Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "test_materializer_failed", Failure: &failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection(),
+								Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "test_materializer_failed", Failure: &failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
 							}); err != nil {
 								t.Fatal(err)
 							}

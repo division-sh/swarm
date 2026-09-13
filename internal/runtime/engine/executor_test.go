@@ -1642,10 +1642,10 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 	}
 	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
 	requireProjectedScore(t, result, "scores")
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "matched" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "matched" {
 		t.Fatalf("RuleID = %q, want matched", got)
 	}
-	if result.HandlerRuleSelection.Context() != handlerselection.ContextRules || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextRules || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("selected rules fact = %#v", result.HandlerRuleSelection)
 	}
 	if got := result.StateMutation.Fields["handler_marker"]; got != "top-level" {
@@ -1695,10 +1695,10 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 	}
 	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
 	requireProjectedScore(t, result, "scores")
-	if got := strings.TrimSpace(result.HandlerRuleSelection.DisplayLabel()); got != "" {
+	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != "" {
 		t.Fatalf("RuleID = %q, want empty when rules do not match", got)
 	}
-	if result.HandlerRuleSelection.Context() != handlerselection.ContextRules || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionNoMatch || result.HandlerRuleSelection.Ref().Valid() {
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextRules || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionNoMatch || requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("no-match rules fact = %#v", result.HandlerRuleSelection)
 	}
 	if _, ok := result.StateMutation.Fields["rule_marker"]; ok {
@@ -1735,7 +1735,7 @@ func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Execute error = %v, want %v", err, wantErr)
 	}
-	fact := result.HandlerRuleSelection
+	fact := requireResolvedSelection(t, result.HandlerRuleSelection)
 	if fact.Context() != handlerselection.ContextRules || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "attempted-rule" {
 		t.Fatalf("failed evaluation fact = %#v", fact)
 	}
@@ -1783,7 +1783,7 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 			if !errors.Is(err, ErrNotImplemented) {
 				t.Fatalf("Execute error = %v, want %v", err, ErrNotImplemented)
 			}
-			fact := result.HandlerRuleSelection
+			fact := requireResolvedSelection(t, result.HandlerRuleSelection)
 			if fact.Context() != tc.wantContext || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "unsupported-condition" {
 				t.Fatalf("unsupported evaluation fact = %#v", fact)
 			}
@@ -2235,10 +2235,10 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	if result.StateMutation.NextState != "complete" {
 		t.Fatalf("barrier next state = %q, want complete", result.StateMutation.NextState)
 	}
-	if result.HandlerRuleSelection.Context() != handlerselection.ContextJoinComplete || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextJoinComplete || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("join completion selection = %#v", result.HandlerRuleSelection)
 	}
-	if got := result.HandlerRuleSelection.Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.on_complete[0]` {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.on_complete[0]` {
 		t.Fatalf("join completion declaration path = %q", got)
 	}
 }
@@ -2297,10 +2297,10 @@ func TestFanInBarrierExecutorRecordsAuthoredJoinTimeoutSelection(t *testing.T) {
 	if result.StateMutation.NextState != "failed" {
 		t.Fatalf("timeout next state = %q, want failed", result.StateMutation.NextState)
 	}
-	if result.HandlerRuleSelection.Context() != handlerselection.ContextJoinTimeout || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextJoinTimeout || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("join timeout selection = %#v", result.HandlerRuleSelection)
 	}
-	if got := result.HandlerRuleSelection.Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.timeout[0]` {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).Ref().SemanticPath(); got != `nodes["portfolio-collector"].handlers["operating.reported"].join.timeout[0]` {
 		t.Fatalf("join timeout declaration path = %q", got)
 	}
 }
@@ -2611,7 +2611,7 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 			t.Fatalf("rendered content missing %q: %s", want, content)
 		}
 	}
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "rendered_yaml" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rendered_yaml" {
 		t.Fatalf("selected rule = %q, want rendered_yaml", got)
 	}
 	if got := len(result.EmitIntents); got != 1 {
@@ -2647,7 +2647,7 @@ func TestExecutor_PolicySheetPythonModuleRowFeedsSelectionRow(t *testing.T) {
 			t.Fatalf("rendered content missing %q: %s", want, content)
 		}
 	}
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "rendered_yaml" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rendered_yaml" {
 		t.Fatalf("selected rule = %q, want rendered_yaml", got)
 	}
 	if got := len(result.ComputeModuleTraces); got != 1 {
@@ -3010,7 +3010,7 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 	if len(violations) != 1 {
 		t.Fatalf("violations len = %d, want 1: %#v", len(violations), deployResult["violations"])
 	}
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "invalid_manifest" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "invalid_manifest" {
 		t.Fatalf("selected rule = %q, want invalid_manifest", got)
 	}
 	if got := len(result.EmitIntents); got != 1 {
@@ -3128,7 +3128,7 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 	if len(violations) != 0 {
 		t.Fatalf("violations len = %d, want 0: %#v", len(violations), countResult["violations"])
 	}
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "valid_count" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "valid_count" {
 		t.Fatalf("selected rule = %q, want valid_count", got)
 	}
 }
@@ -3703,7 +3703,7 @@ func TestExecutor_QuerySelectionRejectsMissingRequiredField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", Node: identitytest.RootNode(t, "worker"), HandlerEventKey: "work.received",
 		Event:   eventtest.RunCreatingRootIngress("evt-query-select-missing", "work.received", "", "", json.RawMessage(`{"items":[{"status":"queued"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "payload.items", Select: []string{"id"}}},
@@ -3711,6 +3711,9 @@ func TestExecutor_QuerySelectionRejectsMissingRequiredField(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "missing required field id") {
 		t.Fatalf("Execute error = %v", err)
+	}
+	if !result.HandlerRuleSelection.Equal(handlerselection.NotReached()) || result.Committed || len(result.EmitIntents) != 0 {
+		t.Fatalf("preselection query failure fabricated final evidence or effects: %+v", result)
 	}
 }
 
@@ -3963,8 +3966,8 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.HandlerRuleSelection.DisplayLabel() != "rule-1" {
-		t.Fatalf("RuleID = %q", result.HandlerRuleSelection.DisplayLabel())
+	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rule-1" {
+		t.Fatalf("RuleID = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
 	}
 	if result.NextState != "approved" {
 		t.Fatalf("NextState = %q", result.NextState)
@@ -4008,7 +4011,7 @@ rules:
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "deep_scan" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "deep_scan" {
 		t.Fatalf("RuleID = %q, want deep_scan", got)
 	}
 	if got := result.NextState; got != "deep_scan" {
@@ -4045,8 +4048,8 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.HandlerRuleSelection.DisplayLabel() != "rule-1" {
-		t.Fatalf("RuleID = %q", result.HandlerRuleSelection.DisplayLabel())
+	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rule-1" {
+		t.Fatalf("RuleID = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
 	}
 	if result.NextState != "default" {
 		t.Fatalf("NextState = %q, want handler-level default", result.NextState)
@@ -4082,8 +4085,8 @@ func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.HandlerRuleSelection.DisplayLabel() != "rule-1" {
-		t.Fatalf("RuleID = %q", result.HandlerRuleSelection.DisplayLabel())
+	if requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel() != "rule-1" {
+		t.Fatalf("RuleID = %q", requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel())
 	}
 	if result.SetsGate != "approved" {
 		t.Fatalf("SetsGate = %q, want handler-level gate with matched rule", result.SetsGate)
@@ -4275,7 +4278,7 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 			if err != nil {
 				t.Fatalf("Execute error: %v", err)
 			}
-			if got := result.HandlerRuleSelection.DisplayLabel(); got != tc.ruleID {
+			if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != tc.ruleID {
 				t.Fatalf("RuleID = %q, want %q", got, tc.ruleID)
 			}
 			if got := len(result.EmitIntents); got != 1 {
@@ -4432,7 +4435,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "rule-1" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "rule-1" {
 		t.Fatalf("RuleID = %q, want rule-1", got)
 	}
 	if got := len(result.EmitIntents); got != 2 {
@@ -4522,10 +4525,10 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "" {
 		t.Fatalf("RuleID = %q, want empty on no-match success", got)
 	}
-	if result.HandlerRuleSelection.Context() != handlerselection.ContextRules || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionNoMatch {
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextRules || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionNoMatch {
 		t.Fatalf("rules no-match selection = %#v", result.HandlerRuleSelection)
 	}
 	if got := len(result.EmitIntents); got != 1 {
@@ -4748,7 +4751,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := strings.TrimSpace(result.HandlerRuleSelection.DisplayLabel()); got != "" {
+	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != "" {
 		t.Fatalf("rule_id = %q, want empty when branch selection cannot see top-level writes", got)
 	}
 	if _, exists := result.StateMutation.Fields["rule_selected"]; exists {
@@ -4796,10 +4799,10 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := strings.TrimSpace(result.HandlerRuleSelection.DisplayLabel()); got != "" {
+	if got := strings.TrimSpace(requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel()); got != "" {
 		t.Fatalf("rule_id = %q, want empty when on_complete selection cannot see top-level writes", got)
 	}
-	if result.HandlerRuleSelection.Context() != handlerselection.ContextOnComplete || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionNoMatch {
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextOnComplete || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionNoMatch {
 		t.Fatalf("on_complete no-match selection = %#v", result.HandlerRuleSelection)
 	}
 	if got := len(result.EmitIntents); got != 0 {
@@ -5479,7 +5482,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 				t.Fatalf("transition = %#v, want ready->dispatched", transition)
 			}
 			compiled, ok := transition.Compiled()
-			if !ok || !compiled.Edge().RuleRef.Equal(result.HandlerRuleSelection.Ref()) || !transition.RuleSelection().Ref().Equal(result.HandlerRuleSelection.Ref()) || string(compiled.Edge().AdvanceCarrier) != "handler."+tc.name {
+			if !ok || !compiled.Edge().RuleRef.Equal(requireResolvedSelection(t, result.HandlerRuleSelection).Ref()) || !transition.RuleSelection().Ref().Equal(requireResolvedSelection(t, result.HandlerRuleSelection).Ref()) || string(compiled.Edge().AdvanceCarrier) != "handler."+tc.name {
 				t.Fatalf("transition carrier = %#v, want exact selected %s rule %#v", compiled.Edge(), tc.name, result.HandlerRuleSelection)
 			}
 
@@ -7221,7 +7224,7 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.HandlerRuleSelection.DisplayLabel(); got != "needs-human" {
+	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "needs-human" {
 		t.Fatalf("RuleID = %q, want needs-human", got)
 	}
 	if got := runner.called; !reflect.DeepEqual(got, []string{"human_action"}) {

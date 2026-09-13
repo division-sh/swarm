@@ -41,7 +41,7 @@ type handlerExecutionOutcome struct {
 	ClearGates       []string
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 	Emits            []string
-	RuleSelection    handlerselection.HandlerRuleSelectionFact
+	RuleSelection    handlerselection.Observation
 	FanOutCount      int
 	Computed         map[string]any
 	InterceptedEmits []runtimeengine.EmitIntent
@@ -57,18 +57,18 @@ type contractHandlerExecutionResult struct {
 	Emissions                 []events.Event
 	SettledDeliveryClaim      *runtimedelivery.Claim
 	Handled                   bool
-	RuleSelection             handlerselection.HandlerRuleSelectionFact
+	RuleSelection             handlerselection.Observation
 	Transition                *workflowlifecycle.Transition
 }
 
 func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Context, evt events.Event, triggerCtx workflowTriggerContext) (contractHandlerExecutionResult, error) {
 	source := pc.SemanticSource()
 	if pc == nil || source == nil {
-		return contractHandlerExecutionResult{}, nil
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, nil
 	}
 	trigger := strings.TrimSpace(string(evt.Type()))
 	if trigger == "" {
-		return contractHandlerExecutionResult{}, nil
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, nil
 	}
 	var (
 		node            identity.ExecutableNode
@@ -80,7 +80,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 	if isJoinLifecycleEvent(events.EventType(trigger)) {
 		resolution, ok, err := resolveWorkflowJoinOccurrence(source, evt)
 		if err != nil {
-			return contractHandlerExecutionResult{}, err
+			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 		}
 		if ok {
 			node = resolution.Ref.Node()
@@ -96,17 +96,17 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		for _, record := range source.ExecutableNodeRecords() {
 			candidate, identityErr := record.Identity()
 			if identityErr != nil {
-				return contractHandlerExecutionResult{}, identityErr
+				return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, identityErr
 			}
 			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, candidate, evt)
 			if resolved.Failure != "" {
-				return contractHandlerExecutionResult{}, fmt.Errorf("resolve workflow handler for node %s: %s", candidate.Key(), resolved.Failure)
+				return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, fmt.Errorf("resolve workflow handler for node %s: %s", candidate.Key(), resolved.Failure)
 			}
 			if !resolved.Matched {
 				continue
 			}
 			if matched {
-				return contractHandlerExecutionResult{}, nil
+				return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, nil
 			}
 			node = candidate
 			handler = resolved.Handler
@@ -116,7 +116,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		}
 	}
 	if !matched {
-		return contractHandlerExecutionResult{}, nil
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, nil
 	}
 	if strings.TrimSpace(triggerCtx.HandlerEventKey) == "" {
 		triggerCtx.HandlerEventKey = handlerEventKey
@@ -140,7 +140,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 ) (contractHandlerExecutionResult, error) {
 	deferCommittedDispatch := len(deferCommittedDispatchOption) > 0 && deferCommittedDispatchOption[0]
 	if !node.Valid() {
-		return contractHandlerExecutionResult{}, nil
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, nil
 	}
 	source := pc.SemanticSource()
 	handlerFact := MustDeliveryTargetHandler(node)
@@ -167,16 +167,16 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 				admittedApplication, err = pc.prepareDeliveryTargetApplication(ctx, node.Key(), exactHandler, handler, triggerCtx.Event, stampedOwner)
 			}
 			if err != nil {
-				return contractHandlerExecutionResult{}, err
+				return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 			}
 			ctx = withDeliveryTargetApplication(ctx, admittedApplication)
 		}
 		if admittedApplication.Owner() != stampedOwner {
-			return contractHandlerExecutionResult{}, fmt.Errorf("durable handler execution requires its exact delivery target application")
+			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, fmt.Errorf("durable handler execution requires its exact delivery target application")
 		}
 		application = admittedApplication
 		if err := application.Validate(); err != nil {
-			return contractHandlerExecutionResult{}, err
+			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 		}
 		flowID = application.FlowID()
 		entityID = application.EntityID()
@@ -189,7 +189,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		handlerEvent := events.EventType(firstNonEmptyString(triggerCtx.HandlerEventKey, string(triggerCtx.Event.Type())))
 		resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlowAtNode(source, node, handlerEvent, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
 		if err != nil {
-			return contractHandlerExecutionResult{}, err
+			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 		}
 		entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
 	}
@@ -201,15 +201,15 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			triggerCtx.Event,
 		)
 		if err != nil {
-			return contractHandlerExecutionResult{}, err
+			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 		}
 		flowOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(triggerCtx.Event.RunID(), stateRoute)
 		if err != nil {
-			return contractHandlerExecutionResult{}, err
+			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 		}
 		currentState, err := pc.currentWorkflowState(ctx, flowOwner, identity.NormalizeEntityID(entityID))
 		if err != nil {
-			return contractHandlerExecutionResult{}, err
+			return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 		}
 		triggerCtx.State = currentState
 		if strings.TrimSpace(triggerCtx.State.EntityID) == "" {
@@ -223,7 +223,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		outcome := &handlerExecutionOutcome{
 			Status:          HandlerOutcomeTerminalReject,
 			GuardsEvaluated: []string{"not_in_terminal_state"},
-			RuleSelection:   handlerselection.NotApplicable(),
+			RuleSelection:   handlerselection.Resolved(handlerselection.NotApplicable()),
 		}
 		plan := handlerExecutionPlanFromNodeHandler(source, node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 		return contractHandlerExecutionResult{
@@ -232,7 +232,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
 			PreviewMetadata: cloneStringAnyMap(triggerCtx.State.Metadata),
 			Handled:         true,
-			RuleSelection:   handlerselection.NotApplicable(),
+			RuleSelection:   handlerselection.Resolved(handlerselection.NotApplicable()),
 		}, nil
 	}
 	ctx = withPipelineFlowScope(ctx, flowID)
@@ -249,7 +249,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	deps := coordinatorEngineDependencies(pc)
 	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))
 	if err != nil {
-		return contractHandlerExecutionResult{}, fmt.Errorf("build runtime engine: %w", err)
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, fmt.Errorf("build runtime engine: %w", err)
 	}
 	workflowVersion := ""
 	if source != nil {
@@ -257,7 +257,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	stateSnapshot, err := handlerExecutionStateSnapshot(handler, entityID, triggerCtx.State, flowID, workflowVersion)
 	if err != nil {
-		return contractHandlerExecutionResult{}, err
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 	}
 	statePath := firstNonEmptyString(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance())
 	if exactDelivery {
@@ -270,15 +270,15 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		triggerCtx.Event,
 	)
 	if err != nil {
-		return contractHandlerExecutionResult{}, err
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 	}
 	producerSource, err := workflowNodeProducerSource(ctx, source, node, flowID, entityID, triggerCtx.Event.RoutingSource())
 	if err != nil {
-		return contractHandlerExecutionResult{}, fmt.Errorf("admit workflow node producer source: %w", err)
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, fmt.Errorf("admit workflow node producer source: %w", err)
 	}
 	joinDeclaration, err := workflowJoinDeclarationForExecution(source, triggerCtx.Event, node, handlerEventKey, handler)
 	if err != nil {
-		return contractHandlerExecutionResult{}, err
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID:               identity.NormalizeEntityID(entityID),
@@ -305,7 +305,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		return contractHandlerExecutionResult{
 			SettledDeliveryClaim: result.SettledDeliveryClaim,
 			Handled:              runtimeengine.IsHandledOutcome(result.Status),
-			RuleSelection:        admittedHandlerRuleSelection(result.HandlerRuleSelection),
+			RuleSelection:        result.HandlerRuleSelection,
 			Transition:           result.StateMutation.Transition,
 		}, err
 	}
@@ -342,7 +342,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Handled:              handled,
 			Emissions:            emissions.immutableEvents(),
 			SettledDeliveryClaim: result.SettledDeliveryClaim,
-			RuleSelection:        admittedHandlerRuleSelection(result.HandlerRuleSelection),
+			RuleSelection:        result.HandlerRuleSelection,
 			Transition:           result.StateMutation.Transition,
 		}, err
 	}
@@ -369,7 +369,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		Emissions:                 emissions.immutableEvents(),
 		SettledDeliveryClaim:      result.SettledDeliveryClaim,
 		Handled:                   handled,
-		RuleSelection:             admittedHandlerRuleSelection(result.HandlerRuleSelection),
+		RuleSelection:             result.HandlerRuleSelection,
 		Transition:                result.StateMutation.Transition,
 	}, err
 }
@@ -554,7 +554,7 @@ func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *ha
 		SetsGate:         strings.TrimSpace(result.SetsGate),
 		ClearGates:       append([]string{}, result.ClearGates...),
 		DataAccumulation: result.StateMutation.DataAccumulation,
-		RuleSelection:    admittedHandlerRuleSelection(result.HandlerRuleSelection),
+		RuleSelection:    result.HandlerRuleSelection,
 		FanOutCount:      result.FanOutCount,
 		Computed:         cloneStringAnyMap(result.Computed),
 		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
@@ -568,13 +568,6 @@ func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *ha
 		}
 	}
 	return out
-}
-
-func admittedHandlerRuleSelection(fact handlerselection.HandlerRuleSelectionFact) handlerselection.HandlerRuleSelectionFact {
-	if fact.Empty() {
-		return handlerselection.NotApplicable()
-	}
-	return fact
 }
 
 func handlerOutcomeStatusFromEngine(status runtimeengine.OutcomeStatus) HandlerOutcomeStatus {

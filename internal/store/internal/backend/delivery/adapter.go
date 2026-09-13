@@ -926,7 +926,7 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 
 func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, sideEffects []string, duration time.Duration, selection handlerselection.HandlerRuleSelectionFact) (Snapshot, error) {
 	return a.settle(ctx, tx, story, claim, Settlement{
-		Disposition: "success", SideEffects: sideEffects, Duration: duration, RuleSelection: selection,
+		Disposition: "success", SideEffects: sideEffects, Duration: duration, RuleSelection: handlerselection.Resolved(selection),
 	})
 }
 
@@ -1127,9 +1127,6 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, story runtimeauthoract
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err := a.persistHandlerRuleSelection(ctx, tx, claim.DeliveryID(), settlement.RuleSelection); err != nil {
-		return Snapshot{}, err
-	}
 	status := StatusDelivered
 	transition := "delivered"
 	outcome := "delivered"
@@ -1163,6 +1160,19 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, story runtimeauthoract
 		status = StatusDeadLetter
 		transition = "dead_letter"
 		outcome = "dead_letter"
+	}
+	final, err := FinalSelection(status, settlement.RuleSelection)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if final.Present() {
+		fact, err := final.Fact()
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if err := a.persistHandlerRuleSelection(ctx, tx, claim.DeliveryID(), fact); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	failureRaw, err := encodeFailure(effectiveFailure)
 	if err != nil {
@@ -1232,7 +1242,7 @@ func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, d
 	if _, err := tx.ExecContext(ctx, query, deliveryID, string(fact.Context()), string(fact.Disposition()), flowPath, family, semanticPath, fact.DisplayLabel()); err != nil {
 		return fmt.Errorf("persist delivery handler rule selection: %w", err)
 	}
-	persisted, err := a.HandlerRuleSelection(ctx, tx, deliveryID)
+	persisted, err := a.handlerRuleSelection(ctx, tx, deliveryID)
 	if err != nil {
 		return err
 	}
@@ -1242,8 +1252,8 @@ func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, d
 	return nil
 }
 
-// HandlerRuleSelection reads the exact committed fact in the caller's snapshot.
-func (a *Adapter) HandlerRuleSelection(ctx context.Context, tx *sql.Tx, deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
+// handlerRuleSelection is private to immutable insertion/equality admission.
+func (a *Adapter) handlerRuleSelection(ctx context.Context, tx *sql.Tx, deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
 	load := `
 		SELECT selection_context, disposition, COALESCE(flow_path, ''),
 			COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label
@@ -1266,23 +1276,15 @@ func (a *Adapter) HandlerRuleSelection(ctx context.Context, tx *sql.Tx, delivery
 }
 
 func (a *Adapter) persistTerminalizationRuleSelection(ctx context.Context, tx *sql.Tx, deliveryID string) error {
-	fact := handlerselection.NotApplicable()
-	query := `
-		INSERT INTO event_delivery_handler_rule_selections
-			(delivery_id, selection_context, disposition, flow_path, declaration_family, semantic_path, display_label)
-		VALUES ($1::uuid, $2, $3, NULL, NULL, NULL, '')
-		ON CONFLICT (delivery_id) DO NOTHING`
-	if a.dialect == DialectSQLite {
-		query = `
-			INSERT INTO event_delivery_handler_rule_selections
-				(delivery_id, selection_context, disposition, flow_path, declaration_family, semantic_path, display_label)
-			VALUES (?, ?, ?, NULL, NULL, NULL, '')
-			ON CONFLICT (delivery_id) DO NOTHING`
+	final, err := FinalSelection(StatusDeadLetter, handlerselection.NotReached())
+	if err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, query, deliveryID, string(fact.Context()), string(fact.Disposition())); err != nil {
-		return fmt.Errorf("persist terminalized delivery handler rule selection: %w", err)
+	fact, err := final.Fact()
+	if err != nil {
+		return err
 	}
-	return nil
+	return a.persistHandlerRuleSelection(ctx, tx, deliveryID, fact)
 }
 
 func (a *Adapter) retryExhaustedFailure(ctx context.Context, tx *sql.Tx, record deliveryRecord, claim Claim, current *runtimefailures.Envelope) (*runtimefailures.Envelope, error) {
@@ -2570,13 +2572,15 @@ func (a *Adapter) selectRecord() string {
 				d.next_eligible_at, d.claim_version, COALESCE(current_attempt.claim_token, ''), current_attempt.lease_expires_at,
 				COALESCE(current_attempt.active_session_id, ''), COALESCE(d.reason_code, ''), d.failure,
 				d.started_at, d.settled_at, d.created_at, d.updated_at,
-				e.event_name, COALESCE(e.entity_id, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, '')
+				e.event_name, COALESCE(e.entity_id, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''),
+				CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label
 			FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
 			LEFT JOIN event_delivery_attempts current_attempt
 			  ON current_attempt.delivery_id = d.delivery_id
 			 AND current_attempt.claim_version = d.current_attempt_version
 			 AND current_attempt.open_marker = TRUE
-			LEFT JOIN runs r ON r.run_id = d.run_id`
+			LEFT JOIN runs r ON r.run_id = d.run_id
+			LEFT JOIN event_delivery_handler_rule_selections s ON s.delivery_id = d.delivery_id`
 	}
 	return `
 		SELECT d.delivery_id::text, d.event_id::text, d.run_id::text, d.route_identity,
@@ -2592,13 +2596,15 @@ func (a *Adapter) selectRecord() string {
 			d.next_eligible_at, d.claim_version, COALESCE(current_attempt.claim_token::text, ''), current_attempt.lease_expires_at,
 			COALESCE(current_attempt.active_session_id::text, ''), COALESCE(d.reason_code, ''), d.failure,
 			d.started_at, d.settled_at, d.created_at, d.updated_at,
-			e.event_name, COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, '')
+			e.event_name, COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''),
+			CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label
 		FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
 		LEFT JOIN event_delivery_attempts current_attempt
 		  ON current_attempt.delivery_id = d.delivery_id
 		 AND current_attempt.claim_version = d.current_attempt_version
 		 AND current_attempt.open_marker = TRUE
-		LEFT JOIN runs r ON r.run_id = d.run_id`
+		LEFT JOIN runs r ON r.run_id = d.run_id
+		LEFT JOIN event_delivery_handler_rule_selections s ON s.delivery_id = d.delivery_id`
 }
 
 func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
@@ -2610,6 +2616,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	var authorityGeneration, selectedGeneration uint64
 	var targetRaw, contextRaw, projectionRaw, connectClaimRaw, materializationRaw, failureRaw []byte
 	var nextEligible, claimExpires, started, settled, created, updated any
+	var selectionID, selectionContext, disposition, flowPath, family, semanticPath, label sql.NullString
 	err := row.Scan(
 		&record.DeliveryID, &record.EventID, &record.RunID, &routeIdentity,
 		&subscriberType, &record.SubscriberID,
@@ -2621,6 +2628,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		&status, &record.RetryCount, &record.MaxRetries, &nextEligible, &record.ClaimVersion,
 		&record.claimToken, &claimExpires, &record.ActiveSessionID, &record.ReasonCode, &failureRaw,
 		&started, &settled, &created, &updated, &record.eventType, &record.entityID, &record.flowID, &record.bundleHash,
+		&selectionID, &selectionContext, &disposition, &flowPath, &family, &semanticPath, &label,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return deliveryRecord{}, ErrNotFound
@@ -2657,6 +2665,17 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	record.Status, err = ParseStatus(status)
 	if err != nil {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery status: %v", ErrConflict, err)
+	}
+	record.FinalSelection = AbsentSelection()
+	if selectionID.Valid {
+		fact, err := handlerselection.Hydrate(selectionContext.String, disposition.String, flowPath.String, family.String, semanticPath.String, label.String)
+		if err != nil {
+			return deliveryRecord{}, fmt.Errorf("%w: persisted final selection: %v", ErrConflict, err)
+		}
+		record.FinalSelection = PresentSelection(fact)
+	}
+	if err := ValidateSelectionPresence(record.Status, record.FinalSelection); err != nil {
+		return deliveryRecord{}, fmt.Errorf("%w: %v", ErrConflict, err)
 	}
 	record.Route, err = decodeRoute(
 		class,

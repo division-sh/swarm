@@ -160,7 +160,7 @@ func TestExecutorPersistCommitsCompleteAuthoritativeStateCarrier(t *testing.T) {
 					),
 				},
 				state:  ExecutionState{State: state},
-				result: ExecutionResult{StateMutation: tc.mutation},
+				result: ExecutionResult{StateMutation: tc.mutation, HandlerRuleSelection: handlerselection.Resolved(handlerselection.NotApplicable())},
 			}
 			if _, err := exec.persist(context.Background(), frame); err != nil {
 				t.Fatalf("persist: %v", err)
@@ -434,7 +434,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	if result.NextState != "passed" {
 		t.Fatalf("NextState = %q", result.NextState)
 	}
-	if result.HandlerRuleSelection.Context() != handlerselection.ContextOnComplete || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
+	if requireResolvedSelection(t, result.HandlerRuleSelection).Context() != handlerselection.ContextOnComplete || requireResolvedSelection(t, result.HandlerRuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, result.HandlerRuleSelection).Ref().Valid() {
 		t.Fatalf("on_complete selection = %#v", result.HandlerRuleSelection)
 	}
 	state, ok, err := repo.LoadState(context.Background(), StateAddress{EntityID: "ent-1"})

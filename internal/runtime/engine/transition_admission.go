@@ -102,7 +102,11 @@ func (e *Executor) admitSelectedTransition(frame *executionFrame, next string) e
 	if next == frame.result.CurrentState {
 		return nil
 	}
-	cause, err := workflowlifecycle.NewCompiledTransition(compiled, frame.result.HandlerRuleSelection, frame.result.GuardsEvaluated)
+	selection, err := frame.result.HandlerRuleSelection.ResolvedFact()
+	if err != nil {
+		return err
+	}
+	cause, err := workflowlifecycle.NewCompiledTransition(compiled, selection, frame.result.GuardsEvaluated)
 	if err != nil {
 		return err
 	}

@@ -15,6 +15,7 @@ import (
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -720,11 +721,11 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		// same settlement and continuation handoff as a handler execution failure.
 		result, err := func() (contractHandlerExecutionResult, error) {
 			if err := pc.notifyTestWorkflowNodeHandlerStarting(executionCtx, node.Key(), evt); err != nil {
-				return contractHandlerExecutionResult{}, err
+				return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 			}
 			application, err := pc.prepareDeliveryTargetApplication(executionCtx, node.Key(), handlerFact, handler, evt, route.Target)
 			if err != nil {
-				return contractHandlerExecutionResult{}, err
+				return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 			}
 			executionCtx = withDeliveryTargetApplication(executionCtx, application)
 			return pc.executeNodeContractHandler(executionCtx, node, handler, workflowTriggerContext{
@@ -758,12 +759,16 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				return result.Handled, postCommitErr
 			}
 			sideEffects := []string{"handler_completed"}
+			selection, selectionErr := result.RuleSelection.ResolvedFact()
+			if selectionErr != nil {
+				return result.Handled, errors.Join(postCommitErr, selectionErr)
+			}
 			settlementGuard, settleErr := heartbeat.BeginSettlement()
 			if settleErr != nil {
 				_ = heartbeat.Stop()
 				return result.Handled, errors.Join(postCommitErr, fmt.Errorf("prepare workflow node delivery settlement: %w", settleErr))
 			}
-			snapshot, settleErr := deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started), admittedHandlerRuleSelection(result.RuleSelection))
+			snapshot, settleErr := deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started), selection)
 			settled := snapshot.Status == runtimedelivery.StatusDelivered && snapshot.MatchesSettlementClaim(claim)
 			if !settled && settleErr == nil {
 				settleErr = errors.New("workflow node success settlement returned no exact acknowledged snapshot")
@@ -807,7 +812,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		snapshot, settleErr := deliveryStore.SettleFailure(executionCtx, claim, runtimedelivery.Settlement{
 			Disposition: disposition, ReasonCode: reason, Failure: &failure.Failure,
 			Duration: time.Since(started), RetryBase: semanticview.HandlerRetryBase(source),
-			RuleSelection: admittedHandlerRuleSelection(result.RuleSelection),
+			RuleSelection: result.RuleSelection,
 		})
 		settled := (snapshot.Status == runtimedelivery.StatusFailed || snapshot.Status == runtimedelivery.StatusDeadLetter) && snapshot.MatchesSettlementClaim(claim)
 		if !settled && settleErr == nil {

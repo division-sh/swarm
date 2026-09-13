@@ -560,7 +560,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				t.Fatalf("claim failed route: %v", err)
 			}
 			if snapshot, err := f.store.SettleFailure(ctx, secondClaim.Claim, runtimedelivery.Settlement{
-				Disposition: runtimedelivery.FailureRetry, Failure: testFailure("handler_failed"), RetryBase: time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+				Disposition: runtimedelivery.FailureRetry, Failure: testFailure("handler_failed"), RetryBase: time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 			}); err != nil || snapshot.Status != runtimedelivery.StatusFailed || snapshot.Terminal() {
 				t.Fatalf("settle retryable failed route snapshot=%#v err=%v", snapshot, err)
 			}

@@ -113,7 +113,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 		Disposition: runtimedelivery.FailureRetry,
 		ReasonCode:  "handler_error",
 		Failure:     failure,
-		RetryBase:   time.Minute, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+		RetryBase:   time.Minute, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 	})
 	if err != nil {
 		t.Fatalf("settle delivery failure: %v", err)

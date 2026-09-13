@@ -92,6 +92,18 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	} else if !current {
 		return true, false, nil
 	}
+	graph, ok := semanticview.WorkflowStageTopology(source, timer.FlowID)
+	if !ok {
+		return true, false, fmt.Errorf("stage timer requires compiled flow topology")
+	}
+	compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{TimerID: timer.ID}, currentStage, nextStage)
+	if err != nil {
+		return true, false, err
+	}
+	// An admitted self-edge consumes the occurrence, not a new stage entry.
+	if currentStage == nextStage {
+		return true, true, nil
+	}
 	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		return true, false, err
@@ -115,14 +127,6 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		FlowID:       identity.NormalizeFlowID(instance.WorkflowName),
 		FlowInstance: runtimeflowidentity.RunScopedFlowInstance{RunID: evt.RunID(), Route: route}.Normalize(),
 		EntityID:     identity.NormalizeEntityID(entityID),
-	}
-	graph, ok := semanticview.WorkflowStageTopology(source, timer.FlowID)
-	if !ok {
-		return true, false, fmt.Errorf("stage timer requires compiled flow topology")
-	}
-	compiled, err := graph.AdmitTransition(runtimecontracts.WorkflowTransitionSite{TimerID: timer.ID}, currentStage, nextStage)
-	if err != nil {
-		return true, false, err
 	}
 	cause, err := runtimeworkflowlifecycle.NewCompiledTransition(compiled, handlerselection.NotApplicable(), nil)
 	if err != nil {

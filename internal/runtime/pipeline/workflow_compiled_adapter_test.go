@@ -265,10 +265,10 @@ func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
 					if carrier.Edge().AdvanceCarrier != wantCarrier {
 						t.Fatalf("carrier = %s, want %s", carrier.Edge().AdvanceCarrier, wantCarrier)
 					}
-					if !record.Evidence.RuleSelection().Equal(result.RuleSelection) {
+					if !record.Evidence.RuleSelection().Equal(requireResolvedSelection(t, result.RuleSelection)) {
 						t.Fatal("executed rule differs from persisted selection")
 					}
-					if event != "direct" && result.RuleSelection.Disposition() != handlerselection.DispositionSelected {
+					if event != "direct" && requireResolvedSelection(t, result.RuleSelection).Disposition() != handlerselection.DispositionSelected {
 						t.Fatal("selected rule lost")
 					}
 					wantPath := map[string]string{
@@ -276,8 +276,8 @@ func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
 						"rule":      `nodes["router"].handlers["rule"].rules[1]`,
 						"complete":  `nodes["router"].handlers["complete"].on_complete[0]`,
 					}[event]
-					if result.RuleSelection.Ref().SemanticPath() != wantPath {
-						t.Fatalf("selected rule path = %s, want %s", result.RuleSelection.Ref().SemanticPath(), wantPath)
+					if requireResolvedSelection(t, result.RuleSelection).Ref().SemanticPath() != wantPath {
+						t.Fatalf("selected rule path = %s, want %s", requireResolvedSelection(t, result.RuleSelection).Ref().SemanticPath(), wantPath)
 					}
 					if event == "inherited" && carrier.Edge().RuleRef.Valid() {
 						t.Fatal("inherited handler target relabeled as a rule-owned advance")
@@ -324,7 +324,7 @@ func TestPipelineCompiledTransitionNoOpOnBothStores(t *testing.T) {
 				if event == "emit_only" && f.bus.publishedCount() != 1 {
 					t.Fatal("emit-only effect was lost")
 				}
-				if event == "unmatched" && result.RuleSelection.Disposition() != handlerselection.DispositionNoMatch {
+				if event == "unmatched" && requireResolvedSelection(t, result.RuleSelection).Disposition() != handlerselection.DispositionNoMatch {
 					t.Fatalf("no-match disposition = %#v", result.RuleSelection)
 				}
 			})
@@ -613,7 +613,7 @@ func requireCompiledPreviewAgreement(t *testing.T, f *compiledAdapterFixture, ev
 	if result.Outcome == nil || preview.Status != result.Outcome.Status || string(preview.Stage) != after.CurrentState {
 		t.Fatalf("preview/execution outcome disagreement: preview=%#v outcome=%#v stage=%s", preview, result.Outcome, after.CurrentState)
 	}
-	if !preview.RuleSelection.Equal(result.RuleSelection) || !preview.RuleSelection.Equal(result.Outcome.RuleSelection) || preview.RuleID != result.RuleSelection.DisplayLabel() {
+	if !preview.RuleSelection.Equal(result.RuleSelection) || !preview.RuleSelection.Equal(result.Outcome.RuleSelection) || preview.RuleID != requireResolvedSelection(t, result.RuleSelection).DisplayLabel() {
 		t.Fatal("preview lost exact qualified rule selection")
 	}
 	if !slices.Equal(preview.GuardsEvaluated, result.GuardsEvaluated) || !slices.Equal(preview.GuardsEvaluated, result.Outcome.GuardsEvaluated) {
@@ -631,7 +631,7 @@ func requireCompiledPreviewAgreement(t *testing.T, f *compiledAdapterFixture, ev
 			t.Fatal("selected cause did not create exactly one history record")
 		}
 		record := after.TransitionHistory[len(after.TransitionHistory)-1]
-		if record.Evidence.ID() != preview.Transition.ID() || !record.Evidence.RuleSelection().Equal(preview.RuleSelection) ||
+		if record.Evidence.ID() != preview.Transition.ID() || !record.Evidence.RuleSelection().Equal(requireResolvedSelection(t, preview.RuleSelection)) ||
 			!slices.Equal(record.Evidence.GuardsEvaluated(), preview.GuardsEvaluated) || record.TriggerEventID != evt.ID() || !record.FiredAt.Equal(evt.CreatedAt()) {
 			t.Fatalf("persisted cause differs from preview evidence: %#v", record)
 		}
@@ -666,7 +666,7 @@ func requireGuardedPreviewEvidence(t *testing.T, f *compiledAdapterFixture, prev
 	t.Helper()
 	handler := f.pc.SemanticSource().ExecutableNodeEventHandlers(f.node)["guarded"]
 	wantRef, qualified := handler.Rules[0].DeclarationIdentity()
-	if !qualified || preview.RuleSelection.Disposition() != handlerselection.DispositionSelected || !preview.RuleSelection.Ref().Equal(wantRef) || preview.RuleID != "explicit-choice" {
+	if !qualified || requireResolvedSelection(t, preview.RuleSelection).Disposition() != handlerselection.DispositionSelected || !requireResolvedSelection(t, preview.RuleSelection).Ref().Equal(wantRef) || preview.RuleID != "explicit-choice" {
 		t.Fatal("preview selected a display-label alias instead of the exact authored rule")
 	}
 	if !slices.Equal(preview.GuardsEvaluated, []string{"first-pass", "true"}) || preview.Metadata["marker"] != "guarded" {
@@ -753,7 +753,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			rootNode := pipelineSourceNode(t, f.pc.SemanticSource(), ".", "router")
 			rootHandler := f.pc.SemanticSource().ExecutableNodeEventHandlers(rootNode)["guarded"]
 			rootRef, _ := rootHandler.Rules[0].DeclarationIdentity()
-			if preview.RuleSelection.Ref().Equal(rootRef) || preview.Transition == nil || preview.Transition.FlowID() != "child" {
+			if requireResolvedSelection(t, preview.RuleSelection).Ref().Equal(rootRef) || preview.Transition == nil || preview.Transition.FlowID() != "child" {
 				t.Fatal("template preview borrowed root identity for the same rule label")
 			}
 		})

@@ -49,7 +49,7 @@ func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *te
 			snapshot, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 				Disposition: runtimedelivery.FailureRetry,
 				Failure:     testRetryableFailure(),
-				RetryBase:   retryBase, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+				RetryBase:   retryBase, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 			})
 			if err != nil {
 				t.Fatalf("settle retry delivery: %v", err)
@@ -138,6 +138,10 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			}
 			tailSnapshot := loadDeliverySnapshotFixture(t, ctx, selected, tailEvent.ID(), tailRoute)
 			setDeliveryReadProjectionFixtureTimes(t, ctx, fixture, tailSnapshot, base.Add(time.Minute))
+			var originalTailTarget []byte
+			if err := fixture.db.QueryRowContext(ctx, `SELECT delivery_target_route FROM event_deliveries WHERE delivery_id=$1`, tailSnapshot.DeliveryID).Scan(&originalTailTarget); err != nil {
+				t.Fatal(err)
+			}
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, tailSnapshot.DeliveryID)
 
 			facts, err := selected.ListPendingAgentDeliveryFacts(ctx, []agentidentity.Identity{pageIdentity}, base.Add(-time.Minute))
@@ -167,6 +171,12 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 				t.Fatalf("second pending page = %#v, want second exact sibling plus cursor", second)
 			}
 
+			// Subsequent fixture writes snapshot the whole run and correctly refuse
+			// corruption. Restore only our injected fault while arranging those rows;
+			// reinstate it below before testing the read-side filtering boundary.
+			if _, err := fixture.db.ExecContext(ctx, `UPDATE event_deliveries SET delivery_target_route=$1 WHERE delivery_id=$2`, string(originalTailTarget), tailSnapshot.DeliveryID); err != nil {
+				t.Fatal(err)
+			}
 			currentAgent := "current-agent"
 			currentIdentity := mustTestAgentIdentityForRun(runID, currentAgent, "delivery-projection/current")
 			currentEvent := eventtest.PersistedProjection(
@@ -191,6 +201,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			historySnapshot := seedDeliveryStateFixture(t, ctx, selected, historyEvent, historyRoute, runtimedelivery.StateDelivered, nil)
 			setDeliveryReadProjectionFixtureTimes(t, ctx, fixture, historySnapshot, base.Add(3*time.Minute))
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, historySnapshot.DeliveryID)
+			corruptOperatorAgentDeliveryTail(t, ctx, fixture, tailSnapshot.DeliveryID)
 
 			lifecycle, err := selected.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{currentIdentity})
 			if err != nil {

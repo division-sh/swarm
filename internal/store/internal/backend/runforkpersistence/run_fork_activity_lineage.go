@@ -120,7 +120,7 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 				if snapshot.Status != runtimedelivery.StatusDelivered {
 					continue
 				}
-				selection, readErr := deliveries.HandlerRuleSelection(ctx, tx, snapshot.DeliveryID)
+				selection, readErr := snapshot.FinalSelection.Fact()
 				if readErr != nil {
 					return reject(id, readErr)
 				}

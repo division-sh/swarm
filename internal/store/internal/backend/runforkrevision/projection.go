@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 type queryer interface {
@@ -76,6 +78,11 @@ func loadCanonicalProjection(ctx context.Context, q queryer, runID string, famil
 		encoded, err := json.Marshal(values)
 		if err != nil {
 			return nil, fmt.Errorf("encode %s projection: %w", family, err)
+		}
+		if family == FamilyEventDeliveries {
+			if _, err := deliverylifecycle.DecodeHistoricalSnapshot(encoded); err != nil {
+				return nil, fmt.Errorf("validate %s projection: %w", family, err)
+			}
 		}
 		key, err := FactKey(family, encoded)
 		if err != nil {
@@ -246,16 +253,31 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				d.agent_flow_scope_key, CAST(d.agent_flow_instance_id AS TEXT), d.agent_flow_instance_path,
 				d.delivery_target_route, d.delivery_context, d.delivery_payload_projection, d.connect_execution_claim, d.receiver_materialization_plan, d.status,
 				d.retry_count, d.max_retries, d.next_eligible_at, d.claim_version, current_attempt.lease_expires_at,
-				d.reason_code, d.failure, CAST(current_attempt.active_session_id AS TEXT), d.started_at, d.settled_at, d.created_at, d.updated_at
+				d.reason_code, d.failure, CAST(current_attempt.active_session_id AS TEXT), d.started_at, d.settled_at, d.created_at, d.updated_at,
+				CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label
 			FROM event_deliveries d
 			LEFT JOIN event_delivery_attempts current_attempt ON current_attempt.delivery_id = d.delivery_id AND current_attempt.claim_version = d.current_attempt_version AND current_attempt.open_marker = TRUE
+			LEFT JOIN event_delivery_handler_rule_selections s ON s.delivery_id = d.delivery_id
 			WHERE d.run_id = $1`,
 			columns: typedColumns(map[string]valueKind{
 				"delivery_target_ownership": valueJSON, "delivery_context": valueJSON,
 				"delivery_payload_projection": valueJSON, "connect_execution_claim": valueJSON, "receiver_materialization_plan": valueJSON, "failure": valueJSON,
 				"next_eligible_at": valueTime, "claim_expires_at": valueTime, "started_at": valueTime, "settled_at": valueTime, "created_at": valueTime, "updated_at": valueTime,
-			}, "delivery_id", "event_id", "run_id", "route_identity", "subscriber_type", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path", "delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan", "status", "retry_count", "max_retries", "next_eligible_at", "claim_version", "claim_expires_at", "reason_code", "failure", "active_session_id", "started_at", "settled_at", "created_at", "updated_at"),
+			}, "delivery_id", "event_id", "run_id", "route_identity", "subscriber_type", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path", "delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan", "status", "retry_count", "max_retries", "next_eligible_at", "claim_version", "claim_expires_at", "reason_code", "failure", "active_session_id", "started_at", "settled_at", "created_at", "updated_at", "selection_delivery_id", "selection_context", "selection_disposition", "selection_flow_path", "selection_declaration_family", "selection_semantic_path", "selection_display_label"),
 			build: func(values map[string]any) map[string]any {
+				selection := map[string]any{"kind": "absent"}
+				if values["selection_delivery_id"] != nil {
+					fact := map[string]any{}
+					for _, name := range []string{"context", "disposition", "flow_path", "declaration_family", "semantic_path", "display_label"} {
+						fact[name] = normalizedText(values["selection_"+name])
+					}
+					selection = map[string]any{"kind": "present", "fact": fact}
+				}
+				values["final_selection"] = selection
+				delete(values, "selection_delivery_id")
+				for _, name := range []string{"context", "disposition", "flow_path", "declaration_family", "semantic_path", "display_label"} {
+					delete(values, "selection_"+name)
+				}
 				identity := map[string]any{}
 				if normalizedText(values["subscriber_type"]) == "agent" {
 					identity = map[string]any{

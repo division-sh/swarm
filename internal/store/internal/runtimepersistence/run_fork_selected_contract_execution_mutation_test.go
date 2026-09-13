@@ -588,7 +588,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	if _, err := pg.SettleFailure(ctx, terminalClaim.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter,
 		ReasonCode:  "terminal_source_delivery",
-		Failure:     &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+		Failure:     &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 	}); err != nil {
 		t.Fatalf("settle terminal delivery: %v", err)
 	}

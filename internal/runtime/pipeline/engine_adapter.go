@@ -111,7 +111,7 @@ func beginWorkflowEngineDeliverySuccess(ctx context.Context, selection handlerse
 	}
 	return &WorkflowEngineDeliverySuccess{
 		Claim: claim, SideEffects: []string{"handler_completed"}, Duration: heartbeat.ExecutionDuration(),
-		RuleSelection: admittedHandlerRuleSelection(selection),
+		RuleSelection: selection,
 	}, guard, nil
 }
 

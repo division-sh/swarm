@@ -956,7 +956,7 @@ func settleFanOutBarrierRouteDeadLetter(t *testing.T, ctx context.Context, store
 	failure := testFailureEnvelope(runtimefailures.ClassLifecycleConflict, "fan_out_barrier_fixture", nil)
 	if _, err := store.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "fixture_exhausted", Failure: &failure,
-		RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+		RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -165,7 +165,7 @@ func (h *compiledLoopEvidenceHarness) advance(nodeID, eventType, revision, from,
 	if !ok || compiled.FlowID() != "." || !compiled.Edge().Node.Equal(node) || compiled.Edge().HandlerEvent != eventType || compiled.Edge().LoopID != "revision" || compiled.Edge().LoopOperation != operation || compiled.Edge().AdvanceCarrier != carrier || record.From != from || record.To != to {
 		h.t.Fatalf("%s exact carrier lost: %#v", eventType, record)
 	}
-	if record.TriggerEventID != event.ID() || record.TransitionID != record.Evidence.ID() || !record.Evidence.RuleSelection().Equal(result.RuleSelection) {
+	if record.TriggerEventID != event.ID() || record.TransitionID != record.Evidence.ID() || !record.Evidence.RuleSelection().Equal(requireResolvedSelection(h.t, result.RuleSelection)) {
 		h.t.Fatalf("%s execution/history disagree: record=%#v result=%#v", eventType, record, result.RuleSelection)
 	}
 	graph, ok := semanticview.WorkflowStageTopology(h.source, ".")

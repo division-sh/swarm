@@ -500,7 +500,7 @@ type ExecutionResult struct {
 	ActionsExecuted         []string
 	ClearGates              []string
 	SetsGate                string
-	HandlerRuleSelection    handlerselection.HandlerRuleSelectionFact
+	HandlerRuleSelection    handlerselection.Observation
 	FanOutCount             int
 	FanOutIntent            *fanoutobligation.IntentRequest
 	FanOutBarrier           *fanoutbarrier.Registration

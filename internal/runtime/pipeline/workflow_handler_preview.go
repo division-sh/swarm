@@ -24,7 +24,7 @@ type HandlerPreview struct {
 	ActionsExecuted []string
 	GuardsEvaluated []string
 	RuleID          string
-	RuleSelection   handlerselection.HandlerRuleSelectionFact
+	RuleSelection   handlerselection.Observation
 	Transition      *workflowlifecycle.Transition
 	SetsGate        string
 	ClearGates      []string
@@ -133,7 +133,9 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		status = result.Outcome.Status
 		actions = append(actions, result.Outcome.ActionsExecuted...)
 		guards = append(guards, result.Outcome.GuardsEvaluated...)
-		ruleID = strings.TrimSpace(result.RuleSelection.DisplayLabel())
+		if fact, factErr := result.RuleSelection.ResolvedFact(); factErr == nil {
+			ruleID = strings.TrimSpace(fact.DisplayLabel())
+		}
 		setsGate = strings.TrimSpace(result.Outcome.SetsGate)
 		clearGates = append(clearGates, result.Outcome.ClearGates...)
 		fanOutCount = result.Outcome.FanOutCount
