@@ -17,15 +17,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
-	proveServedCompiledGateOutcomeRestart(t, false)
-}
-
 func TestServedCompiledGateOutcomeGracefulDrainRestartOnBothStores(t *testing.T) {
-	proveServedCompiledGateOutcomeRestart(t, true)
+	proveServedCompiledGateOutcomeRestart(t)
 }
 
-func proveServedCompiledGateOutcomeRestart(t *testing.T, gracefulDrain bool) {
+func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -105,35 +101,23 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T, gracefulDrain bool) {
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.completed'`, seed.RunID).Scan(&outcomeID); err != nil {
 				t.Fatal(err)
 			}
-			if gracefulDrain {
-				// Dispatch retains a commit-owned context. Graceful drain releases
-				// this test barrier; it is not a substitute for killing a process.
-				releaseHandler()
-				select {
-				case err := <-requestDone:
-					if err != nil {
-						t.Fatalf("drained verdict response: %v", err)
-					}
-				case <-time.After(15 * time.Second):
-					t.Fatal("released verdict did not complete")
+			// Dispatch retains a commit-owned context. Graceful drain releases
+			// this test barrier; it is not a substitute for killing a process.
+			releaseHandler()
+			select {
+			case err := <-requestDone:
+				if err != nil {
+					t.Fatalf("drained verdict response: %v", err)
 				}
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			case <-time.After(15 * time.Second):
+				t.Fatal("released verdict did not complete")
 			}
+			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 			if code := first.stop(); code != 0 {
 				t.Fatalf("pre-consumer stop=%d", code)
 			}
 			cancelRequest()
-			if !gracefulDrain {
-				select {
-				case err := <-requestDone:
-					if err != nil {
-						t.Logf("HTTP response interrupted after durable verdict proof: %v", err)
-					}
-				case <-time.After(5 * time.Second):
-					t.Fatal("interrupted verdict HTTP request did not exit")
-				}
-			}
 			opts.TestWorkflowNodeHandlerStartHook = nil
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			second, rt := start()

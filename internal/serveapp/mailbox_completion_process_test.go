@@ -77,46 +77,10 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, cut := range []string{"released_graceful_drain", "abrupt_process_death"} {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
-				unsetStoreSelectorEnv(t)
 				root := canonicalrouting.CopyGateCompletionDiagnostic(t)
-				var db *sql.DB
-				var config string
-				if backend == "postgres" {
-					dsn, connection, cleanup := testutil.StartPostgres(t)
-					t.Cleanup(cleanup)
-					db = connection
-					config = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
-				} else {
-					path := filepath.Join(t.TempDir(), "mailbox.sqlite")
-					config = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, path, channelOnboardingHostWorkspaceFields())
-					var err error
-					db, err = sql.Open("sqlite", path)
-					if err != nil {
-						t.Fatal(err)
-					}
-					t.Cleanup(func() { _ = db.Close() })
-				}
-				setServeRuntimeRecovery(t, config, false, true)
-				readyR, readyW, err := os.Pipe()
-				if err != nil {
-					t.Fatal(err)
-				}
-				releaseR, releaseW, err := os.Pipe()
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, f := range []*os.File{readyR, readyW, releaseR, releaseW} {
-					t.Cleanup(func() { _ = f.Close() })
-				}
-				start := func(barrier bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime) {
-					raw, err := json.Marshal(mailboxCompletionChild{Source: root, Config: config, Store: backend, Barrier: barrier})
-					if err != nil {
-						t.Fatal(err)
-					}
-					p := startServedCrashProcess(t, "TestMailboxCompletionServeProcessHelper", []string{"SWARM_MAILBOX_COMPLETION_CHILD=" + string(raw)}, readyW, releaseR)
-					return p, servedControlProofRuntime{Endpoint: p.endpoint(t) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
-				}
+				start, readyR, releaseW := mailboxCompletionProcessHarness(t, backend, root)
 				first, rt := start(true)
+				db := rt.DB
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
 				entityID := requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "review")
 				waitServedRunDeliveryQuiescence(t, db, backend, seed.RunID)
@@ -178,4 +142,47 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 			})
 		}
 	}
+}
+
+func mailboxCompletionProcessHarness(t *testing.T, backend, root string) (func(bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime), *os.File, *os.File) {
+	t.Helper()
+	unsetStoreSelectorEnv(t)
+	var db *sql.DB
+	var config string
+	if backend == "postgres" {
+		dsn, connection, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		db = connection
+		config = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
+	} else {
+		path := filepath.Join(t.TempDir(), "mailbox.sqlite")
+		config = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, path, channelOnboardingHostWorkspaceFields())
+		var err error
+		db, err = sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+	}
+	setServeRuntimeRecovery(t, config, false, true)
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseR, releaseW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []*os.File{readyR, readyW, releaseR, releaseW} {
+		t.Cleanup(func() { _ = f.Close() })
+	}
+	start := func(barrier bool) (*channelOnboardingCrashServeProcess, servedControlProofRuntime) {
+		raw, err := json.Marshal(mailboxCompletionChild{Source: root, Config: config, Store: backend, Barrier: barrier})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := startServedCrashProcess(t, "TestMailboxCompletionServeProcessHelper", []string{"SWARM_MAILBOX_COMPLETION_CHILD=" + string(raw)}, readyW, releaseR)
+		return p, servedControlProofRuntime{Endpoint: p.endpoint(t) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
+	}
+	return start, readyR, releaseW
 }
