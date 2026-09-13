@@ -108,24 +108,28 @@ func commitDecisionCardOperation(
 			return fmt.Errorf("decision-card mutation kind is required")
 		}
 		if selected != nil {
-		plan, ok := selected.(runtimebus.EnginePublicationPlan)
-		if !ok {
-			return fmt.Errorf("decision-card publication has unexpected type %T", selected)
-		}
-		committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), nil)
-		if err != nil {
-			return err
-		}
-		evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
-		if err != nil {
-			return err
-		}
-		result.Publication = evidence
-		result.HasPublication = true
+			plan, ok := selected.(runtimebus.EnginePublicationPlan)
+			if !ok {
+				return fmt.Errorf("decision-card publication has unexpected type %T", selected)
+			}
+			committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), nil)
+			if err != nil {
+				return err
+			}
+			evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+			if err != nil {
+				return err
+			}
+			result.Publication = evidence
+			result.HasPublication = true
 		}
 		completion, err := result.ProjectCompletion()
-		if err != nil { return err }
-		if err := storeCompletion(txctx, tx, completion); err != nil { return err }
+		if err != nil {
+			return err
+		}
+		if err := storeCompletion(txctx, tx, completion); err != nil {
+			return err
+		}
 		result.Completion = completion
 		return nil
 	})

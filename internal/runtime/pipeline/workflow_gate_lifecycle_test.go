@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"strings"
 	"testing"
 	"time"
@@ -158,7 +159,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				decisionEventID := uuid.NewString()
 				source := eventtest.ConcreteTemplateRoutingSource("provider", "provider/instance-a", "11111111-1111-1111-1111-111111111111")
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
-					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
+					RequesterAgentID: "requester-agent", OperationID: decisioncardtest.HumanOperation(t, t.Name(), "provider-turn/tool-call-1"), Category: "review",
 					Scope: scopeCase.scope, Source: source,
 				})
 				if err != nil {
@@ -271,7 +272,7 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				lifecycleEventID := uuid.NewString()
 				source := eventtest.ConcreteTemplateRoutingSource("provider", "provider/instance-a", "11111111-1111-1111-1111-111111111111")
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
-					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
+					RequesterAgentID: "requester-agent", OperationID: decisioncardtest.HumanOperation(t, runID, "provider-turn/tool-call-1"), Category: "review",
 					Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: source,
 				})
 				if err != nil {

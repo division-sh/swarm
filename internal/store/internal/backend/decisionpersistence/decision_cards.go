@@ -1414,7 +1414,7 @@ func decisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, e
 		if err != nil {
 			return "", "", "", err
 		}
-		return task.OperationID, task.Scope.EntityID, task.Scope.FlowInstance, nil
+		return task.OperationID.String(), task.Scope.EntityID, task.Scope.FlowInstance, nil
 	case decisioncard.AnchorKindProposedEffect:
 		effect, err := anchor.ProposedEffect()
 		if err != nil {

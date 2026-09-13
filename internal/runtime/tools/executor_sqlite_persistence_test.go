@@ -367,7 +367,12 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: source,
 			})
 			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
-			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn/tool-call-1")
+			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn")
+			ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "tool_call:1:0:mock-1:ask_human")
+			logicalCall, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
+			if !ok || logicalCall != "provider-turn\x00tool_call:1:0:mock-1:ask_human" {
+				t.Fatalf("logical call = %q, present %v", logicalCall, ok)
+			}
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
 			ctx = runtimetools.WithActor(ctx, requester)
 			input := map[string]any{
@@ -387,8 +392,22 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			if anchor.RequesterAgentID != requester.ID || anchor.OperationID != "provider-turn/tool-call-1" || anchor.Scope.Kind != decisioncard.ScopeFlow || anchor.Scope.FlowInstance != "provider" {
+			operation, err := decisioncard.NewHumanTaskOperationID(runtimecorrelation.RunIDFromContext(ctx), logicalCall)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if anchor.RequesterAgentID != requester.ID || anchor.OperationID != operation || anchor.Scope.Kind != decisioncard.ScopeFlow || anchor.Scope.FlowInstance != "provider" {
 				t.Fatalf("human-task anchor = %#v", anchor)
+			}
+			if got, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx); !ok || got != logicalCall {
+				t.Fatalf("ask_human changed the internal logical call: %q", got)
+			}
+			provenance, ok := card.Provenance.ObjectMap()
+			if !ok {
+				t.Fatal("persisted provenance is not an object")
+			}
+			if got, _ := provenance["logical_operation_id"].String(); got != operation.String() || strings.ContainsRune(got, '\x00') {
+				t.Fatalf("persisted operation = %q, want %q", got, operation.String())
 			}
 			wantSourceRoute := events.RouteIdentity{FlowID: "provider", FlowInstance: flowPath, EntityID: requester.EntityID}
 			if got := anchor.Source.Route().Normalized(); got != wantSourceRoute {
@@ -422,7 +441,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			}
 
 			forkCtx, _, _ := seedReplyToolContext(t, tc.store)
-			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, "provider-turn/tool-call-1")
+			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, logicalCall)
 			forkCtx = runtimecorrelation.WithSourceArtifactFact(forkCtx, authorActivityTestSourceArtifactFact)
 			forkCtx = runtimetools.WithActor(forkCtx, requester)
 			forked, err := exec.Execute(forkCtx, "ask_human", input)

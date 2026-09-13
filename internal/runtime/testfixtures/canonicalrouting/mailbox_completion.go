@@ -6,72 +6,10 @@ import (
 	"testing"
 )
 
-// CopyGateCompletionDiagnostic is a source-only typed gate used on both the
-// baseline and compiled-transition trees; it carries no transition test API.
-func CopyGateCompletionDiagnostic(t testing.TB) string {
-	t.Helper()
-	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", `name: gate-completion-diagnostic
-stages:
-  waiting: {initial: true}
-  review:
-    gate:
-      decision: review_decision
-      outcomes:
-        approve:
-          advances_to: approved
-          emit:
-            event: work.completed
-            fields: {result: {literal: approved}}
-        reject:
-          input:
-            reason: {type: text, required: true}
-          advances_to: approved
-          emit:
-            event: work.completed
-            fields: {result: {literal: rejected}}
-  approved: {}
-  done: {terminal: true}
-pins:
-  inputs:
-    events:
-      - {event: work.requested, source: external}
-`)
-	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  result: text\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", `requester:
-  execution_type: system_node
-  subscribes_to: [work.requested]
-  event_handlers:
-    work.requested:
-      create_entity: true
-      advances_to: waiting
-      emit:
-        event: work.completed
-        fields: {result: {literal: ready}}
-collector:
-  execution_type: system_node
-  subscribes_to: [work.completed]
-  event_handlers:
-    work.completed:
-      data_accumulation:
-        writes:
-          - target_field: result
-            expression: payload.result
-      rules:
-        enter_review:
-          condition: "payload.result == 'ready'"
-          advances_to: review
-        finish:
-          condition: "payload.result in ['approved', 'rejected']"
-          advances_to: done
-`)
-	return root
-}
-
 func CopyMailboxCompletionMatrix(t testing.TB) string {
 	t.Helper()
 	root := CopyGateCompletionDiagnostic(t)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "        reject:\n", "        reject:\n          input:\n            reason: {type: text, required: true}\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "stages:\n", "imports:\n  connector_packs:\n    - provider: telegram\n      tool: telegram.send_message\nstages:\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - {event: work.requested, source: external}\n", "      - {event: work.requested, source: external}\n      - {event: effect.requested, source: external}\n")
 	nodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))

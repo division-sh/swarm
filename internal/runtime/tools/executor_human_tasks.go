@@ -90,9 +90,13 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 	if runID == "" {
 		return nil, errors.New("ask_human requires an admitted run")
 	}
-	operationID, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
+	logicalCall, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
 	if !ok {
 		return nil, errors.New("ask_human requires canonical logical tool-operation identity")
+	}
+	operationID, err := decisioncard.NewHumanTaskOperationID(runID, logicalCall)
+	if err != nil {
+		return nil, err
 	}
 	bundleFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
@@ -185,7 +189,7 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 	if err != nil {
 		return nil, err
 	}
-	provenanceMap := map[string]any{"requester_agent_id": actor.ID, "logical_operation_id": operationID}
+	provenanceMap := map[string]any{"requester_agent_id": actor.ID, "logical_operation_id": operationID.String()}
 	executionMode, err := decisioncard.CausalExecutionMode(ctx)
 	if err != nil {
 		return nil, err
@@ -198,7 +202,7 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 	if err != nil {
 		return nil, err
 	}
-	cardID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.card.v1\x00"+runID+"\x00"+operationID)).String()
+	cardID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.card.v1\x00"+runID+"\x00"+operationID.String())).String()
 	cadence := decisioncard.CadencePolicy{}
 	if cfg != nil {
 		cadence = decisioncard.CadencePolicy{

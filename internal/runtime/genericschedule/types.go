@@ -281,7 +281,7 @@ func validateRoutingScope(c AdmissionCommand) error {
 		}
 	case events.RoutingSourceFlowOwnedControl:
 		route := c.RoutingSource.Route()
-		if route.EntityID != c.EntityID || route.FlowInstance != c.FlowInstance || c.RunID == "" {
+		if c.EntityID == "" || route.EntityID != c.EntityID || route.FlowInstance != c.FlowInstance || c.RunID == "" {
 			return errors.New("flow-owned generic schedule source does not match run/entity/flow scope")
 		}
 	case events.RoutingSourcePlatformControl:

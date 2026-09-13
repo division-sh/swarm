@@ -65,7 +65,7 @@ type StageGateAnchor struct {
 
 type HumanTaskAnchor struct {
 	RequesterAgentID string
-	OperationID      string
+	OperationID      HumanTaskOperationID
 	Category         string
 	Scope            Scope
 	Source           events.RoutingSource
@@ -155,12 +155,11 @@ func NewStageGateAnchor(in StageGateAnchor) (Anchor, error) {
 
 func NewHumanTaskAnchor(in HumanTaskAnchor) (Anchor, error) {
 	in.RequesterAgentID = strings.TrimSpace(in.RequesterAgentID)
-	in.OperationID = strings.TrimSpace(in.OperationID)
 	in.Category = strings.TrimSpace(in.Category)
 	if in.RequesterAgentID == "" {
 		return Anchor{}, fmt.Errorf("human_task anchor requester_agent_id is required")
 	}
-	if in.OperationID == "" {
+	if in.OperationID.String() == "" {
 		return Anchor{}, fmt.Errorf("human_task anchor operation_id is required")
 	}
 	if in.Category == "" {
@@ -174,7 +173,7 @@ func NewHumanTaskAnchor(in HumanTaskAnchor) (Anchor, error) {
 	}
 	data, err := canonicaljson.FromGo(map[string]any{
 		"requester_agent_id": in.RequesterAgentID,
-		"operation_id":       in.OperationID,
+		"operation_id":       in.OperationID.String(),
 		"category":           in.Category,
 		"scope":              in.Scope,
 		"routing_source":     in.Source,
@@ -487,9 +486,14 @@ func (a Anchor) HumanTask() (HumanTaskAnchor, error) {
 	if err := exactAnchorFields(scopeMap, "human_task scope", []string{"kind"}, []string{"flow_instance", "entity_id"}); err != nil {
 		return HumanTaskAnchor{}, err
 	}
+	operationText, _ := values["operation_id"].String()
+	operation, err := parseHumanTaskOperationID(operationText)
+	if err != nil {
+		return HumanTaskAnchor{}, err
+	}
 	out := HumanTaskAnchor{
 		RequesterAgentID: requiredAnchorString(values, "requester_agent_id"),
-		OperationID:      requiredAnchorString(values, "operation_id"),
+		OperationID:      operation,
 		Category:         requiredAnchorString(values, "category"),
 		Scope: Scope{
 			Kind:         ScopeKind(requiredAnchorString(scopeMap, "kind")),
@@ -500,7 +504,7 @@ func (a Anchor) HumanTask() (HumanTaskAnchor, error) {
 	if err := canonicaljson.ValueInto(values["routing_source"], &out.Source); err != nil {
 		return HumanTaskAnchor{}, fmt.Errorf("human_task anchor routing_source: %w", err)
 	}
-	if out.RequesterAgentID == "" || out.OperationID == "" || out.Category == "" {
+	if out.RequesterAgentID == "" || out.OperationID.String() == "" || out.Category == "" {
 		return HumanTaskAnchor{}, fmt.Errorf("human_task anchor contains an empty required identity")
 	}
 	if err := out.Scope.Validate(); err != nil {

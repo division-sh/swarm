@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"sort"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ func TestAuthorActivityDecisionCardAdapterCoversRegisteredAnchors(t *testing.T) 
 		t.Fatal(err)
 	}
 	human, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
-		RequesterAgentID: "reviewer", OperationID: "human-op", Category: "review",
+		RequesterAgentID: "reviewer", OperationID: decisioncardtest.HumanOperation(t, t.Name(), "human-op"), Category: "review",
 		Scope:  decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "root/review"},
 		Source: eventtest.RootRoutingSource("human-task-owner"),
 	})

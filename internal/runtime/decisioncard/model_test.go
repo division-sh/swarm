@@ -502,8 +502,12 @@ func TestRegisteredAnchorKindsAreClosedAndProjectScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	operation, err := NewHumanTaskOperationID(t.Name(), "operation-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	human, err := NewHumanTaskAnchor(HumanTaskAnchor{
-		RequesterAgentID: "agent-a", OperationID: "operation-1", Category: "review",
+		RequesterAgentID: "agent-a", OperationID: operation, Category: "review",
 		Scope: Scope{Kind: ScopeFlow, FlowInstance: "root"}, Source: source,
 	})
 	if err != nil {

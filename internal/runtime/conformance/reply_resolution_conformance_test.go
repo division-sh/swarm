@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"strings"
 	"sync"
 	"testing"
@@ -724,7 +725,7 @@ func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards re
 	}
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 		RequesterAgentID: "provider-agent",
-		OperationID:      "provider-turn/" + suffix,
+		OperationID:      decisioncardtest.HumanOperation(t, t.Name(), "provider-turn/"+suffix),
 		Category:         "approval",
 		Scope:            decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: templatereply.ProviderFlowID},
 		Source:           source,

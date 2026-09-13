@@ -224,8 +224,8 @@ func newRoutingSource(kind RoutingSourceKind, route RouteIdentity) (RoutingSourc
 			return RoutingSource{}, fmt.Errorf("%s routing source requires flow_id and flow_instance", kind.StorageCode())
 		}
 	case RoutingSourceFlowOwnedControl:
-		if route.FlowID == "" || route.FlowInstance == "" || route.EntityID == "" {
-			return RoutingSource{}, fmt.Errorf("%s routing source requires flow_id, flow_instance, and entity_id", kind.StorageCode())
+		if route.FlowID == "" || route.FlowInstance == "" {
+			return RoutingSource{}, fmt.Errorf("%s routing source requires flow_id and flow_instance", kind.StorageCode())
 		}
 	default:
 		return RoutingSource{}, fmt.Errorf("routing source kind %q cannot carry a flow route", kind.StorageCode())

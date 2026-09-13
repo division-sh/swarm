@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"reflect"
 	"sort"
 	"testing"
@@ -109,7 +110,7 @@ func (f cursorMailboxFixture) card(t *testing.T, entity string, at time.Time, ki
 		stage.EntityID, stage.StageActivationID, stage.Source = entity, uuid.NewString(), source
 		card.Anchor, err = decisioncard.NewStageGateAnchor(stage)
 	case decisioncard.AnchorKindHumanTask:
-		card.Anchor, err = decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{RequesterAgentID: "reviewer", OperationID: uuid.NewString(), Category: "review", Scope: scope, Source: source})
+		card.Anchor, err = decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{RequesterAgentID: "reviewer", OperationID: decisioncardtest.HumanOperation(t, t.Name(), uuid.NewString()), Category: "review", Scope: scope, Source: source})
 	case decisioncard.AnchorKindProposedEffect:
 		card.Anchor, err = decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{RequestEventID: uuid.NewString(), ActivityID: "send_reply", Decision: "review", Scope: scope, Source: source})
 	}

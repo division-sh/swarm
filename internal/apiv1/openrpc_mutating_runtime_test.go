@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -203,7 +204,7 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 	handler, _, state := newMutatingRuntimeProbeHandler(t, "mailbox.decide", func(state *mutatingRuntimeProbeState) {
 		anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
-			RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
+			RequesterAgentID: "requester-agent", OperationID: decisioncardtest.HumanOperation(t, t.Name(), "provider-turn/tool-call-1"), Category: "review",
 			Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: eventtest.RootRoutingSource("requester-entity"),
 		})
 		if err != nil {
@@ -1601,15 +1602,15 @@ func (*mutatingProbeMailboxStore) CountUnreadInformationalNotices(context.Contex
 
 func (s *mutatingProbeMailboxStore) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (apiidempotency.Completion, bool, error) {
 	return s.state.idempotency.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
-	if s.notifyErr != nil {
-		return apiidempotency.Completion{}, s.notifyErr
-	}
-	if req.ResourceID != s.item.MailboxID {
-		return apiidempotency.Completion{}, mailbox.ErrV1NotFound
-	}
-	s.state.recordEffect()
-	raw, err := canonicaljson.Bytes(map[string]any{"ok": true, "mailbox_id": req.ResourceID, "kind": decisioncard.KindNotice})
-	return apiidempotency.Completion{ResourceID: req.ResourceID, Response: raw}, err
+		if s.notifyErr != nil {
+			return apiidempotency.Completion{}, s.notifyErr
+		}
+		if req.ResourceID != s.item.MailboxID {
+			return apiidempotency.Completion{}, mailbox.ErrV1NotFound
+		}
+		s.state.recordEffect()
+		raw, err := canonicaljson.Bytes(map[string]any{"ok": true, "mailbox_id": req.ResourceID, "kind": decisioncard.KindNotice})
+		return apiidempotency.Completion{ResourceID: req.ResourceID, Response: raw}, err
 	})
 }
 

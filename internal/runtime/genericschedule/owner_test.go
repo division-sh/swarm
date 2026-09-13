@@ -152,6 +152,22 @@ func TestSystemJoinScheduleAdmissionRejectsDeclarationDrift(t *testing.T) {
 	}
 }
 
+func TestFlowScheduleStillRequiresEntityForEntitylessControlSource(t *testing.T) {
+	command := testJoinScheduleCommand(t, "orders", "orders/order-1", attemptgeneration.Generation{})
+	if err := command.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	command.EntityID = ""
+	var err error
+	command.RoutingSource, err = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: "orders", FlowInstance: command.FlowInstance})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Validate(); err == nil || !strings.Contains(err.Error(), "run/entity/flow") {
+		t.Fatalf("entityless schedule error = %v", err)
+	}
+}
+
 func testJoinScheduleCommand(t *testing.T, flowID, flowInstance string, generation attemptgeneration.Generation) AdmissionCommand {
 	t.Helper()
 	entityID := uuid.NewString()

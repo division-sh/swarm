@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -246,7 +247,7 @@ func TestMailboxWebSocketSubscriptionPreservesHumanTaskAnchorKind(t *testing.T) 
 	state := &mutatingRuntimeProbeState{now: base}
 	cards := newMutatingProbeDecisionCardStore(state)
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
-		RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
+		RequesterAgentID: "requester-agent", OperationID: decisioncardtest.HumanOperation(t, t.Name(), "provider-turn/tool-call-1"), Category: "review",
 		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"}, Source: eventtest.RootRoutingSource("requester-entity"),
 	})
 	if err != nil {

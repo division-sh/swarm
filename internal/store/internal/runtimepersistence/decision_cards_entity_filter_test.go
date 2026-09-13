@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"errors"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"reflect"
 	"sort"
 	"testing"
@@ -168,7 +169,7 @@ func entityFilterCardForTest(t *testing.T, kind decisioncard.AnchorKind, runID, 
 		anchor = newDecisionCardTestStageAnchor(path, "launch", entityID, "waiting", uuid.NewString())
 		outcome.AdvancesTo = "done"
 	case decisioncard.AnchorKindHumanTask:
-		anchor, err = decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{RequesterAgentID: "reviewer", OperationID: uuid.NewString(), Category: "review", Scope: scope, Source: source})
+		anchor, err = decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{RequesterAgentID: "reviewer", OperationID: decisioncardtest.HumanOperation(t, t.Name(), uuid.NewString()), Category: "review", Scope: scope, Source: source})
 	case decisioncard.AnchorKindProposedEffect:
 		anchor, err = decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{RequestEventID: uuid.NewString(), ActivityID: "review", Decision: "review", Scope: scope, Source: source})
 		if err == nil {

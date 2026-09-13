@@ -73,8 +73,8 @@ func TestProposedEffectCompletionUsesFrozenPublicationIdentityBothStores(t *test
 						t.Fatal(err)
 					}
 					decisionID := uuid.NewString()
-					if _, err := cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: verdict,
-						Fields: fields, ActorTokenID: "operator", ObservedContentHash: card.CardContentHash,
+					if _, err := DecisionCardDomainForTest(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: verdict,
+						Fields: fields, PrincipalID: "operator", ObservedContentHash: card.CardContentHash,
 						DecisionEventID: decisionID, Now: now.Add(time.Minute)}); err != nil {
 						t.Fatal(err)
 					}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"strings"
 	"sync"
 	"testing"
@@ -445,7 +446,7 @@ func newHumanTaskDecisionCardTestFixture(t *testing.T, runID, operationID string
 		t.Fatal(err)
 	}
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
-		RequesterAgentID: "requester", OperationID: operationID, Category: "review",
+		RequesterAgentID: "requester", OperationID: decisioncardtest.HumanOperation(t, t.Name(), operationID), Category: "review",
 		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"}, Source: source,
 	})
 	if err != nil {
