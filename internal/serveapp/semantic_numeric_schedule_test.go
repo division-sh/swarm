@@ -70,7 +70,7 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			command := genericschedule.AdmissionCommand{RunID: run, OwnerID: "runtime", OwnerKind: genericschedule.OwnerAgent,
-				AgentIdentity: agentidentitytest.RootRuntime(t, "runtime", "numeric-schedule"), ScheduleKey: "numeric", TaskID: "numeric", EventType: "numeric.requested", EntityID: run,
+				AgentIdentity: agentidentitytest.RootRuntimeForRun(t, run, "runtime", "numeric-schedule"), ScheduleKey: "numeric", TaskID: "numeric", EventType: "numeric.requested", EntityID: run,
 				RoutingSource: route, ExecutionMode: executionmode.Live, Due: genericschedule.AbsoluteDue(time.Now().UTC().Add(100 * time.Millisecond).Truncate(time.Microsecond))}
 			var activationID, fingerprint string
 			admit := func(number string) {

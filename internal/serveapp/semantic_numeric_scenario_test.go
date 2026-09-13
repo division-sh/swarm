@@ -79,6 +79,28 @@ collector:
 				}
 				var stdout, stderr bytes.Buffer
 				if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), args, rt.Endpoint, &stdout, &stderr); code != 0 {
+					rows, err := rt.DB.Query(`SELECT CAST(failure AS TEXT) FROM dead_letters ORDER BY created_at`)
+					if err == nil {
+						for rows.Next() {
+							var failure string
+							if err := rows.Scan(&failure); err != nil {
+								t.Fatal(err)
+							}
+							t.Logf("numeric scenario failure: %s", failure)
+						}
+						rows.Close()
+					}
+					logs, err := rt.DB.Query(`SELECT event_name, CAST(payload AS TEXT) FROM events ORDER BY created_at`)
+					if err == nil {
+						for logs.Next() {
+							var event, payload string
+							if err := logs.Scan(&event, &payload); err != nil {
+								t.Fatal(err)
+							}
+							t.Logf("numeric scenario event %s: %s", event, payload)
+						}
+						logs.Close()
+					}
 					t.Fatalf("numeric scenario code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 				}
 				if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {

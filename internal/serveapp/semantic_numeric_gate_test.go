@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -81,7 +82,27 @@ pins:
 				t.Fatalf("gate decision: %#v", first.Error)
 			}
 			semanticNumericOutput(t, rt.Endpoint, rt.DB, published.RunID)
-			requireSemanticReplay(t, first.Result, semanticNumericRPC(t, rt.Endpoint, "http", body("7e0")))
+			replayed := semanticNumericRPC(t, rt.Endpoint, "http", body("7e0"))
+			if replayed.Error != nil {
+				t.Fatalf("gate replay: %#v", replayed.Error)
+			}
+			var original, repeated map[string]json.RawMessage
+			if err := json.Unmarshal(first.Result, &original); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(replayed.Result, &repeated); err != nil {
+				t.Fatal(err)
+			}
+			if string(original["idempotency_replayed"]) != "false" || string(repeated["idempotency_replayed"]) != "true" {
+				t.Fatalf("gate replay receipt markers: %s -> %s", first.Result, replayed.Result)
+			}
+			// Mailbox receipts intentionally mark replay; every domain result stays exact.
+			original["idempotency_replayed"] = json.RawMessage("true")
+			want, err := json.Marshal(original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireSemanticReplay(t, want, replayed)
 			semanticNumericOutput(t, rt.Endpoint, rt.DB, published.RunID)
 		})
 	}

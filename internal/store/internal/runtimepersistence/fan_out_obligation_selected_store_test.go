@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -1358,7 +1359,7 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	ctx, fixture := seedDeclaredForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 3, createdAt)
+	ctx, fixture := seedDeclaredNumericForkFanOutFixture(t, "postgres", authorActivityReceiptFixture{db: db, store: pg}, 3, createdAt, false)
 
 	issuedEventID := uuid.NewString()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, issuedEventID, fixture.runID, "items.child", events.EventProducerPlatform, "fan-out-test", "", "", createdAt.Add(time.Second))
@@ -1705,7 +1706,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				owner = store
 			}
 			createdAt := time.Now().UTC().Truncate(time.Microsecond)
-			ctx, fixture := seedDeclaredForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 5, createdAt)
+			ctx, fixture := seedDeclaredNumericForkFanOutFixture(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 5, createdAt, true)
 			ref, err := durabledata.ParseDeclarationRef(".", "fanout.items")
 			if err != nil {
 				t.Fatal(err)
@@ -1775,10 +1776,26 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if input.Items[0].(map[string]any)["score"] != int64(1) {
 				t.Fatalf("resource numeric carrier = %#v", input.Items[0])
 			}
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, fixture.artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := semanticview.Wrap(bundle)
+			plan, ok := source.FanOutPlanForElement(intent.Request.PlanRef.ElementRef)
+			if !ok || plan.Ref != intent.Request.PlanRef {
+				t.Fatal("resource fixture lost its exact compiled fan-out")
+			}
+			entityType, err := semanticview.ResolveEntityStructuralType(source, ".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			itemType := plan.ItemType.Clone()
+			options := workflowexpr.ValueExpressionOptions{ItemAlias: "item", ItemType: &itemType, EntityType: entityType}
 			projectedResourceScore, err := workflowexpr.EvalValueExpressionWithOptions(
 				"item.score",
 				workflowexpr.ValueContext{FanOut: map[string]any{"item": input.Items[0]}},
-				workflowexpr.ValueExpressionOptions{AllowBareItem: true},
+				options,
 			)
 			if err != nil || projectedResourceScore != int64(1) {
 				t.Fatalf("resource projected score = %#v err=%v", projectedResourceScore, err)
@@ -1792,11 +1809,31 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			} {
 				got, err := workflowexpr.EvalValueExpressionWithOptions(proof.expression,
 					workflowexpr.ValueContext{Entity: intent.Request.Capsule.StateFields, FanOut: map[string]any{"item": input.Items[0]}},
-					workflowexpr.ValueExpressionOptions{AllowBareItem: true})
+					options)
 				if err != nil || got != proof.want {
 					t.Fatalf("mixed resource/capsule %s: got %#v want %#v err=%v", proof.expression, got, proof.want, err)
 				}
 			}
+			unused := forkOrdinalUnusedDependencies{}
+			executor, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{Source: source, StateRepo: unused, MutationOwner: unused, Locker: unused, Dispatcher: unused}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proveEmit := func(intent fanoutobligation.Intent, trigger events.Event, item any) {
+				t.Helper()
+				emit, err := executor.EvaluateFanOutOrdinal(ctx, intent, trigger, item, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var decoded map[string]any
+				if err := canonicaljson.DecodePreservingNumberLexemes(emit.Event.Payload(), &decoded); err != nil {
+					t.Fatal(err)
+				}
+				if decoded["value"] != "alpha" || decoded["integer_result"] != json.Number("77") || decoded["double_result"] != json.Number("76.0") {
+					t.Fatalf("real resource/capsule ordinal execution: %s", emit.Event.Payload())
+				}
+			}
+			proveEmit(intent, input.Trigger, input.Items[0])
 			if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
@@ -1831,7 +1868,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_version_pins WHERE run_id=$1 AND version_id=$2`, materialized.ForkRunID, imported.Candidate.VersionID).Scan(&childPins); err != nil || childPins != 1 {
 				t.Fatalf("fork resource pins = %d err=%v, want 1", childPins, err)
 			}
-			_, childClaim, found, err := claimFanOutForRun(t, ctx, owner, materialized.ForkRunID, fixture.bundleHash, createdAt.Add(4*time.Second))
+			childIntent, childClaim, found, err := claimFanOutForRun(t, ctx, owner, materialized.ForkRunID, fixture.bundleHash, createdAt.Add(4*time.Second))
 			if err != nil || !found {
 				t.Fatalf("claim fork resource fan-out: found=%v err=%v", found, err)
 			}
@@ -1839,6 +1876,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if err != nil || len(childInput.Items) != 4 || childInput.Items[0].(map[string]any)["slug"] != "alpha" {
 				t.Fatalf("fork resource input = %#v err=%v", childInput, err)
 			}
+			proveEmit(childIntent, childInput.Trigger, childInput.Items[0])
 		})
 	}
 }
