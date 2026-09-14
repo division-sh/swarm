@@ -1,7 +1,7 @@
 package serveapp
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -170,16 +171,12 @@ func requireHumanTaskForeignContinuationRefusal(t *testing.T, rt servedControlPr
 		{"requester_entity_id", uuid.NewString()},
 	} {
 		t.Run("reject_"+tc.column, func(t *testing.T) {
-			var original sql.NullString
-			if err := rt.DB.QueryRow(`SELECT `+tc.column+` FROM human_task_continuations WHERE card_id=$1`, card.CardID).Scan(&original); err != nil {
-				t.Fatal(err)
-			}
-			update := `UPDATE human_task_continuations SET ` + tc.column + `=$1 WHERE card_id=$2`
-			if _, err := rt.DB.Exec(update, tc.value, card.CardID); err != nil {
+			restore, err := storetest.CorruptHumanTaskRequester(context.Background(), selectedMailboxFixtureStore(rt), card.RunID, card.CardID, tc.column, tc.value)
+			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				if _, err := rt.DB.Exec(update, original, card.CardID); err != nil {
+				if err := restore(context.Background()); err != nil {
 					t.Error(err)
 				}
 			})
@@ -200,4 +197,11 @@ func requireHumanTaskForeignContinuationRefusal(t *testing.T, rt servedControlPr
 			}
 		})
 	}
+}
+
+func selectedMailboxFixtureStore(rt servedControlProofRuntime) any {
+	if rt.Postgres != nil {
+		return rt.Postgres
+	}
+	return rt.SQLite
 }
