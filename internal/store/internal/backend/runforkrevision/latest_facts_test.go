@@ -47,7 +47,7 @@ PRIMARY KEY(run_id,family,fact_key,revision))`)
 		for _, family := range AllFamilies() {
 			for key := 0; key < keys; key++ {
 				for revision := 1; revision <= revisions; revision++ {
-					body := fmt.Sprintf(`{"revision":%d,"value":%q}`, revision, strings.Repeat("evidence", 32))
+					body := fmt.Sprintf(`{"run":%q,"family":%q,"key":%d,"revision":%d,"value":%q}`, run, family, key, revision, strings.Repeat("evidence", 32))
 					if _, err := stmt.Exec(run, string(family), fmt.Sprint(key), revision, body, (key+revision)%3 != 0); err != nil {
 						t.Fatal(err)
 					}
@@ -128,7 +128,7 @@ func TestLatestFactsQueryPreservesAllFamiliesAndTombstones(t *testing.T) {
 					}
 					for key := 0; key < 4; key++ {
 						fact := got[family][fmt.Sprint(key)]
-						wantBody := fmt.Sprintf(`{"revision":5,"value":%q}`, strings.Repeat("evidence", 32))
+						wantBody := fmt.Sprintf(`{"run":%q,"family":%q,"key":%d,"revision":5,"value":%q}`, run, family, key, strings.Repeat("evidence", 32))
 						if string(fact.fact) != wantBody || fact.present != ((key+5)%3 != 0) {
 							t.Fatalf("%s/%d lost latest body or tombstone", family, key)
 						}

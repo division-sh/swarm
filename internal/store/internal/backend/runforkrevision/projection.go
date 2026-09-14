@@ -55,12 +55,12 @@ func loadCanonicalProjection(ctx context.Context, q queryer, runID string, famil
 	}
 	defer rows.Close()
 	facts := make([]canonicalFact, 0)
+	raw := make([]any, len(spec.columns))
+	dest := make([]any, len(raw))
+	for i := range raw {
+		dest[i] = &raw[i]
+	}
 	for rows.Next() {
-		raw := make([]any, len(spec.columns))
-		dest := make([]any, len(raw))
-		for i := range raw {
-			dest[i] = &raw[i]
-		}
 		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan %s projection: %w", family, err)
 		}

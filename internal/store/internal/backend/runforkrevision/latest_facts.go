@@ -60,11 +60,11 @@ func readLatestFacts(ctx context.Context, q queryer, runID string, families []Fa
 	}
 	defer rows.Close()
 	facts := ledgerFactsByFamily{}
+	var family Family
+	var key string
+	var fact []byte
+	var present bool
 	for rows.Next() {
-		var family Family
-		var key string
-		var fact []byte
-		var present bool
 		// Keep every family's coordinate/presence validation, including unknown
 		// and tombstoned families. Only unused JSON body transfer is omitted.
 		if err := rows.Scan(&family, &key, &fact, &present); err != nil {
