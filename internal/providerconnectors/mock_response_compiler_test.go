@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
@@ -60,9 +61,17 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 	if len(first.responses) != 11 || len(second.responses) != 11 {
 		t.Fatalf("compiled response counts = %d, %d, want 11", len(first.responses), len(second.responses))
 	}
-	for toolID, firstRaw := range first.responses {
-		if !bytes.Equal(firstRaw, second.responses[toolID]) {
-			t.Fatalf("response %q is not byte-deterministic: first=%s second=%s", toolID, firstRaw, second.responses[toolID])
+	for toolID, firstValue := range first.responses {
+		firstRaw, err := canonicaljson.Encode(firstValue)
+		if err != nil {
+			t.Fatal(err)
+		}
+		secondRaw, err := canonicaljson.Encode(second.responses[toolID])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(firstRaw, secondRaw) {
+			t.Fatalf("response %q is not byte-deterministic: first=%s second=%s", toolID, firstRaw, secondRaw)
 		}
 		admitted, admitErr := first.Admit(toolID, tools[toolID])
 		if admitErr != nil {
@@ -98,7 +107,7 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 	}
 	want := map[string]any{
 		"accepted": false,
-		"count":    float64(2),
+		"count":    int64(2),
 		"items":    []any{"", ""},
 		"metadata": map[string]any{},
 		"name":     "zeta",
@@ -166,7 +175,7 @@ required: [value]
 	}
 	want := map[string]any{
 		"value": map[string]any{
-			"null_value": nil, "bool_value": true, "int_value": float64(1), "float_value": 1.5,
+			"null_value": nil, "bool_value": true, "int_value": int64(1), "float_value": 1.5,
 			"text_value": "text", "list_value": []any{false}, "object_value": map[string]any{"key": true},
 		},
 	}
