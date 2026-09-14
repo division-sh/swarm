@@ -12,6 +12,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
@@ -31,20 +32,23 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 						req := mailboxPrincipalRequest(t, rt, method, params)
 						if kind != "notice" {
 							before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+							installed := false
 							restore := func() {
-								if _, err := rt.DB.Exec(`UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, rt.BundleHash, f.base.RunID); err != nil {
-									t.Fatal(err)
+								if installed {
+									if err := storetest.SwapMailboxRunSource(context.Background(), selectedMailboxFixtureStore(rt), f.base.RunID, unavailable, rt.BundleHash); err != nil {
+										t.Error(err)
+										return
+									}
+									installed = false
 								}
 							}
 							t.Cleanup(restore)
 							cut := &mailboxPostCommitFault{beforeCommit: func(ctx context.Context, _ runtimepipeline.DecisionCardMutationCommand) error {
-								result, err := rt.DB.ExecContext(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3`, unavailable, f.base.RunID, rt.BundleHash)
+								err := storetest.SwapMailboxRunSource(ctx, selectedMailboxFixtureStore(rt), f.base.RunID, rt.BundleHash, unavailable)
 								if err != nil {
 									return err
 								}
-								if n, err := result.RowsAffected(); err != nil || n != 1 {
-									t.Fatalf("source race missed exact run: rows=%d err=%v", n, err)
-								}
+								installed = true
 								return nil
 							}}
 							mutation, err := mailboxCardMutation(req, params)

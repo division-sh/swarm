@@ -91,7 +91,7 @@ func (f cursorMailboxFixture) notice(t *testing.T, entity string, at time.Time) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.rt.DB.Exec(`UPDATE mailbox SET created_at=$1 WHERE item_id=$2`, at, id); err != nil {
+	if err := storetest.SetMailboxNoticeTime(context.Background(), selectedMailboxFixtureStore(f.rt), id, at); err != nil {
 		t.Fatal(err)
 	}
 	return cursorMailboxRow{Kind: decisioncard.KindNotice, Notice: mailbox.V1Item{MailboxID: id, CreatedAt: at.Format(time.RFC3339Nano)}}
