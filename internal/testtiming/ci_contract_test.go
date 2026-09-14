@@ -296,7 +296,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
-	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-journeys-first", "serveapp-journeys-rest", "serveapp-mailbox", "serveapp-selected", "serveapp-other", "serveapp-standing"}
+	serveappUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-publication-text", "serveapp-journeys-first", "serveapp-journeys-rest", "serveapp-mailbox", "serveapp-selected", "serveapp-other", "serveapp-standing"}
 	var serveappPatterns []*regexp.Regexp
 	for _, id := range serveappUnits {
 		unit, exists := policy.Units[id]
