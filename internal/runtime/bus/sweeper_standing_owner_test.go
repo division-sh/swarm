@@ -9,10 +9,27 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
+
+func newRecoveryControlOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
+	t.Helper()
+	process := worklifetime.NewProcess()
+	owner := newReceiverProjectionRuntimeOwner(t, process, "recovery-control")
+	t.Cleanup(func() {
+		if _, err := owner.RetireAndWait(context.Background()); err != nil {
+			t.Error(err)
+		}
+		process.Retire()
+		if _, err := process.Join(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	return owner
+}
 
 type recoveryOriginStore struct {
 	InMemoryEventStore
@@ -47,7 +64,7 @@ func TestStandingPipelineRecoveryBlocksUntilExactOwnerIsInstalled(t *testing.T) 
 		t.Fatal(err)
 	}
 	store := &recoveryOriginStore{origin: standing, disposition: disposition}
-	bus := &EventBus{store: store, durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
+	bus := &EventBus{store: store, workOwner: newRecoveryControlOwner(t), durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("test.standing.recovery"),
@@ -82,7 +99,7 @@ func TestStandingPipelineRecoveryParksNonExecutableDispositionBeforeLease(t *tes
 		origin:      standing,
 		disposition: runtimepipeline.StandingRestartDisposition{Kind: runtimepipeline.StandingRestartTerminalDeclared},
 	}
-	bus := &EventBus{store: store, durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
+	bus := &EventBus{store: store, workOwner: newRecoveryControlOwner(t), durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("test.standing.terminal-recovery"),
@@ -106,7 +123,7 @@ func TestStandingPipelineRecoveryParksNonExecutableDispositionBeforeLease(t *tes
 
 func TestNonStandingPipelineRecoveryDoesNotRequireStandingOwner(t *testing.T) {
 	store := &recoveryOriginStore{origin: runtimerunlifecycle.ScenarioSetupRunOrigin()}
-	bus := &EventBus{store: store, durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
+	bus := &EventBus{store: store, workOwner: newRecoveryControlOwner(t), durable: DurableDependencies{RunOrigins: store, StandingRestarts: store}}
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("test.ordinary.recovery"),

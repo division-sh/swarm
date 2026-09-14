@@ -428,7 +428,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 func (eb *EventBus) bindClaimedRunWork(
 	ctx context.Context,
 	event events.Event,
-) (context.Context, *worklifetime.Lease, error) {
+) (bound context.Context, standing *worklifetime.Lease, err error) {
 	runID := strings.TrimSpace(event.RunID())
 	if runID == "" {
 		return ctx, nil, nil
@@ -437,9 +437,27 @@ func (eb *EventBus) bindClaimedRunWork(
 	if reader == nil {
 		return ctx, nil, errors.New("persisted pipeline recovery requires typed run origin readback")
 	}
-	origin, err := reader.LoadRunOrigin(ctx, runID)
+	if err := ctx.Err(); err != nil {
+		return ctx, nil, err
+	}
+	readOwner := eb.workOwnerForContext(ctx)
+	if readOwner == nil {
+		return ctx, nil, errors.New("pipeline recovery reads require a process work occurrence")
+	}
+	readLease, err := readOwner.Begin(ctx)
+	if err != nil {
+		return ctx, nil, err
+	}
+	defer func() { err = errors.Join(err, readLease.Done()) }()
+	// Only these admitted metadata reads drain without cancellation. The lease
+	// joins their completion, and its original context fences every late result.
+	readCtx := context.WithoutCancel(readLease.Context())
+	origin, err := reader.LoadRunOrigin(readCtx, runID)
 	if err != nil {
 		return ctx, nil, fmt.Errorf("load pipeline recovery run origin: %w", err)
+	}
+	if err := readLease.Context().Err(); err != nil {
+		return ctx, nil, err
 	}
 	if origin.Kind() != runtimerunlifecycle.OriginStandingGeneration {
 		return ctx, nil, nil
@@ -448,9 +466,12 @@ func (eb *EventBus) bindClaimedRunWork(
 	if standingReader == nil {
 		return ctx, nil, errors.New("persisted standing recovery requires typed restart disposition readback")
 	}
-	disposition, err := standingReader.StandingRunRestartDisposition(ctx, runID)
+	disposition, err := standingReader.StandingRunRestartDisposition(readCtx, runID)
 	if err != nil {
 		return ctx, nil, fmt.Errorf("classify pipeline recovery standing disposition: %w", err)
+	}
+	if err := readLease.Context().Err(); err != nil {
+		return ctx, nil, err
 	}
 	if disposition.UsesGenericRecovery() {
 		return ctx, nil, nil
