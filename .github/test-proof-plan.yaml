@@ -64,6 +64,7 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-publication-text
       - serveapp-journeys-first
       - serveapp-journeys-rest
       - serveapp-mailbox
@@ -113,6 +114,7 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-publication-text
       - serveapp-journeys-first
       - serveapp-journeys-rest
       - serveapp-mailbox
@@ -162,6 +164,7 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-publication-text
       - serveapp-journeys-first
       - serveapp-journeys-rest
       - serveapp-mailbox
@@ -211,6 +214,7 @@ profiles:
       - conformance-2
       - serveapp-other
       - serveapp-surfaces
+      - serveapp-publication-text
       - serveapp-journeys-first
       - serveapp-journeys-rest
       - serveapp-mailbox
@@ -448,9 +452,16 @@ units:
   serveapp-surfaces:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # CI 34780549661 measured publication text alone at 298s. Keep the
-    # publication family separate from parity/restart and mailbox journeys.
-    run: '^TestServedPu.*$'
+    # CI 34851793743: structured and text sites each took 277s. Keep complete
+    # top-level families separate; the partition census rejects missed tests.
+    run: '^TestServedPublication(Sites|Direct).*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-publication-text:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestServedPublicationText.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
