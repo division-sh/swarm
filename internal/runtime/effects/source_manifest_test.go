@@ -128,6 +128,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/testfixtures/canonicalrouting/root_connect.go:CopyRootSingletonBoomerang:filesystem_write:1":                        ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/root_connect.go:copySingletonOutputRootConnect:filesystem_write:1":                    ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/publication_connector.go:CopyPublicationConnector:filesystem_write:1":                 ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/semantic_numeric_ingress.go:CopySemanticNumericIngress:filesystem_write:1":            ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/specialized_variants.go:removeInheritedScenarios:filesystem_write:1":                  ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:1":              ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go:CopySelectedForkReadiness:filesystem_write:2":              ownerBuildTest,

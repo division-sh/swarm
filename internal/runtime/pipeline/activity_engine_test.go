@@ -630,6 +630,25 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 			if !reflect.DeepEqual(payload["result"], want) {
 				t.Fatalf("journaled channel result = %#v, want %#v", payload["result"], want)
 			}
+			projection, ok := testCompiledChannelActivityTool(server.URL).CompiledResultExecution()
+			if !ok {
+				t.Fatal("missing admitted channel result projection")
+			}
+			rawSchema, err := json.Marshal(projection.OutputSchema())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var resultSchema map[string]any
+			if err := json.Unmarshal(rawSchema, &resultSchema); err != nil {
+				t.Fatal(err)
+			}
+			payloadSchema, err := runtimecontracts.ResolveJSONSchemaStructuralType(map[string]any{
+				"type": "object", "required": []string{"result"},
+				"properties": map[string]any{"result": resultSchema},
+			}, "channel-result-proof")
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, published := range bus.publishes {
 				var executionPayload map[string]any
 				if err := canonicaljson.DecodePreservingNumberLexemes(published.Payload(), &executionPayload); err != nil {
@@ -642,7 +661,7 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 					{"payload.result.delivery_reference.id + 1", int64(43)},
 					{"double(payload.result.delivery_reference.id) + 1.0", float64(43)},
 				} {
-					got, err := workflowexpr.EvalValueExpression(proof.expression, workflowexpr.ValueContext{Payload: executionPayload})
+					got, err := workflowexpr.EvalValueExpressionWithOptions(proof.expression, workflowexpr.ValueContext{Payload: executionPayload}, workflowexpr.ValueExpressionOptions{PayloadType: &payloadSchema})
 					if err != nil || got != proof.want {
 						t.Fatalf("journal numeric expression %s: got %#v want %#v err=%v", proof.expression, got, proof.want, err)
 					}

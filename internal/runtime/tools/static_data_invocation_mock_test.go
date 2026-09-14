@@ -104,7 +104,7 @@ func TestStaticDataInvocationMockRequestsExactForeignID(t *testing.T) {
 					t.Fatalf("own static ID rejected: %v", err)
 				}
 			} else {
-				want := "schema validation failed: $.static_id has invalid enum value " + tc.foreign
+				want := fmt.Sprintf("schema validation failed: $.static_id has invalid enum value %q", tc.foreign)
 				if err == nil || err.Error() != want {
 					t.Fatalf("foreign rejection = %v, want exactly %q", err, want)
 				}

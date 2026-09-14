@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -109,11 +110,11 @@ func seedHistoricalContextFanOutKinds(t *testing.T, tx *sql.Tx, f historicalCont
 	}
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `DELETE FROM fan_out_intents WHERE run_id=$1`, s.runID)
 	insertFanOutOwnerIntent(t, ctx, tx, fixture, 1, s.at)
-	failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "fan_out_test_item_invalid", "test", "commit_fan_out_chunk", nil))
-	if !ok {
-		t.Fatal("construct typed fan-out fixture rejection")
-	}
-	failureJSON, err := runtimefailures.MarshalEnvelope(failure)
+	failure := engine.NormalizeFailure(&engine.EmitPayloadContractError{
+		Event: "item.emitted", Kind: engine.EmitPayloadSchemaMismatch, Path: "$.score",
+		Constraint: "type", Expected: "number", Actual: "string", Detail: "item score must be numeric",
+	}, "test", "commit_fan_out_chunk")
+	failureJSON, err := runtimefailures.MarshalEnvelope(failure.Failure)
 	if err != nil {
 		t.Fatal(err)
 	}

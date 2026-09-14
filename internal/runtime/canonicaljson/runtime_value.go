@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"unicode/utf8"
 )
 
@@ -33,7 +34,13 @@ func cloneRuntimeValue(value any, seen map[visit]struct{}) (any, error) {
 		seen[key] = struct{}{}
 		defer delete(seen, key)
 		out := make(map[string]any, len(typed))
-		for name, item := range typed {
+		keys := make([]string, 0, len(typed))
+		for name := range typed {
+			keys = append(keys, name)
+		}
+		sort.Strings(keys)
+		for _, name := range keys {
+			item := typed[name]
 			if !utf8.ValidString(name) {
 				return nil, admissionErrorf("JSON object key is not valid UTF-8")
 			}

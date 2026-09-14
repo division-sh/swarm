@@ -875,43 +875,8 @@ func projectCELValue(path string, value any) (any, error) {
 			out[key] = projected
 		}
 		return out, nil
-	case json.Number:
-		number, err := canonicaljson.NormalizeNumber(typed)
-		if err != nil {
-			return nil, projectionNumberError(path, err)
-		}
-		if integer, err := typed.Int64(); err == nil {
-			return integer, nil
-		}
-		return number, nil
-	case int:
-		return projectCELInteger(path, int64(typed), typed)
-	case int8:
-		return projectCELInteger(path, int64(typed), typed)
-	case int16:
-		return projectCELInteger(path, int64(typed), typed)
-	case int32:
-		return projectCELInteger(path, int64(typed), typed)
-	case int64:
-		return projectCELInteger(path, typed, typed)
-	case uint:
-		return projectCELUnsignedInteger(path, uint64(typed), typed)
-	case uint8:
-		return projectCELUnsignedInteger(path, uint64(typed), typed)
-	case uint16:
-		return projectCELUnsignedInteger(path, uint64(typed), typed)
-	case uint32:
-		return projectCELUnsignedInteger(path, uint64(typed), typed)
-	case uint64:
-		return projectCELUnsignedInteger(path, typed, typed)
-	case float32:
-		number, err := canonicaljson.NormalizeNumber(typed)
-		if err != nil {
-			return nil, projectionNumberError(path, err)
-		}
-		return number, nil
-	case float64:
-		number, err := canonicaljson.NormalizeNumber(typed)
+	case json.Number, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		number, err := canonicaljson.NormalizeRuntimeNumber(typed)
 		if err != nil {
 			return nil, projectionNumberError(path, err)
 		}
@@ -965,20 +930,6 @@ func projectSemanticValue(path string, value semanticvalue.Value) (any, error) {
 	default:
 		return value.Interface(), nil
 	}
-}
-
-func projectCELInteger(path string, integer int64, original any) (any, error) {
-	if _, err := canonicaljson.NormalizeNumber(original); err != nil {
-		return nil, projectionNumberError(path, err)
-	}
-	return integer, nil
-}
-
-func projectCELUnsignedInteger(path string, integer uint64, original any) (any, error) {
-	if _, err := canonicaljson.NormalizeNumber(original); err != nil {
-		return nil, projectionNumberError(path, err)
-	}
-	return int64(integer), nil
 }
 
 func projectionNumberError(path string, err error) error {

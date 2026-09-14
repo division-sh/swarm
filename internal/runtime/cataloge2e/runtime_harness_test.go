@@ -862,6 +862,9 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	items := make([]publishItem, 0, len(steps))
 	for _, step := range steps {
 		payload := cloneStringAnyMap(step.Payload)
+		if payload == nil {
+			payload = map[string]any{}
+		}
 		targetRoute, hasTarget := step.Target.route()
 		if !hasTarget && step.Target != (catalogTriggerTarget{}) {
 			h.t.Fatalf("concurrent trigger %s requires a complete target owner", step.Event)
@@ -966,6 +969,9 @@ func (h *runtimeHarness) publishRuntimeEventResultForStep(step catalogTriggerSte
 func (h *runtimeHarness) publishRuntimeEventResultWithIdentity(eventType, sourceAgent string, payload map[string]any, eventID string, createdAt time.Time, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) error {
 	h.t.Helper()
 	payload = cloneStringAnyMap(payload)
+	if payload == nil {
+		payload = map[string]any{}
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -1498,7 +1504,7 @@ func triggerPayloadEntityID(payload map[string]any) string {
 }
 
 func cloneStringAnyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
+	if in == nil {
 		return nil
 	}
 	out := make(map[string]any, len(in))

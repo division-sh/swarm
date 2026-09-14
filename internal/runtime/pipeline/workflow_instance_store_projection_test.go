@@ -61,7 +61,7 @@ func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
 		"integer": runtimecontracts.CatalogTypeInteger, "decimal": runtimecontracts.CatalogTypeNumber, "exponent": runtimecontracts.CatalogTypeNumber,
 	})
 	matched, err := newWorkflowExpressionEvaluator().EvalBoolWithOptions(
-		"entity.integer + 1 == 76 && entity.decimal + 1.0 == 76.0 && entity.exponent + 1.0 == 76.0",
+		"entity.integer + 1 == 76 && double(entity.decimal) + 1.0 == 76.0 && double(entity.exponent) + 1.0 == 76.0",
 		workflowExpressionContext{Entity: instance.Fields}, workflowexpr.ValueExpressionOptions{EntityType: &entityType},
 	)
 	if err != nil || !matched {

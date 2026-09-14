@@ -30,6 +30,11 @@ func TestJSONDomainRefinementsAndInstanceIdentity(t *testing.T) {
 	if _, err := validateTemplateInstanceField("child", field, primary); err == nil {
 		t.Fatal("JSON accepted as scalar instance identity")
 	}
+	for _, ref := range []string{"json", "map[text]json", "list<json>", "map[text]list<json>"} {
+		if err := singletonCoordinatorValidateTypeRef(primary.Types, ref); err != nil {
+			t.Fatalf("contained JSON value %s rejected: %v", ref, err)
+		}
+	}
 }
 
 func floatPointerForJSONTest(v float64) *float64 { return &v }

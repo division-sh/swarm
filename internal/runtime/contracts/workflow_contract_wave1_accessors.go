@@ -181,6 +181,7 @@ func singletonCoordinatorValidateTypeRefSeen(types TypeCatalogDocument, typeRef 
 		templateInstanceIsIntegerType(types, typeRef) ||
 		templateInstanceIsNumericType(types, typeRef) ||
 		templateInstanceIsBooleanType(types, typeRef) ||
+		templateInstanceIsJSONValueType(types, typeRef) ||
 		templateInstanceIsJSONObjectType(types, typeRef) ||
 		templateInstanceIsJSONArrayType(types, typeRef) ||
 		templateInstanceIsTimestampType(types, typeRef) ||
@@ -268,7 +269,7 @@ func validateTemplateInstanceField(flowID string, field TemplateInstanceField, p
 
 func templateInstanceFieldLeafKind(primary PrimaryEntityContract, typeRef string) string {
 	switch {
-	case strings.EqualFold(templateInstanceTypeName(primary.Types, typeRef), "json"):
+	case templateInstanceIsJSONValueType(primary.Types, typeRef):
 		return "json"
 	case templateInstanceIsTextType(typeRef):
 		return "scalar"
@@ -335,6 +336,10 @@ func templateInstanceIsBooleanType(types TypeCatalogDocument, typeRef string) bo
 
 func templateInstanceIsJSONObjectType(types TypeCatalogDocument, typeRef string) bool {
 	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "object")
+}
+
+func templateInstanceIsJSONValueType(types TypeCatalogDocument, typeRef string) bool {
+	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "json")
 }
 
 func templateInstanceIsJSONArrayType(types TypeCatalogDocument, typeRef string) bool {

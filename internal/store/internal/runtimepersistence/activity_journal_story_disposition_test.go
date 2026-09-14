@@ -26,6 +26,36 @@ type activityStoryJournal interface {
 	ClaimActivityAttemptForLoopGeneration(context.Context, runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error)
 }
 
+func TestActivityJournalPreservesExecutionNumberKindsBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			for _, operation := range []string{"complete", "uncertain"} {
+				t.Run(operation, func(t *testing.T) {
+					record := seedActivityStoryAttempt(t, fixture, executionmode.Live, "started", false)
+					request := activityStoryRequest(t, record, operation)
+					want := map[string]any{"integer": int64(75), "double": float64(75), "fraction": 7.5, "nested": []any{int64(8), float64(8)}}
+					request.ResultPayload = want
+					got, _, err := activityStoryOuter(fixture, operation, request)
+					if err != nil || !reflect.DeepEqual(got.ResultPayload, want) {
+						t.Fatalf("committed result kinds = %#v, err=%v", got.ResultPayload, err)
+					}
+					journal := fixture.store.(activityStoryJournal)
+					for retry := 0; retry < 2; retry++ {
+						got, found, err := journal.LoadActivityAttempt(context.Background(), record.RequestEventID)
+						if err != nil || !found || !reflect.DeepEqual(got.ResultPayload, want) {
+							t.Fatalf("reloaded result kinds = %#v, found=%v err=%v", got.ResultPayload, found, err)
+						}
+						if _, _, err := activityStoryOuter(fixture, operation, request); err != nil {
+							t.Fatal(err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
 type activityStorySpy struct {
 	drafts []authoractivity.Draft
 	err    error

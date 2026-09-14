@@ -1805,7 +1805,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				want       any
 			}{
 				{"item.score + entity.integer + 1", int64(77)},
-				{"double(item.score) + entity.decimal", float64(76)},
+				{"double(item.score) + double(entity.decimal)", float64(76)},
 			} {
 				got, err := workflowexpr.EvalValueExpressionWithOptions(proof.expression,
 					workflowexpr.ValueContext{Entity: intent.Request.Capsule.StateFields, FanOut: map[string]any{"item": input.Items[0]}},

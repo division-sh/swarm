@@ -156,7 +156,7 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	payload, err := canonicaljson.Bytes(record.ResultPayload)
+	payload, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("marshal activity attempt result payload: %w", err)
 	}
@@ -225,7 +225,7 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	payload, err := canonicaljson.Bytes(record.ResultPayload)
+	payload, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("marshal activity attempt uncertain payload: %w", err)
 	}
@@ -479,7 +479,17 @@ func decodePayload(raw any) (map[string]any, error) {
 	if err := canonicaljson.DecodeInto(bytes, &out); err != nil {
 		return nil, fmt.Errorf("decode activity attempt result_payload: %w", err)
 	}
-	return out, nil
+	if out == nil {
+		return nil, nil
+	}
+	if err := canonicaljson.DecodePreservingNumberLexemes(bytes, &out); err != nil {
+		return nil, fmt.Errorf("decode activity attempt result_payload: %w", err)
+	}
+	projected, err := canonicaljson.CloneRuntimeValue(out)
+	if err != nil {
+		return nil, fmt.Errorf("project activity attempt result_payload: %w", err)
+	}
+	return projected.(map[string]any), nil
 }
 
 func decodeTime(raw any) (time.Time, bool, error) {

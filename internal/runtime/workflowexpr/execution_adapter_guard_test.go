@@ -63,7 +63,7 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 	root := filepath.Clean(filepath.Join(workflowProjectionRuntimeRoot(t), "..", ".."))
 	pkgs, err := packages.Load(&packages.Config{Dir: root, Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
-	}, "./internal/runtime", "./internal/runtime/engine", "./internal/runtime/workflowexpr", "./internal/runtime/entityruntime")
+	}, "./internal/runtime", "./internal/runtime/engine", "./internal/runtime/workflowexpr", "./internal/runtime/entityruntime", "./internal/runtime/pipeline", "./internal/store/internal/backend/activityjournal")
 	if err != nil || packages.PrintErrors(pkgs) != 0 {
 		t.Fatalf("execution adapter guard requires compiler-resolved packages: %v", err)
 	}
@@ -71,13 +71,16 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 	var findings []string
 	seen := map[string]bool{}
 	required := map[string][]string{
-		base + "workflowexpr.compileValueExpression":                          {base + "workflowexpr.validateWorkflowNumericEvidence", base + "workflowexpr.validateWorkflowResultType"},
-		base + "workflowexpr.EvalValueResultWithOptions":                      {base + "workflowexpr.workflowProgram"},
-		"(*" + base + "workflowexpr.StructuralPredicateEnv).PredicateProgram": {base + "workflowexpr.workflowProgram"},
-		base + "workflowexpr.workflowProgram":                                 {base + "workflowexpr.validateWorkflowNumericEvidence"},
-		base + "entityruntime.normalizeValueForType":                          {base + "canonicaljson.NormalizeRuntimeNumber", base + "entityruntime.normalizeJSONFieldValue"},
-		base + "entityruntime.normalizeJSONFieldValue":                        {base + "canonicaljson.CloneRuntimeValue"},
-		base + "entityruntime.normalizePartialObjectValue":                    {base + "canonicaljson.CloneRuntimeValue"},
+		base + "workflowexpr.compileValueExpression":                                                 {base + "workflowexpr.validateWorkflowNumericEvidence", base + "workflowexpr.validateWorkflowResultType"},
+		base + "workflowexpr.EvalValueResultWithOptions":                                             {base + "workflowexpr.workflowProgram"},
+		"(*" + base + "workflowexpr.StructuralPredicateEnv).PredicateProgram":                        {base + "workflowexpr.workflowProgram"},
+		base + "workflowexpr.workflowProgram":                                                        {base + "workflowexpr.validateWorkflowNumericEvidence"},
+		base + "workflowexpr.projectCELValue":                                                        {base + "canonicaljson.NormalizeRuntimeNumber"},
+		base + "entityruntime.normalizeValueForType":                                                 {base + "canonicaljson.NormalizeRuntimeNumber", base + "entityruntime.normalizeJSONFieldValue"},
+		base + "entityruntime.normalizeJSONFieldValue":                                               {base + "canonicaljson.CloneRuntimeValue"},
+		base + "entityruntime.normalizePartialObjectValue":                                           {base + "canonicaljson.CloneRuntimeValue"},
+		"(" + base + "pipeline.pipelineActivityDispatcher).publishActivityResultWithID":              {base + "canonicaljson.CloneRuntimeValue", base + "canonicaljson.MarshalPreservingNumberKinds"},
+		"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal.decodePayload": {base + "canonicaljson.DecodeInto", base + "canonicaljson.DecodePreservingNumberLexemes", base + "canonicaljson.CloneRuntimeValue"},
 	}
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Syntax {
