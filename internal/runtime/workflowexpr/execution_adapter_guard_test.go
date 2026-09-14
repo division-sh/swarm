@@ -28,6 +28,10 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 		"engine/fan_out_evaluator.go":        {{"e.bindFrameExpressionSchemas(frame)", ""}},
 		"pipeline/activity_engine.go":        {{"raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)", "_, _ = canonicaljson.FromGo(payload)\nraw, err := canonicaljson.MarshalPreservingNumberKinds(payload)"}},
 		"workflowexpr/numeric_expression.go": {},
+		"../providerconnectors/mock_response_plan.go": {
+			{"value, err = canonicaljson.FromGo(response)", "raw, encodeErr := json.Marshal(response)\nif encodeErr != nil { return nil, encodeErr }; value, err = canonicaljson.Decode(raw)"},
+			{"return workflowexpr.ProjectSemanticValue(r.value)", "raw, err := canonicaljson.Encode(r.value); if err != nil { return nil, err }; var value any; err = json.Unmarshal(raw, &value); return value, err"},
+		},
 	} {
 		path := filepath.Join(root, relative)
 		raw, err := os.ReadFile(path)
@@ -49,10 +53,13 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 		if relative == "workflowexpr/numeric_expression.go" {
 			source += "\nfunc hostileNumericPlanner(arbitrary *cel.Env, checked *cel.Ast) (cel.Program, error) { return arbitrary.Program(checked) }\n"
 		}
+		if relative == "../providerconnectors/mock_response_plan.go" {
+			source += "\nfunc hostileMockDecoder(arbitrary AdmittedMockResponse) (any, error) { raw, err := canonicaljson.Encode(arbitrary.value); if err != nil { return nil, err }; var value any; err = json.Unmarshal(raw, &value); return value, err }\n"
+		}
 		overlay[path] = []byte(source)
 	}
 	findings := strings.Join(executionAdapterFindings(t, overlay), "\n")
-	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor", "hostileNumericPlanner bypasses checked numeric planning", "activity result writer reinterprets execution kinds as semantic DTOs"} {
+	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor", "hostileNumericPlanner bypasses checked numeric planning", "activity result writer reinterprets execution kinds as semantic DTOs", "NewMockResponsePlan missing numeric/JSON owner", "Materialize competing mock codec", "hostileMockDecoder competing mock codec"} {
 		if !strings.Contains(findings, want) {
 			t.Fatalf("missing %q: %s", want, findings)
 		}
@@ -64,14 +71,18 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 	root := filepath.Clean(filepath.Join(workflowProjectionRuntimeRoot(t), "..", ".."))
 	pkgs, err := packages.Load(&packages.Config{Dir: root, Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
-	}, "./internal/runtime", "./internal/runtime/engine", "./internal/runtime/workflowexpr", "./internal/runtime/entityruntime", "./internal/runtime/pipeline", "./internal/store/internal/backend/activityjournal")
+	}, "./internal/runtime", "./internal/runtime/engine", "./internal/runtime/workflowexpr", "./internal/runtime/entityruntime", "./internal/runtime/pipeline", "./internal/store/internal/backend/activityjournal", "./internal/providerconnectors")
 	if err != nil || packages.PrintErrors(pkgs) != 0 {
 		t.Fatalf("execution adapter guard requires compiler-resolved packages: %v", err)
 	}
 	const base = "github.com/division-sh/swarm/internal/runtime/"
+	const mock = "github.com/division-sh/swarm/internal/providerconnectors"
 	var findings []string
 	seen := map[string]bool{}
 	required := map[string][]string{
+		mock + ".NewMockResponsePlan":                                                                {base + "canonicaljson.Decode", base + "canonicaljson.FromGo"},
+		"(*" + mock + ".MockResponsePlan).Admit":                                                     {base + "workflowexpr.ProjectSemanticValue"},
+		"(" + mock + ".AdmittedMockResponse).Materialize":                                            {base + "workflowexpr.ProjectSemanticValue"},
 		base + "workflowexpr.compileValueExpression":                                                 {base + "workflowexpr.validateWorkflowNumericEvidence", base + "workflowexpr.validateWorkflowResultType"},
 		base + "workflowexpr.EvalValueResultWithOptions":                                             {base + "workflowexpr.workflowProgram"},
 		"(*" + base + "workflowexpr.StructuralPredicateEnv).PredicateProgram":                        {base + "workflowexpr.workflowProgram"},
@@ -99,6 +110,21 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 					seen[fn.Name.Name] = true
 				}
 				calls := map[string]bool{}
+				mockConsumer := owner == mock+".NewMockResponsePlan"
+				if function, ok := pkg.TypesInfo.Defs[fn.Name].(*types.Func); ok {
+					if signature, ok := function.Type().(*types.Signature); ok {
+						for _, fields := range []*types.Tuple{signature.Params(), signature.Results()} {
+							for i := 0; i < fields.Len(); i++ {
+								typ := strings.TrimPrefix(fields.At(i).Type().String(), "*")
+								mockConsumer = mockConsumer || typ == mock+".AdmittedMockResponse" || typ == mock+".MockResponsePlan"
+							}
+						}
+						if receiver := signature.Recv(); receiver != nil {
+							typ := strings.TrimPrefix(receiver.Type().String(), "*")
+							mockConsumer = mockConsumer || typ == mock+".AdmittedMockResponse" || typ == mock+".MockResponsePlan"
+						}
+					}
+				}
 				var strictInput types.Object
 				ast.Inspect(fn.Body, func(n ast.Node) bool {
 					if literal, ok := n.(*ast.CompositeLit); ok {
@@ -142,6 +168,9 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 						return true
 					}
 					calls[callee.FullName()] = true
+					if mockConsumer && callee.Pkg().Path() == "encoding/json" {
+						findings = append(findings, fn.Name.Name+" competing mock codec")
+					}
 					if owner == "("+base+"pipeline.pipelineActivityDispatcher).publishActivityResultWithID" && callee.Pkg().Path() == base+"canonicaljson" &&
 						(callee.Name() == "FromGo" || callee.Name() == "Bytes" || callee.Name() == "ValueInto" || callee.Name() == "DecodeInto") {
 						findings = append(findings, "activity result writer reinterprets execution kinds as semantic DTOs")

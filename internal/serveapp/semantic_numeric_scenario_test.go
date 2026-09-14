@@ -163,6 +163,11 @@ collector:
 
 func startSemanticNumericLiveRuntime(t *testing.T, backend servedparity.Backend, root string) (servedControlProofRuntime, func() servedControlProofRuntime) {
 	t.Helper()
+	return startSemanticNumericRuntime(t, backend, root, false)
+}
+
+func startSemanticNumericRuntime(t *testing.T, backend servedparity.Backend, root string, mock bool) (servedControlProofRuntime, func() servedControlProofRuntime) {
+	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	var db *sql.DB
@@ -179,8 +184,15 @@ func startSemanticNumericLiveRuntime(t *testing.T, backend servedparity.Backend,
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, dialect, filepath.Join(t.TempDir(), "numeric.db"))
 	}
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+	retainedRoot := t.TempDir()
 	start := func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
-		process := startServeRuntimeTestProcess(t, opts)
+		var process *serveRuntimeTestProcess
+		if mock {
+			t.Log("proof_surface=H retained MockOnly composition; not public serve or private-test lifetime")
+			process = startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
+		} else {
+			process = startServeRuntimeTestProcess(t, opts)
+		}
 		process.waitForReadyLine()
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 		return process, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}

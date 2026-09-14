@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -74,10 +75,10 @@ func OverlayMockResponsePlan(base *MockResponsePlan, source semanticview.Source,
 	if source == nil {
 		return nil, fmt.Errorf("scenario mock response overlay requires the effective semantic source")
 	}
-	merged := map[string]json.RawMessage{}
+	merged := map[string]semanticvalue.Value{}
 	if base != nil {
 		for toolID, response := range base.responses {
-			merged[toolID] = append(json.RawMessage(nil), response...)
+			merged[toolID] = response
 		}
 	}
 	tools := source.ToolEntries()
@@ -100,7 +101,7 @@ func OverlayMockResponsePlan(base *MockResponsePlan, source semanticview.Source,
 		if _, err := candidate.Admit(response.ToolID, tool); err != nil {
 			return nil, fmt.Errorf("scenario mock response tool %q: %w", response.ToolID, err)
 		}
-		merged[response.ToolID] = append(json.RawMessage(nil), response.Response...)
+		merged[response.ToolID] = candidate.responses[response.ToolID]
 	}
 	return NewMockResponsePlan(merged)
 }

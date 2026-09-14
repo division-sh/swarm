@@ -5,22 +5,25 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 // MockResponsePlan is the immutable exact-tool response catalog compiled from
 // one effective semantic source. It is not an authored connector model.
 type MockResponsePlan struct {
-	responses map[string]json.RawMessage
+	responses map[string]semanticvalue.Value
 }
 
 type AdmittedMockResponse struct {
 	toolID string
-	raw    json.RawMessage
+	value  semanticvalue.Value
 }
 
 func NewMockResponsePlan[T any](responses map[string]T) (*MockResponsePlan, error) {
-	plan := &MockResponsePlan{responses: make(map[string]json.RawMessage, len(responses))}
+	plan := &MockResponsePlan{responses: make(map[string]semanticvalue.Value, len(responses))}
 	for rawID, response := range responses {
 		toolID := strings.TrimSpace(rawID)
 		if toolID == "" {
@@ -29,11 +32,17 @@ func NewMockResponsePlan[T any](responses map[string]T) (*MockResponsePlan, erro
 		if toolID != rawID {
 			return nil, fmt.Errorf("mock connector response tool id %q is not canonical", rawID)
 		}
-		raw, err := json.Marshal(response)
-		if err != nil {
-			return nil, fmt.Errorf("encode mock connector response for tool %q: %w", toolID, err)
+		var value semanticvalue.Value
+		var err error
+		if raw, ok := any(response).(json.RawMessage); ok {
+			value, err = canonicaljson.Decode(raw)
+		} else {
+			value, err = canonicaljson.FromGo(response)
 		}
-		plan.responses[toolID] = append(json.RawMessage(nil), raw...)
+		if err != nil {
+			return nil, fmt.Errorf("admit mock connector response for tool %q: %w", toolID, err)
+		}
+		plan.responses[toolID] = value
 	}
 	return plan, nil
 }
@@ -52,27 +61,23 @@ func (p *MockResponsePlan) Admit(toolID string, tool runtimecontracts.ToolSchema
 	if p == nil {
 		return AdmittedMockResponse{}, fmt.Errorf("mock connector response for tool %q is not configured; provide an exact deterministic responder", toolID)
 	}
-	raw, ok := p.responses[toolID]
+	value, ok := p.responses[toolID]
 	if !ok {
 		return AdmittedMockResponse{}, fmt.Errorf("mock connector response for tool %q is not configured; provide an exact deterministic responder", toolID)
 	}
-	var response any
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return AdmittedMockResponse{}, fmt.Errorf("decode mock connector response for tool %q: %w", toolID, err)
+	response, err := workflowexpr.ProjectSemanticValue(value)
+	if err != nil {
+		return AdmittedMockResponse{}, fmt.Errorf("project mock connector response for tool %q: %w", toolID, err)
 	}
 	if err := tool.OutputSchema().Validate(response); err != nil {
 		return AdmittedMockResponse{}, fmt.Errorf("mock connector response for tool %q does not match output_schema: %w", toolID, err)
 	}
-	return AdmittedMockResponse{toolID: toolID, raw: append(json.RawMessage(nil), raw...)}, nil
+	return AdmittedMockResponse{toolID: toolID, value: value}, nil
 }
 
 func (r AdmittedMockResponse) Materialize() (any, error) {
-	if strings.TrimSpace(r.toolID) == "" || len(r.raw) == 0 {
+	if strings.TrimSpace(r.toolID) == "" {
 		return nil, fmt.Errorf("mock connector response was not admitted")
 	}
-	var response any
-	if err := json.Unmarshal(r.raw, &response); err != nil {
-		return nil, fmt.Errorf("materialize mock connector response for tool %q: %w", r.toolID, err)
-	}
-	return response, nil
+	return workflowexpr.ProjectSemanticValue(r.value)
 }

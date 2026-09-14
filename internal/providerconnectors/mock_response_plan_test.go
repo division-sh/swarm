@@ -2,11 +2,69 @@ package providerconnectors
 
 import (
 	"encoding/json"
+	"math"
+	"reflect"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
+
+func TestMockResponseConstructorRejectsLossySources(t *testing.T) {
+	cycle := map[string]any{}
+	cycle["cycle"] = cycle
+	for name, source := range map[string]any{
+		"native invalid string": map[string]any{"text": string([]byte{0xff})},
+		"native invalid key":    map[string]any{string([]byte{0xff}): true},
+		"nested invalid string": []any{map[string]any{"text": string([]byte{0xff})}},
+		"raw invalid UTF8":      json.RawMessage{'"', 0xff, '"'},
+		"duplicate key":         json.RawMessage(`{"a":1,"\u0061":2}`),
+		"nested duplicate":      json.RawMessage(`[{"a":1,"a":2}]`),
+		"unsafe integer":        json.RawMessage(`9007199254740992`),
+		"native unsafe integer": int64(9007199254740992),
+		"negative zero":         json.RawMessage(`-0`),
+		"native negative zero":  math.Copysign(0, -1),
+		"infinity":              math.Inf(1),
+		"underflow":             json.RawMessage(`1e-999`),
+		"trailing value":        json.RawMessage(`{} {}`),
+		"cycle":                 cycle,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if plan, err := NewMockResponsePlan(map[string]any{"provider.write": source}); err == nil || plan != nil {
+				t.Fatalf("lossy source admitted: plan=%v err=%v", plan, err)
+			}
+		})
+	}
+}
+
+func TestMockResponseSemanticIsolationAndNativeExecutionContrast(t *testing.T) {
+	source := map[string]any{"rows": []any{map[string]any{"count": float64(8), "fraction": 8.25, "optional": nil}}}
+	plan, err := NewMockResponsePlan(map[string]any{"provider.write": source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source["rows"].([]any)[0].(map[string]any)["count"] = 99
+	admitted, err := plan.Admit("provider.write", mockResponseTool(Category, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"rows": []any{map[string]any{"count": int64(8), "fraction": 8.25, "optional": nil}}}
+	for i := 0; i < 3; i++ {
+		got, err := admitted.Materialize()
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("materialization %d: %#v err=%v", i, got, err)
+		}
+		got.(map[string]any)["rows"].([]any)[0].(map[string]any)["count"] = -1
+	}
+	native, err := workflowexpr.ProjectCELValue(float64(8))
+	if err != nil || native != float64(8) {
+		t.Fatalf("native execution double lost: %T(%v) err=%v", native, native, err)
+	}
+	if _, err := (AdmittedMockResponse{}).Materialize(); err == nil {
+		t.Fatal("zero response admitted")
+	}
+}
 
 func TestMockResponseMaterializationUsesSemanticNumericExecution(t *testing.T) {
 	tool := mockResponseTool(Category, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject,
@@ -31,6 +89,24 @@ func TestMockResponseMaterializationUsesSemanticNumericExecution(t *testing.T) {
 				t.Fatalf("semantic mock count = %T(%v), want int64(8)", got, got)
 			}
 		})
+	}
+}
+
+func TestMockResponseNullFollowsOutputSchema(t *testing.T) {
+	plan, err := NewMockResponsePlan(map[string]any{"provider.write": nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := plan.Admit("provider.write", mockResponseTool(Category, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaNull)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := admitted.Materialize()
+	if err != nil || value != nil {
+		t.Fatalf("null materialization: %v %v", value, err)
+	}
+	if _, err := plan.Admit("provider.write", mockResponseTool(Category, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))); err == nil {
+		t.Fatal("null admitted for object schema")
 	}
 }
 

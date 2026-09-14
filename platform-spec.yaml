@@ -280,7 +280,12 @@ contract_formats:
       Setup, scenario materialization, resource rows, activity/module results and
       semantic decision/schedule payloads cross this owner before execution.
       Activity HTTP JSON responses cross semantic admission at the provider
-      boundary. Already projected activity results and terminal journal payloads
+      boundary. Compiled and scenario-overlaid mock connector responses cross the
+      same semantic admission before output-schema validation: raw JSON is checked
+      before decoding loses evidence, and native source values before encoding can
+      replace invalid strings. The exact-tool plan retains immutable semantic values;
+      each admitted materialization projects an isolated workflow value, not a second
+      generic JSON decode. Already projected activity results and terminal journal payloads
       preserve their execution kinds through publication, completion, uncertainty,
       readback and duplicate replay; they do not re-enter semantic DTO projection.
       Generic semantic DTO projection does not establish execution intent;

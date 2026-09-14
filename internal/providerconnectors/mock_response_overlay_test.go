@@ -74,3 +74,48 @@ func (emptyMockResponseSource) SemanticCapabilities() semanticview.Capabilities 
 func (emptyMockResponseSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	return map[string]runtimecontracts.ToolSchemaEntry{}
 }
+
+func TestOverlayMockResponsePlanPreservesNumericIsolationAndRejectsOriginalCorruption(t *testing.T) {
+	tool := mockResponseTool(Category, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject,
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"count": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger),
+		}), runtimecontracts.ToolSchemaRequired("count")))
+	source, err := semanticview.WithRuntimeTools(emptyMockResponseSource{}, map[string]runtimecontracts.ToolSchemaEntry{"provider.send": tool})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := tool.OutputSchema().CanonicalHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := NewMockResponsePlan(map[string]any{"provider.send": map[string]any{"count": 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{`{"count":8}`, `{"count":8.0}`, `{"count":8e0}`} {
+		bytes := json.RawMessage(raw)
+		plan, err := OverlayMockResponsePlan(base, source, []scenarioexecution.ConnectorResponse{{ToolID: "provider.send", OutputSchemaDigest: digest, Response: bytes}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bytes[0] = '!'
+		for _, expected := range []struct {
+			plan  *MockResponsePlan
+			count int64
+		}{{plan, 8}, {base, 3}} {
+			admitted, err := expected.plan.Admit("provider.send", tool)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := admitted.Materialize()
+			if err != nil || got.(map[string]any)["count"] != expected.count {
+				t.Fatalf("overlay/base = %#v err=%v", got, err)
+			}
+		}
+	}
+	for _, raw := range []string{`{"count":8,"count":9}`, `{"count":9007199254740992}`, `{"count":8.5}`, `{"count":null}`, `{"count":"8"}`, "{\"count\":8,\"text\":\"\xff\"}"} {
+		if _, err := OverlayMockResponsePlan(base, source, []scenarioexecution.ConnectorResponse{{ToolID: "provider.send", OutputSchemaDigest: digest, Response: json.RawMessage(raw)}}); err == nil {
+			t.Fatalf("invalid overlay admitted: %q", raw)
+		}
+	}
+}
