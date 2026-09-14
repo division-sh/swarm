@@ -30,6 +30,9 @@ PRIMARY KEY(run_id,family,fact_key,revision))`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`CREATE INDEX idx_run_fork_fact_revision_snapshot ON run_fork_fact_revisions(run_id, revision, family, fact_key)`); err != nil {
+		t.Fatal(err)
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +112,7 @@ func TestLatestFactsQueryPreservesAllFamiliesAndTombstones(t *testing.T) {
 			}
 			for _, run := range []string{"selected", "foreign", "absent"} {
 				want := originalLatestFacts(t, tx, run)
-				got, err := adapter.latestFacts(context.Background(), run)
+				got, err := adapter.latestFacts(context.Background(), run, AllFamilies())
 				if err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("%s: got=%v want=%v err=%v", run, got, want, err)
 				}
@@ -132,10 +135,68 @@ func TestLatestFactsQueryPreservesAllFamiliesAndTombstones(t *testing.T) {
 					}
 				}
 			}
+			complete := originalLatestFacts(t, tx, "selected")
+			for _, family := range AllFamilies() {
+				got, err := adapter.latestFacts(context.Background(), "selected", []Family{family})
+				want := ledgerFactsByFamily{family: complete[family]}
+				if err != nil || !reflect.DeepEqual(got, want) {
+					t.Fatalf("declared family %s: got=%v want=%v err=%v", family, got, want, err)
+				}
+			}
+			if _, err := adapter.latestFacts(context.Background(), "selected", nil); err == nil {
+				t.Fatal("missing family declaration accepted")
+			}
+			if _, err := adapter.latestFacts(context.Background(), "selected", []Family{Family("unknown")}); err == nil {
+				t.Fatal("unknown requested family accepted")
+			}
+			// CASE projects away only unconsumed body bytes, not their row metadata.
+			query, args, _, err := latestFactReadQuery("selected", []Family{FamilyEvents})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows, err := tx.Query(query, args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadataRows, bodies := 0, 0
+			for rows.Next() {
+				var family Family
+				var key string
+				var raw []byte
+				var present bool
+				if err := rows.Scan(&family, &key, &raw, &present); err != nil {
+					t.Fatal(err)
+				}
+				metadataRows++
+				if raw != nil {
+					bodies++
+					if family != FamilyEvents {
+						t.Fatal("transferred unused body")
+					}
+				}
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			rows.Close()
+			if metadataRows != len(AllFamilies())*4 || bodies != 4 {
+				t.Fatalf("metadata=%d bodies=%d", metadataRows, bodies)
+			}
+			if backend == "sqlite" {
+				if _, err := tx.Exec(`UPDATE run_fork_fact_revisions SET present='corrupt' WHERE run_id='selected' AND family='timers' AND revision=5`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := adapter.latestFacts(context.Background(), "selected", []Family{FamilyEvents}); err == nil {
+					t.Fatal("unrequested family presence corruption escaped")
+				}
+				if _, err := tx.Exec(`UPDATE run_fork_fact_revisions SET present=true WHERE run_id='selected' AND family='timers' AND revision=5`); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if _, err := tx.Exec(`INSERT INTO run_fork_fact_revisions VALUES ('selected','unknown','hostile',9,'{}',false)`); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := adapter.latestFacts(context.Background(), "selected"); err == nil || !strings.Contains(err.Error(), "unsupported") {
+			if _, err := adapter.latestFacts(context.Background(), "selected", []Family{FamilyEvents}); err == nil || !strings.Contains(err.Error(), "unsupported") {
 				t.Fatalf("unknown tombstoned family escaped validation: %v", err)
 			}
 		})
@@ -154,13 +215,16 @@ func BenchmarkLatestFactsSQLite(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer tx.Rollback()
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		facts, err := (&sqliteAdapter{tx}).latestFacts(context.Background(), "selected")
-		if err != nil || len(facts) != len(AllFamilies()) {
-			b.Fatalf("%v %d", err, len(facts))
-		}
+	for name, families := range map[string][]Family{"all": AllFamilies(), "one": {FamilyFanOutObligations}} {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				facts, err := (&sqliteAdapter{tx}).latestFacts(context.Background(), "selected", families)
+				if err != nil || len(facts) != len(families) {
+					b.Fatalf("%v %d", err, len(facts))
+				}
+			}
+		})
 	}
 }
 
@@ -171,7 +235,7 @@ func TestLatestFactsSQLiteQueryPlan(t *testing.T) {
 	}
 	defer db.Close()
 	revisionQueryFixture(t, db, 2, 3)
-	for name, query := range map[string]string{"original": originalLatestFactsQuery, "candidate": latestFactsQuery} {
+	for name, query := range map[string]string{"original": originalLatestFactsQuery, "candidate": fmt.Sprintf(latestFactsQuery, "r.fact")} {
 		rows, err := db.Query("EXPLAIN QUERY PLAN "+query, "selected")
 		if err != nil {
 			t.Fatal(err)
