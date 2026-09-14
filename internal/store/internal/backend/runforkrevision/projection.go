@@ -84,7 +84,7 @@ func loadCanonicalProjection(ctx context.Context, q queryer, runID string, famil
 				return nil, fmt.Errorf("validate %s projection: %w", family, err)
 			}
 		}
-		key, err := FactKey(family, encoded)
+		key, err := projectionFactKey(family, values)
 		if err != nil {
 			return nil, fmt.Errorf("key %s projection: %w", family, err)
 		}

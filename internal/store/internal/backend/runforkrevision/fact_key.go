@@ -16,9 +16,36 @@ import (
 // It validates key coordinates only; owning-run, revision, body semantics and
 // reference admission belong to the historical fact reader and family owners.
 func FactKey(family Family, raw []byte) (string, error) {
+	fields, err := factKeyFields(family)
+	if err != nil {
+		return "", err
+	}
 	if family == FamilyFanOutObligations {
 		return fanOutFactKey(raw)
 	}
+	field := fields[0]
+	body, err := decodeFactKeyFields(raw, field)
+	if err != nil {
+		return "", fmt.Errorf("decode %s fact key: %w", family, err)
+	}
+	var key string
+	if err := json.Unmarshal(body[field], &key); err != nil {
+		return "", fmt.Errorf("decode %s.%s fact key: %w", family, field, err)
+	}
+	if strings.TrimSpace(key) == "" {
+		return "", fmt.Errorf("%s fact key requires %s", family, field)
+	}
+	// reply_context_id is opaque TEXT; all other scalar primary identities
+	// are UUIDs. Validation must not rewrite their persisted key spelling.
+	if family != FamilyReplyContexts {
+		if _, err := uuid.Parse(strings.TrimSpace(key)); err != nil {
+			return "", fmt.Errorf("%s fact key requires UUID %s: %w", family, field, err)
+		}
+	}
+	return key, nil
+}
+
+func factKeyFields(family Family) ([]string, error) {
 	var field string
 	switch family {
 	case FamilyEvents, FamilyCommittedReplayScopes:
@@ -41,32 +68,41 @@ func FactKey(family Family, raw []byte) (string, error) {
 		field = "turn_id"
 	case FamilyReplyContexts:
 		field = "reply_context_id"
+	case FamilyFanOutObligations:
+		return []string{"fact_kind", "triggering_delivery_id", "flow_path", "declaration_family", "semantic_path", "ordinal"}, nil
 	default:
-		return "", fmt.Errorf("unsupported run fork revision fact family %q", family)
+		return nil, fmt.Errorf("unsupported run fork revision fact family %q", family)
 	}
-	body, err := decodeFactKeyFields(raw, field)
+	return []string{field}, nil
+}
+
+// The canonical writer already has a decoded, uniquely keyed projection. Do
+// not decode its entire serialized payload again just to admit key coordinates.
+// Include case aliases too so FactKey retains its exact-spelling rejection.
+func projectionFactKey(family Family, values map[string]any) (string, error) {
+	fields, err := factKeyFields(family)
 	if err != nil {
-		return "", fmt.Errorf("decode %s fact key: %w", family, err)
+		return "", err
 	}
-	var key string
-	if err := json.Unmarshal(body[field], &key); err != nil {
-		return "", fmt.Errorf("decode %s.%s fact key: %w", family, field, err)
-	}
-	if strings.TrimSpace(key) == "" {
-		return "", fmt.Errorf("%s fact key requires %s", family, field)
-	}
-	// reply_context_id is opaque TEXT; all other scalar primary identities
-	// are UUIDs. Validation must not rewrite their persisted key spelling.
-	if family != FamilyReplyContexts {
-		if _, err := uuid.Parse(strings.TrimSpace(key)); err != nil {
-			return "", fmt.Errorf("%s fact key requires UUID %s: %w", family, field, err)
+	coordinates := make(map[string]any, len(fields))
+	for name, value := range values {
+		for _, field := range fields {
+			if strings.EqualFold(name, field) {
+				coordinates[name] = value
+				break
+			}
 		}
 	}
-	return key, nil
+	raw, err := json.Marshal(coordinates)
+	if err != nil {
+		return "", err
+	}
+	return FactKey(family, raw)
 }
 
 func fanOutFactKey(raw []byte) (string, error) {
-	if _, err := decodeFactKeyFields(raw, "fact_kind", "triggering_delivery_id", "flow_path", "declaration_family", "semantic_path", "ordinal"); err != nil {
+	fields, _ := factKeyFields(FamilyFanOutObligations)
+	if _, err := decodeFactKeyFields(raw, fields...); err != nil {
 		return "", fmt.Errorf("decode fan-out fact key: %w", err)
 	}
 	var body struct {
