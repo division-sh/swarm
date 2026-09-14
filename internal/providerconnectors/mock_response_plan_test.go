@@ -1,11 +1,38 @@
 package providerconnectors
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
+
+func TestMockResponseMaterializationUsesSemanticNumericExecution(t *testing.T) {
+	tool := mockResponseTool(Category, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject,
+		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"count": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger),
+		}), runtimecontracts.ToolSchemaRequired("count")))
+	for _, spelling := range []string{"8", "8.0", "8e0"} {
+		t.Run(spelling, func(t *testing.T) {
+			plan, err := NewMockResponsePlan(map[string]json.RawMessage{"provider.write": json.RawMessage(`{"count":` + spelling + `}`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			admitted, err := plan.Admit("provider.write", tool)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err := admitted.Materialize()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := value.(map[string]any)["count"]; got != int64(8) {
+				t.Fatalf("semantic mock count = %T(%v), want int64(8)", got, got)
+			}
+		})
+	}
+}
 
 func TestMockResponsePlanAdmitsOnlyExactProviderConnectorResponses(t *testing.T) {
 	plan, err := NewMockResponsePlan(map[string]map[string]any{
