@@ -282,6 +282,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	backend string,
 	decisionObligation bool,
 	origin runtimerunlifecycle.RunOrigin,
+	originReaders ...func(completeEventDispatchStore) runtimebus.RunOriginReader,
 ) completeEventDispatchFixture {
 	t.Helper()
 	var selected completeEventDispatchStore
@@ -298,7 +299,11 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
-	bus, err := newScopedTestEventBus(selected)
+	opts := runtimebus.EventBusOptions{}
+	for _, reader := range originReaders {
+		opts.Durable.RunOrigins = reader(selected)
+	}
+	bus, err := newScopedTestEventBus(selected, opts)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
