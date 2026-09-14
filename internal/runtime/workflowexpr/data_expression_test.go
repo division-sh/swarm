@@ -210,7 +210,7 @@ func TestSchemaBoundPayloadOptionalSelectionEvaluatesOrdinaryMaps(t *testing.T) 
 	for _, test := range []struct {
 		name    string
 		payload map[string]any
-		want    int
+		want    int64
 	}{
 		{name: "absent", payload: map[string]any{}, want: 7},
 		{name: "present", payload: map[string]any{"score": 9}, want: 9},
@@ -288,7 +288,7 @@ func TestSchemaBoundOptionalResultRequiresCompatibleOptionalSink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluate present optional result: %v", err)
 	}
-	if !present.Present() || present.Value() != 7 {
+	if !present.Present() || present.Value() != int64(7) {
 		t.Fatalf("present result = (%#v, %t), want (7, true)", present.Value(), present.Present())
 	}
 }

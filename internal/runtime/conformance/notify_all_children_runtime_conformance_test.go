@@ -810,7 +810,7 @@ func assertNotifyAllChildrenFanOutRunStatus(t *testing.T, ctx context.Context, s
 		t.Fatalf("write API token: %v", err)
 	}
 	configFile := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(configFile, []byte("runtime:\n  execution_posture: live\n"), 0o600); err != nil {
+	if err := os.WriteFile(configFile, []byte("{}\n"), 0o600); err != nil {
 		t.Fatalf("write CLI runtime config: %v", err)
 	}
 

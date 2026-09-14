@@ -129,7 +129,7 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 	}
 	compiled, issues := env.Check(parsed)
 	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
+		return nil, workflowNumericCheckError(issues.Err())
 	}
 	if err := validateLoopAccesses(compiled, opts); err != nil {
 		return nil, err
@@ -147,6 +147,9 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 		return nil, err
 	}
 	if err := validateWorkflowOptionalReads(typeChecked, provider); err != nil {
+		return nil, err
+	}
+	if err := validateWorkflowNumericEvidence(typeChecked); err != nil {
 		return nil, err
 	}
 	if err := validateWorkflowResultType(typeChecked.OutputType(), provider, opts); err != nil {
@@ -294,7 +297,7 @@ func EvalValueResultWithOptions(expression string, ctx ValueContext, opts ValueE
 	if err != nil {
 		return ValueResult{}, err
 	}
-	program, err := env.Program(ast)
+	program, err := workflowProgram(env, ast)
 	if err != nil {
 		return ValueResult{}, err
 	}
@@ -1044,7 +1047,8 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 	if opts.AllowAccumulated {
 		variables = append(variables, cel.Variable("accumulated", cel.DynType))
 	}
-	base, err := cel.NewEnv(append(variables, cel.OptionalTypes())...)
+	variables = append(variables, workflowNumericEnvOptions()...)
+	base, err := newWorkflowExpressionEnv(append(variables, cel.OptionalTypes())...)
 	if err != nil {
 		return nil, err
 	}

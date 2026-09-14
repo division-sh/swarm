@@ -16,7 +16,8 @@ type StructuralPredicateEnv struct {
 }
 
 func NewEntityPredicateEnv(entity runtimecontracts.ResolvedCatalogType, extra ...cel.EnvOption) (*StructuralPredicateEnv, error) {
-	env, err := cel.NewEnv(append(extra, cel.OptionalTypes())...)
+	options := append([]cel.EnvOption{cel.OptionalTypes()}, workflowNumericEnvOptions()...)
+	env, err := newWorkflowExpressionEnv(append(options, extra...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +32,7 @@ func NewEntityPredicateEnv(entity runtimecontracts.ResolvedCatalogType, extra ..
 	// Bare aliases reuse the entity owner's field types, including its existing
 	// top-level nullable scalar convention; nested records remain exact.
 	node := provider.nodes[root.TypeName()]
-	options := []cel.EnvOption{cel.CustomTypeProvider(provider)}
+	options = []cel.EnvOption{cel.CustomTypeProvider(provider)}
 	if _, shadowsEnvelope := node.fields["fields"]; !shadowsEnvelope {
 		provider.rootTypes["fields"] = root
 		provider.rootIdentifiers["fields"] = struct{}{}
@@ -53,7 +54,7 @@ func NewEntityPredicateEnv(entity runtimecontracts.ResolvedCatalogType, extra ..
 func (e *StructuralPredicateEnv) CompilePredicate(expression string) (cel.Program, error) {
 	compiled, issues := e.Env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
-		return nil, issues.Err()
+		return nil, workflowNumericCheckError(issues.Err())
 	}
 	return e.PredicateProgram(compiled)
 }
@@ -70,5 +71,5 @@ func (e *StructuralPredicateEnv) PredicateProgram(compiled *cel.Ast) (cel.Progra
 	if err := validateWorkflowOptionalReads(compiled, e.provider); err != nil {
 		return nil, err
 	}
-	return e.Env.Program(compiled)
+	return workflowProgram(e.Env, compiled)
 }

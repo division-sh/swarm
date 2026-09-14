@@ -217,7 +217,9 @@ func schemaRefinementKind(types TypeCatalogDocument, typeRef string) string {
 		return "number"
 	case "array":
 		return "array"
-	case "object", "json", "jsonb":
+	case "json", "jsonb":
+		return "json"
+	case "object":
 		return "object"
 	case "boolean":
 		return "boolean"
@@ -263,7 +265,9 @@ func schemaRefinementComparableType(types TypeCatalogDocument, typeRef string) s
 		return "uuid"
 	case "array":
 		return "array"
-	case "object", "json", "jsonb":
+	case "json", "jsonb":
+		return "json"
+	case "object":
 		return "object"
 	default:
 		return ""

@@ -122,7 +122,7 @@ func (p *workflowStructuralTypeProvider) register(root, path string, resolved ru
 	case runtimecontracts.CatalogTypeInteger:
 		return cel.IntType, nil
 	case runtimecontracts.CatalogTypeNumber:
-		return cel.DoubleType, nil
+		return workflowNumericType(), nil
 	case runtimecontracts.CatalogTypeBoolean:
 		return cel.BoolType, nil
 	case runtimecontracts.CatalogTypeList:
@@ -169,7 +169,7 @@ func (p *workflowStructuralTypeProvider) register(root, path string, resolved ru
 			// Keep scalar types exact while allowing comparisons with materialized null.
 			if root == "entity" && path == "entity" {
 				switch field.Type.Kind {
-				case runtimecontracts.CatalogTypeText, runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeNumber, runtimecontracts.CatalogTypeBoolean:
+				case runtimecontracts.CatalogTypeText, runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeBoolean:
 					fieldType = cel.NullableType(fieldType)
 				}
 			}
@@ -196,6 +196,8 @@ func (p *workflowStructuralTypeProvider) resolvedType(value *cel.Type) (runtimec
 		return node.typeValue.Clone(), true
 	}
 	switch value.TypeName() {
+	case workflowNumericTypeName:
+		return runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeNumber}, true
 	case "string":
 		return runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}, true
 	case "int":
@@ -557,11 +559,14 @@ func validateWorkflowResultType(output *cel.Type, provider *workflowStructuralTy
 	}
 	// Separately governed untyped roots (for example computed values) retain
 	// their existing sink validation. Declared record roots are structural.
-	if actual == cel.DynType {
+	if actual == cel.DynType || opts.ResultType.Kind == runtimecontracts.CatalogTypeDynamic {
 		return nil
 	}
-	if structural, ok := provider.resolvedType(actual); ok && runtimecontracts.StructuralCatalogTypesEqual(structural, *opts.ResultType) {
-		return nil
+	if structural, ok := provider.resolvedType(actual); ok {
+		if runtimecontracts.StructuralCatalogTypeAssignable(structural, *opts.ResultType) {
+			return nil
+		}
+		return fmt.Errorf("workflow expression result %s is not assignable to %s", runtimecontracts.StructuralCatalogTypeSyntax(structural), runtimecontracts.StructuralCatalogTypeSyntax(*opts.ResultType))
 	}
 	expected, err := provider.register("result", "result", opts.ResultType.Clone())
 	if err != nil {

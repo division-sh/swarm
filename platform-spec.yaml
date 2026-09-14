@@ -305,6 +305,19 @@ contract_formats:
       exact recursive value path; unsafe exact integers teach authors to
       declare the field as string. This implemented scope excludes authored
       aggregate/reduce/scoring coercion tracked by #2046.
+      A declared numeric field denotes the closed int-or-double family, not a
+      promise that execution supplies a double. The checked expression owner
+      retains that evidence for payload, entity, item, join and nested/optional
+      collection reads. Stock int(...) and double(...) conversions dispatch on
+      the admitted carrier; direct reads preserve it. Operations requiring a
+      particular arithmetic kind require an explicit conversion if the declaration
+      does not establish that kind. There is no implicit mixed-kind arithmetic.
+      Numeric comparisons retain stock CEL execution semantics. A numeric family
+      cannot be erased into unrestricted dynamic typing to authorize string
+      operations or bypass typed-result admission. Typed-result admission consumes
+      the catalog assignment relation, including scalar integer-to-numeric
+      acceptance without rewriting the result; it does not recursively widen
+      collection or record elements.
   authoritative_yaml_source:
     canonical_owner: platform-spec.yaml#filesystem_source_model
     scope: All authored YAML is admitted once as exact bytes by AdmittedSourceArtifact; consumers use admitted provenance and never reopen host paths.
@@ -2341,6 +2354,32 @@ type_system:
       by member order; the retired sequence form and omitted/non-member defaults are contract-load errors rejected
       with teaching guidance (#1532).
     lists: Ordered collections of a declared element type.
+    opaque_json: |
+      The supported json field type is an opaque JSON value: string, boolean,
+      supported number, array or object. It does not establish a named-record
+      shape, an object merge capability, or a scalar template-instance key.
+      Separately governed object schemas remain object-only; this does not revive
+      retired authored jsonb or inline-object grammar. Required field-level null
+      remains rejected, and optional field omission/null admission stays with the
+      presence owner. Null nested inside opaque JSON arrays/objects is data.
+    numeric_family: |
+      numeric accepts the admitted integer and double execution kinds. Entity
+      initial values, materialization, normalized writes and readback preserve
+      those kinds rather than manufacturing doubles from integer inputs. Defaults
+      retain their existing policy. Scalar integer results may be assigned to
+      numeric destinations; numeric results require explicit conversion for an
+      integer destination. Lists, maps and named records retain exact structural
+      assignment, not recursive scalar widening.
+    runtime_json_values: |
+      Entity JSON normalization validates and isolates the complete supplied value
+      through canonical JSON admission without a generic semantic DTO roundtrip.
+      Invalid UTF-8, unsupported Go values, cycles, nonfinite and unsafe numbers
+      fail before mutation. Admitted integer/double kinds and nested nulls remain
+      intact. Set, append and update consume this same value owner. Merge requires
+      an actual object patch and object destination before mutation; a json
+      declaration alone is not evidence that either is an object. An existing {}
+      default does not narrow the declared value domain. equal_to requires the
+      same declared domain: opaque json and object are not interchangeable.
   schema_refinements:
     description: |
       Declared event payload fields, named-type fields, and entity fields

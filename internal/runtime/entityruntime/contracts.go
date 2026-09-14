@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -543,7 +544,7 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 		return false, nil
 	case isTimestampType(contract, typeRef), isUUIDType(contract, typeRef):
 		return nil, nil
-	case isJSONObjectType(contract, typeRef):
+	case isJSONValueType(contract, typeRef), isJSONObjectType(contract, typeRef):
 		return map[string]any{}, nil
 	case isJSONArrayType(contract, typeRef):
 		return []any{}, nil
@@ -647,29 +648,31 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 		floatValue, _ := runtimesharedjson.AsFloat64(value)
 		return int64(floatValue), nil
 	case isNumericType(contract, typeRef):
-		if !runtimesharedjson.IsNumeric(value) {
+		normalized, err := canonicaljson.NormalizeRuntimeNumber(value)
+		if err != nil {
 			return nil, fieldTypeError(fieldName, "must be numeric")
 		}
-		floatValue, _ := runtimesharedjson.AsFloat64(value)
-		return floatValue, nil
+		return normalized, nil
 	case isBooleanType(contract, typeRef):
 		boolean, ok := value.(bool)
 		if !ok {
 			return nil, fieldTypeError(fieldName, "must be boolean")
 		}
 		return boolean, nil
+	case isJSONValueType(contract, typeRef):
+		return normalizeJSONFieldValue(fieldName, value)
 	case isJSONObjectType(contract, typeRef):
 		object, ok := value.(map[string]any)
 		if !ok {
 			return nil, fieldTypeError(fieldName, "must be object")
 		}
-		return cloneMap(object), nil
+		return normalizeJSONFieldValue(fieldName, object)
 	case isJSONArrayType(contract, typeRef):
 		items, ok := listValues(value)
 		if !ok {
 			return nil, fieldTypeError(fieldName, "must be array")
 		}
-		return cloneValue(items), nil
+		return normalizeJSONFieldValue(fieldName, items)
 	case isTimestampType(contract, typeRef):
 		switch typed := value.(type) {
 		case time.Time:
@@ -752,6 +755,17 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 	default:
 		return nil, fieldTypeError(fieldName, "has unsupported type "+typeRef)
 	}
+}
+
+func normalizeJSONFieldValue(fieldName string, value any) (any, error) {
+	normalized, err := canonicaljson.CloneRuntimeValue(value)
+	if err != nil {
+		return nil, fieldTypeError(fieldName, err.Error())
+	}
+	if normalized == nil {
+		return nil, fieldTypeError(fieldName, "cannot be null")
+	}
+	return normalized, nil
 }
 
 func validateValueRefinements(contract Contract, fieldName, typeRef string, refinements runtimecontracts.SchemaRefinements, value any) (any, error) {
@@ -960,6 +974,8 @@ func resolveStructuralType(contract Contract, typeRef string) (runtimecontracts.
 
 func pathKind(contract Contract, typeRef string) string {
 	switch {
+	case isJSONValueType(contract, typeRef):
+		return "json"
 	case isTextType(typeRef):
 		return "scalar"
 	case isIntegerType(contract, typeRef):
@@ -1046,8 +1062,11 @@ func isBooleanType(contract Contract, typeRef string) bool {
 }
 
 func isJSONObjectType(contract Contract, typeRef string) bool {
-	raw := strings.ToLower(strings.TrimSpace(typeName(contract, typeRef)))
-	return raw == "json" || raw == "object"
+	return strings.EqualFold(typeName(contract, typeRef), "object")
+}
+
+func isJSONValueType(contract Contract, typeRef string) bool {
+	return strings.EqualFold(typeName(contract, typeRef), "json")
 }
 
 func isJSONArrayType(contract Contract, typeRef string) bool {
