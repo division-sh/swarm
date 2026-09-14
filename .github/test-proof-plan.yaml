@@ -66,6 +66,7 @@ profiles:
       - serveapp-surfaces
       - serveapp-journeys-first
       - serveapp-journeys-rest
+      - serveapp-mailbox
       - serveapp-selected
       - serveapp-standing
       - store-full
@@ -114,6 +115,7 @@ profiles:
       - serveapp-surfaces
       - serveapp-journeys-first
       - serveapp-journeys-rest
+      - serveapp-mailbox
       - serveapp-selected
       - serveapp-standing
       - store-full
@@ -162,6 +164,7 @@ profiles:
       - serveapp-surfaces
       - serveapp-journeys-first
       - serveapp-journeys-rest
+      - serveapp-mailbox
       - serveapp-selected
       - serveapp-standing
       - store-full
@@ -210,6 +213,7 @@ profiles:
       - serveapp-surfaces
       - serveapp-journeys-first
       - serveapp-journeys-rest
+      - serveapp-mailbox
       - serveapp-selected
       - serveapp-standing
       - store-full
@@ -462,9 +466,17 @@ units:
   serveapp-journeys-rest:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # Move the measured 323s M* family out of the 512s "other" package shard.
-    # All M-Z served journeys except Pu* remain here, including bare P.
-    run: '^(TestM.*|TestServed([M-OQ-Z].*|P($|[^u].*)))$'
+    # CI 34786084117 measured this unit at 548s, including new mailbox cuts.
+    # Keep TestMa* separate; retain every other M* and non-Pu served journey.
+    run: '^(TestM($|[^a].*)|TestServed([M-OQ-Z].*|P($|[^u].*)))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-mailbox:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    # Complete mailbox/managed families, disjoint from the other M* proofs.
+    run: '^TestMa.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -513,12 +525,12 @@ units:
   store-runtime-fork-generation:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    # Repeated-generation proof cost151.68s in34693302523. Preserve every
-    # generation/backend assertion under the same240s command budget.
+    # CI 34786084117: 247s command, 210.53s in repeated activity alone.
+    # Retier this heavy execution proof; preserve all generations and backends.
     run: '^TestForkG.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
-    budget_class: broad
+    budget_class: full
   store-runtime-full-03:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
