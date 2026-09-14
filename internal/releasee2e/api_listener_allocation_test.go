@@ -106,7 +106,11 @@ func TestReleaseReadinessRequiresCurrentChildEvidence(t *testing.T) {
 			if stage == "before_publication" || stage == "after_publication" {
 				close(p.exited)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+			budget := 25 * time.Millisecond // Missing evidence must remain unready until cancellation.
+			if stage == "valid" {
+				budget = 5 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), budget)
 			defer cancel()
 			err := p.waitReady(ctx)
 			if (err == nil) != (stage == "valid") {
