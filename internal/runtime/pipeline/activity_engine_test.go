@@ -515,7 +515,7 @@ func TestActivityHTTPAppliesConnectorThenChannelResultProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executePreparedActivityHTTPTool: %v", err)
 	}
-	want := map[string]any{"delivery_reference": map[string]any{"id": float64(42)}}
+	want := map[string]any{"delivery_reference": map[string]any{"id": int64(42)}}
 	if !reflect.DeepEqual(result, want) {
 		t.Fatalf("result = %#v, want %#v", result, want)
 	}

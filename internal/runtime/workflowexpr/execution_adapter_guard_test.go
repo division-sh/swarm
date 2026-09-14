@@ -26,6 +26,7 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 			{"canonicaljson.MarshalPreservingNumberKinds(decoded)", "canonicaljson.Bytes(decoded)"},
 		},
 		"engine/fan_out_evaluator.go":        {{"e.bindFrameExpressionSchemas(frame)", ""}},
+		"pipeline/activity_engine.go":        {{"raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)", "_, _ = canonicaljson.FromGo(payload)\nraw, err := canonicaljson.MarshalPreservingNumberKinds(payload)"}},
 		"workflowexpr/numeric_expression.go": {},
 	} {
 		path := filepath.Join(root, relative)
@@ -51,7 +52,7 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 		overlay[path] = []byte(source)
 	}
 	findings := strings.Join(executionAdapterFindings(t, overlay), "\n")
-	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor", "hostileNumericPlanner bypasses checked numeric planning"} {
+	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor", "hostileNumericPlanner bypasses checked numeric planning", "activity result writer reinterprets execution kinds as semantic DTOs"} {
 		if !strings.Contains(findings, want) {
 			t.Fatalf("missing %q: %s", want, findings)
 		}
@@ -79,7 +80,7 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 		base + "entityruntime.normalizeValueForType":                                                 {base + "canonicaljson.NormalizeRuntimeNumber", base + "entityruntime.normalizeJSONFieldValue"},
 		base + "entityruntime.normalizeJSONFieldValue":                                               {base + "canonicaljson.CloneRuntimeValue"},
 		base + "entityruntime.normalizePartialObjectValue":                                           {base + "canonicaljson.CloneRuntimeValue"},
-		"(" + base + "pipeline.pipelineActivityDispatcher).publishActivityResultWithID":              {base + "canonicaljson.CloneRuntimeValue", base + "canonicaljson.MarshalPreservingNumberKinds"},
+		"(" + base + "pipeline.pipelineActivityDispatcher).publishActivityResultWithID":              {base + "canonicaljson.MarshalPreservingNumberKinds"},
 		"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal.decodePayload": {base + "canonicaljson.DecodeInto", base + "canonicaljson.DecodePreservingNumberLexemes", base + "canonicaljson.CloneRuntimeValue"},
 	}
 	for _, pkg := range pkgs {
@@ -141,6 +142,10 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 						return true
 					}
 					calls[callee.FullName()] = true
+					if owner == "("+base+"pipeline.pipelineActivityDispatcher).publishActivityResultWithID" && callee.Pkg().Path() == base+"canonicaljson" &&
+						(callee.Name() == "FromGo" || callee.Name() == "Bytes" || callee.Name() == "ValueInto" || callee.Name() == "DecodeInto") {
+						findings = append(findings, "activity result writer reinterprets execution kinds as semantic DTOs")
+					}
 					if pkg.PkgPath == base+"workflowexpr" && callee.Pkg().Path() == "github.com/google/cel-go/cel" &&
 						(callee.Name() == "Program" || callee.Name() == "PlanProgram") && owner != base+"workflowexpr.workflowProgram" {
 						findings = append(findings, fn.Name.Name+" bypasses checked numeric planning")

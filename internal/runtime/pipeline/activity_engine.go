@@ -1552,11 +1552,7 @@ func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, i
 
 func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any) error {
 	ctx = events.WithDeliveryContext(ctx, intent.Context)
-	projected, err := canonicaljson.CloneRuntimeValue(payload)
-	if err != nil {
-		return err
-	}
-	raw, err := canonicaljson.MarshalPreservingNumberKinds(projected)
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 	if err != nil {
 		return err
 	}
