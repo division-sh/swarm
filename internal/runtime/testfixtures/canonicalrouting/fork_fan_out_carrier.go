@@ -155,7 +155,7 @@ func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
           fields:
             value: {cel: entry.slug}
             integer_result: {cel: 'entry.score + entity.integer + 1'}
-            double_result: {cel: 'double(entry.score) + entity.decimal'}
+            double_result: {cel: 'double(entry.score) + double(entity.decimal)'}
 `)
 	}
 	return root
