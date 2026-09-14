@@ -1,0 +1,52 @@
+package runforkrevision
+
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func originalJSONEqual(left, right []byte) bool {
+	var a, b any
+	if json.Unmarshal(left, &a) != nil || json.Unmarshal(right, &b) != nil {
+		return false
+	}
+	x, xe := json.Marshal(a)
+	y, ye := json.Marshal(b)
+	return xe == nil && ye == nil && bytes.Equal(x, y)
+}
+
+func TestRevisionEqualityPreservesExistingInterpretation(t *testing.T) {
+	values := []string{`{}`, ` { } `, `null`, `[]`, `[1,2]`, `[2,1]`, `{"n":1}`, `{"n":1.0}`, `{"n":1e0}`, `{"n":1,"m":2}`, `{"m":2,"n":1}`, `{"n":0}`, `{"n":-0}`, `{"n":1e999}`, `{"n":1e-999}`, `{"n":1,"n":2}`, `{"n":2}`, `{"x":"\\u0061"}`, `{"x":"a"}`, `{"payload_base64":"Nw=="}`, `{"payload_base64":"Ny4w"}`, `{"n":9007199254740993}`, `{"n":9007199254740992}`, `{`, `{} {}`, `NaN`, "\xff"}
+	for _, a := range values {
+		for _, b := range values {
+			if got, want := canonicalJSONEqual([]byte(a), []byte(b)), originalJSONEqual([]byte(a), []byte(b)); got != want {
+				t.Fatalf("equality %q/%q=%v want %v", a, b, got, want)
+			}
+		}
+	}
+}
+
+func FuzzRevisionEqualityPreservesExistingInterpretation(f *testing.F) {
+	f.Add([]byte(`{"a":1}`), []byte(`{"a":1.0}`))
+	f.Add([]byte(`{"n":1e999}`), []byte(`{"n":1e999}`))
+	f.Fuzz(func(t *testing.T, a, b []byte) {
+		if canonicalJSONEqual(a, b) != originalJSONEqual(a, b) {
+			t.Fatalf("changed equality %q/%q", a, b)
+		}
+		if canonicalJSONEqual(a, a) != originalJSONEqual(a, a) {
+			t.Fatalf("changed reflexive admission %q", a)
+		}
+	})
+}
+
+func BenchmarkRevisionEqualityIdentical(b *testing.B) {
+	raw := []byte(`{"revision":8,"source_evidence":"` + strings.Repeat("frozen-evidence", 32) + `","value":7.5}`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if !canonicalJSONEqual(raw, raw) {
+			b.Fatal("not equal")
+		}
+	}
+}

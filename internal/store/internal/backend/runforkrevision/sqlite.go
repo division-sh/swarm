@@ -62,15 +62,7 @@ func (a *sqliteAdapter) latestRevision(ctx context.Context, runID string) (int64
 }
 
 func (a *sqliteAdapter) latestFacts(ctx context.Context, runID string) (ledgerFactsByFamily, error) {
-	rows, err := a.tx.QueryContext(ctx, `
-		SELECT r.family, r.fact_key, r.fact, r.present
-		FROM run_fork_fact_revisions r
-		WHERE r.run_id=$1
-		  AND NOT EXISTS (
-			SELECT 1 FROM run_fork_fact_revisions newer
-			WHERE newer.run_id=r.run_id AND newer.family=r.family AND newer.fact_key=r.fact_key AND newer.revision>r.revision
-		  )
-	`, runID)
+	rows, err := a.tx.QueryContext(ctx, latestFactsQuery, runID)
 	if err != nil {
 		return nil, err
 	}

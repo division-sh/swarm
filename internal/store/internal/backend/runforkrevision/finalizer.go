@@ -130,7 +130,15 @@ func countPresent(facts map[string]ledgerFact) int {
 
 func canonicalJSONEqual(left, right []byte) bool {
 	var leftValue, rightValue any
-	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
+	if json.Unmarshal(left, &leftValue) != nil {
+		return false
+	}
+	// Identical bytes still require the existing JSON admission (in particular,
+	// float overflow must not become equal), but not a second decode/two encodes.
+	if bytes.Equal(left, right) {
+		return true
+	}
+	if json.Unmarshal(right, &rightValue) != nil {
 		return false
 	}
 	leftCanonical, leftErr := json.Marshal(leftValue)
