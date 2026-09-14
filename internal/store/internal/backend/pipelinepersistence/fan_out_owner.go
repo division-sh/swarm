@@ -250,10 +250,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, claim 
 		return input, fmt.Errorf("fan-out triggering event run %s is outside intent run %s fork lineage", input.Trigger.RunID(), intent.Request.Key.RunID)
 	}
 	input.StartOrdinal = intent.Cursor
-	endOrdinal := intent.Cursor + intent.NextChunkSize
-	if endOrdinal > intent.Request.Cardinality {
-		endOrdinal = intent.Request.Cardinality
-	}
+	endOrdinal := intent.ChunkEndOrdinal()
 	var raw []byte
 	switch intent.Source.Kind {
 	case fanoutobligation.SourceEventPayloadField:
@@ -375,14 +372,6 @@ func (s *PipelineSQLiteOwner) ReleaseFanOutClaim(ctx context.Context, claim fano
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
 	return releaseFanOutClaim(ctx, s.backend, "release fan-out claim", claim)
-}
-
-func retryableFanOutChunk(current int) int {
-	next := (current + 1) / 2
-	if next < fanoutobligation.MinChunkSize {
-		return fanoutobligation.MinChunkSize
-	}
-	return next
 }
 
 func observedFanOutMilliseconds(duration time.Duration) int64 {
@@ -520,22 +509,6 @@ func releaseFanOutClaim(ctx context.Context, backend any, label string, claim fa
 	default:
 		return fmt.Errorf("fan-out transaction owner is unavailable")
 	}
-}
-
-func adaptiveFanOutChunk(current int, duration time.Duration) int {
-	next := current
-	if duration <= 250*time.Millisecond {
-		next++
-	} else if duration > time.Second {
-		next = retryableFanOutChunk(current)
-	}
-	if next < fanoutobligation.MinChunkSize {
-		return fanoutobligation.MinChunkSize
-	}
-	if next > fanoutobligation.MaxChunkSize {
-		return fanoutobligation.MaxChunkSize
-	}
-	return next
 }
 
 func commitFanOutChunk(
@@ -696,7 +669,7 @@ func commitFanOutChunk(
 	// Keep post-commit failures out of the runtime's mutation retry path.
 	result.PostCommitFailure = err
 	observedDuration := time.Since(selectedStoreCallStarted)
-	nextChunk := adaptiveFanOutChunk(result.Intent.NextChunkSize, observedDuration)
+	nextChunk := fanoutobligation.MaxChunkSize
 	lastChunkMS := observedFanOutMilliseconds(observedDuration)
 	observedAt := time.Now().UTC()
 	if observeNow != nil {

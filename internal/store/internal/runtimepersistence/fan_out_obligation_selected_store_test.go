@@ -122,7 +122,7 @@ func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load bounded fan-out source: %v", err)
 			}
-			if input.StartOrdinal != 0 || len(input.Items) != fanoutobligation.InitialChunkSize || fmt.Sprint(input.Items[0]) != "item-000" || fmt.Sprint(input.Items[3]) != "item-003" {
+			if input.StartOrdinal != 0 || len(input.Items) != 10 || fmt.Sprint(input.Items[0]) != "item-000" || fmt.Sprint(input.Items[9]) != "item-009" {
 				t.Fatalf("bounded source = start %d items %#v", input.StartOrdinal, input.Items)
 			}
 
@@ -150,7 +150,7 @@ func TestFanOutSelectedStoreOwnerParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load remaining fan-out range: %v", err)
 			}
-			if secondInput.StartOrdinal != 4 || len(secondInput.Items) != 5 || fmt.Sprint(secondInput.Items[0]) != "item-004" || fmt.Sprint(secondInput.Items[4]) != "item-008" {
+			if secondInput.StartOrdinal != 4 || len(secondInput.Items) != 6 || fmt.Sprint(secondInput.Items[0]) != "item-004" || fmt.Sprint(secondInput.Items[5]) != "item-009" {
 				t.Fatalf("remaining source = start %d items %#v", secondInput.StartOrdinal, secondInput.Items)
 			}
 			second, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(secondClaim, 4, 5, claimAt.Add(4*time.Second)))
@@ -570,7 +570,7 @@ func TestFanOutCardinalityMatrixIsConstantAtTriggerAndExactAfterPumpOnBothStores
 			}
 
 			base := time.Now().UTC().Truncate(time.Microsecond)
-			for caseIndex, cardinality := range []int{0, 1, 10, 25, 500, 1000} {
+			for caseIndex, cardinality := range []int{0, 1, 10, 25, 32, 33, 500, 1000} {
 				t.Run(fmt.Sprintf("n_%d", cardinality), func(t *testing.T) {
 					fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, cardinality, base.Add(time.Duration(caseIndex)*time.Minute))
 					var eventsCount, deliveriesCount, intentsCount, outcomesCount int
@@ -617,6 +617,9 @@ func TestFanOutCardinalityMatrixIsConstantAtTriggerAndExactAfterPumpOnBothStores
 						}
 					}
 					assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, cardinality, cardinality)
+					if turns != (cardinality+31)/32 {
+						t.Fatalf("N=%d committed chunks = %d, want %d", cardinality, turns, (cardinality+31)/32)
+					}
 					if cardinality > 0 {
 						var minOrdinal, maxOrdinal, distinctOrdinals int
 						if err := db.QueryRowContext(ctx, `SELECT MIN(ordinal),MAX(ordinal),COUNT(DISTINCT ordinal) FROM fan_out_outcomes WHERE run_id=$1`, fixture.runID).Scan(&minOrdinal, &maxOrdinal, &distinctOrdinals); err != nil {
@@ -1184,10 +1187,10 @@ func TestFanOutTwoLevelRestartResumesParentPrefixAndNestedPendingOnBothStores(t 
 				t.Fatalf("claim parent before restart = %#v found=%v err=%v", intent.Request.Key, found, err)
 			}
 			input, err := firstOwner.LoadFanOutEvaluation(ctx, claim)
-			if err != nil || len(input.Items) != 4 {
+			if err != nil || len(input.Items) != 9 {
 				t.Fatalf("load parent prefix before restart = %d err=%v", len(input.Items), err)
 			}
-			if _, err := firstOwner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, len(input.Items), base.Add(3*time.Second))); err != nil {
+			if _, err := firstOwner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 4, base.Add(3*time.Second))); err != nil {
 				t.Fatalf("commit parent prefix before restart: %v", err)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, parent, 4, 4)
@@ -1298,7 +1301,7 @@ func TestFanOutRetryableReleaseHalvesWithoutSemanticProgressOnBothStores(t *test
 			`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath).Scan(&cursor, &nextChunk, &lastChunkMS, &outcomes); err != nil {
 				t.Fatalf("load retryable fan-out release: %v", err)
 			}
-			if cursor != 0 || outcomes != 0 || nextChunk != 2 || lastChunkMS != 1250 {
+			if cursor != 0 || outcomes != 0 || nextChunk != 16 || lastChunkMS != 1250 {
 				t.Fatalf("retryable release = cursor:%d outcomes:%d chunk:%d latency:%dms", cursor, outcomes, nextChunk, lastChunkMS)
 			}
 		})
@@ -1774,7 +1777,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load resource fan-out: %v", err)
 			}
-			if len(input.Items) != 4 || input.Items[0].(map[string]any)["slug"] != "alpha" || input.Items[3].(map[string]any)["slug"] != "delta" {
+			if len(input.Items) != 5 || input.Items[0].(map[string]any)["slug"] != "alpha" || input.Items[3].(map[string]any)["slug"] != "delta" {
 				t.Fatalf("canonical bounded resource items = %#v", input.Items)
 			}
 			if input.Items[0].(map[string]any)["score"] != int64(1) {
@@ -1877,7 +1880,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				t.Fatalf("claim fork resource fan-out: found=%v err=%v", found, err)
 			}
 			childInput, err := owner.LoadFanOutEvaluation(ctx, childClaim)
-			if err != nil || len(childInput.Items) != 4 || childInput.Items[0].(map[string]any)["slug"] != "alpha" {
+			if err != nil || len(childInput.Items) != 5 || childInput.Items[0].(map[string]any)["slug"] != "alpha" || childIntent.NextChunkSize != 32 {
 				t.Fatalf("fork resource input = %#v err=%v", childInput, err)
 			}
 			proveEmit(childIntent, childInput.Trigger, childInput.Items[0])
@@ -2109,7 +2112,7 @@ func seedFanOutOwnerChildFixture(t *testing.T, ctx context.Context, db *sql.DB, 
 	if cardinality == 0 {
 		status = fanoutobligation.StatusClosed
 	}
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,$3,'fan_out',$4,$5,$6,'event_payload_field',$7,'items',$8,0,$9,4,$10,$11,$11)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, fixture.bundleHash, "sha256:"+strings.Repeat("3", 64), fixture.eventID, cardinality, string(status), string(capsuleJSON), createdAt)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,$3,'fan_out',$4,$5,$6,'event_payload_field',$7,'items',$8,0,$9,$12,$10,$11,$11)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, fixture.bundleHash, "sha256:"+strings.Repeat("3", 64), fixture.eventID, cardinality, string(status), string(capsuleJSON), createdAt, fanoutobligation.InitialChunkSize)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit nested fan-out fixture: %v", err)
 	}
@@ -2218,7 +2221,7 @@ func insertFanOutOwnerIntent(t *testing.T, ctx context.Context, tx *sql.Tx, fixt
 	if cardinality == 0 {
 		status = fanoutobligation.StatusClosed
 	}
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,$3,'fan_out',$4,$5,$6,'event_payload_field',$7,'items',$8,0,$9,4,$10,$11,$11)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, fixture.bundleHash, "sha256:"+strings.Repeat("2", 64), fixture.eventID, cardinality, string(status), string(capsuleJSON), createdAt)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,$3,'fan_out',$4,$5,$6,'event_payload_field',$7,'items',$8,0,$9,$12,$10,$11,$11)`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath, fixture.bundleHash, "sha256:"+strings.Repeat("2", 64), fixture.eventID, cardinality, string(status), string(capsuleJSON), createdAt, fanoutobligation.InitialChunkSize)
 }
 
 func rejectedFanOutChunk(claim fanoutobligation.Claim, start, count int, at time.Time) pipeline.FanOutChunkCommand {

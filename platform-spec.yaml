@@ -3922,10 +3922,15 @@ handler_specification:
           most one chunk and releases before reacquisition; process-local wakeups are advisory and periodic scanning owns
           lost-wakeup recovery.
         chunk_policy: >-
-          Internal, observable, and not author-overridable: floor 1, initial 4, ceiling 32. A successful selected-store
-          call taking at most 250ms increments by one; over 250ms through 1s is unchanged; over 1s halves with ceiling
-          division. A typed retryable selected-store failure advances nothing and applies the same halving. Restart and
-          fork without valid tuning state use 4. Chunk boundaries never change semantic output.
+          Internal, observable, and not author-overridable: floor 1, initial and ceiling 32. Actual ranges are bounded by
+          remaining cardinality; a closed or zero-cardinality intent owes no work despite its positive stored budget.
+          Every confirmed successful chunk restores the next budget to 32, regardless of elapsed duration. Only a typed
+          retryable failure advances nothing and halves the budget with ceiling division, bounded by floor 1.
+          Outcome uncertainty requires canonical readback before choosing success or retry. Safe semantic-rejection
+          bisection remains separate. Elapsed duration is diagnostic evidence, never sizing authority. Same-run restart
+          preserves valid persisted tuning; fork resets operational tuning to 32 while preserving inherited cursor,
+          outcomes and source evidence. Invalid persisted evidence fails closed, without migration or repair fallback.
+          Chunk boundaries never change semantic output, claim fencing, fairness or atomic publication semantics.
         failure_isolation: >-
           Publication plans, outcomes, cursor advancement, and closure commit atomically. Only a typed emit-contract
           failure may become semantic_rejected. Publication-planner, authorization, conflicting-duplicate, non-emit
