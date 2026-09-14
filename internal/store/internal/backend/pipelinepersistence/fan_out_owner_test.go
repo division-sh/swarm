@@ -30,30 +30,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func TestAdaptiveFanOutChunkUsesExactPlatformBands(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		current  int
-		duration time.Duration
-		want     int
-	}{
-		{name: "fast lower", current: 4, duration: 0, want: 5},
-		{name: "fast boundary", current: 4, duration: 250 * time.Millisecond, want: 5},
-		{name: "fast ceiling", current: 32, duration: time.Millisecond, want: 32},
-		{name: "neutral lower", current: 4, duration: 250*time.Millisecond + time.Nanosecond, want: 4},
-		{name: "neutral upper", current: 4, duration: time.Second, want: 4},
-		{name: "slow even", current: 4, duration: time.Second + time.Nanosecond, want: 2},
-		{name: "slow odd rounds up", current: 5, duration: 2 * time.Second, want: 3},
-		{name: "slow floor", current: 1, duration: 2 * time.Second, want: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := adaptiveFanOutChunk(tc.current, tc.duration); got != tc.want {
-				t.Fatalf("adaptiveFanOutChunk(%d, %s) = %d, want %d", tc.current, tc.duration, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestFanOutIntentSQLArgsEncodeClosedSourceUnionWithExplicitAbsence(t *testing.T) {
 	request := fanoutobligation.IntentRequest{
 		PlanRef: runtimecontracts.FanOutPlanRef{BundleHash: "bundle", SemanticDigest: "digest"},
@@ -191,10 +167,13 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 
 func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, outcome := range []string{"committed", "rolled_back", "contradictory", "acknowledged_cleanup"} {
+		for _, outcome := range []string{"committed", "neutral_success", "fast_success", "rolled_back", "contradictory", "acknowledged_cleanup"} {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				db := fanOutReadbackTestDB(t, backend)
 				command := seedFanOutReadbackClaim(t, db)
+				if _, err := db.Exec(`UPDATE fan_out_intents SET next_chunk_size=1`); err != nil {
+					t.Fatal(err)
+				}
 				ackLost := errors.New("injected fan-out commit acknowledgement loss")
 				finishFailure := errors.New("injected successful-turn release failure")
 				run := func(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
@@ -218,10 +197,16 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 					if outcome == "committed" {
 						time.Sleep(1100 * time.Millisecond)
 					}
+					if outcome == "neutral_success" {
+						time.Sleep(300 * time.Millisecond)
+					}
 					if outcome == "contradictory" {
 						if _, err := db.ExecContext(ctx, `DELETE FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath); err != nil {
 							return false, err
 						}
+					}
+					if outcome == "neutral_success" || outcome == "fast_success" {
+						return true, nil
 					}
 					return outcome == "acknowledged_cleanup", ackLost
 				}
@@ -261,12 +246,15 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 					t.Fatal(queryErr)
 				}
 				switch outcome {
-				case "committed":
-					if err != nil || cursor != 1 || count != 1 || nextChunk != 2 || lastChunkMS < 1000 || committed.Intent.Cursor != 1 || committed.Intent.Status != fanoutobligation.StatusOpen || committed.Intent.NextChunkSize != 2 {
+				case "committed", "neutral_success", "fast_success":
+					if err != nil || cursor != 1 || count != 1 || nextChunk != 32 || committed.Intent.Cursor != 1 || committed.Intent.Status != fanoutobligation.StatusOpen || committed.Intent.NextChunkSize != 32 {
 						t.Fatalf("committed readback = cursor:%d outcomes:%d next:%d last_ms:%d result:%#v err:%v", cursor, count, nextChunk, lastChunkMS, committed.Intent, err)
 					}
-					if !errors.Is(committed.PostCommitFailure, ackLost) {
+					if outcome == "committed" && (lastChunkMS < 1000 || !errors.Is(committed.PostCommitFailure, ackLost)) {
 						t.Fatalf("reconciled commit lost acknowledgement error: %v", committed.PostCommitFailure)
+					}
+					if outcome == "neutral_success" && lastChunkMS < 300 {
+						t.Fatalf("neutral success lost observed duration: %dms", lastChunkMS)
 					}
 				case "acknowledged_cleanup":
 					if err != nil || cursor != 1 || count != 1 || committed.Intent.Cursor != 1 || !errors.Is(committed.PostCommitFailure, ackLost) || !errors.Is(committed.PostCommitFailure, finishFailure) {

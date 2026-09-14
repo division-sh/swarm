@@ -76,10 +76,7 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 	workCtx = runtimecorrelation.WithRunID(workCtx, intent.Request.Key.RunID)
 	workCtx = runtimecorrelation.WithInboundEvent(workCtx, input.Trigger)
 
-	end := intent.Cursor + intent.NextChunkSize
-	if end > intent.Request.Cardinality {
-		end = intent.Request.Cardinality
-	}
+	end := intent.ChunkEndOrdinal()
 	outcomes := make([]FanOutChunkOutcome, 0, end-intent.Cursor)
 	prepared := make([]runtimeengine.DurablePublicationPlan, 0, end-intent.Cursor)
 	for ordinal := intent.Cursor; ordinal < end; ordinal++ {

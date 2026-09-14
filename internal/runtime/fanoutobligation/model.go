@@ -21,10 +21,15 @@ import (
 var ErrStaleClaim = errors.New("stale fan-out claim")
 
 const (
-	InitialChunkSize = 4
+	InitialChunkSize = MaxChunkSize
 	MinChunkSize     = 1
 	MaxChunkSize     = 32
 )
+
+// RetryChunkSize applies only after a typed retry failure, never after a slow success.
+func RetryChunkSize(current int) int {
+	return max(MinChunkSize, (current+1)/2)
+}
 
 type SourceKind string
 
@@ -257,6 +262,11 @@ type Intent struct {
 	ClaimGeneration uint64        `json:"claim_generation,omitempty"`
 	LeaseExpiresAt  time.Time     `json:"lease_expires_at,omitempty"`
 	BlockedReason   string        `json:"blocked_reason,omitempty"`
+}
+
+// ChunkEndOrdinal bounds an already validated intent's budget by remaining work.
+func (i Intent) ChunkEndOrdinal() int {
+	return i.Cursor + min(i.NextChunkSize, i.Request.Cardinality-i.Cursor)
 }
 
 func (i Intent) Validate() error {

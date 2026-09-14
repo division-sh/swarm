@@ -158,10 +158,7 @@ func (i FanOutEvaluationInput) Validate(intent fanoutobligation.Intent) error {
 	if err := intent.Validate(); err != nil {
 		return err
 	}
-	end := intent.Cursor + intent.NextChunkSize
-	if end > intent.Request.Cardinality {
-		end = intent.Request.Cardinality
-	}
+	end := intent.ChunkEndOrdinal()
 	if i.StartOrdinal != intent.Cursor || len(i.Items) != end-intent.Cursor || i.Trigger.ID() != intent.Request.Capsule.Lineage.ParentEventID || i.Trigger.RunID() != intent.Request.Capsule.Lineage.RunID {
 		return fmt.Errorf("fan-out evaluation input disagrees with immutable intent")
 	}

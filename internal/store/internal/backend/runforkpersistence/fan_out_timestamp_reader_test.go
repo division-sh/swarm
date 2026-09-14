@@ -85,7 +85,7 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(`INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,claim_generation) VALUES ($1,$2,'.','fan_out',$3,$4,$5,'event_payload_field',$6,'items',2,1,'open',4,$7,0)`, childID, triggerID, ref.ElementRef.SemanticPath, ref.BundleHash, ref.SemanticDigest, eventID, string(capsule)); err != nil {
+			if _, err := db.Exec(`INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,claim_generation) VALUES ($1,$2,'.','fan_out',$3,$4,$5,'event_payload_field',$6,'items',2,1,'open',$8,$7,0)`, childID, triggerID, ref.ElementRef.SemanticPath, ref.BundleHash, ref.SemanticDigest, eventID, string(capsule), fanoutobligation.InitialChunkSize); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := db.Exec(`INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,source_event_id,inherited_disposition,created_at) VALUES ($1,$2,'.','fan_out',$3,0,'committed',$4,'no_route',$5)`, childID, triggerID, ref.ElementRef.SemanticPath, outcome.SourceEventID, at); err != nil {
