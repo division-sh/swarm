@@ -85,7 +85,7 @@ func TestCommandLiveUneditedScaffoldReadiness(t *testing.T) {
 				t.Run("dev="+strconv.FormatBool(dev), func(t *testing.T) {
 					process := startReleaseServe(t, releaseProcessSpec{
 						BinaryPath: binary, WorkingDir: project, DefaultExecutionSelection: true,
-						Dev: dev, APIPort: freeReleaseTCPPort(t),
+						Dev: dev, APIPort: 0,
 						MCPListenHost: prerequisites.mcpHost, TokenFile: tokenFile, Token: goldenAPIToken,
 						Env: env, RedactValues: []string{prerequisites.claudeToken, prerequisites.botToken, signing},
 					})

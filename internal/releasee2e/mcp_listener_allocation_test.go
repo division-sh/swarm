@@ -38,7 +38,7 @@ func TestReleaseServeAllocatesMCPAtBind(t *testing.T) {
 	}
 	process := startReleaseServe(t, releaseProcessSpec{
 		BinaryPath: binary, WorkingDir: root, ConfigPath: config, Source: source,
-		Store: "sqlite", APIPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env,
+		Store: "sqlite", APIPort: 0, TokenFile: token, Token: goldenAPIToken, Env: env,
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 	defer cancel()

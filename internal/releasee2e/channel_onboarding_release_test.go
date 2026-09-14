@@ -52,7 +52,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 	writeReleaseFile(t, tokenFile, releaseChannelAPIToken+"\n")
 
 	provider := &releaseTelegramAPIDouble{}
-	apiPort := freeReleaseTCPPort(t)
+	apiPort := 0
 	publicPort := freeReleaseTCPPort(t)
 	publicListen := fmt.Sprintf("127.0.0.1:%d", publicPort)
 	providerEnv := startReleaseTelegramAPI(t, provider, root, publicListen)

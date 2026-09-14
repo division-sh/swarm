@@ -149,7 +149,7 @@ func prepareCommandLiveProject(t *testing.T, binary, project string, store golde
 	}
 	return releaseProcessSpec{
 		BinaryPath: binary, WorkingDir: project, Source: "contracts", ConfigPath: "live.yaml",
-		Store: store.name, APIPort: freeReleaseTCPPort(t),
+		Store: store.name, APIPort: 0,
 		MCPListenHost: prerequisites.mcpHost,
 		TokenFile:     "api-token", Token: apiToken, Env: env, WorkspaceBackend: "docker",
 		RedactValues: []string{prerequisites.claudeToken, prerequisites.botToken, signingSecret, apiToken},

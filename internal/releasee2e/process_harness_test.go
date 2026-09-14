@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -184,15 +185,12 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start release serve: %v", err)
 	}
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d", options.APIPort)
 	process := &releaseServeProcess{
 		cmd:               cmd,
 		output:            output,
 		exited:            make(chan struct{}),
-		apiBase:           baseURL,
 		internalLifecycle: options.InternalMockLifecycleBinary != "",
 		rpc: &releaseRPCClient{
-			endpoint:     baseURL + "/v1/rpc",
 			token:        options.Token,
 			client:       &http.Client{Timeout: 5 * time.Second},
 			processID:    cmd.Process.Pid,
@@ -215,16 +213,34 @@ func (p *releaseServeProcess) waitReady(ctx context.Context) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, p.apiBase+"/readyz", nil)
+		select {
+		case <-p.exited:
+			return fmt.Errorf("serve exited before readiness: %v\n%s", p.waitError(), p.output.String())
+		default:
+		}
+		address, err := releaseAPIListener(p.output.String())
 		if err != nil {
 			return err
 		}
-		response, err := client.Do(request)
-		if err == nil {
-			_, _ = io.Copy(io.Discard, response.Body)
-			_ = response.Body.Close()
-			if response.StatusCode == http.StatusOK {
-				return nil
+		if address != "" {
+			base := "http://" + address
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/readyz", nil)
+			if err != nil {
+				return err
+			}
+			response, err := client.Do(request)
+			if err == nil {
+				_, _ = io.Copy(io.Discard, response.Body)
+				_ = response.Body.Close()
+				if response.StatusCode == http.StatusOK {
+					select {
+					case <-p.exited:
+						return fmt.Errorf("serve exited during readiness: %v", p.waitError())
+					default:
+					}
+					p.apiBase, p.rpc.endpoint = base, base+"/v1/rpc"
+					return nil
+				}
 			}
 		}
 		select {
@@ -236,6 +252,42 @@ func (p *releaseServeProcess) waitReady(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// Only complete records from this child's captured output can establish its
+// endpoint. The boot and summary presentations must agree when both exist.
+func releaseAPIListener(output string) (string, error) {
+	var address string
+	lines := strings.Split(output, "\n")
+	for _, line := range lines[:len(lines)-1] {
+		fields := strings.Fields(line)
+		for i, raw := range fields {
+			field := strings.Trim(raw, "(),")
+			candidate, present := strings.CutPrefix(field, "api_listener=")
+			if len(fields) > 0 && fields[0] == "listeners" && field == "api" {
+				present = true
+				candidate = ""
+				if i+1 < len(fields) {
+					candidate = strings.Trim(fields[i+1], "(),")
+				}
+			}
+			if !present {
+				continue
+			}
+			host, port, err := net.SplitHostPort(candidate)
+			ip := net.ParseIP(host)
+			n, parseErr := strconv.Atoi(port)
+			if err != nil || ip == nil || !ip.IsLoopback() || parseErr != nil || n < 1 || n > 65535 {
+				return "", fmt.Errorf("invalid child API listener evidence %q", candidate)
+			}
+			candidate = net.JoinHostPort(ip.String(), strconv.Itoa(n))
+			if address != "" && address != candidate {
+				return "", fmt.Errorf("conflicting child API listener evidence %q and %q", address, candidate)
+			}
+			address = candidate
+		}
+	}
+	return address, nil
 }
 
 func (p *releaseServeProcess) collectStartupEvidence() {
