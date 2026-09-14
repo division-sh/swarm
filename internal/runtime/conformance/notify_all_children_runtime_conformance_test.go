@@ -2498,15 +2498,15 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 	t.Helper()
 	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), 5*time.Minute)
 	defer cancel()
-	query := `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1::uuid`
+	query := `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1::uuid`
 	if _, ok := runtime.selected.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0) FROM fan_out_intents WHERE run_id=?`
+		query = `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=?`
 	}
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		var total, cursor, owed int
-		if err := db.QueryRowContext(ctx, query, runID).Scan(&total, &cursor, &owed); err != nil {
+		var total, cursor, owed, blocked int
+		if err := db.QueryRowContext(ctx, query, runID).Scan(&total, &cursor, &owed, &blocked); err != nil {
 			t.Fatalf("load fan-out cursor: %v", err)
 		}
 		if total == cardinality && cursor == cardinality && owed == 0 {
@@ -2523,7 +2523,9 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 		if err != sql.ErrNoRows {
 			t.Fatalf("diagnose terminal fan-out delivery: %v", err)
 		}
-		if owed > 0 {
+		// Poll progress, not the per-ordinal settlement fold. The caller still
+		// verifies the full canonical summary once all ordinals have progressed.
+		if blocked > 0 {
 			summary, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
 			if err != nil {
 				t.Fatalf("diagnose fan-out cursor: %v", err)
