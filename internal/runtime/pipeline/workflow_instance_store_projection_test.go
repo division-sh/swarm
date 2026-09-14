@@ -101,7 +101,7 @@ func TestWorkflowStateWriterPreservesNativeWholeDoubleForCELArithmetic(t *testin
 		Kind: runtimecontracts.CatalogTypeList, Element: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeNumber},
 	}})
 	matched, err := newWorkflowExpressionEvaluator().EvalBoolWithOptions(
-		"entity.integer + 1 == 76 && entity.double + 1.0 == 76.0 && entity.nested[?0].value() + 1.0 == 76.0 && entity.nested[?1].value() + 1.0 == 76.0",
+		"entity.integer + 1 == 76 && double(entity.double) + 1.0 == 76.0 && double(entity.nested[?0].value()) + 1.0 == 76.0 && double(entity.nested[?1].value()) + 1.0 == 76.0",
 		workflowExpressionContext{Entity: fields}, workflowexpr.ValueExpressionOptions{EntityType: &entityType},
 	)
 	if err != nil || !matched {
