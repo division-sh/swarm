@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -46,6 +47,12 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 			return err
 		}
 		source := string(raw)
+		if relative == "internal/store/internal/runtimepersistence/test_mailbox_fixture.go" {
+			source, err = maskNamedMailboxSourceFixtureWrite(source)
+			if err != nil {
+				violations = append(violations, relative+": "+err.Error())
+			}
+		}
 		if runWrite.MatchString(source) && !allowedWrites[relative] {
 			violations = append(violations, relative+": writes runs outside the private lifecycle adapters")
 		}
@@ -168,11 +175,6 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 	compact := compactSQLForLifecycleGuard(value)
 	switch relative {
-	case "internal/serveapp/mailbox_source_admission_test.go":
-		// Exact hostile source-binding corruption after request acquisition,
-		// followed by restoration; neither statement constructs a semantic run.
-		return compact == "UPDATE runs SET bundle_hash=$1 WHERE run_id=$2" ||
-			compact == "UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3"
 	case "internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":
 		// Deliberate persisted-source corruption and restoration at final fork
 		// validation, not a semantic run constructor or lifecycle transition.
@@ -195,6 +197,68 @@ func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 			compact == "UPDATE runs SET completion_revision = 1, completion_due_at = $1 WHERE run_id = $2::uuid"
 	}
 	return false
+}
+
+// The source-corruption fixture moved into the selected transaction owner.
+// Exempt only its exact CAS literal, never another write in the same file.
+func maskNamedMailboxSourceFixtureWrite(source string) (string, error) {
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, "test_mailbox_fixture.go", source, 0)
+	if err != nil {
+		return source, err
+	}
+	masked := []byte(source)
+	count := 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "SwapMailboxRunSourceForTest" {
+			continue
+		}
+		ast.Inspect(fn, func(node ast.Node) bool {
+			literal, ok := node.(*ast.BasicLit)
+			if !ok || literal.Kind != token.STRING {
+				return true
+			}
+			value, err := strconv.Unquote(literal.Value)
+			if err == nil && value == "UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3" {
+				count++
+				for i := set.Position(literal.Pos()).Offset; i < set.Position(literal.End()).Offset; i++ {
+					masked[i] = ' '
+				}
+			}
+			return true
+		})
+	}
+	if count != 1 {
+		return source, fmt.Errorf("expected exactly one named source-fixture CAS, got %d", count)
+	}
+	return string(masked), nil
+}
+
+func TestRunLifecycleFixtureGuardRejectsSiblingWrites(t *testing.T) {
+	const source = "package fixture\nfunc SwapMailboxRunSourceForTest() { use(`UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3`) }\n"
+	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
+	for _, tc := range []struct {
+		name, input string
+		allowed     bool
+	}{
+		{"exact", source, true},
+		{"sibling_function", source + "func other() { use(`UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`) }", false},
+		{"same_function_extra", strings.Replace(source, "use(", "use(`DELETE FROM runs`); use(", 1), false},
+		{"duplicate_exact", strings.Replace(source, "use(", "use(`UPDATE runs SET bundle_hash=$1 WHERE run_id=$2 AND bundle_hash=$3`); use(", 1), false},
+		{"wrong_function", strings.ReplaceAll(source, "SwapMailboxRunSourceForTest", "unapproved"), false},
+		{"missing_CAS", strings.ReplaceAll(source, " AND bundle_hash=$3", ""), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			masked, err := maskNamedMailboxSourceFixtureWrite(tc.input)
+			if got := err == nil && !runWrite.MatchString(masked); got != tc.allowed {
+				t.Fatalf("allowed=%v want=%v err=%v", got, tc.allowed, err)
+			}
+		})
+	}
+	if allowedSemanticRunFixtureLiteral("internal/serveapp/mailbox_source_admission_test.go", "UPDATE runs SET bundle_hash=$1 WHERE run_id=$2") {
+		t.Fatal("retired raw fixture writer still authorized")
+	}
 }
 
 func compactSQLForLifecycleGuard(value string) string {
