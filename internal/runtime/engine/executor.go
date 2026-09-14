@@ -637,7 +637,10 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	if state.StateCarrier.StateBuckets == nil {
 		state.StateCarrier.StateBuckets = map[string]map[string]any{}
 	}
-	payload := decodePayload(req.Event.Payload())
+	payload, err := decodePayload(req.Event.Payload())
+	if err != nil {
+		return executionFrame{}, fmt.Errorf("decode execution event payload: %w", err)
+	}
 	if len(payload) == 0 {
 		payload = map[string]any{}
 	}
@@ -653,21 +656,17 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	}
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
-	payloadType := e.executionPayloadType(req)
-	entityType, _ := semanticview.ResolveEntityStructuralType(e.deps.Source, req.Node.FlowPath())
 	collectionPlan, err := e.resolveHandlerCollectionPlan(req)
 	if err != nil {
 		return executionFrame{}, err
 	}
 	delivery, deliveryPresent := runtimedelivery.RouteFromContext(ctx)
-	return executionFrame{
+	frame := executionFrame{
 		ctx:                      ctx,
 		deliveryTarget:           runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent),
 		req:                      req,
 		base:                     base,
 		payload:                  payload,
-		payloadType:              payloadType,
-		entityType:               entityType,
 		collectionPlan:           collectionPlan,
 		topLevelDataAccumulation: req.Handler.DataAccumulation,
 		state: ExecutionState{
@@ -687,7 +686,9 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 			HandlerRuleSelection: handlerselection.NotReached(),
 		},
 		ruleIndex: -1,
-	}, nil
+	}
+	e.bindFrameExpressionSchemas(&frame)
+	return frame, nil
 }
 
 func (e *Executor) resolveHandlerCollectionPlan(req ExecutionRequest) (runtimecontracts.WorkflowHandlerCollectionPlan, error) {
@@ -1052,7 +1053,10 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		}
 		filtered := make([]any, 0, len(items))
 		for _, item := range items {
-			scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+			scope, err := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+			if err != nil {
+				return err
+			}
 			passed, err := compiled.Eval(scope)
 			if err != nil {
 				return err
@@ -1203,7 +1207,10 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 	}
 	filtered := make([]any, 0, len(items))
 	for _, item := range items {
-		scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		scope, err := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		if err != nil {
+			return err
+		}
 		passed, err := compiled.Eval(scope)
 		if err != nil {
 			return err
@@ -1265,7 +1272,10 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 			count++
 			continue
 		}
-		scope := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		scope, err := newExecutionScope(item, frame.payload, frame.base.Event.Raw(), current.Entity.Raw(), current.PlatformEntity.Raw(), current.Policy.Raw())
+		if err != nil {
+			return err
+		}
 		passed, err := compiled.Eval(scope)
 		if err != nil {
 			return err
@@ -1554,11 +1564,16 @@ func (e *Executor) recordComputeModuleFailure(frame *executionFrame, trace Compu
 }
 
 func decodeComputeModuleOutput(moduleID, rowID string, raw []byte, schema map[string]any) (map[string]any, error) {
-	var output map[string]any
-	if err := json.Unmarshal(raw, &output); err != nil {
+	admitted, err := canonicaljson.Decode(raw)
+	if err != nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not exactly one JSON object: %w", err)}
 	}
-	if output == nil {
+	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	if err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err}
+	}
+	output, ok := projected.(map[string]any)
+	if !ok {
 		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not JSON object")}
 	}
 	if err := eventschema.ValidatePayloadAgainstSchema(schema, output); err != nil {
@@ -2143,6 +2158,14 @@ func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOp
 		options.JoinContext = workflowexpr.JoinContextFanOutDelivery
 	}
 	return options
+}
+
+func (e *Executor) bindFrameExpressionSchemas(frame *executionFrame) {
+	frame.payloadType = e.executionPayloadType(frame.req)
+	// Entity values may be frozen, but their meaning belongs to the pinned node
+	// declaration, not a live entity or the runtime instance's name. An absent
+	// schema remains absent; expression admission rejects entity reads without it.
+	frame.entityType, _ = semanticview.ResolveEntityStructuralType(e.deps.Source, frame.req.Node.FlowPath())
 }
 
 func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOptions {
@@ -2952,22 +2975,29 @@ func emitPersistenceFieldTarget(target string) (string, paths.Path, bool) {
 	return field, parsed, true
 }
 
-func decodePayload(raw json.RawMessage) map[string]any {
+func decodePayload(raw json.RawMessage) (map[string]any, error) {
 	if len(raw) == 0 {
-		return map[string]any{}
+		return map[string]any{}, nil
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
-		return map[string]any{}
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &payload); err != nil {
+		return nil, err
 	}
-	return payload
+	if payload == nil {
+		return map[string]any{}, nil
+	}
+	projected, err := workflowexpr.ProjectCELValue(payload)
+	if err != nil {
+		return nil, err
+	}
+	return projected.(map[string]any), nil
 }
 
 func encodePayload(payload map[string]any) (json.RawMessage, error) {
 	if len(payload) == 0 {
 		return json.RawMessage(`{}`), nil
 	}
-	encoded, err := json.Marshal(payload)
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 	if err != nil {
 		return nil, err
 	}

@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -33,6 +36,90 @@ func TestWorkflowInstanceReadRejectsBlankEntityContract(t *testing.T) {
 	}
 	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "entity_state.entity_type is required") {
 		t.Fatalf("blank entity contract read error = %v", err)
+	}
+}
+
+func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
+	instance, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
+		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
+		CurrentState: "active", Revision: 1, EnteredStageAt: now,
+		Gates: []byte(`{}`), Fields: []byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("decode persisted workflow state: %v", err)
+	}
+	if got := instance.Fields["integer"]; got != int64(75) {
+		t.Fatalf("persisted integer = %#v, want admitted integer", got)
+	}
+	if instance.Fields["decimal"] != float64(75) || instance.Fields["exponent"] != float64(75) {
+		t.Fatalf("persisted decimal carriers = %#v, want doubles", instance.Fields)
+	}
+	entityType := pipelineExpressionObjectType("numeric.persisted", map[string]runtimecontracts.CatalogTypeKind{
+		"integer": runtimecontracts.CatalogTypeInteger, "decimal": runtimecontracts.CatalogTypeNumber, "exponent": runtimecontracts.CatalogTypeNumber,
+	})
+	matched, err := newWorkflowExpressionEvaluator().EvalBoolWithOptions(
+		"entity.integer + 1 == 76 && entity.decimal + 1.0 == 76.0 && entity.exponent + 1.0 == 76.0",
+		workflowExpressionContext{Entity: instance.Fields}, workflowexpr.ValueExpressionOptions{EntityType: &entityType},
+	)
+	if err != nil || !matched {
+		t.Fatalf("persisted workflow-state integer arithmetic = %v err=%v", matched, err)
+	}
+}
+
+func TestWorkflowStateWriterPreservesNativeWholeDoubleForCELArithmetic(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+		StorageRef: "review/inst-1", EntityType: "review_subject",
+		WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active",
+		Fields: map[string]any{
+			"integer": int64(75),
+			"double":  float64(75),
+			"nested":  []any{json.Number("75.0"), json.Number("75e0")},
+		},
+	})
+	record, err := workflowEngineStateRecord(
+		runtimeflowidentity.RunScopedFlowInstance{RunID: uuid.NewString(), Route: testWorkflowInstanceRoute(instance.StorageRef)}, instance,
+		"", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(record.Fields) != `{"double":75.0,"integer":75,"nested":[75.0,75.0]}` {
+		t.Fatalf("persisted workflow fields = %s", record.Fields)
+	}
+	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", record.Fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entityType := pipelineExpressionObjectType("numeric.persisted.writer", map[string]runtimecontracts.CatalogTypeKind{
+		"integer": runtimecontracts.CatalogTypeInteger, "double": runtimecontracts.CatalogTypeNumber,
+	})
+	entityType.Fields = append(entityType.Fields, runtimecontracts.ResolvedCatalogField{Name: "nested", Type: runtimecontracts.ResolvedCatalogType{
+		Kind: runtimecontracts.CatalogTypeList, Element: &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeNumber},
+	}})
+	matched, err := newWorkflowExpressionEvaluator().EvalBoolWithOptions(
+		"entity.integer + 1 == 76 && entity.double + 1.0 == 76.0 && entity.nested[?0].value() + 1.0 == 76.0 && entity.nested[?1].value() + 1.0 == 76.0",
+		workflowExpressionContext{Entity: fields}, workflowexpr.ValueExpressionOptions{EntityType: &entityType},
+	)
+	if err != nil || !matched {
+		t.Fatalf("persisted workflow writer arithmetic = %v err=%v fields=%#v", matched, err, fields)
+	}
+}
+
+func TestPersistedWorkflowStateRejectsUnsafeIntegerBeforeReadback(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 1, 2, 3, 0, time.UTC)
+	_, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
+		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
+		CurrentState: "active", Revision: 1, EnteredStageAt: now,
+		Gates: []byte(`{}`), Fields: []byte(`{"score":9007199254740992}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
+	})
+	if err == nil || !strings.Contains(err.Error(), "$.score") || !strings.Contains(err.Error(), "declare the field as string") {
+		t.Fatalf("unsafe persisted workflow-state error = %v, want typed $.score remediation", err)
 	}
 }
 
@@ -293,7 +380,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	}
 	gotScore, ok := workflowStateBucketObject(loaded, "score")
 	if !ok || gotScore["value"] != float64(1) {
-		t.Fatalf("StateBuckets score = %#v ok=%v, want 1", gotScore, ok)
+		t.Fatalf("StateBuckets score = %#v ok=%v, want double 1", gotScore, ok)
 	}
 
 	var (

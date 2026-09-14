@@ -35,6 +35,22 @@ func TestNormalizeFieldValue_AcceptsBuiltInNumberAndJSONTypes(t *testing.T) {
 	}
 }
 
+func TestNamedJSONFieldPreservesScalarAcrossEntityNormalization(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{Fields: map[string]runtimecontracts.EntityFieldDecl{"rows": {Type: "list<Row>"}}},
+		Types: runtimecontracts.TypeCatalogDocument{Types: map[string]runtimecontracts.NamedTypeDecl{
+			"Row": {Fields: map[string]runtimecontracts.TypeFieldSpec{"value": {Type: "json"}}},
+		}},
+	}
+	for _, value := range []any{int64(8), float64(8.25), "invalid-output-number", map[string]any{"nested": int64(8)}} {
+		input := []any{map[string]any{"value": value}}
+		got, err := NormalizeFieldValue(contract, "rows", input)
+		if err != nil || !reflect.DeepEqual(got, input) {
+			t.Errorf("declared json carrier %T: got=%#v err=%v", value, got, err)
+		}
+	}
+}
+
 func TestNormalizeFieldValue_EnforcesSchemaRefinements(t *testing.T) {
 	minLength := 40
 	maxLength := 40

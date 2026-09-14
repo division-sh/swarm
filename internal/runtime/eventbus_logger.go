@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, sourceArtifactFact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadAdmitter runtimebus.PayloadAdmitter, templateInstanceActivator runtimepipeline.FlowInstanceActivator, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
@@ -71,14 +72,28 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			}
 			payload = []byte("{}")
 		}
-		decoded := map[string]any{}
-		if err := canonicaljson.DecodeInto(payload, &decoded); err != nil {
+		// Strict admission examines the original bytes, before any transport decoder
+		// can discard duplicate keys or normalize an invalid numeric spelling.
+		var admittedObject map[string]any
+		if err := canonicaljson.DecodeInto(payload, &admittedObject); err != nil {
 			if logger != nil {
 				handleRuntimeLogPersistenceError("event-bus", "payload_validation_json_invalid", logger.Warn(ctx, "event-bus", "payload_validation_json_invalid", map[string]any{
 					"event_type": eventType,
 				}, err))
 			}
 			return events.PayloadAdmission{}, err
+		}
+		var executionObject map[string]any
+		if err := canonicaljson.DecodePreservingNumberLexemes(payload, &executionObject); err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		projected, err := workflowexpr.ProjectCELValue(executionObject)
+		if err != nil {
+			return events.PayloadAdmission{}, err
+		}
+		decoded, ok := projected.(map[string]any)
+		if !ok || admittedObject == nil {
+			return events.PayloadAdmission{}, fmt.Errorf("event payload must be a JSON object")
 		}
 
 		resolution := semanticview.ResolveEventSchema(source, strings.TrimSpace(flowID), eventType)
@@ -140,7 +155,7 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 		normalizedBytes := payload
 		if !preservePayloadBytes {
 			var err error
-			normalizedBytes, err = canonicaljson.Bytes(decoded)
+			normalizedBytes, err = canonicaljson.MarshalPreservingNumberKinds(decoded)
 			if err != nil {
 				return events.PayloadAdmission{}, fmt.Errorf("canonical event payload: %w", err)
 			}

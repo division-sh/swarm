@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -497,7 +499,7 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bundle source fact: %v", err)
 	}
-	payload := []byte(`{"conversation_reference":"12345","conversation_scope":"direct","external_account_reference":"67890","provider_message_reference":1,"text":"hello"}`)
+	payload := []byte(`{"conversation_reference":"12345","conversation_scope":"direct","external_account_reference":"67890","provider_message_reference":1.0,"text":"hello"}`)
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "inbound.telegram.text_message", "telegram", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	// This is a target-free root ingress, not a receiver named telegram-ingress.
 	admission, err := NewRuntimePayloadAdmitter(nil, wrapped, fact)(context.Background(), event, "")
@@ -506,6 +508,13 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	}
 	if admission.Binding().SchemaClass() != events.PayloadSchemaImported {
 		t.Fatalf("imported provider payload schema class = %q", admission.Binding().SchemaClass())
+	}
+	var executionPayload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(admission.Payload(), &executionPayload); err != nil {
+		t.Fatal(err)
+	}
+	if executionPayload["provider_message_reference"] != json.Number("1.0") {
+		t.Fatalf("imported schema coerced execution kind: %s", admission.Payload())
 	}
 	if bound.Digest() == "" || bound.Digest() == basePin.Digest() {
 		t.Fatalf("bound provider input digest = %q, base=%q", bound.Digest(), basePin.Digest())

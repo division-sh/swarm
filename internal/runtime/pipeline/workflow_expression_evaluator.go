@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"fmt"
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -49,7 +48,11 @@ func (e *workflowExpressionEvaluator) EvalBoolWithOptions(expression string, ctx
 	if e == nil {
 		return false, fmt.Errorf("workflow expression evaluator is not initialized")
 	}
-	normalized, normalizedCtx, err := normalizeWorkflowExpression(expression, ctx)
+	projectedCtx, err := projectWorkflowExpressionContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	normalized, normalizedCtx, err := normalizeWorkflowExpression(expression, projectedCtx)
 	if err != nil {
 		return false, err
 	}
@@ -76,6 +79,47 @@ func (e *workflowExpressionEvaluator) EvalBoolWithOptions(expression string, ctx
 	default:
 		return false, fmt.Errorf("workflow expression returned non-bool %T", out)
 	}
+}
+
+func projectWorkflowExpressionContext(ctx workflowExpressionContext) (workflowExpressionContext, error) {
+	projected, err := workflowexpr.ProjectCELValue(map[string]any{
+		"entity":      ctx.Entity,
+		"_entity":     ctx.PlatformEntity,
+		"event":       ctx.Event,
+		"payload":     ctx.Payload,
+		"policy":      ctx.Policy,
+		"computed":    ctx.Computed,
+		"accumulated": ctx.Accumulated,
+		"fan_out":     ctx.FanOut,
+		"join":        ctx.Join,
+		"_loop":       ctx.Loop,
+	})
+	if err != nil {
+		return workflowExpressionContext{}, err
+	}
+	values := projected.(map[string]any)
+	return workflowExpressionContext{
+		Entity:                       workflowExpressionProjectedMap(values["entity"]),
+		PlatformEntity:               workflowExpressionProjectedMap(values["_entity"]),
+		Event:                        workflowExpressionProjectedMap(values["event"]),
+		Payload:                      workflowExpressionProjectedMap(values["payload"]),
+		Policy:                       workflowExpressionProjectedMap(values["policy"]),
+		Computed:                     workflowExpressionProjectedMap(values["computed"]),
+		Accumulated:                  values["accumulated"],
+		FanOut:                       workflowExpressionProjectedMap(values["fan_out"]),
+		Join:                         workflowExpressionProjectedMap(values["join"]),
+		Loop:                         workflowExpressionProjectedMap(values["_loop"]),
+		WorkflowName:                 ctx.WorkflowName,
+		QueryEntityCount:             ctx.QueryEntityCount,
+		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
+	}, nil
+}
+
+func workflowExpressionProjectedMap(value any) map[string]any {
+	if projected, ok := value.(map[string]any); ok && projected != nil {
+		return projected
+	}
+	return map[string]any{}
 }
 
 func missingEntityReferences(expression string, entity map[string]any) []string {
@@ -316,30 +360,6 @@ func cloneAccumulatedItems(value any) any {
 	}
 }
 
-func workflowNormalizeCELInput(value any) any {
-	switch typed := value.(type) {
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, workflowNormalizeCELInput(item))
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[key] = workflowNormalizeCELInput(item)
-		}
-		return out
-	case float64:
-		if math.Trunc(typed) == typed && typed <= math.MaxInt && typed >= math.MinInt {
-			return int(typed)
-		}
-		return typed
-	default:
-		return typed
-	}
-}
-
 func normalizeWorkflowExpressionStringLiterals(expression string) string {
 	if expression == "" || !strings.ContainsRune(expression, '\'') {
 		return expression
@@ -496,10 +516,18 @@ func workflowExpressionLiteral(value any) string {
 	case uint64:
 		return strconv.FormatUint(typed, 10)
 	case float32:
-		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+		return workflowExpressionFloatLiteral(float64(typed), 32)
 	case float64:
-		return strconv.FormatFloat(typed, 'f', -1, 64)
+		return workflowExpressionFloatLiteral(typed, 64)
 	default:
 		return fmt.Sprintf("%v", value)
 	}
+}
+
+func workflowExpressionFloatLiteral(value float64, bitSize int) string {
+	literal := strconv.FormatFloat(value, 'g', -1, bitSize)
+	if !strings.ContainsAny(literal, ".eE") {
+		literal += ".0"
+	}
+	return literal
 }

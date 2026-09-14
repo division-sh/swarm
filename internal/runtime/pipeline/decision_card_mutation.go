@@ -17,6 +17,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
 )
 
@@ -575,7 +576,11 @@ func decisionCardDecidedEvent(card decisioncard.Card, req decisioncard.DecideReq
 	if err != nil {
 		return noEvent, err
 	}
-	payload, err := canonicaljson.Encode(payloadValue)
+	projected, err := workflowexpr.ProjectSemanticValue(payloadValue)
+	if err != nil {
+		return noEvent, err
+	}
+	payload, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
 		return noEvent, err
 	}

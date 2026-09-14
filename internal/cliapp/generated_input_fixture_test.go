@@ -114,7 +114,7 @@ func TestGeneratedInputFixturePlanResolvesExactEventAndIsContextDeterministic(t 
 	if err != nil {
 		t.Fatalf("materialize beta: %v", err)
 	}
-	if !reflect.DeepEqual(betaPayload, map[string]any{"beta": float64(2)}) {
+	if !reflect.DeepEqual(betaPayload, map[string]any{"beta": int64(2)}) {
 		t.Fatalf("beta payload = %#v, want isolated beta schema", betaPayload)
 	}
 	if first.identity == beta.identity || first.eventKey == beta.eventKey {
@@ -384,7 +384,7 @@ steps:
 			}
 			writeJSONRPCResult(t, w, rpc.ID, eventPublishTestResult(true))
 		case "run.diagnose":
-			writeJSONRPCResult(t, w, rpc.ID, scenarioRunDiagnoseTestResult("run-1", true))
+			writeJSONRPCResult(t, w, rpc.ID, scenarioRunDiagnoseTestResult(testPublishedRunID, true))
 		default:
 			t.Fatalf("unexpected method %q", rpc.Method)
 		}
