@@ -106,7 +106,7 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 				Source:     contracts,
 				Store:      store.name,
 				Dev:        test.dev,
-				APIPort:    freeReleaseTCPPort(t),
+				APIPort:    0,
 				TokenFile:  tokenFile,
 				Token:      goldenAPIToken,
 				Env:        env,
@@ -242,7 +242,7 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	env := goldenProcessEnv(t, root, "", 0)
 	assertGoldenProcessHasNoExternalExecutables(t, env)
 
-	apiPort := freeReleaseTCPPort(t)
+	apiPort := 0
 	start := func(dev bool) *releaseServeProcess {
 		return startReleaseServe(t, releaseProcessSpec{
 			BinaryPath:                  binaryPath,
@@ -331,7 +331,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 				WorkingDir: test.root,
 				Source:     contracts,
 				Dev:        true,
-				APIPort:    freeReleaseTCPPort(t),
+				APIPort:    0,
 				TokenFile:  "api-token",
 				Token:      goldenAPIToken,
 				Env:        env,
@@ -371,8 +371,8 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 		refused := runReleaseCommand(t, goldenStartupTimeout, invocationRoot, invocationEnv, "", binaryPath,
 			"serve", contracts, "--dev",
 			"--backend", "claude_cli", "--workspace-backend", "host",
-			"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)),
-			"--mcp-listen-addr", fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)),
+			"--api-listen-addr", "127.0.0.1:0",
+			"--mcp-listen-addr", "127.0.0.1:0",
 			"--api-token-file", "api-token", "--shutdown-grace", "2s", "--no-color")
 		if refused.err == nil || !strings.Contains(refused.output, "run from the contracts-owning project root") {
 			t.Fatalf("borrowed dev refusal: err=%v output=%s", refused.err, refused.output)
@@ -390,7 +390,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			BinaryPath: binaryPath,
 			WorkingDir: invocationRoot,
 			Source:     contracts,
-			APIPort:    freeReleaseTCPPort(t),
+			APIPort:    0,
 			TokenFile:  "api-token",
 			Token:      goldenAPIToken,
 			Env:        invocationEnv,
@@ -415,7 +415,7 @@ func TestGoldenInvocationRootDevReadiness(t *testing.T) {
 			WorkingDir: projectRoot,
 			Source:     contracts,
 			Dev:        true,
-			APIPort:    freeReleaseTCPPort(t),
+			APIPort:    0,
 			TokenFile:  "api-token",
 			Token:      goldenAPIToken,
 			Env:        projectEnv,
@@ -581,7 +581,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	if err := json.Unmarshal([]byte(strings.TrimSpace(verify.output)), &verifyResult); err != nil || !verifyResult.OK {
 		t.Fatalf("golden release verify result is not canonical success: err=%v output=%s", err, verify.output)
 	}
-	apiPort := freeReleaseTCPPort(t)
+	apiPort := 0
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath:                  binaryPath,

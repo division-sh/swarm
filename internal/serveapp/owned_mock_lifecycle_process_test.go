@@ -45,8 +45,8 @@ func TestOwnedMockLifecycleProcessEntry(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &request); err != nil {
 		t.Fatal(err)
 	}
-	if request.Token == "" || request.APIPort == 0 {
-		t.Fatal("internal lifecycle child requires exact parent transport and auth facts")
+	if request.Token == "" || request.APIPort < 0 || request.APIPort > 65535 {
+		t.Fatal("internal lifecycle child requires a valid listener port and exact parent auth facts")
 	}
 	root, err := os.Getwd()
 	if err != nil {
