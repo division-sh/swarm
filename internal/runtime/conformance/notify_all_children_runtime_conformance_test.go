@@ -2508,6 +2508,7 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 	for {
 		var total, cursor, owed, blocked int
 		if err := db.QueryRowContext(ctx, query, runID).Scan(&total, &cursor, &owed, &blocked); err != nil {
+			logNotifyAllChildrenFanOutWork(t, db, runID)
 			t.Fatalf("load fan-out cursor: %v; last cursor=%d want=%d", err, lastCursor, cardinality)
 		}
 		lastCursor = cursor
@@ -2519,6 +2520,7 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 			if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatalf("wait fan-out EventBus settlement: %v", err)
 			}
+			logNotifyAllChildrenFanOutWork(t, db, runID)
 			return
 		}
 		var terminalFailure string
@@ -2542,10 +2544,36 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 		}
 		select {
 		case <-ctx.Done():
+			logNotifyAllChildrenFanOutWork(t, db, runID)
 			t.Fatalf("wait for fan-out cursor: %v; total=%d cursor=%d owed=%d", ctx.Err(), total, cursor, owed)
 		case <-ticker.C:
 		}
 	}
+}
+
+// Observe only after the original progress verdict or completed quiescence.
+// A bounded diagnostic read cannot extend, recover or waive that verdict.
+func logNotifyAllChildrenFanOutWork(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var intents, floor, minimum, maximum int
+	var lastMS float64
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN next_chunk_size=1 THEN 1 ELSE 0 END),0),COALESCE(MIN(next_chunk_size),0),COALESCE(MAX(next_chunk_size),0),COALESCE(MAX(last_chunk_ms),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &floor, &minimum, &maximum, &lastMS)
+	if err != nil {
+		t.Logf("fan-out work diagnostic: %v", err)
+		return
+	}
+	var revisions, facts int64
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1`, runID).Scan(&revisions); err != nil {
+		t.Logf("fan-out revision diagnostic: %v", err)
+		return
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1`, runID).Scan(&facts); err != nil {
+		t.Logf("fan-out fact diagnostic: %v", err)
+		return
+	}
+	t.Logf("fan-out work: intents=%d floor_one=%d next_chunk=%d..%d last_chunk_max_ms=%g committed_revisions=%d fact_revisions=%d", intents, floor, minimum, maximum, lastMS, revisions, facts)
 }
 
 func assertNotifyAllChildrenRunPersisted(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) {
