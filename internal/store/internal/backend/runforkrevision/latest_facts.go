@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-// Fold the revision index once, then hydrate only the latest row of each key.
-// All families and tombstones remain in the result and pass the same read
-// validation; this is not a dirty-family filter or a second latest-state store.
-// CROSS JOIN keeps SQLite from driving the join with every historical row.
-const latestFactsQuery = `
+func latestFactReadQuery(runID string, families []Family) (string, []any, map[Family]bool, error) {
+	// Fold the revision index once, then hydrate only the latest row of each key.
+	// All families and tombstones retain read validation. CROSS JOIN keeps SQLite
+	// from driving the join with every historical row.
+	const latestFactsQuery = `
 SELECT r.family, r.fact_key, %s, r.present
 FROM (
 	SELECT family, fact_key, MAX(revision) AS revision
@@ -21,8 +21,6 @@ FROM (
 WHERE r.run_id=$1 AND r.family=latest.family
 	AND r.fact_key=latest.fact_key AND r.revision=latest.revision
 `
-
-func latestFactReadQuery(runID string, families []Family) (string, []any, map[Family]bool, error) {
 	if len(families) == 0 {
 		return "", nil, nil, fmt.Errorf("latest revision projection requires declared families")
 	}
