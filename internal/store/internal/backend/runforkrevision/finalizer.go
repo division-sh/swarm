@@ -46,9 +46,10 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 			return nil, fmt.Errorf("load latest revision facts: %w", err)
 		}
 		type familyChange struct {
-			family  Family
-			current []canonicalFact
-			latest  map[string]ledgerFact
+			family         Family
+			current        []canonicalFact
+			latest         map[string]ledgerFact
+			comparedPrefix int
 		}
 		changed := make([]familyChange, 0, len(change.families))
 		for _, family := range change.families {
@@ -57,10 +58,11 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 				return nil, err
 			}
 			latest := latestByFamily[family]
-			if canonicalProjectionEqual(current, latest) {
+			equal, comparedPrefix := compareCanonicalProjection(current, latest)
+			if equal {
 				continue
 			}
-			changed = append(changed, familyChange{family: family, current: current, latest: latest})
+			changed = append(changed, familyChange{family: family, current: current, latest: latest, comparedPrefix: comparedPrefix})
 		}
 		if len(changed) == 0 {
 			revision, ok, err := adapter.latestRevision(ctx, change.runID)
@@ -78,8 +80,13 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 		}
 		for _, family := range changed {
 			currentKeys := make(map[string]struct{}, len(family.current))
-			for _, fact := range family.current {
+			for i, fact := range family.current {
 				currentKeys[fact.key] = struct{}{}
+				// This exact slice prefix was already compared against the same
+				// transaction-local ledger. Do not decode it a second time.
+				if i < family.comparedPrefix {
+					continue
+				}
 				stored, exists := family.latest[fact.key]
 				if exists && stored.present && canonicalJSONEqual(fact.fact, stored.fact) {
 					continue
@@ -106,16 +113,21 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 }
 
 func canonicalProjectionEqual(current []canonicalFact, latest map[string]ledgerFact) bool {
+	equal, _ := compareCanonicalProjection(current, latest)
+	return equal
+}
+
+func compareCanonicalProjection(current []canonicalFact, latest map[string]ledgerFact) (bool, int) {
 	if len(current) != countPresent(latest) {
-		return false
+		return false, 0
 	}
-	for _, fact := range current {
+	for i, fact := range current {
 		stored, ok := latest[fact.key]
 		if !ok || !stored.present || !canonicalJSONEqual(fact.fact, stored.fact) {
-			return false
+			return false, i
 		}
 	}
-	return true
+	return true, len(current)
 }
 
 func countPresent(facts map[string]ledgerFact) int {

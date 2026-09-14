@@ -50,3 +50,48 @@ func BenchmarkRevisionEqualityIdentical(b *testing.B) {
 		}
 	}
 }
+
+func TestComparedProjectionPrefixPreservesWriteDecisions(t *testing.T) {
+	current := []canonicalFact{{key: "a", fact: []byte(`{"v":1}`)}, {key: "b", fact: []byte(`{"v":2}`)}, {key: "c", fact: []byte(`{"v":3}`)}}
+	for _, mutation := range []string{"same", "first", "middle", "last", "missing", "tombstone", "extra", "invalid"} {
+		t.Run(mutation, func(t *testing.T) {
+			latest := map[string]ledgerFact{}
+			for _, fact := range current {
+				latest[fact.key] = ledgerFact{fact: fact.fact, present: true}
+			}
+			switch mutation {
+			case "first":
+				latest["a"] = ledgerFact{fact: []byte(`{"v":9}`), present: true}
+			case "middle":
+				latest["b"] = ledgerFact{fact: []byte(`{"v":9}`), present: true}
+			case "last":
+				latest["c"] = ledgerFact{fact: []byte(`{"v":9}`), present: true}
+			case "missing":
+				delete(latest, "b")
+			case "tombstone":
+				latest["b"] = ledgerFact{fact: []byte(`{}`), present: false}
+			case "extra":
+				latest["d"] = ledgerFact{fact: []byte(`{}`), present: true}
+			case "invalid":
+				latest["c"] = ledgerFact{fact: []byte(`{`), present: true}
+			}
+			equal, prefix := compareCanonicalProjection(current, latest)
+			wantEqual := len(current) == countPresent(latest)
+			for i, fact := range current {
+				stored, exists := latest[fact.key]
+				unchanged := exists && stored.present && originalJSONEqual(fact.fact, stored.fact)
+				wantEqual = wantEqual && unchanged
+				if i < prefix && !unchanged {
+					t.Fatalf("prefix hides changed fact %q", fact.key)
+				}
+				newWrite := i >= prefix && (!exists || !stored.present || !canonicalJSONEqual(fact.fact, stored.fact))
+				if newWrite != !unchanged {
+					t.Fatalf("write decision changed for %q", fact.key)
+				}
+			}
+			if equal != wantEqual {
+				t.Fatalf("equal=%v want %v", equal, wantEqual)
+			}
+		})
+	}
+}
