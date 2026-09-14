@@ -58,7 +58,7 @@ func (pc *PipelineCoordinator) validateArtifactRepoOutputContract(execCtx engine
 			}
 		case "failure":
 			// Both {} and an arbitrary canonical failure envelope must fit this field.
-			if resolved.Kind != contracts.CatalogTypeDynamic || decl.LeafKind != "object" || !decl.Refinements.Empty() {
+			if resolved.Kind != contracts.CatalogTypeDynamic || (decl.LeafKind != "object" && decl.LeafKind != "json") || !decl.Refinements.Empty() {
 				return invalid(fmt.Errorf("artifact output.failure requires an unrestricted JSON object"))
 			}
 		case "file_manifest":
@@ -66,7 +66,7 @@ func (pc *PipelineCoordinator) validateArtifactRepoOutputContract(execCtx engine
 				if err := artifactRepoAdmitProviderRef(contract, field+".ref"); err != nil {
 					return invalid(err)
 				}
-			} else if resolved.Kind != contracts.CatalogTypeDynamic || decl.LeafKind != "object" {
+			} else if resolved.Kind != contracts.CatalogTypeDynamic || (decl.LeafKind != "object" && decl.LeafKind != "json") {
 				return invalid(fmt.Errorf("artifact output.file_manifest requires an object"))
 			}
 			// Admit the actual prepared manifest before provider access below.

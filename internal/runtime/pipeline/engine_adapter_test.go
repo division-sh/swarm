@@ -3277,7 +3277,7 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *test
 }
 
 func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
-	root := &runtimecontracts.FlowContractView{Events: map[string]runtimecontracts.EventCatalogEntry{
+	root := &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Events: map[string]runtimecontracts.EventCatalogEntry{
 		"company.registered": {
 			Payload: runtimecontracts.EventPayloadSpec{
 				Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -3287,16 +3287,14 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 				Required: []string{"gem_score", "external_id"},
 			},
 		},
-		"company.unresolved": {
-			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{"evidence": {Type: "NotDeclared"}},
-				Required:   []string{"evidence"},
-			},
-		},
 	}}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root},
-	})
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
 
 	tests := []struct {
 		name       string
@@ -3308,13 +3306,6 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 		expected   string
 		actual     string
 	}{
-		{
-			name: "unresolved schema", event: "company.unresolved", kind: runtimeengine.EmitPayloadSchemaUnresolved,
-			path: "$", constraint: "resolved_schema", expected: "resolved event payload schema", actual: "unresolved",
-			run: func() error {
-				return validatePipelineEmitPayload(source, "", "company.unresolved", map[string]any{"evidence": "x"}, nil, runtimeengine.EmitSurfaceDeclarative)
-			},
-		},
 		{
 			name: "schema mismatch", event: "company.registered", kind: runtimeengine.EmitPayloadSchemaMismatch,
 			path: "$.gem_score", constraint: "type", expected: "number", actual: "string",
@@ -3350,6 +3341,17 @@ func TestPipelineEmitPayloadContractProducersReturnOneTypedFact(t *testing.T) {
 			}
 		})
 	}
+	t.Run("unresolved schema rejected before execution", func(t *testing.T) {
+		root.Events["company.unresolved"] = runtimecontracts.EventCatalogEntry{
+			Payload: runtimecontracts.EventPayloadSpec{
+				Properties: map[string]runtimecontracts.EventFieldSpec{"evidence": {Type: "NotDeclared"}},
+				Required:   []string{"evidence"},
+			},
+		}
+		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "NotDeclared") {
+			t.Fatalf("unresolved schema escaped compiler admission: %v", err)
+		}
+	})
 }
 
 func TestPipelineEnginePayloadShaper_DoesNotBorrowRootSchemaForChildOutput(t *testing.T) {

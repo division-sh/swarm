@@ -2,13 +2,15 @@ package workflowexpr
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
 	celenv "github.com/google/cel-go/common/env"
+	"github.com/google/cel-go/common/functions"
 	"github.com/google/cel-go/common/overloads"
+	celtypes "github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 )
 
 const workflowNumericTypeName = "swarm.numeric"
@@ -29,15 +31,14 @@ type numericDispatch struct {
 	id       string
 	args     []*cel.Type
 	result   *cel.Type
-	stock    []string
 }
 
 func workflowNumericDispatches() []numericDispatch {
 	number := workflowNumericType()
 	out := []numericDispatch{
-		{"int", "swarm_numeric_to_int", []*cel.Type{number}, cel.IntType, []string{overloads.IntToInt, overloads.DoubleToInt}},
-		{"double", "swarm_numeric_to_double", []*cel.Type{number}, cel.DoubleType, []string{overloads.IntToDouble, overloads.DoubleToDouble}},
-		{"string", "swarm_numeric_to_string", []*cel.Type{number}, cel.StringType, []string{overloads.IntToString, overloads.DoubleToString}},
+		{"int", "swarm_numeric_to_int", []*cel.Type{number}, cel.IntType},
+		{"double", "swarm_numeric_to_double", []*cel.Type{number}, cel.DoubleType},
+		{"string", "swarm_numeric_to_string", []*cel.Type{number}, cel.StringType},
 	}
 	for _, op := range []struct {
 		name string
@@ -49,7 +50,7 @@ func workflowNumericDispatches() []numericDispatch {
 		{"_>=_", []string{overloads.GreaterEqualsInt64, overloads.GreaterEqualsInt64Double, overloads.GreaterEqualsDoubleInt64, overloads.GreaterEqualsDouble}},
 	} {
 		for index, pair := range [][]*cel.Type{{number, number}, {number, cel.IntType}, {number, cel.DoubleType}, {cel.IntType, number}, {cel.DoubleType, number}} {
-			out = append(out, numericDispatch{op.name, fmt.Sprintf("swarm_numeric_%s_%d", op.ids[0], index), pair, cel.BoolType, op.ids})
+			out = append(out, numericDispatch{op.name, fmt.Sprintf("swarm_numeric_%s_%d", op.ids[0], index), pair, cel.BoolType})
 		}
 	}
 	return out
@@ -182,29 +183,63 @@ func workflowProgram(env *cel.Env, compiled *cel.Ast) (cel.Program, error) {
 	if err := validateWorkflowNumericEvidence(compiled); err != nil {
 		return nil, err
 	}
-	// Preserve the checked evidence for validators and callers. The private plan
-	// uses stock CEL dispatch only; there is no numeric runtime wrapper/operator.
-	native := celast.Copy(compiled.NativeRep())
-	dispatches := workflowNumericDispatches()
-	for id, reference := range native.ReferenceMap() {
-		var ids []string
-		for _, overload := range reference.OverloadIDs {
-			replacement := []string{overload}
-			for _, dispatch := range dispatches {
-				if overload == dispatch.id {
-					replacement = dispatch.stock
-					break
-				}
-			}
-			for _, candidate := range replacement {
-				if !slices.Contains(ids, candidate) {
-					ids = append(ids, candidate)
-				}
+	// Bind only the closed checked overload IDs, after authored checking. Delegating
+	// an erased reference to the whole stock function would also admit its string
+	// conversions. Guard the family first; values and stock operators are unchanged.
+	used := map[string]bool{}
+	for _, reference := range compiled.NativeRep().ReferenceMap() {
+		for _, id := range reference.OverloadIDs {
+			used[id] = true
+		}
+	}
+	functionsByName := env.Functions()
+	var options []cel.EnvOption
+	for _, dispatch := range workflowNumericDispatches() {
+		if !used[dispatch.id] {
+			continue
+		}
+		bindings, err := functionsByName[dispatch.function].Bindings()
+		if err != nil {
+			return nil, err
+		}
+		var stock *functions.Overload
+		for _, binding := range bindings {
+			if binding.Operator == dispatch.function {
+				stock = binding
+				break
 			}
 		}
-		copy := *reference
-		copy.OverloadIDs = ids
-		native.SetReference(id, &copy)
+		if stock == nil {
+			return nil, fmt.Errorf("missing stock numeric dispatch for %s", dispatch.function)
+		}
+		guarded := func(args ...ref.Val) ref.Val {
+			for _, arg := range args {
+				switch arg.(type) {
+				case celtypes.Int, celtypes.Double:
+				default:
+					return celtypes.NewErr("numeric operation requires an admitted integer or double, got %s", arg.Type())
+				}
+			}
+			if stock.Function != nil {
+				return stock.Function(args...)
+			}
+			if len(args) == 1 && stock.Unary != nil {
+				return stock.Unary(args[0])
+			}
+			if len(args) == 2 && stock.Binary != nil {
+				return stock.Binary(args[0], args[1])
+			}
+			return celtypes.NewErr("missing stock numeric operation binding")
+		}
+		options = append(options, cel.Function(dispatch.id,
+			cel.Overload(dispatch.id, dispatch.args, dispatch.result), cel.SingletonFunctionBinding(guarded)))
 	}
-	return env.PlanProgram(native)
+	if len(options) == 0 {
+		return env.PlanProgram(compiled.NativeRep())
+	}
+	planEnv, err := env.Extend(options...)
+	if err != nil {
+		return nil, err
+	}
+	return planEnv.PlanProgram(compiled.NativeRep())
 }

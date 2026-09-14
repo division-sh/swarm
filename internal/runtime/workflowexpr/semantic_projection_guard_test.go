@@ -128,6 +128,8 @@ func TestWorkflowCELProjectionJSONWritersPreserveNumberKinds(t *testing.T) {
 		{name: "ordinary event payload", path: filepath.Join(runtimeRoot, "engine", "executor.go"), function: "encodePayload"},
 		{name: "dynamic flow auto-emit payload", path: filepath.Join(runtimeRoot, "manager", "flow_activation.go"), function: "buildDynamicFlowRuntimeCreationEventPlan"},
 		{name: "activity result payload", path: filepath.Join(runtimeRoot, "pipeline", "activity_engine.go"), function: "publishActivityResultWithID"},
+		{name: "activity completion journal", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "activityjournal", "journal.go"), function: "Complete"},
+		{name: "activity uncertainty journal", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "activityjournal", "journal.go"), function: "MarkUncertain"},
 		{name: "workflow engine state", path: filepath.Join(runtimeRoot, "pipeline", "engine_mutation_commit.go"), function: "workflowEngineStateRecord"},
 		{name: "workflow activation state", path: filepath.Join(runtimeRoot, "pipeline", "workflow_instance_activation.go"), function: "PersistenceRecord"},
 		{name: "initial workflow projection", path: filepath.Join(runtimeRoot, "pipeline", "workflow_initial_materialization_commit.go"), function: "workflowInitialMaterializationRecord"},

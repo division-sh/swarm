@@ -3545,7 +3545,7 @@ func TestExecutorOrdinaryEventPayloadPreservesIntegerForCELArithmetic(t *testing
 		),
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 			Source:  "payload.items",
-			Filter:  "item.integer + 1 == 76 && item.decimal + 1.0 == 76.0 && item.exponent + 1.0 == 76.0",
+			Filter:  "item.integer + 1 == 76 && double(item.decimal) + 1.0 == 76.0 && double(item.exponent) + 1.0 == 76.0",
 			StoreAs: "entity.matches",
 		}},
 		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),

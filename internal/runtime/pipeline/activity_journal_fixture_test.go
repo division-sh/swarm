@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
@@ -121,7 +122,7 @@ func (j pipelineTestActivityJournal) CompleteActivityAttempt(ctx context.Context
 		if err := j.requireActiveRun(txctx, record.RunID); err != nil {
 			return err
 		}
-		payload, err := json.Marshal(record.ResultPayload)
+		payload, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
 		if err != nil {
 			return err
 		}
@@ -176,7 +177,7 @@ func (j pipelineTestActivityJournal) MarkActivityAttemptUncertain(ctx context.Co
 		if err := j.requireActiveRun(txctx, record.RunID); err != nil {
 			return err
 		}
-		payload, err := json.Marshal(record.ResultPayload)
+		payload, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
 		if err != nil {
 			return err
 		}
@@ -271,9 +272,14 @@ func scanPipelineTestActivityAttempt(row interface{ Scan(...any) error }) (Activ
 		record.Failure = &failure
 	}
 	if raw := testJSONRaw(payloadRaw); len(raw) > 0 && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &record.ResultPayload); err != nil {
+		if err := canonicaljson.DecodePreservingNumberLexemes(raw, &record.ResultPayload); err != nil {
 			return ActivityAttemptRecord{}, err
 		}
+		projected, err := canonicaljson.CloneRuntimeValue(record.ResultPayload)
+		if err != nil {
+			return ActivityAttemptRecord{}, err
+		}
+		record.ResultPayload = projected.(map[string]any)
 	}
 	var err error
 	if record.StartedAt, _, err = testActivityTime(startedAtRaw); err != nil {

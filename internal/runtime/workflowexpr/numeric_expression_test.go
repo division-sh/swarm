@@ -75,6 +75,17 @@ func TestNumericFamilyRejectsUncheckedOperationsAndErasure(t *testing.T) {
 	}
 }
 
+func TestNumericFamilyRuntimeDispatchRejectsNonNumericCarriers(t *testing.T) {
+	record := contracts.ResolvedCatalogType{Kind: contracts.CatalogTypeObject, Fields: []contracts.ResolvedCatalogField{{Name: "n", Type: contracts.ResolvedCatalogType{Kind: contracts.CatalogTypeNumber}}}}
+	for _, expression := range []string{`int(payload.n)`, `double(payload.n)`, `string(payload.n)`, `payload.n > 1`} {
+		for _, value := range []any{"8", true, []any{8}} {
+			if got, err := EvalValueExpressionWithOptions(expression, ValueContext{Payload: map[string]any{"n": value}}, ValueExpressionOptions{PayloadType: &record}); err == nil {
+				t.Errorf("%s accepted non-numeric %T: %#v", expression, value, got)
+			}
+		}
+	}
+}
+
 func TestNumericResultUsesCatalogAssignment(t *testing.T) {
 	number := contracts.ResolvedCatalogType{Kind: contracts.CatalogTypeNumber}
 	integer := contracts.ResolvedCatalogType{Kind: contracts.CatalogTypeInteger}

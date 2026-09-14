@@ -1203,7 +1203,10 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 		if readErr != nil {
 			return nil, activityHTTPUncertainError{err: runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "activity_http_response_read_uncertain", "activity-runtime", "read_http_response", map[string]any{"tool": prepared.toolName}, redactActivityError(readErr, prepared.secrets))}
 		}
-		parsed := parseHTTPActivityResponse(raw)
+		parsed, err := parseHTTPActivityResponse(raw)
+		if err != nil {
+			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_schema_invalid", "activity-runtime", "admit_http_response", map[string]any{"tool": prepared.toolName}, err)
+		}
 		parsed = runtimemanagedcredentials.RedactValue(parsed, prepared.secrets...)
 		if prepared.managedAuth != nil && resp.StatusCode == http.StatusUnauthorized && !refreshedAfterUnauthorized {
 			refreshedAfterUnauthorized = true
@@ -1414,15 +1417,18 @@ func activityHTTPOutcomeUncertain(err error) bool {
 	return errors.As(err, &target)
 }
 
-func parseHTTPActivityResponse(raw []byte) any {
+func parseHTTPActivityResponse(raw []byte) (any, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
-		return map[string]any{}
+		return map[string]any{}, nil
 	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return string(raw)
+	if !json.Valid(raw) {
+		return string(raw), nil
 	}
-	return out
+	value, err := canonicaljson.Decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	return workflowexpr.ProjectSemanticValue(value)
 }
 
 func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.Context, intent runtimeengine.ActivityIntent, keys []string) (map[string]any, []string, error) {
@@ -1546,11 +1552,7 @@ func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, i
 
 func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any) error {
 	ctx = events.WithDeliveryContext(ctx, intent.Context)
-	admitted, err := canonicaljson.FromGo(payload)
-	if err != nil {
-		return err
-	}
-	projected, err := workflowexpr.ProjectSemanticValue(admitted)
+	projected, err := canonicaljson.CloneRuntimeValue(payload)
 	if err != nil {
 		return err
 	}

@@ -171,7 +171,7 @@ func TestEmitFieldsPayload_PreservesNativeWholeNumberFloatAsDouble(t *testing.T)
 	}
 	transformed, err := emitFieldsPayload(base, ExecutionState{}, runtimecontracts.EmitSpec{
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"score": runtimecontracts.CELExpression("payload.raw_score * 2.0"),
+			"score": runtimecontracts.CELExpression("double(payload.raw_score) * 2.0"),
 		},
 	}, workflowexpr.ValueExpressionOptions{PayloadType: &payloadType}, nil)
 	if err != nil {
@@ -206,7 +206,7 @@ func TestEncodePayloadPreservesEagerNumericKindForPersistedEvaluation(t *testing
 		{Name: "double", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeNumber}},
 	}}
 	result, err := workflowexpr.EvalValueExpressionWithOptions(
-		"payload.integer + 1 == 51 && payload.double + 1.0 == 51.0",
+		"payload.integer + 1 == 51 && double(payload.double) + 1.0 == 51.0",
 		workflowexpr.ValueContext{Payload: payload},
 		workflowexpr.ValueExpressionOptions{PayloadType: &payloadType},
 	)

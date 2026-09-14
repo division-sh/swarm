@@ -21,7 +21,7 @@ var semanticExecutionExits = map[string][]string{
 	"internal/store/internal/backend/pipelinepersistence/scenario_setup.go::scenarioSetupEntityJSON": {"FromGo", "ProjectSemanticValue", "MarshalPreservingNumberKinds"},
 	"internal/store/internal/backend/pipelinepersistence/fan_out_owner.go::collectionRangeFromJSONL": {"Decode", "ProjectSemanticValue"},
 	"internal/runtime/engine/executor.go::decodeComputeModuleOutput":                                 {"Decode", "ProjectSemanticValue"},
-	"internal/runtime/pipeline/activity_engine.go::publishActivityResultWithID":                      {"FromGo", "ProjectSemanticValue", "MarshalPreservingNumberKinds"},
+	"internal/runtime/pipeline/activity_engine.go::parseHTTPActivityResponse":                        {"Decode", "ProjectSemanticValue"},
 	"internal/runtime/pipeline/workflow_gate_decision.go::workflowGateOutcomeEvent":                  {"ProjectSemanticValue", "MarshalPreservingNumberKinds"},
 	"internal/runtime/pipeline/decision_card_mutation.go::decisionCardDecidedEvent":                  {"ProjectSemanticValue", "MarshalPreservingNumberKinds"},
 	"internal/runtime/genericschedule/owner.go::fire":                                                {"ProjectSemanticValue", "MarshalPreservingNumberKinds"},

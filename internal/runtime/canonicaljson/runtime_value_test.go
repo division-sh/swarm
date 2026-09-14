@@ -46,7 +46,7 @@ func TestRuntimeJSONCarrierRejectsNonValues(t *testing.T) {
 	cycle := []any{nil}
 	cycle[0] = cycle
 	for _, value := range []any{semantic, struct{ N int }{1}, make(chan int), new(int), math.Copysign(0, -1),
-		math.NaN(), math.Inf(1), int64(9007199254740992), json.Number("1e9999"), "\xff", map[string]any{"\xff": 1}, cycle,
+		math.NaN(), math.Inf(1), int64(9007199254740992), json.Number("1e9999"), json.Number("+8"), json.Number("08"), "\xff", map[string]any{"\xff": 1}, cycle,
 	} {
 		if _, err := CloneRuntimeValue(value); err == nil {
 			t.Fatalf("admitted %T", value)

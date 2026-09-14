@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
 )
@@ -103,16 +102,12 @@ func TestRuntimePayloadAdmissionStrictOriginalBytes(t *testing.T) {
 		"unknown_field":     `{"value":8,"unknown":8}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			event, err := events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{
-				Facts: events.EventFacts{ID: uuid.NewString(), Type: "numeric.completed", Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "numeric-proof"}, Payload: []byte(raw), CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live},
-				RunID: uuid.NewString(),
-			})
-			if err != nil {
-				if json.Valid([]byte(raw)) {
-					t.Fatalf("valid-JSON probe failed before payload admission: %v", err)
+			defer func() {
+				if failure := recover(); failure != nil && json.Valid([]byte(raw)) {
+					t.Fatalf("valid-JSON probe failed before payload admission: %v", failure)
 				}
-				return // Malformed/trailing JSON is rejected by the event constructor.
-			}
+			}()
+			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "numeric.completed", "numeric-proof", "", []byte(raw), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if _, err := admitter(context.Background(), event, ""); err == nil {
 				t.Fatalf("accepted hostile original bytes %q", raw)
 			}
@@ -121,6 +116,24 @@ func TestRuntimePayloadAdmissionStrictOriginalBytes(t *testing.T) {
 	for _, raw := range []string{`{"value":9007199254740991}`, `{"value":5e-324}`, `{"value":8.0,"optional":null}`} {
 		if _, err := admitRuntimePayload(admitter, "numeric.completed", []byte(raw)); err != nil {
 			t.Fatalf("rejected lawful control %s: %v", raw, err)
+		}
+	}
+}
+
+func TestRuntimePayloadAdmissionEmptyObjectIsNotNull(t *testing.T) {
+	admitter := testRuntimePayloadAdmitter(t, loadRootPayloadBundle(t, "empty.completed: {}\n", ""))
+	for _, raw := range []string{"", "{}", "{ }"} {
+		event, err := admitRuntimePayload(admitter, "empty.completed", []byte(raw))
+		if err != nil {
+			t.Fatalf("empty object %q: %v", raw, err)
+		}
+		if string(event.Payload()) != "{}" {
+			t.Fatalf("empty object changed shape: %s", event.Payload())
+		}
+	}
+	for _, raw := range []string{"null", "[]", "1", "true", `""`} {
+		if _, err := admitRuntimePayload(admitter, "empty.completed", []byte(raw)); err == nil {
+			t.Fatalf("accepted non-object %q", raw)
 		}
 	}
 }

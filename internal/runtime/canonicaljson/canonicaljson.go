@@ -670,6 +670,9 @@ func NormalizeNumber(value any) (float64, error) {
 		return number, nil
 	case json.Number:
 		raw = typed.String()
+		if !json.Valid([]byte(raw)) {
+			return 0, admissionErrorf("unsupported JSON number %q", raw)
+		}
 	case semanticvalue.Value:
 		number, ok := typed.Number()
 		if !ok {

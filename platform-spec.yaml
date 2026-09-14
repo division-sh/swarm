@@ -279,6 +279,10 @@ contract_formats:
       subscriptions project semantic output and do not admit those commands.
       Setup, scenario materialization, resource rows, activity/module results and
       semantic decision/schedule payloads cross this owner before execution.
+      Activity HTTP JSON responses cross semantic admission at the provider
+      boundary. Already projected activity results and terminal journal payloads
+      preserve their execution kinds through publication, completion, uncertainty,
+      readback and duplicate replay; they do not re-enter semantic DTO projection.
       Generic semantic DTO projection does not establish execution intent;
       reconstructing wire spelling after admission is forbidden.
       `internal/runtime/workflowexpr.ProjectCELValue` delegates semantic Values
