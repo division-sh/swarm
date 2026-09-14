@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -87,7 +87,7 @@ func (e *Executor) EvaluateFanOutOrdinal(ctx context.Context, intent fanoutoblig
 		base: base, state: state, payload: payload,
 		fanOutEmission: &emission,
 	}
-	frame.payloadType = e.executionPayloadType(frame.req)
+	e.bindFrameExpressionSchemas(frame)
 	emitSpec := plan.Emit
 	eventType, err := admittedDeclarativeEmitEventType(frame, emitSpec.EventType())
 	if err != nil {
@@ -130,9 +130,7 @@ func (e *Executor) resolveFanOutPlan(want runtimecontracts.FanOutPlanRef) (runti
 
 func decodeFanOutPayload(raw json.RawMessage) (map[string]any, error) {
 	var payload map[string]any
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&payload); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &payload); err != nil {
 		return nil, fmt.Errorf("decode fan-out triggering payload: %w", err)
 	}
 	if payload == nil {

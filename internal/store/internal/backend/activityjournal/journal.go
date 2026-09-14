@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
@@ -155,7 +156,7 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	payload, err := json.Marshal(record.ResultPayload)
+	payload, err := canonicaljson.Bytes(record.ResultPayload)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("marshal activity attempt result payload: %w", err)
 	}
@@ -224,7 +225,7 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	payload, err := json.Marshal(record.ResultPayload)
+	payload, err := canonicaljson.Bytes(record.ResultPayload)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("marshal activity attempt uncertain payload: %w", err)
 	}
@@ -475,7 +476,7 @@ func decodePayload(raw any) (map[string]any, error) {
 		return nil, nil
 	}
 	var out map[string]any
-	if err := json.Unmarshal(bytes, &out); err != nil {
+	if err := canonicaljson.DecodeInto(bytes, &out); err != nil {
 		return nil, fmt.Errorf("decode activity attempt result_payload: %w", err)
 	}
 	return out, nil

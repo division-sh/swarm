@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 const wakeupCallbackTimeout = 10 * time.Second
@@ -394,7 +395,11 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (CommitResult, erro
 	}
 	activation = prepared.Activation
 	occurrence := prepared.Occurrence
-	payload, err := canonicaljson.Encode(activation.Command.Payload)
+	projected, err := workflowexpr.ProjectSemanticValue(activation.Command.Payload)
+	if err != nil {
+		return CommitResult{Outcome: CommitRetry}, err
+	}
+	payload, err := canonicaljson.MarshalPreservingNumberKinds(projected)
 	if err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
 	}

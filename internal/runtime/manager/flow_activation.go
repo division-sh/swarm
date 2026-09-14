@@ -13,6 +13,7 @@ import (
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -668,7 +669,7 @@ func buildDynamicFlowRuntimeCreationEventPlan(
 	if err := validateAutoEmitPayload(source, templateID, autoEmit, payload); err != nil {
 		return nil, fmt.Errorf("auto-emit %s: %w", autoEmit, err)
 	}
-	encoded, err := json.Marshal(payload)
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 	if err != nil {
 		return nil, fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
 	}

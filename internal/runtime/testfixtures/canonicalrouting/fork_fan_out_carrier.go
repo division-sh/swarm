@@ -131,3 +131,32 @@ stages:
 	}
 	return root
 }
+
+// CopyNumericForkFanOutCarrier gives numeric persistence proofs real declared
+// entity fields and, for resource rows, a matching compiled collection type.
+func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
+	t.Helper()
+	root := CopyForkFanOutCarrier(t, false, false)
+	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  integer: integer\n  decimal: numeric\n")
+	if resourceRows {
+		writeClosedVariantFile(t, root, "types.yaml", "types:\n  ResourceRow:\n    slug: text\n    score: integer\n")
+		writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: '[ResourceRow]'\nitems.child:\n  value: text\n  integer_result: integer\n  double_result: numeric\n")
+		writeClosedVariantFile(t, root, "nodes.yaml", `fan-out-source:
+  execution_type: system_node
+  subscribes_to: [items.ready]
+  event_handlers:
+    items.ready:
+      fan_out:
+        items_from: payload.items
+        as: entry
+        identity: entry.slug
+        emit:
+          event: items.child
+          fields:
+            value: {cel: entry.slug}
+            integer_result: {cel: 'entry.score + entity.integer + 1'}
+            double_result: {cel: 'double(entry.score) + entity.decimal'}
+`)
+	}
+	return root
+}

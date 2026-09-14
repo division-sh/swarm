@@ -12,6 +12,8 @@ import (
 	"testing"
 )
 
+const testPublishedRunID = "11111111-1111-4111-8111-111111111111"
+
 func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
@@ -64,7 +66,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 		"event publish ok:",
 		"event_id=event-1",
 		"event_name=scan.requested",
-		"run_id=run-1",
+		"run_id=" + testPublishedRunID,
 		"new_run_created=true",
 		"deliveries=1",
 		"delivery delivery_id=delivery-1",
@@ -674,7 +676,7 @@ func TestEventPublishMalformedResultsFailClosed(t *testing.T) {
 func eventPublishTestResult(newRunCreated bool) map[string]any {
 	return map[string]any{
 		"event_id":                    "event-1",
-		"run_id":                      "run-1",
+		"run_id":                      testPublishedRunID,
 		"operator_reference_event_id": "event-parent-1",
 		"new_run_created":             newRunCreated,
 		"deliveries": []any{

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -39,9 +40,28 @@ func seedDeclaredForkFanOutFixtureWithBarrier(t *testing.T, backend string, fixt
 }
 
 func seedDeclaredForkFanOutGenerationFixture(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time, withBarrier, withGeneration bool) (context.Context, fanOutOwnerFixture, timeridentity.TimerHandle, func(bool)) {
+	return seedDeclaredForkFanOutGenerationFromSource(t, backend, fixture, cardinality, at, withBarrier, withGeneration, canonicalrouting.CopyForkFanOutCarrier(t, withGeneration, withBarrier), nil, nil)
+}
+
+func seedDeclaredNumericForkFanOutFixture(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time, resourceRows bool) (context.Context, fanOutOwnerFixture) {
+	t.Helper()
+	var rows any
+	if resourceRows {
+		items := make([]map[string]any, cardinality)
+		for i := range items {
+			items[i] = map[string]any{"slug": fmt.Sprintf("item-%03d", i), "score": int64(i + 1)}
+		}
+		rows = items
+	}
+	ctx, source, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend, fixture, cardinality, at, false, false,
+		canonicalrouting.CopyNumericForkFanOutCarrier(t, resourceRows), map[string]any{"integer": int64(75), "decimal": float64(75)}, rows)
+	return ctx, source
+}
+
+func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fixture authorActivityReceiptFixture, cardinality int, at time.Time, withBarrier, withGeneration bool, root string, captured map[string]any, rows any) (context.Context, fanOutOwnerFixture, timeridentity.TimerHandle, func(bool)) {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
-	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkFanOutCarrier(t, withGeneration, withBarrier), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +80,9 @@ func seedDeclaredForkFanOutGenerationFixture(t *testing.T, backend string, fixtu
 	generation := attemptgeneration.Generation{}
 	var activation loopruntime.Activation
 	payload := map[string]any{"items": items}
+	if rows != nil {
+		payload["items"] = rows
+	}
 	if withGeneration {
 		activation, err = loopruntime.New(runID, runID, ".", "revision", "revision_id", uuid.NewString(), "review", 3, at)
 		if err != nil {
@@ -91,6 +114,13 @@ func seedDeclaredForkFanOutGenerationFixture(t *testing.T, backend string, fixtu
 	record := stateOnlyWorkflowEngineMutationRecord(t, runID, ".", runID, runID, "pending", 1, at)
 	record.CurrentState, record.EntityType, record.Mode = "review", "root", "static"
 	record.EnteredStageAt, record.UpdatedAt = at, at
+	if captured != nil {
+		request.Capsule.Entity, request.Capsule.StateFields = captured, captured
+		record.Fields, err = canonicaljson.MarshalPreservingNumberKinds(captured)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if withGeneration {
 		request.Capsule.Loop = activation.Context()
 		buckets := map[string]map[string]any{}
