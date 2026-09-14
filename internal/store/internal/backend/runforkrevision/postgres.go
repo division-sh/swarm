@@ -63,30 +63,8 @@ func (a *postgresAdapter) latestRevision(ctx context.Context, runID string) (int
 	return revision, true, nil
 }
 
-func (a *postgresAdapter) latestFacts(ctx context.Context, runID string) (ledgerFactsByFamily, error) {
-	rows, err := a.tx.QueryContext(ctx, latestFactsQuery, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	facts := ledgerFactsByFamily{}
-	for rows.Next() {
-		var family Family
-		var key string
-		var fact []byte
-		var present bool
-		if err := rows.Scan(&family, &key, &fact, &present); err != nil {
-			return nil, err
-		}
-		if !ValidFamily(family) {
-			return nil, fmt.Errorf("decode unsupported run fork revision fact family %q", family)
-		}
-		if facts[family] == nil {
-			facts[family] = map[string]ledgerFact{}
-		}
-		facts[family][key] = ledgerFact{fact: append([]byte(nil), fact...), present: present}
-	}
-	return facts, rows.Err()
+func (a *postgresAdapter) latestFacts(ctx context.Context, runID string, families []Family) (ledgerFactsByFamily, error) {
+	return readLatestFacts(ctx, a.tx, runID, families)
 }
 
 func (a *postgresAdapter) allocate(ctx context.Context, runID string) (int64, error) {

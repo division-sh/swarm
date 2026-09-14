@@ -19,7 +19,7 @@ type ledgerAdapter interface {
 	lockParents(context.Context, []string) error
 	lockRevisionState(context.Context, []string) error
 	latestRevision(context.Context, string) (int64, bool, error)
-	latestFacts(context.Context, string) (ledgerFactsByFamily, error)
+	latestFacts(context.Context, string, []Family) (ledgerFactsByFamily, error)
 	allocate(context.Context, string) (int64, error)
 	insertFact(context.Context, string, int64, Family, string, []byte, bool) error
 }
@@ -41,7 +41,7 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 		return nil, err
 	}
 	for _, change := range changes {
-		latestByFamily, err := adapter.latestFacts(ctx, change.runID)
+		latestByFamily, err := adapter.latestFacts(ctx, change.runID, change.families)
 		if err != nil {
 			return nil, fmt.Errorf("load latest revision facts: %w", err)
 		}
@@ -151,7 +151,7 @@ func validateComplete(ctx context.Context, adapter ledgerAdapter, runID string) 
 	if err := effects.Add(runID, allFamilies...); err != nil {
 		return err
 	}
-	latestByFamily, err := adapter.latestFacts(ctx, runID)
+	latestByFamily, err := adapter.latestFacts(ctx, runID, AllFamilies())
 	if err != nil {
 		return fmt.Errorf("validate run fork revision facts: %w", err)
 	}

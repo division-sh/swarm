@@ -2504,10 +2504,16 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 	}
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
+	lastCursor, loggedHundreds := 0, 0
 	for {
 		var total, cursor, owed, blocked int
 		if err := db.QueryRowContext(ctx, query, runID).Scan(&total, &cursor, &owed, &blocked); err != nil {
-			t.Fatalf("load fan-out cursor: %v", err)
+			t.Fatalf("load fan-out cursor: %v; last cursor=%d want=%d", err, lastCursor, cardinality)
+		}
+		lastCursor = cursor
+		if cursor/100 > loggedHundreds {
+			loggedHundreds = cursor / 100
+			t.Logf("fan-out progress: total=%d cursor=%d owed=%d", total, cursor, owed)
 		}
 		if total == cardinality && cursor == cardinality && owed == 0 {
 			if err := runtime.bus.WaitForQuiescence(ctx); err != nil {

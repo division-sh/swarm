@@ -14048,6 +14048,11 @@ platform_tables:
         bytes; the derived events.payload JSON projection is not revision or replay evidence. It also retains
         operator_reference_event_id as operator provenance, distinct from causal source_event_id, so fixed
         starting-input evidence and strict live loading can compare the complete original publication.
+        A transaction-local finalizer MAY omit transfer of JSON bodies for families outside its declared
+        effects, but MUST retain the complete latest-row family, key and presence validation, including
+        tombstones and unsupported-family rejection. Full consistency validation reads all thirteen
+        families. Such work reduction MUST NOT introduce a latest-state cache, defer capture, change
+        canonical equality, or weaken fixed-revision, no-change or rollback semantics.
       ddl: |
         CREATE TABLE run_fork_fact_revisions (
             run_id    UUID NOT NULL,
