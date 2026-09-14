@@ -562,6 +562,7 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 			if validSummary.Intents != 20 || validSummary.Cardinality != 500 || validSummary.Cursor != 500 || validSummary.Committed != 500 || validSummary.SemanticRejected != 0 || validSummary.SemanticRejectionSample != nil || validSummary.Settled != 500 || validSummary.Unsettled != 0 || validSummary.Owed != 0 {
 				t.Fatalf("valid numeric reporter summary = %#v", validSummary)
 			}
+			assertReporterFanOutSingleChunkHistory(t, validCtx, db, validRunID)
 			registrations := loadNotifyAllChildrenNumericRegistrations(t, validCtx, selected, db, validRunID)
 			if len(registrations) != 500 {
 				t.Fatalf("valid numeric registration events = %d, want 500", len(registrations))
