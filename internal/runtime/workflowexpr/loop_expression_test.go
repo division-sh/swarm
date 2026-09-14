@@ -8,7 +8,7 @@ import (
 func TestJoinCapturedLoopExpressionMembers(t *testing.T) {
 	context := ValueContext{Loop: map[string]any{
 		"id": "review", "activation_id": "captured-activation", "revision_id": "captured-revision",
-		"attempt": 1, "max_attempts": 3, "flow_id": "private", "revision_field": "private",
+		"attempt": int64(1), "max_attempts": int64(3), "flow_id": "private", "revision_field": "private",
 	}}
 	opts := ValueExpressionOptions{AllowJoin: true}
 	for _, field := range []string{"id", "activation_id", "revision_id", "attempt", "max_attempts"} {

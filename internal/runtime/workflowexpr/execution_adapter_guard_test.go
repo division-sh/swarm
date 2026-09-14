@@ -25,7 +25,8 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 			{"canonicaljson.DecodeInto(payload, &admittedObject)", "canonicaljson.DecodePreservingNumberLexemes(payload, &admittedObject)"},
 			{"canonicaljson.MarshalPreservingNumberKinds(decoded)", "canonicaljson.Bytes(decoded)"},
 		},
-		"engine/fan_out_evaluator.go": {{"e.bindFrameExpressionSchemas(frame)", ""}},
+		"engine/fan_out_evaluator.go":        {{"e.bindFrameExpressionSchemas(frame)", ""}},
+		"workflowexpr/numeric_expression.go": {},
 	} {
 		path := filepath.Join(root, relative)
 		raw, err := os.ReadFile(path)
@@ -44,10 +45,13 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 			source += "\nfunc hostileLocalSchema(arbitrary *executionFrame) { arbitrary.entityType = nil }\n"
 			source += "\nfunc hostileConstructor() executionFrame { return executionFrame{} }\n"
 		}
+		if relative == "workflowexpr/numeric_expression.go" {
+			source += "\nfunc hostileNumericPlanner(arbitrary *cel.Env, checked *cel.Ast) (cel.Program, error) { return arbitrary.Program(checked) }\n"
+		}
 		overlay[path] = []byte(source)
 	}
 	findings := strings.Join(executionAdapterFindings(t, overlay), "\n")
-	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor"} {
+	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor", "hostileNumericPlanner bypasses checked numeric planning"} {
 		if !strings.Contains(findings, want) {
 			t.Fatalf("missing %q: %s", want, findings)
 		}
@@ -59,13 +63,22 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 	root := filepath.Clean(filepath.Join(workflowProjectionRuntimeRoot(t), "..", ".."))
 	pkgs, err := packages.Load(&packages.Config{Dir: root, Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
-	}, "./internal/runtime", "./internal/runtime/engine")
+	}, "./internal/runtime", "./internal/runtime/engine", "./internal/runtime/workflowexpr", "./internal/runtime/entityruntime")
 	if err != nil || packages.PrintErrors(pkgs) != 0 {
 		t.Fatalf("execution adapter guard requires compiler-resolved packages: %v", err)
 	}
 	const base = "github.com/division-sh/swarm/internal/runtime/"
 	var findings []string
 	seen := map[string]bool{}
+	required := map[string][]string{
+		base + "workflowexpr.compileValueExpression":                          {base + "workflowexpr.validateWorkflowNumericEvidence", base + "workflowexpr.validateWorkflowResultType"},
+		base + "workflowexpr.EvalValueResultWithOptions":                      {base + "workflowexpr.workflowProgram"},
+		"(*" + base + "workflowexpr.StructuralPredicateEnv).PredicateProgram": {base + "workflowexpr.workflowProgram"},
+		base + "workflowexpr.workflowProgram":                                 {base + "workflowexpr.validateWorkflowNumericEvidence"},
+		base + "entityruntime.normalizeValueForType":                          {base + "canonicaljson.NormalizeRuntimeNumber", base + "entityruntime.normalizeJSONFieldValue"},
+		base + "entityruntime.normalizeJSONFieldValue":                        {base + "canonicaljson.CloneRuntimeValue"},
+		base + "entityruntime.normalizePartialObjectValue":                    {base + "canonicaljson.CloneRuntimeValue"},
+	}
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Syntax {
 			for _, decl := range file.Decls {
@@ -74,6 +87,7 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 					continue
 				}
 				owner := pkg.TypesInfo.Defs[fn.Name].(*types.Func).FullName()
+				seen[owner] = true
 				admitter := owner == strings.TrimSuffix(base, "/")+".NewRuntimePayloadAdmitter"
 				binder := owner == "(*"+base+"engine.Executor).bindFrameExpressionSchemas"
 				constructor := owner == "(*"+base+"engine.Executor).newExecutionFrame" || owner == "(*"+base+"engine.Executor).EvaluateFanOutOrdinal"
@@ -113,15 +127,21 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 					if !ok {
 						return true
 					}
-					sel, ok := call.Fun.(*ast.SelectorExpr)
-					if !ok {
-						return true
+					var callee *types.Func
+					switch fun := call.Fun.(type) {
+					case *ast.SelectorExpr:
+						callee, _ = pkg.TypesInfo.Uses[fun.Sel].(*types.Func)
+					case *ast.Ident:
+						callee, _ = pkg.TypesInfo.Uses[fun].(*types.Func)
 					}
-					callee, ok := pkg.TypesInfo.Uses[sel.Sel].(*types.Func)
-					if !ok || callee.Pkg() == nil {
+					if callee == nil || callee.Pkg() == nil {
 						return true
 					}
 					calls[callee.FullName()] = true
+					if pkg.PkgPath == base+"workflowexpr" && callee.Pkg().Path() == "github.com/google/cel-go/cel" &&
+						(callee.Name() == "Program" || callee.Name() == "PlanProgram") && owner != base+"workflowexpr.workflowProgram" {
+						findings = append(findings, fn.Name.Name+" bypasses checked numeric planning")
+					}
 					if admitter && callee.Pkg().Path() == base+"canonicaljson" && len(call.Args) > 0 {
 						id, isVariable := call.Args[0].(*ast.Ident)
 						switch callee.Name() {
@@ -141,6 +161,11 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 					}
 					return true
 				})
+				for _, callee := range required[owner] {
+					if !calls[callee] {
+						findings = append(findings, fn.Name.Name+" missing numeric/JSON owner "+callee)
+					}
+				}
 				if constructor && !calls["(*"+base+"engine.Executor).bindFrameExpressionSchemas"] {
 					findings = append(findings, fn.Name.Name+" missing shared schema binding")
 				}
@@ -156,6 +181,11 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 	for _, owner := range []string{"NewRuntimePayloadAdmitter", "bindFrameExpressionSchemas", "newExecutionFrame", "EvaluateFanOutOrdinal"} {
 		if !seen[owner] {
 			findings = append(findings, "missing adapter owner "+owner)
+		}
+	}
+	for owner := range required {
+		if !seen[owner] {
+			findings = append(findings, "missing numeric/JSON owner "+owner)
 		}
 	}
 	return findings

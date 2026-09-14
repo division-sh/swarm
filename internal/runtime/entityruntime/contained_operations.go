@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
@@ -191,7 +192,7 @@ func validateOperationTargetKind(contract Contract, target ContainedOperationTar
 		if hasIndex {
 			return "", fmt.Errorf("op merge must not declare index")
 		}
-		if !isNamedType(contract, target.TargetType) && !isJSONObjectType(contract, target.TargetType) {
+		if !isNamedType(contract, target.TargetType) && !isJSONObjectType(contract, target.TargetType) && !isJSONValueType(contract, target.TargetType) {
 			return "", fmt.Errorf("op merge target %s must resolve to an object type", target.Path)
 		}
 	case ContainedOperationDelete:
@@ -244,8 +245,15 @@ func normalizePartialObjectValue(contract Contract, fieldName, typeRef string, v
 	if !ok {
 		return nil, fieldTypeError(fieldName, "must be object")
 	}
-	if isJSONObjectType(contract, typeRef) {
-		return cloneMap(object), nil
+	if isJSONObjectType(contract, typeRef) || isJSONValueType(contract, typeRef) {
+		cloned, err := canonicaljson.CloneRuntimeValue(object)
+		if err != nil {
+			return nil, err
+		}
+		if cloned == nil {
+			return nil, fieldTypeError(fieldName, "must be object")
+		}
+		return cloned.(map[string]any), nil
 	}
 	resolved, err := resolveStructuralType(contract, typeRef)
 	if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {

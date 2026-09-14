@@ -268,6 +268,8 @@ func validateTemplateInstanceField(flowID string, field TemplateInstanceField, p
 
 func templateInstanceFieldLeafKind(primary PrimaryEntityContract, typeRef string) string {
 	switch {
+	case strings.EqualFold(templateInstanceTypeName(primary.Types, typeRef), "json"):
+		return "json"
 	case templateInstanceIsTextType(typeRef):
 		return "scalar"
 	case templateInstanceIsIntegerType(primary.Types, typeRef):
@@ -332,8 +334,7 @@ func templateInstanceIsBooleanType(types TypeCatalogDocument, typeRef string) bo
 }
 
 func templateInstanceIsJSONObjectType(types TypeCatalogDocument, typeRef string) bool {
-	raw := strings.ToLower(strings.TrimSpace(templateInstanceTypeName(types, typeRef)))
-	return raw == "json" || raw == "object"
+	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "object")
 }
 
 func templateInstanceIsJSONArrayType(types TypeCatalogDocument, typeRef string) bool {

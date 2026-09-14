@@ -77,6 +77,26 @@ func TestEntityFilterPreservesTopLevelNullComparisons(t *testing.T) {
 	}
 }
 
+func TestEntityFilterNumericFamilyExecutesIntAndDoubleCarriers(t *testing.T) {
+	schema := testEntityFilterSchema()
+	rows := []map[string]any{
+		{"fields": map[string]any{"score": int64(8)}},
+		{"fields": map[string]any{"score": float64(8)}},
+		{"fields": map[string]any{"score": float64(8.25)}},
+	}
+	for _, expression := range []string{`double(score) > 7.5`, `int(score) == 8`, `score >= 8`, `score != null`} {
+		got, err := filterEntityStateRowsCEL(expression, rows, schema)
+		if err != nil || len(got) != len(rows) {
+			t.Fatalf("%s: %#v %v", expression, got, err)
+		}
+	}
+	for _, expression := range []string{`score.startsWith("8")`, `score + 1.0 > 8.0`, `dyn(score).startsWith("8")`} {
+		if _, err := filterEntityStateRowsCEL(expression, nil, schema); err == nil {
+			t.Fatalf("invalid expression admitted on empty rows: %s", expression)
+		}
+	}
+}
+
 func testEntityFilterSchema() entityToolSchema {
 	return entityToolSchema{
 		Defined: true,
