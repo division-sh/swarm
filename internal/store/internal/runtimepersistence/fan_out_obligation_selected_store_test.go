@@ -1594,10 +1594,14 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			if !ok || firstEntityItem["score"] != json.Number("7.25") {
 				t.Fatalf("own-run entity numeric carrier = %#v", input.Items)
 			}
+			itemType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+				{Name: "name", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeString}},
+				{Name: "score", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeNumber}},
+			}}
 			projectedEntityScore, err := workflowexpr.EvalValueExpressionWithOptions(
 				"item.score",
 				workflowexpr.ValueContext{FanOut: map[string]any{"item": input.Items[0]}},
-				workflowexpr.ValueExpressionOptions{AllowBareItem: true},
+				workflowexpr.ValueExpressionOptions{AllowBareItem: true, ItemType: &itemType},
 			)
 			if err != nil || projectedEntityScore != float64(7.25) {
 				t.Fatalf("own-run entity projected score = %#v err=%v", projectedEntityScore, err)

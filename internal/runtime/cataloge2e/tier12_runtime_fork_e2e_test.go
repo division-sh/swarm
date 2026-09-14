@@ -651,6 +651,9 @@ func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot stri
 func publishCatalogTrigger(t testing.TB, h *runtimeHarness, step catalogTriggerStep, timeout time.Duration) string {
 	t.Helper()
 	payload := cloneStringAnyMap(step.Payload)
+	if payload == nil {
+		payload = map[string]any{}
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal trigger payload: %v", err)
