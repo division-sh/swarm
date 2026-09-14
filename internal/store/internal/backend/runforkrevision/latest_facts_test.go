@@ -235,7 +235,11 @@ func TestLatestFactsSQLiteQueryPlan(t *testing.T) {
 	}
 	defer db.Close()
 	revisionQueryFixture(t, db, 2, 3)
-	for name, query := range map[string]string{"original": originalLatestFactsQuery, "candidate": fmt.Sprintf(latestFactsQuery, "r.fact")} {
+	candidate, _, _, err := latestFactReadQuery("selected", AllFamilies())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, query := range map[string]string{"original": originalLatestFactsQuery, "candidate": candidate} {
 		rows, err := db.Query("EXPLAIN QUERY PLAN "+query, "selected")
 		if err != nil {
 			t.Fatal(err)

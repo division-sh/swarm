@@ -47,13 +47,13 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		historicalBoundaryOwner + "collectRunForkSourceAdvancedFacts/ledger_sql":                                                                         {1, "post-R family inventory, not payload decoding"},
 		historicalBoundaryOwner + "ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision/ledger_sql":                                              {1, "post-R marker existence, not historical payload admission"},
 		historicalBoundaryOwner + "ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling/ledger_sql":                                          {1, "current coupling revision safety, not historical payload admission"},
-		historicalBoundaryWriter + "postgresAdapter.latestFacts/ledger_sql":                                                                              {1, "canonical latest equality owner"},
-		historicalBoundaryWriter + "sqliteAdapter.latestFacts/ledger_sql":                                                                                {1, "canonical latest equality owner"},
+		historicalBoundaryWriter + "latestFactReadQuery/ledger_sql":                                                                                      {2, "shared latest equality query: one local constant and its exact formatting use"},
 		historicalBoundaryWriter + "postgresAdapter.insertFact/ledger_sql":                                                                               {1, "canonical ledger writer"},
 		historicalBoundaryWriter + "sqliteAdapter.insertFact/ledger_sql":                                                                                 {1, "canonical ledger writer"},
 		historicalBoundaryOwner + "appendRunForkHistoricalFact/raw_decode":                                                                               {2, "embedded owning-run check and contextual family decoding closure"},
 		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:" + historicalBoundaryWriter + "FactKey":                                        {1, "historical admission consumes the writer's exact key relation"},
-		historicalBoundaryWriter + "loadCanonicalProjection/reference:" + historicalBoundaryWriter + "FactKey":                                           {1, "canonical writer consumes that same key relation"},
+		historicalBoundaryWriter + "loadCanonicalProjection/reference:" + historicalBoundaryWriter + "projectionFactKey":                                 {1, "canonical writer projects only identity coordinates from its validated map"},
+		historicalBoundaryWriter + "projectionFactKey/reference:" + historicalBoundaryWriter + "FactKey":                                                 {1, "identity-only projection still consumes the exact historical key relation"},
 		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":                            {1, "typed historical delivery decoding under contextual admission"},
 		historicalBoundaryOwner + "resolveRunForkRevisionPoint/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "event cursor uses the same contextual relation"},
 		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "all present snapshot families use contextual admission"},
@@ -258,7 +258,7 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 					add(n, "reference:"+callee)
 				}
 				switch callee {
-				case historicalBoundaryWriter + "FactKey", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
+				case historicalBoundaryWriter + "FactKey", historicalBoundaryWriter + "projectionFactKey", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
 					"runtime/runfork::NewTerminalBarrierHistory", historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory",
 					historicalBoundaryOwner + "resolveRunForkRevisionPoint", historicalBoundaryOwner + "resolveSQLiteRunForkRevisionPoint":
 					add(n, "reference:"+callee)
@@ -624,5 +624,32 @@ func ordinaryBusiness(raw []byte) error {
 	duplicate := historicalBoundaryFinding{historicalBoundaryOwner + "appendRunForkHistoricalFact", "raw_decode", "same approved function:extra decode"}
 	if got := historicalBoundaryProblems([]historicalBoundaryFinding{duplicate, duplicate, duplicate}, historicalBoundaryAllowances(), false); len(got) != 1 || !strings.Contains(got[0], "observed 3, audited 2") {
 		t.Fatalf("same-owner duplicate decoding must fail: %v", got)
+	}
+	const projectionSource = `package runforkrevision
+func projectionFactKey() {}
+func FactKey() {}
+type arbitrary struct{}
+func (unrelated *arbitrary) stealProjection() {
+    alias := projectionFactKey
+    alias()
+}
+func (unrelated *arbitrary) bypassProjection() { FactKey() }
+`
+	projectionSet := token.NewFileSet()
+	projectionFile, err := parser.ParseFile(projectionSet, "projection.go", projectionSource, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectionInfo := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}, Selections: map[*ast.SelectorExpr]*types.Selection{}}
+	projectionPkg, err := (&types.Config{}).Check(historicalBoundaryModule+"store/internal/backend/runforkrevision", projectionSet, []*ast.File{projectionFile}, projectionInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectionFindings := historicalBoundaryCollect(projectionPkg, projectionInfo, projectionSet, projectionFile)
+	projectionProblems := historicalBoundaryProblems(projectionFindings, historicalBoundaryAllowances(), false)
+	if len(projectionProblems) != 2 ||
+		!strings.Contains(projectionProblems[0], "arbitrary.bypassProjection/reference:"+historicalBoundaryWriter+"FactKey") ||
+		!strings.Contains(projectionProblems[1], "arbitrary.stealProjection/reference:"+historicalBoundaryWriter+"projectionFactKey") {
+		t.Fatalf("unapproved direct and aliased key consumers in the approved file must fail: %v", projectionProblems)
 	}
 }
