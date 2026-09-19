@@ -45,10 +45,7 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	effects, err := agentSessionEffects(identity.RunID)
-	if err != nil {
-		return nil, runtimellm.ConversationRecord{}, err
-	}
+	effects := emptyRunForkRevisionEffects()
 
 	var lease *runtimesessions.Lease
 	var conversation runtimellm.ConversationRecord
@@ -58,6 +55,9 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 	}
 	defer handoff.Rollback()
 	committed, err := s.runRuntimeMutationOutcome(ctx, "sqlite session acquire", effects, func(txctx context.Context, tx *sql.Tx) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
@@ -83,6 +83,9 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lockOwner, expires, now, now); err != nil {
 				return fmt.Errorf("insert sqlite session row: %w", err)
 			}
+			if err := addAgentSessionFacts(effects, identity.RunID, sessionID); err != nil {
+				return err
+			}
 			lease = &runtimesessions.Lease{SessionID: sessionID, Identity: identity, LockOwner: lockOwner, ExpiresAt: expires}
 			conversation, err = loadSQLiteExactConversationTx(txctx, tx, identity, sessionID)
 			if err != nil {
@@ -99,6 +102,9 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 		}
 		if _, err := tx.ExecContext(txctx, `UPDATE agent_sessions SET lease_holder=?, lease_expires_at=?, updated_at=? WHERE session_id=?`, lockOwner, expires, now, rec.sessionID); err != nil {
 			return fmt.Errorf("update sqlite session lease: %w", err)
+		}
+		if err := addAgentSessionFacts(effects, identity.RunID, rec.sessionID); err != nil {
+			return err
 		}
 		lease = &runtimesessions.Lease{
 			SessionID: rec.sessionID, ProviderSessionID: rec.providerSessionID, Identity: identity,
@@ -156,13 +162,13 @@ func (s *LLMSQLiteOwner) Release(ctx context.Context, lease *runtimesessions.Lea
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	effects, err := agentSessionEffects(identity.RunID)
-	if err != nil {
-		return err
-	}
+	effects := emptyRunForkRevisionEffects()
 	var rows int64
 	if _, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runhandoff.CandidateHandoff) (bool, error) {
 		return s.runRuntimeMutationOutcome(ctx, "sqlite session release", effects, func(txctx context.Context, tx *sql.Tx) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 				return err
 			}
@@ -177,6 +183,9 @@ func (s *LLMSQLiteOwner) Release(ctx context.Context, lease *runtimesessions.Lea
 				rows, _ = res.RowsAffected()
 			}
 			if err != nil || rows == 0 {
+				return err
+			}
+			if err := addAgentSessionFacts(effects, identity.RunID, lease.SessionID); err != nil {
 				return err
 			}
 			_, err = s.lifecycle.RequestCompletionCandidateTx(txctx, tx, identity.RunID, nil, handoff)
@@ -209,13 +218,13 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, identity agentmemory.Identi
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	effects, err := agentSessionEffects(identity.RunID)
-	if err != nil {
-		return nil, err
-	}
+	effects := emptyRunForkRevisionEffects()
 	var lease *runtimesessions.Lease
 	committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runhandoff.CandidateHandoff) (bool, error) {
 		return s.runRuntimeMutationOutcome(ctx, "sqlite session rotate", effects, func(txctx context.Context, tx *sql.Tx) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 				return err
 			}
@@ -264,7 +273,7 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, identity agentmemory.Identi
 				return err
 			}
 			lease = &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: rec.sessionID, LockOwner: lockOwner, ExpiresAt: expires}
-			return nil
+			return addAgentSessionFacts(effects, identity.RunID, rec.sessionID, newID)
 		})
 	})
 	if !committed {
@@ -282,10 +291,7 @@ func (s *LLMSQLiteOwner) IncrementTurn(ctx context.Context, identity agentmemory
 	if err != nil {
 		return err
 	}
-	effects, err := agentSessionEffects(identity.RunID)
-	if err != nil {
-		return err
-	}
+	effects := emptyRunForkRevisionEffects()
 	var rows int64
 	if err := s.runRuntimeMutation(ctx, "sqlite session turn increment", effects, func(txctx context.Context, tx *sql.Tx) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
@@ -304,7 +310,10 @@ func (s *LLMSQLiteOwner) IncrementTurn(ctx context.Context, identity agentmemory
 		if err == nil {
 			rows, _ = res.RowsAffected()
 		}
-		return err
+		if err != nil || rows == 0 {
+			return err
+		}
+		return addAgentSessionFacts(effects, identity.RunID, sessionID)
 	}); err != nil {
 		return fmt.Errorf("increment sqlite session turn: %w", err)
 	}
@@ -324,14 +333,14 @@ func (s *LLMSQLiteOwner) AdoptSessionID(ctx context.Context, identity agentmemor
 	if lockOwner == "" || newSessionID == "" {
 		return errors.New("lockOwner and newSessionID are required")
 	}
-	effects, err := agentSessionEffects(identity.RunID)
-	if err != nil {
-		return err
-	}
+	effects := emptyRunForkRevisionEffects()
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	_, err = runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runhandoff.CandidateHandoff) (bool, error) {
+	_, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runhandoff.CandidateHandoff) (bool, error) {
 		return s.runRuntimeMutationOutcome(ctx, "sqlite adopt session id", effects, func(txctx context.Context, tx *sql.Tx) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 				return err
 			}
@@ -353,6 +362,9 @@ func (s *LLMSQLiteOwner) AdoptSessionID(ctx context.Context, identity agentmemor
 			if _, err = tx.ExecContext(txctx, `UPDATE agent_sessions SET runtime_state=json_set(COALESCE(runtime_state,'{}'),'$.provider_session_id',?), lease_holder=?, lease_expires_at=?, updated_at=? WHERE session_id=?`, newSessionID, lockOwner, expires, now, rec.sessionID); err != nil {
 				return err
 			}
+			if err := addAgentSessionFacts(effects, identity.RunID, rec.sessionID); err != nil {
+				return err
+			}
 			_, err = s.lifecycle.RequestCompletionCandidateTx(txctx, tx, identity.RunID, &expires, handoff)
 			return err
 		})
@@ -371,6 +383,10 @@ func (s *LLMSQLiteOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runti
 	effects := emptyRunForkRevisionEffects()
 	committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runhandoff.CandidateHandoff) (bool, error) {
 		return s.runRuntimeMutationOutcome(ctx, "sqlite session reset", effects, func(ctx context.Context, tx *sql.Tx) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
+			summary = runtimesessions.ResetSummary{}
 			rows, err := tx.QueryContext(ctx, `SELECT session_id, run_id, agent_id, flow_instance, status FROM agent_sessions WHERE status IN ('active','suspended') ORDER BY run_id, agent_id, flow_instance, session_id`)
 			if err != nil {
 				return err
@@ -393,13 +409,13 @@ func (s *LLMSQLiteOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runti
 			}
 			seenRuns := make(map[string]struct{}, len(summary.OrphanedSessions))
 			for _, disposition := range summary.OrphanedSessions {
+				if err := addAgentSessionFacts(effects, disposition.RunID, disposition.SessionID); err != nil {
+					return err
+				}
 				if _, exists := seenRuns[disposition.RunID]; exists {
 					continue
 				}
 				seenRuns[disposition.RunID] = struct{}{}
-				if err := addAgentSessionEffect(effects, disposition.RunID); err != nil {
-					return err
-				}
 				if _, err := s.lifecycle.RequestCompletionCandidateTx(ctx, tx, disposition.RunID, nil, handoff); err != nil {
 					return err
 				}

@@ -31,6 +31,8 @@ func TestRevisionEqualityPreservesExistingInterpretation(t *testing.T) {
 func FuzzRevisionEqualityPreservesExistingInterpretation(f *testing.F) {
 	f.Add([]byte(`{"a":1}`), []byte(`{"a":1.0}`))
 	f.Add([]byte(`{"n":1e999}`), []byte(`{"n":1e999}`))
+	f.Add([]byte(`{"a":[null,true,{"x":-0}]}`), []byte(`{"a":[null,true,{"x":0}]}`))
+	f.Add([]byte(`{"a":[null,false,{"x":"\u0061"}]}`), []byte(`{ "a": [null,false,{"x":"a"}] }`))
 	f.Fuzz(func(t *testing.T, a, b []byte) {
 		if canonicalJSONEqual(a, b) != originalJSONEqual(a, b) {
 			t.Fatalf("changed equality %q/%q", a, b)
@@ -39,6 +41,24 @@ func FuzzRevisionEqualityPreservesExistingInterpretation(f *testing.F) {
 			t.Fatalf("changed reflexive admission %q", a)
 		}
 	})
+}
+
+func BenchmarkRevisionEqualityReordered(b *testing.B) {
+	a := []byte(`{"revision":8,"source_evidence":"` + strings.Repeat("frozen-evidence", 32) + `","value":7.5}`)
+	c := []byte(`{"value":7.5,"source_evidence":"` + strings.Repeat("frozen-evidence", 32) + `","revision":8}`)
+	for _, method := range []struct {
+		name  string
+		equal func([]byte, []byte) bool
+	}{{"former", originalJSONEqual}, {"decoded", canonicalJSONEqual}} {
+		b.Run(method.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if !method.equal(a, c) {
+					b.Fatal("not equal")
+				}
+			}
+		})
+	}
 }
 
 func BenchmarkRevisionEqualityIdentical(b *testing.B) {

@@ -112,17 +112,9 @@ func (s *EventPostgresOwner) LoadPreparedPublishEvent(ctx context.Context, event
 	if s == nil || s.backend == nil {
 		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("postgres store is required")
 	}
-	row, found, err := loadPostgresEventIdentity(ctx, s.backend, eventID)
+	admitted, settlement, found, err := eventrecordpostgres.LoadAdmitted(ctx, s.backend, eventID)
 	if err != nil || !found {
 		return runtimebus.PreparedPublishEvent{}, found, err
-	}
-	admitted, err := decodeEventRecord(row)
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
-	}
-	settlement, err := row.DecodeSettlement()
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
 	}
 	snapshots, err := s.DeliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
@@ -135,17 +127,9 @@ func (s *EventSQLiteOwner) LoadPreparedPublishEvent(ctx context.Context, eventID
 	if s == nil || s.backend == nil {
 		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("sqlite runtime store is required")
 	}
-	row, found, err := loadSQLiteEventIdentity(ctx, s.backend, eventID)
+	admitted, settlement, found, err := eventrecordsqlite.LoadAdmitted(ctx, s.backend, eventID)
 	if err != nil || !found {
 		return runtimebus.PreparedPublishEvent{}, found, err
-	}
-	admitted, err := decodeEventRecord(row)
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
-	}
-	settlement, err := row.DecodeSettlement()
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
 	}
 	snapshots, err := s.DeliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
@@ -191,11 +175,7 @@ func (s *EventSQLiteOwner) validateDuplicatePublicationTx(ctx context.Context, t
 }
 
 func validateDuplicatePublication(row eventrecord.Record, snapshots []runtimedelivery.Snapshot) error {
-	admitted, err := decodeEventRecord(row)
-	if err != nil {
-		return err
-	}
-	settlement, err := row.DecodeSettlement()
+	admitted, settlement, err := row.DecodeWithSettlement()
 	if err != nil {
 		return err
 	}

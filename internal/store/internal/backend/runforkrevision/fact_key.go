@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
@@ -32,17 +33,7 @@ func FactKey(family Family, raw []byte) (string, error) {
 	if err := json.Unmarshal(body[field], &key); err != nil {
 		return "", fmt.Errorf("decode %s.%s fact key: %w", family, field, err)
 	}
-	if strings.TrimSpace(key) == "" {
-		return "", fmt.Errorf("%s fact key requires %s", family, field)
-	}
-	// reply_context_id is opaque TEXT; all other scalar primary identities
-	// are UUIDs. Validation must not rewrite their persisted key spelling.
-	if family != FamilyReplyContexts {
-		if _, err := uuid.Parse(strings.TrimSpace(key)); err != nil {
-			return "", fmt.Errorf("%s fact key requires UUID %s: %w", family, field, err)
-		}
-	}
-	return key, nil
+	return admitFactKeyCoordinates(family, factKeyCoordinates{Key: key})
 }
 
 func factKeyFields(family Family) ([]string, error) {
@@ -76,28 +67,74 @@ func factKeyFields(family Family) ([]string, error) {
 	return []string{field}, nil
 }
 
-// The canonical writer already has a decoded, uniquely keyed projection. Do
-// not decode its entire serialized payload again just to admit key coordinates.
-// Include case aliases too so FactKey retains its exact-spelling rejection.
+// The projection is already uniquely keyed. Keep exact-spelling admission,
+// but do not serialize and token-decode its coordinates a second time.
 func projectionFactKey(family Family, values map[string]any) (string, error) {
 	fields, err := factKeyFields(family)
 	if err != nil {
 		return "", err
 	}
-	coordinates := make(map[string]any, len(fields))
-	for name, value := range values {
+	for name := range values {
 		for _, field := range fields {
-			if strings.EqualFold(name, field) {
-				coordinates[name] = value
-				break
+			if name != field && strings.EqualFold(name, field) {
+				return "", fmt.Errorf("fact key field %q must use exact spelling %q", name, field)
 			}
 		}
 	}
-	raw, err := json.Marshal(coordinates)
-	if err != nil {
-		return "", err
+	var body factKeyCoordinates
+	if family != FamilyFanOutObligations {
+		body.Key, err = projectionKeyString(values[fields[0]])
+	} else {
+		for i, target := range []*string{&body.Kind, &body.TriggeringDeliveryID, &body.FlowPath, &body.DeclarationFamily, &body.SemanticPath} {
+			*target, err = projectionKeyString(values[fields[i]])
+			if err != nil {
+				return "", fmt.Errorf("decode fan-out fact key: %w", err)
+			}
+		}
+		switch ordinal := values["ordinal"].(type) {
+		case nil:
+		case int64:
+			body.Ordinal = &ordinal
+		default:
+			err = decodeProjectionKeyValue(ordinal, &body.Ordinal)
+		}
 	}
-	return FactKey(family, raw)
+	if err != nil {
+		return "", fmt.Errorf("decode %s fact key: %w", family, err)
+	}
+	return admitFactKeyCoordinates(family, body)
+}
+
+func projectionKeyString(value any) (string, error) {
+	if value == nil {
+		return "", nil
+	}
+	if text, ok := value.(string); ok && utf8.ValidString(text) {
+		return text, nil
+	}
+	var text string
+	err := decodeProjectionKeyValue(value, &text)
+	return text, err
+}
+
+// Non-SQL carriers retain JSON's existing conversion, including invalid UTF-8
+// replacement and the distinction between float64(1) and json.Number("1.0").
+func decodeProjectionKeyValue(value, target any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, target)
+}
+
+type factKeyCoordinates struct {
+	Key                  string `json:"-"`
+	Kind                 string `json:"fact_kind"`
+	TriggeringDeliveryID string `json:"triggering_delivery_id"`
+	FlowPath             string `json:"flow_path"`
+	DeclarationFamily    string `json:"declaration_family"`
+	SemanticPath         string `json:"semantic_path"`
+	Ordinal              *int64 `json:"ordinal"`
 }
 
 func fanOutFactKey(raw []byte) (string, error) {
@@ -105,16 +142,30 @@ func fanOutFactKey(raw []byte) (string, error) {
 	if _, err := decodeFactKeyFields(raw, fields...); err != nil {
 		return "", fmt.Errorf("decode fan-out fact key: %w", err)
 	}
-	var body struct {
-		Kind                 string `json:"fact_kind"`
-		TriggeringDeliveryID string `json:"triggering_delivery_id"`
-		FlowPath             string `json:"flow_path"`
-		DeclarationFamily    string `json:"declaration_family"`
-		SemanticPath         string `json:"semantic_path"`
-		Ordinal              *int64 `json:"ordinal"`
-	}
+	var body factKeyCoordinates
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return "", fmt.Errorf("decode fan-out fact key: %w", err)
+	}
+	return admitFactKeyCoordinates(FamilyFanOutObligations, body)
+}
+
+func admitFactKeyCoordinates(family Family, body factKeyCoordinates) (string, error) {
+	fields, err := factKeyFields(family)
+	if err != nil {
+		return "", err
+	}
+	if family != FamilyFanOutObligations {
+		field := fields[0]
+		if strings.TrimSpace(body.Key) == "" {
+			return "", fmt.Errorf("%s fact key requires %s", family, field)
+		}
+		// Validate UUID spelling without rewriting it; reply IDs are opaque.
+		if family != FamilyReplyContexts {
+			if _, err := uuid.Parse(strings.TrimSpace(body.Key)); err != nil {
+				return "", fmt.Errorf("%s fact key requires UUID %s: %w", family, field, err)
+			}
+		}
+		return body.Key, nil
 	}
 	switch body.Kind {
 	case "intent", "outcome", "barrier":

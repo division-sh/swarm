@@ -9389,6 +9389,93 @@
       ]
     },
     {
+      "name": "run.fan_out.list",
+      "description": "Read one bounded page of durable fan-out intent headers. Read-only; does not claim, release, retry, repair or hydrate immutable source values or outcomes. Filters are exact persisted predicates combined with AND; omitted filters select all statuses, including terminal rows. Fixed ascending order is triggering_delivery_id, element_ref.flow_path, element_ref.family, element_ref.semantic_path, using byte collation. Progress cannot move a row. Cursor is bound to run, complete filter and order; page size may change. Malformed or differently scoped cursors are invalid params. Each page has its own observation time and current run status; there is no cross-page snapshot promise. Concurrent arrivals before the cursor are not revisited. Durable state precedence consumes Intent.ServingAt: closed/canceled/blocked first, then unexpired lease, then future retry readiness, otherwise eligible. Expiry/due equality is eligible. Durable eligible is not runtime authorization: paused/terminal runs, retired/unavailable generations, and unavailable source admission must never be inferred eligible from it. Runtime evidence is separate; unavailable metrics and eligibility are null, never fabricated zero/false. Existing aggregate status/diagnose and direct delivery barriers are unchanged.",
+      "params": [
+        {
+          "name": "run_id",
+          "required": true,
+          "schema": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        {
+          "name": "filter",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/FanOutListFilter"
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "schema": {
+            "maxLength": 16384,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/FanOutListPage"
+        }
+      },
+      "errors": [
+        {
+          "code": -32060,
+          "message": "Application error: RUN_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "run.fork",
       "description": "Public selected-contract run fork mutation. Before domain mutation, resolve the source run's canonical runs.bundle_hash and verify its immutable source artifact. Missing or invalid authority fails closed; nullable identities, compatibility aliases, loaded-runtime modules and ambient filesystem discovery cannot supply it.\nIf bundle_hash is omitted or equals the source hash, use selected_contracts against that exact artifact. A different hash selects the exact retained target artifact and persists mode=bundle_hash. The selected execution owner reconstructs the effective source and its non-executable preparation independently of RuntimeContextManager. A target need not be loaded by this process; missing target bytes fail with BUNDLE_UNAVAILABLE and corrupt or mismatched bytes with BUNDLE_DATA_INTEGRITY_ERROR.\nPreparation fixes source, frontier, declaration correspondence, provider configuration and catalog before domain mutation. Only exact post-materialization binding may issue selected execution authority. Process-owned work retains preparation and selected execution through activation and failure disposition. A same-hash loaded runtime is not authority and cannot supply configuration, module, grants or lifetime. This does not perform Dynamic Load or make the target available for ordinary ingress. Normal runtime admission and deferred-work replay refusals remain unchanged. The swarm run fork CLI consumes this method and cannot call runtime/store helpers directly.",
       "params": [
@@ -18782,6 +18869,263 @@
         ],
         "type": "object"
       },
+      "FanOutIntentKey": {
+        "additionalProperties": false,
+        "properties": {
+          "element_ref": {
+            "additionalProperties": false,
+            "properties": {
+              "family": {
+                "enum": [
+                  "fan_out"
+                ],
+                "type": "string"
+              },
+              "flow_path": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "semantic_path": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "flow_path",
+              "family",
+              "semantic_path"
+            ],
+            "type": "object"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "triggering_delivery_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "triggering_delivery_id",
+          "element_ref"
+        ],
+        "type": "object"
+      },
+      "FanOutIntentReadback": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          },
+          "cancellation_reason": {
+            "type": "string"
+          },
+          "cardinality": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "claim_generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "claim_owner": {
+            "type": "string"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "cursor": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "durable_state": {
+            "enum": [
+              "eligible",
+              "leased",
+              "retry_wait",
+              "blocked",
+              "closed",
+              "canceled"
+            ],
+            "type": "string"
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FailureEnvelope"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "key": {
+            "$ref": "#/components/schemas/FanOutIntentKey"
+          },
+          "last_served_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lease_expires_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_chunk_size": {
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "owed": {
+            "description": "Cardinality minus cursor only for open/blocked; canceled suffix is not owed.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retry": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "failure": {
+                    "$ref": "#/components/schemas/FailureEnvelope"
+                  },
+                  "ready_at": {
+                    "$ref": "#/components/schemas/Timestamp"
+                  }
+                },
+                "required": [
+                  "ready_at",
+                  "failure"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/FanOutRuntimeReadback"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "blocked",
+              "closed",
+              "canceled"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          }
+        },
+        "required": [
+          "key",
+          "bundle_hash",
+          "status",
+          "durable_state",
+          "cardinality",
+          "cursor",
+          "owed",
+          "next_chunk_size",
+          "last_served_at",
+          "retry",
+          "claim_owner",
+          "claim_generation",
+          "lease_expires_at",
+          "failure",
+          "cancellation_reason",
+          "created_at",
+          "updated_at",
+          "runtime"
+        ],
+        "type": "object"
+      },
+      "FanOutListFilter": {
+        "additionalProperties": false,
+        "properties": {
+          "flow_path": {
+            "description": "Exact canonical authored flow path; the selected root is '.', never empty.",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "semantic_path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "blocked",
+              "closed",
+              "canceled"
+            ],
+            "type": "string"
+          },
+          "triggering_delivery_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FanOutListPage": {
+        "additionalProperties": false,
+        "properties": {
+          "intents": {
+            "items": {
+              "$ref": "#/components/schemas/FanOutIntentReadback"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "next_cursor": {
+            "maxLength": 16384,
+            "minLength": 1,
+            "type": "string"
+          },
+          "observed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "order": {
+            "enum": [
+              "intent_identity_asc"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "run_status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_status",
+          "observed_at",
+          "order",
+          "intents"
+        ],
+        "type": "object"
+      },
       "FanOutRunSummary": {
         "additionalProperties": false,
         "description": "Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.",
@@ -18829,10 +19173,6 @@
             "type": "integer"
           },
           "intents": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "last_chunk_max_ms": {
             "minimum": 0,
             "type": "integer"
           },
@@ -18905,8 +19245,95 @@
           "barrier_terminal",
           "min_next_chunk",
           "max_next_chunk",
-          "last_chunk_max_ms",
           "oldest_age_ms"
+        ],
+        "type": "object"
+      },
+      "FanOutRuntimeReadback": {
+        "additionalProperties": false,
+        "description": "Current exact registered-runtime and canonical grant/run observation, never inferred from durable row metadata. Absent local evidence has null observation time, eligibility and metrics.",
+        "properties": {
+          "active_workers": {
+            "description": "Exact active shared process fan-out permits; null when unavailable.",
+            "oneOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "availability": {
+            "enum": [
+              "available",
+              "unavailable",
+              "retired"
+            ],
+            "type": "string"
+          },
+          "eligible": {
+            "description": "Canonical execution eligibility, distinct from durable_state and from free process capacity; null when exact local evidence is unavailable or retired.",
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_commit_ms": {
+            "description": "Completed commit/handoff latency retained only for the latest completed key in this runtime registration. Null for other keys, after restart, or when no exact timing exists; never a fabricated zero or total-turn duration.",
+            "oneOf": [
+              {
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_at": {
+            "description": "Exact process-local runtime observation time, distinct from the durable page observation; null when unavailable or retired.",
+            "oneOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "description": "Reason supplied by the canonical runtime observation owner.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workers": {
+            "description": "Exact shared process fan-out worker limit, not a per-run count; null when unavailable.",
+            "oneOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "availability",
+          "reason",
+          "observed_at",
+          "eligible",
+          "workers",
+          "active_workers",
+          "last_commit_ms"
         ],
         "type": "object"
       },

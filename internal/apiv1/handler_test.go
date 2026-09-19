@@ -48,8 +48,11 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 70 {
-		t.Fatalf("method count = %d, want 70", len(openRPCNames))
+	if len(openRPCNames) != 71 {
+		t.Fatalf("method count = %d, want 71", len(openRPCNames))
+	}
+	if _, ok := registry.Method("run.fan_out.list"); !ok {
+		t.Fatal("run.fan_out.list missing from generated registry")
 	}
 	if _, ok := registry.Method("test.setup_entities"); !ok {
 		t.Fatal("test.setup_entities missing from generated registry")
@@ -898,10 +901,18 @@ func (p fakePinger) Ping(context.Context) error {
 }
 
 type fakeRunReadStore struct {
+	fanOutPage   *fanoutobligation.ListPage
 	headers      map[string]operatorread.RunHeader
 	reports      map[string]operatorread.RunDebugReport
 	notFound     map[string]bool
 	lastListOpts operatorread.RunHeaderListOptions
+}
+
+func (s *fakeRunReadStore) ListFanOutIntents(_ context.Context, query fanoutobligation.ListQuery) (fanoutobligation.ListPage, error) {
+	if s.fanOutPage == nil || s.fanOutPage.RunID != query.RunID {
+		return fanoutobligation.ListPage{}, operatorread.ErrRunNotFound
+	}
+	return *s.fanOutPage, nil
 }
 
 func (s *fakeRunReadStore) LoadRunHeader(_ context.Context, runID string) (operatorread.RunHeader, error) {

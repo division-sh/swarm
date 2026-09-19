@@ -936,6 +936,8 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm mailbox list", "flag:status"):                   true,
 	cliIdentifierRegistryKey("swarm mailbox list", "flag:type"):                     true,
 	cliIdentifierRegistryKey("swarm run list", "flag:cursor"):                       true,
+	cliIdentifierRegistryKey("swarm run fan-out list", "flag:cursor"):               true,
+	cliIdentifierRegistryKey("swarm run fan-out list", "flag:status"):               true,
 	cliIdentifierRegistryKey("swarm run list", "flag:since"):                        true,
 	cliIdentifierRegistryKey("swarm run list", "flag:status"):                       true,
 	cliIdentifierRegistryKey("swarm run list", "flag:until"):                        true,

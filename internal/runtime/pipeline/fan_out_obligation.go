@@ -12,11 +12,13 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type FanOutClaimRequest struct {
 	Owner      string
 	BundleHash string
+	Candidate  *fanoutobligation.IntentKey
 	Now        time.Time
 	Lease      time.Duration
 }
@@ -28,7 +30,16 @@ func (r FanOutClaimRequest) Validate() error {
 	if err := runtimecontracts.ValidateBundleHash(r.BundleHash); err != nil {
 		return fmt.Errorf("fan-out claim requires exact admitted bundle: %w", err)
 	}
+	if r.Candidate != nil {
+		return r.Candidate.Validate()
+	}
 	return nil
+}
+
+// FanOutTurnResult describes the disposition of one exact candidate. Queue
+// exhaustion belongs to the shared selector, never to an individual executor.
+type FanOutTurnResult struct {
+	Refill bool
 }
 
 type FanOutChunkOutcome struct {
@@ -117,6 +128,7 @@ type FanOutRetryableRelease struct {
 	Claim            fanoutobligation.Claim
 	Now              time.Time
 	ObservedDuration time.Duration
+	Failure          runtimefailures.Envelope
 }
 
 type FanOutBlockRequest struct {
@@ -145,7 +157,7 @@ func (r FanOutRetryableRelease) Validate() error {
 	if r.Now.IsZero() || r.ObservedDuration < 0 {
 		return fmt.Errorf("fan-out retryable release requires observation time and nonnegative duration")
 	}
-	return nil
+	return (fanoutobligation.RetryWait{ReadyAt: r.Now, Failure: r.Failure}).Validate()
 }
 
 type FanOutEvaluationInput struct {
@@ -166,6 +178,8 @@ func (i FanOutEvaluationInput) Validate(intent fanoutobligation.Intent) error {
 }
 
 type FanOutObligationOwner interface {
+	FanOutSummaryOwner
+	BeginFanOutPublicationGroup(context.Context, fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error)
 	ClaimFanOutIntent(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error)
 	LoadFanOutEvaluation(context.Context, fanoutobligation.Claim) (FanOutEvaluationInput, error)
 	CommitFanOutChunk(context.Context, FanOutChunkCommand) (CommittedFanOutChunk, error)
@@ -173,5 +187,31 @@ type FanOutObligationOwner interface {
 	ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) error
 	BlockFanOutClaim(context.Context, FanOutBlockRequest) error
 	CancelRunFanOut(context.Context, string, string, time.Time) error
+}
+
+// FanOutPublicationPlanner carries the explicit bounded publication lifetime;
+// ordinary engine publication remains an independently owned operation.
+type FanOutPublicationPlanner interface {
+	EnginePublicationPlanner
+	PrepareFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, []FanOutPublicationRequest) ([]FanOutPublicationPreparation, error)
+	SealFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, int, []runtimeengine.DurablePublicationPlan) error
+	FinalizeFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, []runtimeengine.CommittedDurablePublication) error
+	DispatchFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, []runtimeengine.CommittedDurablePublication) error
+}
+
+type FanOutPublicationRequest struct {
+	Ordinal int
+	Intent  runtimeengine.EmitIntent
+}
+
+// Per-ordinal rejection remains separate from whole acquisition failure. The
+// pipeline's existing failure algebra alone decides whether a row is rejected.
+type FanOutPublicationPreparation struct {
+	Ordinal     int
+	Publication runtimeengine.DurablePublicationPlan
+	Err         error
+}
+
+type FanOutSummaryOwner interface {
 	FanOutRunSummary(context.Context, string, time.Time) (fanoutobligation.RunSummary, error)
 }

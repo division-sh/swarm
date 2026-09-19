@@ -114,6 +114,9 @@ func (s *RunLifecycleSQLiteOwner) RequestCompletionCandidate(
 	}
 	var result runtimerunlifecycle.CandidateRequestResult
 	committed, err := s.runRuntimeMutationOutcome(ctx, "sqlite request completion candidate", func(txctx context.Context, tx *sql.Tx) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
 		result, err = s.RequestCompletionCandidateTx(txctx, tx, request.RunID, dueAt, handoff)
 		return err
 	})
@@ -593,6 +596,15 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance fan-out delivery barriers: %w", err)
 		}
+		pending, wake, err := s.pendingPostgresRunCompletionWork(ctx, tx, candidate.RunID, selectedNow, catalog)
+		if err != nil {
+			return runtimerunlifecycle.CompletionResult{}, err
+		}
+		if pending {
+			result, err := s.finishBlockedPostgresCandidate(ctx, tx, candidate, wake)
+			result.GenericScheduleActivations = barrierActivations
+			return result, err
+		}
 		summaries, err := s.loadPostgresRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
@@ -729,6 +741,15 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance sqlite fan-out delivery barriers: %w", err)
+		}
+		pending, wake, err := s.pendingSQLiteRunCompletionWork(ctx, tx, candidate.RunID, selectedNow, catalog)
+		if err != nil {
+			return runtimerunlifecycle.CompletionResult{}, err
+		}
+		if pending {
+			result, err := s.finishBlockedSQLiteCandidate(ctx, tx, candidate, wake, selectedNow)
+			result.GenericScheduleActivations = barrierActivations
+			return result, err
 		}
 		summaries, err := s.loadSQLiteRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
 		if err != nil {

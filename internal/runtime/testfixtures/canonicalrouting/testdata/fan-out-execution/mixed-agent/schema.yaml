@@ -1,0 +1,7 @@
+name: mixed-route
+connect:
+  - {event: mixed.one, from: producer, to: one}
+  - {event: mixed.multi, from: producer, to: multi-a}
+  - {event: mixed.multi, from: producer, to: multi-b}
+  - {event: mixed.multi, from: producer, to: child}
+  - {event: mixed.agent, from: producer, to: agent-only}

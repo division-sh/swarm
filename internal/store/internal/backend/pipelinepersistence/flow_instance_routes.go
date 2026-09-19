@@ -76,27 +76,25 @@ func upsertPostgresFlowInstanceRoute(
 	exec flowInstanceRouteExecutor,
 	route runtimebus.FlowInstanceRouteRecord,
 ) error {
-	var materializedFrom any
-	if route.EventPattern != "" && route.SubscriberType != "" && route.SubscriberID != "" {
-		_ = exec.QueryRowContext(ctx, `
-				SELECT rule_id
+	_, err := exec.ExecContext(ctx, `
+		WITH source AS MATERIALIZED (
+			SELECT (
+			SELECT rule_id
 			FROM routing_rules
 			WHERE event_pattern = $1
 			  AND subscriber_type = $2
 			  AND subscriber_id = $3
-			  AND COALESCE(source_flow, '') = $4
+			  AND COALESCE(source_flow, '') = $6
 			  AND is_wildcard = true
 				  AND is_materialized = false
 				  AND status = 'active'
 				ORDER BY created_at ASC
 				LIMIT 1
-			`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.SourceFlow).Scan(&materializedFrom)
-	}
-	_, err := exec.ExecContext(ctx, `
-		WITH updated AS (
+			) AS materialized_from
+		), updated AS (
 			UPDATE routing_rules
 			SET source_flow = NULLIF($6,''),
-			    materialized_from = $7,
+			    materialized_from = (SELECT materialized_from FROM source),
 			    status = 'active'
 			WHERE event_pattern = $1
 			  AND subscriber_type = $2
@@ -128,11 +126,11 @@ func upsertPostgresFlowInstanceRoute(
 			NULLIF($6,''),
 			false,
 			true,
-			$7,
+			(SELECT materialized_from FROM source),
 				'active',
 				now()
 			WHERE NOT EXISTS (SELECT 1 FROM updated)
-		`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath, route.SourceFlow, materializedFrom)
+		`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath, route.SourceFlow)
 	if err != nil {
 		return fmt.Errorf("upsert flow instance route %s/%s: %w", route.Identity.Route.ScopeKey, route.Identity.Route.InstanceID, err)
 	}
@@ -161,9 +159,9 @@ func upsertSQLiteFlowInstanceRoute(
 	tx *sql.Tx,
 	route runtimebus.FlowInstanceRouteRecord,
 ) error {
-	var materializedFrom sql.NullInt64
+	var materializedFrom sql.NullString
 	if route.EventPattern != "" && route.SubscriberType != "" && route.SubscriberID != "" {
-		_ = tx.QueryRowContext(ctx, `
+		err := tx.QueryRowContext(ctx, `
 				SELECT rule_id
 				FROM routing_rules
 				WHERE event_pattern = ?
@@ -176,6 +174,9 @@ func upsertSQLiteFlowInstanceRoute(
 				ORDER BY created_at ASC
 				LIMIT 1
 			`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.SourceFlow).Scan(&materializedFrom)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("load sqlite flow instance route source: %w", err)
+		}
 	}
 	result, err := tx.ExecContext(ctx, `
 			UPDATE routing_rules
@@ -186,7 +187,7 @@ func upsertSQLiteFlowInstanceRoute(
 			  AND run_id = ?
 			  AND COALESCE(flow_instance, '') = ?
 			  AND is_materialized = TRUE
-		`, route.SourceFlow, nullableSQLiteInt64(materializedFrom), route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath)
+		`, route.SourceFlow, materializedFrom, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath)
 	if err != nil {
 		return fmt.Errorf("update sqlite flow instance route %s/%s: %w", route.Identity.Route.ScopeKey, route.Identity.Route.InstanceID, err)
 	}
@@ -203,17 +204,10 @@ func upsertSQLiteFlowInstanceRoute(
 				is_wildcard, is_materialized, materialized_from, status, created_at
 			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), FALSE, TRUE, ?, 'active', ?)
 		`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath, route.SourceFlow,
-		nullableSQLiteInt64(materializedFrom), time.Now().UTC()); err != nil {
+		materializedFrom, time.Now().UTC()); err != nil {
 		return fmt.Errorf("insert sqlite flow instance route %s/%s: %w", route.Identity.Route.ScopeKey, route.Identity.Route.InstanceID, err)
 	}
 	return nil
-}
-
-func nullableSQLiteInt64(value sql.NullInt64) any {
-	if !value.Valid {
-		return nil
-	}
-	return value.Int64
 }
 
 func (s *PipelinePostgresOwner) ReplaceFlowInstanceRouteRecords(
@@ -331,11 +325,23 @@ func replaceFlowInstanceRouteTopologyTx(
 	if len(normalized) == 0 {
 		return nil, nil
 	}
+	// This transaction changes only routes. The active-run lock (or SQLite
+	// writer snapshot) remains held while all of that run's owners are replaced.
+	admittedRuns := make(map[string]bool)
 	for _, set := range normalized {
-		if postgres {
-			if err := requirePostgresRunActive(ctx, tx, set.Identity.RunID); err != nil {
+		if !admittedRuns[set.Identity.RunID] {
+			var err error
+			if postgres {
+				err = requirePostgresRunActive(ctx, tx, set.Identity.RunID)
+			} else {
+				err = requireSQLiteRunActive(ctx, tx, set.Identity.RunID)
+			}
+			if err != nil {
 				return nil, err
 			}
+			admittedRuns[set.Identity.RunID] = true
+		}
+		if postgres {
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE routing_rules
 				SET status = 'inactive'
@@ -351,9 +357,6 @@ func replaceFlowInstanceRouteTopologyTx(
 				}
 			}
 			continue
-		}
-		if err := requireSQLiteRunActive(ctx, tx, set.Identity.RunID); err != nil {
-			return nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE routing_rules

@@ -79,7 +79,34 @@ func (c diagnosticSQLConn) ExecContext(ctx context.Context, query string, args [
 	return result, err
 }
 func (c diagnosticSQLConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	if err != nil || c.afterExec == nil || !diagnosticEventInsertReturning(query) {
+		return rows, err
+	}
+	return &diagnosticInsertRows{Rows: rows, afterInsert: func() error { return c.afterExec(ctx, query) }}, nil
+}
+
+func diagnosticEventInsertReturning(query string) bool {
+	normalized := strings.Join(strings.Fields(strings.ToLower(query)), " ")
+	return strings.HasPrefix(normalized, diagnosticEventInsertSQL+" (") && strings.Contains(normalized, " returning ")
+}
+
+type diagnosticInsertRows struct {
+	driver.Rows
+	afterInsert func() error
+}
+
+func (r *diagnosticInsertRows) Next(dest []driver.Value) error {
+	if err := r.Rows.Next(dest); err != nil {
+		return err
+	}
+	// A returned row proves the INSERT succeeded; a conflict returning no row
+	// must not manufacture the successful-write barrier.
+	if hook := r.afterInsert; hook != nil {
+		r.afterInsert = nil
+		return hook()
+	}
+	return nil
 }
 func (c diagnosticSQLConn) CheckNamedValue(value *driver.NamedValue) error {
 	if checker, ok := c.Conn.(driver.NamedValueChecker); ok {
@@ -170,6 +197,13 @@ func TestLifecycleDiagnosticCleanupTransactionInterleavingsBothStores(t *testing
 				}
 				firstDone, secondDone := make(chan error, 1), make(chan error, 1)
 				armed.Store(true)
+				var unrelated string
+				if err := firstDB.QueryRowContext(ctx, `SELECT 'insert into events ( returning delete from "runs"'`).Scan(&unrelated); err != nil {
+					t.Fatalf("unrelated read: %v", err)
+				}
+				if held.Load() {
+					t.Fatal("unrelated read entered mutation barrier")
+				}
 				go func() { firstDone <- firstOperation() }()
 				select {
 				case <-entered:

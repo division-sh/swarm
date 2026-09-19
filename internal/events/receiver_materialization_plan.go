@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
 
@@ -294,10 +295,23 @@ func RestoreDeliveryMaterialization(route DeliveryRoute, raw []byte) (DeliveryRo
 		}
 		return route, nil
 	}
-	var wire receiverMaterializationWire
-	if _, err := canonicaljson.Decode(raw); err != nil {
+	decoded, err := canonicaljson.Decode(raw)
+	if err != nil {
 		return DeliveryRoute{}, fmt.Errorf("receiver dependency JSON: %w", err)
 	}
+	return restoreDeliveryMaterialization(route, raw, decoded)
+}
+
+// decoded is the same-input canonical value, including all nested evidence.
+// Required fields and typed/binding admission remain mandatory here.
+func restoreDeliveryMaterialization(route DeliveryRoute, raw []byte, decoded semanticvalue.Value) (DeliveryRoute, error) {
+	if decoded.Kind() == semanticvalue.KindNull {
+		if !route.Materialization.Empty() {
+			return DeliveryRoute{}, fmt.Errorf("cannot erase a receiver dependency")
+		}
+		return route, nil
+	}
+	var wire receiverMaterializationWire
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&wire); err != nil {
@@ -306,12 +320,11 @@ func RestoreDeliveryMaterialization(route DeliveryRoute, raw []byte) (DeliveryRo
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return DeliveryRoute{}, fmt.Errorf("receiver dependency must be one object")
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || len(fields) != 6 {
+	if decoded.Kind() != semanticvalue.KindObject || decoded.Len() != 6 {
 		return DeliveryRoute{}, fmt.Errorf("receiver dependency requires every binding field")
 	}
 	for _, field := range []string{"run_id", "event_id", "routing_source", "target", "materializer_route_identity", "dependent_route_identities"} {
-		if value := fields[field]; len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		if value, present := decoded.Lookup(field); !present || value.Kind() == semanticvalue.KindNull {
 			return DeliveryRoute{}, fmt.Errorf("receiver dependency missing %s", field)
 		}
 	}

@@ -58,6 +58,10 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 
 	var divergence *runfork.RunForkSelectedContractBranchDivergence
 	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
+		divergence = nil
 		lineage, err := port.loadLineage(txctx, tx, forkRunID)
 		if err != nil {
 			return err

@@ -1,11 +1,13 @@
 package events
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -877,17 +879,20 @@ func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
 		HandlerNode       *runtimeidentity.ExecutableNode `json:"handler_node"`
 		HandlerEvent      string                          `json:"handler_event"`
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&encoded); err != nil {
 		return fmt.Errorf("decode connect execution claim: %w", err)
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+	object := bytes.TrimSpace(raw)
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF || len(object) == 0 || object[0] != '{' {
 		return fmt.Errorf("connect execution claim must be an object")
 	}
 	if encoded.Digest == "" {
-		if len(fields) != 0 {
+		// Typed decoding and EOF established one complete object. Only JSON
+		// whitespace may remain between its delimiters for the empty arm.
+		if len(bytes.TrimSpace(object[1:len(object)-1])) != 0 {
 			return fmt.Errorf("empty connect execution claim cannot carry partial fields")
 		}
 		*c = ConnectExecutionClaim{}

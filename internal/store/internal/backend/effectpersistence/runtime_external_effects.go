@@ -108,6 +108,9 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 	var summary runtimeeffects.RecoverySummary
 	committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
 		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite reconcile external effect attempts", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, false, "")
 			if err != nil {
 				return err
@@ -1785,6 +1788,9 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
 	_, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
 		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite settle external attempt", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, _ *revisionEffects) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			if settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
 					return err

@@ -7,13 +7,13 @@ import (
 	"time"
 )
 
-type sqliteAdapter struct{ tx *sql.Tx }
+type sqliteAdapter struct{ tx revisionSQL }
 
 func FinalizeSQLite(ctx context.Context, tx *sql.Tx, effects *Effects) (map[string]Result, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision finalization requires an existing SQLite transaction")
 	}
-	return finalize(ctx, &sqliteAdapter{tx: tx}, effects)
+	return finalize(ctx, &sqliteAdapter{tx: revisionQueryOwner(ctx, tx)}, effects)
 }
 
 func ValidateCompleteSQLite(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -80,9 +80,6 @@ func (a *sqliteAdapter) allocate(ctx context.Context, runID string) (int64, erro
 	return revision, nil
 }
 
-func (a *sqliteAdapter) insertFact(ctx context.Context, runID string, revision int64, family Family, key string, fact []byte, present bool) error {
-	if _, err := a.tx.ExecContext(ctx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,$2,$3,$4,$5,$6)`, runID, revision, family, key, string(fact), present); err != nil {
-		return fmt.Errorf("record run fork %s fact %s at revision %d: %w", family, key, revision, err)
-	}
-	return nil
+func (a *sqliteAdapter) insertFacts(ctx context.Context, runID string, revision int64, facts []revisionFactInsert) error {
+	return insertRevisionFacts(ctx, a.tx, false, runID, revision, facts)
 }

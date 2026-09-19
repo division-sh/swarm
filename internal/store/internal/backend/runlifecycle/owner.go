@@ -210,18 +210,30 @@ func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutation(
 }
 
 func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+	return s.runPrivateAuthorActivityMutationObserved(ctx, effects, operation, nil)
+}
+
+func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutationObserved(ctx context.Context, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error, stage *string) (bool, error) {
 	return s.runPostgresRuntimeMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		observeMutationStage(stage, "activity_begin")
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
 		}
+		observeMutationStage(stage, "transition")
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
+		observeMutationStage(stage, "revision_finalize")
 		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		observeMutationStage(stage, "activity_finalize")
+		if err := story.Finalize(txctx); err != nil {
+			return err
+		}
+		observeMutationStage(stage, "commit")
+		return nil
 	})
 }
 
@@ -236,19 +248,39 @@ func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutation(
 }
 
 func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+	return s.runPrivateAuthorActivityMutationObserved(ctx, label, effects, operation, nil)
+}
+
+func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutationObserved(ctx context.Context, label string, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error, stage *string) (bool, error) {
+	resetEffects := effects.AttemptReset()
 	return s.runRuntimeMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		resetEffects()
+		observeMutationStage(stage, "activity_begin")
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
 		}
+		observeMutationStage(stage, "transition")
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
+		observeMutationStage(stage, "revision_finalize")
 		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		observeMutationStage(stage, "activity_finalize")
+		if err := story.Finalize(txctx); err != nil {
+			return err
+		}
+		observeMutationStage(stage, "commit")
+		return nil
 	})
+}
+
+func observeMutationStage(stage *string, value string) {
+	if stage != nil {
+		*stage = value
+	}
 }
 
 func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {

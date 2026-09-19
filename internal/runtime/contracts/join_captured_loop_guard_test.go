@@ -73,6 +73,24 @@ func hostileBusinessRevision(arbitrary *executionFrame) {
 	}
 }
 
+func TestJoinCapturedLoopOwnershipGuardHostilePreparedOrdinal(t *testing.T) {
+	root := handlerRuleIdentityGuardRepoRoot(t)
+	path := filepath.Join(root, "internal/runtime/engine/fan_out_evaluator.go")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := "state.Join, state.Loop = cloneStringAnyMap(state.Join), cloneStringAnyMap(state.Loop)"
+	if strings.Count(string(original), from) != 1 {
+		t.Fatal("prepared ordinal context clone site moved")
+	}
+	hostile := strings.Replace(string(original), from, from+"\nstate.Loop = map[string]any{\"revision_id\": \"invented\"}", 1)
+	violations := capturedLoopOwnershipViolations(t, map[string][]byte{path: []byte(hostile)})
+	if len(violations) != 1 || !strings.Contains(violations[0], "FanOutEvaluation.EvaluateOrdinal -> ExecutionState.Loop") {
+		t.Fatalf("approved prepared ordinal interpreter gained an unchecked context writer: %v", violations)
+	}
+}
+
 func capturedLoopOwnershipViolations(t *testing.T, overlay map[string][]byte) []string {
 	t.Helper()
 	const module = "github.com/division-sh/swarm/internal/"
@@ -138,13 +156,16 @@ func capturedLoopOwnershipViolations(t *testing.T, overlay map[string][]byte) []
 		"runtime/pipeline::workflowLoopGenerationCurrentInBuckets -> runtime/loopruntime::GenerationCurrent": 1,
 		"runtime/engine::ExecutionState.LoopBucket -> ExecutionState.Loop":                                   1,
 		"runtime/engine::ExecutionState.SetLoop -> ExecutionState.Loop":                                      1,
-		"runtime/engine::Executor.EvaluateFanOutOrdinal -> ExecutionState.Loop":                              1,
-		"runtime/engine::Executor.currentContext -> ExecutionState.Loop":                                     1,
-		"runtime/engine::Executor.newExecutionFrame -> ExecutionState.Loop":                                  1,
-		"runtime/engine::evalWorkflowValueExpression -> ExecutionState.Loop":                                 1,
+		// Preparation captures the admitted capsule once; each ordinal clones
+		// that captured context rather than reading a replacement generation.
+		"runtime/engine::Executor.PrepareFanOutEvaluation -> ExecutionState.Loop": 1,
+		"runtime/engine::FanOutEvaluation.EvaluateOrdinal -> ExecutionState.Loop": 2,
+		"runtime/engine::Executor.currentContext -> ExecutionState.Loop":          1,
+		"runtime/engine::Executor.newExecutionFrame -> ExecutionState.Loop":       1,
+		"runtime/engine::evalWorkflowValueExpression -> ExecutionState.Loop":      1,
 		// The typed result adapter passes the already-selected context through;
 		// it neither loads a current activation nor reconstructs a generation.
-		"runtime/engine::evalWorkflowValueResult -> ExecutionState.Loop":                                     1,
+		"runtime/engine::workflowValueContext -> ExecutionState.Loop":                                        1,
 		"runtime/loopruntime::Activation.CapturedContext -> runtime/loopruntime::Activation.Context":         1,
 		"runtime/loopruntime::ForkChildReference.Context -> runtime/loopruntime::Activation.CapturedContext": 1,
 		"runtime/engine::Executor.stepLoop -> runtime/loopruntime::Activation.Context":                       1,

@@ -86,7 +86,7 @@ func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSour
 	`, mutationID, runID, entityID, string(domain), path, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
 		return err
 	}
-	if err := effects.Add(runID, runforkrevision.FamilyEntityMutations); err != nil {
+	if err := effects.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID); err != nil {
 		return err
 	}
 	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
@@ -171,7 +171,7 @@ func InsertSQLiteWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveR
 	`, mutationID, runID, entityID, string(domain), path, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
 		return err
 	}
-	if err := effects.Add(runID, runforkrevision.FamilyEntityMutations); err != nil {
+	if err := effects.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID); err != nil {
 		return err
 	}
 	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)

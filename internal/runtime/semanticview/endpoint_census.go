@@ -493,11 +493,12 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 			endpoint.SourceLocation = "effective generated producer"
 			b.add(endpoint)
 		}
-		consumerEvents := append(ExecutableNodeEffectiveSubscriptions(b.source, nodeRef), sortedMapKeys(b.source.ExecutableNodeEventHandlers(nodeRef))...)
+		handlers := b.source.ExecutableNodeEventHandlers(nodeRef)
+		consumerEvents := append(ExecutableNodeEffectiveSubscriptions(b.source, nodeRef), sortedMapKeys(handlers)...)
 		for _, eventType := range normalizedSortedStrings(consumerEvents) {
 			kind := EventEndpointNodeGenerated
 			handlerEvent := ""
-			if resolution, ok := resolveNodeHandlerProof(b.source, nodeRef, eventType); ok {
+			if resolution, ok := resolveNodeHandlerProof(b.source, nodeRef, eventType, handlers); ok {
 				kind = EventEndpointNodeHandler
 				handlerEvent = resolution
 			}
@@ -951,19 +952,19 @@ func fanInInputMatchesHandler(source Source, endpoint AuthoredEventEndpoint, han
 	return declaredInputIdentityMatches(source, endpoint, handlerEvent)
 }
 
-func resolveNodeHandlerProof(source Source, node runtimeidentity.ExecutableNode, eventType string) (string, bool) {
+func resolveNodeHandlerProof(source Source, node runtimeidentity.ExecutableNode, eventType string, handlers map[string]runtimecontracts.SystemNodeEventHandler) (string, bool) {
 	if source == nil || !node.Valid() {
 		return "", false
 	}
 	authored := eventidentity.Normalize(eventType)
 	if admission := ClassifyExecutableNodeSubscription(source, node, authored); admission.Admitted() {
-		for key := range source.ExecutableNodeEventHandlers(node) {
+		for key := range handlers {
 			if eventidentity.Normalize(key) == authored {
 				return authored, true
 			}
 		}
 	}
-	resolution := ResolveExecutableNodeSubscriptionHandler(source, node, eventType)
+	resolution := resolveExecutableNodeSubscriptionHandler(source, node, eventType, handlers)
 	if resolution.Matched {
 		return strings.TrimSpace(resolution.HandlerEventKey), true
 	}

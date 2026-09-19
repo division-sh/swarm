@@ -405,6 +405,15 @@ func (p *Process) Begin(ctx context.Context) (*Lease, error) {
 	return p.occurrence.begin(WithProcess(ctx, p))
 }
 
+// BeginStanding owns process-scoped watchers without treating an idle watcher
+// as finite execution. Shutdown still cancels and joins this work.
+func (p *Process) BeginStanding(ctx context.Context) (*Lease, error) {
+	if p == nil {
+		return nil, errors.New("process work owner is required")
+	}
+	return p.occurrence.gate.beginStanding(WithProcess(ctx, p))
+}
+
 func (p *Process) Fence() error {
 	if p == nil {
 		return errors.New("process work owner is required")

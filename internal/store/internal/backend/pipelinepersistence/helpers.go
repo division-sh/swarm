@@ -115,40 +115,22 @@ func persistedReplayEvents[T eventDecoder](records []T) ([]events.PersistedRepla
 
 func loadFanOutSourceEvent(ctx context.Context, q eventReadQueryer, eventID string, postgres bool) (events.Event, events.RouteSettlement, error) {
 	var (
-		record     eventDecoder
+		empty      events.Event
+		admitted   events.AdmittedEvent
 		settlement events.RouteSettlement
-		zeroEvent  events.Event
+		found      bool
+		err        error
 	)
 	if postgres {
-		loaded, found, err := eventrecordpostgres.Load(ctx, q, eventID)
-		if err != nil {
-			return zeroEvent, settlement, err
-		}
-		if !found {
-			return zeroEvent, settlement, fmt.Errorf("event %s not found", strings.TrimSpace(eventID))
-		}
-		record = loaded
-		settlement, err = loaded.DecodeSettlement()
-		if err != nil {
-			return zeroEvent, events.RouteSettlement{}, err
-		}
+		admitted, settlement, found, err = eventrecordpostgres.LoadAdmitted(ctx, q, eventID)
 	} else {
-		loaded, found, err := eventrecordsqlite.Load(ctx, q, eventID)
-		if err != nil {
-			return zeroEvent, settlement, err
-		}
-		if !found {
-			return zeroEvent, settlement, fmt.Errorf("event %s not found", strings.TrimSpace(eventID))
-		}
-		record = loaded
-		settlement, err = loaded.DecodeSettlement()
-		if err != nil {
-			return zeroEvent, events.RouteSettlement{}, err
-		}
+		admitted, settlement, found, err = eventrecordsqlite.LoadAdmitted(ctx, q, eventID)
 	}
-	admitted, err := record.Decode()
 	if err != nil {
-		return zeroEvent, events.RouteSettlement{}, err
+		return empty, events.RouteSettlement{}, err
+	}
+	if !found {
+		return empty, events.RouteSettlement{}, fmt.Errorf("event %s not found", strings.TrimSpace(eventID))
 	}
 	return admitted.Event(), settlement, nil
 }

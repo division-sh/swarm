@@ -448,9 +448,19 @@ func TestCLITopologyTargetRowsInheritContractsAndNeverClaimImplemented(t *testin
 	revision := mustMappingValue(t, cliSpecification(t), "topology_revision_v2_2")
 	catalog := mustMappingValue(t, cliSpecification(t), "command_catalog")
 	targets := mustMappingValue(t, revision, "target_rows")
+	wantContracts := map[string]string{
+		"run_group": "", "run_start": "run", "run_list": "runs",
+		"run_fan_out_group": "run_fan_out_group", "run_fan_out_list": "run_fan_out_list",
+		"run_status": "status", "run_trace": "trace", "run_fork": "run_fork",
+		"agent_list": "agents_list", "event_list": "events_list", "event_follow": "events_follow",
+		"entity_list": "entities_list", "conversation_list": "conversations_list",
+	}
 	count := 0
 	forEachMappingEntry(t, targets, func(name string, row *yaml.Node) {
 		count++
+		if _, ok := wantContracts[name]; !ok {
+			t.Errorf("unexpected topology target row %q", name)
+		}
 		command := mustMappingValue(t, row, "command")
 		if !strings.HasPrefix(command.Value, "swarm ") {
 			t.Errorf("target_rows.%s: command %q must start with \"swarm \"", name, command.Value)
@@ -479,12 +489,18 @@ func TestCLITopologyTargetRowsInheritContractsAndNeverClaimImplemented(t *testin
 			return
 		}
 		source := strings.TrimPrefix(inherits.Value, prefix)
+		if source != wantContracts[name] {
+			t.Errorf("target_rows.%s: inherits %q, want %q", name, source, wantContracts[name])
+		}
 		if mappingValue(catalog, source) == nil {
 			t.Errorf("target_rows.%s: inherits_contract references missing catalog row %q", name, source)
 		}
 	})
-	if count != 11 {
-		t.Fatalf("target rows = %d, want exactly 11 (run_group, run start/list/status/trace/fork, agent/event list, event follow, entity/conversation list)", count)
+	if count != len(wantContracts) {
+		t.Fatalf("target rows = %d, want exactly %d", count, len(wantContracts))
+	}
+	for name := range wantContracts {
+		mustMappingValue(t, targets, name)
 	}
 	// The CLI-only supersession scope for run fork is load-bearing (#1654 gate
 	// condition: runtime/API run.fork must not be disturbed).
@@ -528,6 +544,8 @@ func TestCLITopologyCatalogRowsImplementTargetSpellings(t *testing.T) {
 	// each row's command must match its historical target-row command, and the
 	// Phase-2 supersession pointers must be gone.
 	rowToTarget := map[string]string{
+		"run_fan_out_group":  "run_fan_out_group",
+		"run_fan_out_list":   "run_fan_out_list",
 		"run":                "run_start",
 		"run_group":          "run_group",
 		"runs":               "run_list",

@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -156,6 +157,7 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 		name  string
 		setup func(*testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error)
 	}{
+		{name: "sqlite", setup: setupSQLiteReplyContextStoreTest},
 		{name: "postgres", setup: setupPostgresReplyContextStoreTest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -189,6 +191,7 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 			if err := store.CreateReplyContext(ctx, record); err != nil {
 				t.Fatalf("CreateReplyContext: %v", err)
 			}
+			requireReplyContextHistory(t, ctx, store, record, runtimereplycontext.StateOpen, 1)
 			if err := store.CreateReplyContext(ctx, record); err != nil {
 				t.Fatalf("idempotent CreateReplyContext: %v", err)
 			}
@@ -198,6 +201,7 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 			if err := store.CreateReplyContext(ctx, collision); err == nil {
 				t.Fatal("same-origin in-flight correlation collision unexpectedly accepted")
 			}
+			requireReplyContextHistory(t, ctx, store, record, runtimereplycontext.StateOpen, 1)
 			loaded, err := store.LoadReplyContext(ctx, record.ID)
 			if err != nil {
 				t.Fatalf("LoadReplyContext: %v", err)
@@ -241,8 +245,71 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 			if err != nil || outcome != runtimereplycontext.ClaimIdempotent || claimed.AcceptedReplyEventID != acceptedID {
 				t.Fatalf("accepted replay = record:%#v outcome:%q err:%v", claimed, outcome, err)
 			}
+			requireReplyContextHistory(t, ctx, store, record, runtimereplycontext.StateTerminal, 2)
 
 		})
+	}
+}
+
+func requireReplyContextHistory(t *testing.T, ctx context.Context, store replyContextStoreTestSurface, record runtimereplycontext.Record, state runtimereplycontext.State, count int) {
+	t.Helper()
+	var db *sql.DB
+	switch s := store.(type) {
+	case *SQLiteRuntimeStore:
+		db = s.backend.ConstructionHandle()
+	case *PostgresStore:
+		db = s.backend.ConstructionHandle()
+	default:
+		t.Fatalf("unsupported history proof store %T", store)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT fact,present FROM run_fork_fact_revisions WHERE run_id=$1 AND family='reply_contexts' ORDER BY revision`, record.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got int
+	var latest struct {
+		ID    string                    `json:"reply_context_id"`
+		State runtimereplycontext.State `json:"state"`
+	}
+	for rows.Next() {
+		var body []byte
+		var present bool
+		if err := rows.Scan(&body, &present); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body, &latest); err != nil {
+			t.Fatal(err)
+		}
+		if !present || latest.ID != record.ID {
+			t.Fatalf("unexpected reply history: present=%t fact=%s", present, body)
+		}
+		got++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got != count || latest.State != state {
+		t.Fatalf("reply history count=%d state=%q, want count=%d state=%q", got, latest.State, count, state)
+	}
+}
+
+func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
+	t.Helper()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
+		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: authorActivityTestBundleHash})
+		for i, eventID := range eventIDs {
+			eventName := "provider.replied"
+			if i == 0 {
+				eventName = "provider.requested"
+			}
+			event := eventtest.PersistedProjectionForProducer(eventID, events.EventType(eventName), eventtest.Producer(events.EventProducerPlatform, "test"), "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+			if err := commitSemanticEventFixture(ctx, store, event); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 }
 

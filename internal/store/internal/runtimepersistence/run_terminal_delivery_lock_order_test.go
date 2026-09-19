@@ -78,7 +78,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 			renewalDone <- context.Cause(ctx)
 			return
 		}
-		if _, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, claimed.Claim, runtimedelivery.DefaultLeaseTTL); err != nil {
+		if _, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, privaterunforkrevision.NewEffects(), claimed.Claim, runtimedelivery.DefaultLeaseTTL); err != nil {
 			renewalDone <- err
 			return
 		}

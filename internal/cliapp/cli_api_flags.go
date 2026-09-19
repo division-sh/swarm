@@ -54,6 +54,7 @@ func firstCLIAPIConnectionFlagIndex(args []string) (int, string) {
 func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 	leafCommands := [][]string{
 		{"run", "list"},
+		{"run", "fan-out", "list"},
 		{"run", "status"},
 		{"run", "trace"},
 		{"test"},

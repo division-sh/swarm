@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -25,8 +26,105 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
+
+func TestReceiverFirstMaterializationRawTriggerHistoryBoundaryBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID := uuid.NewString()
+			ctx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, runID, semanticview.Wrap(bundle)), runID)
+			trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "start.seeded", "operator", "", []byte(`{"token":"first"}`), 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC().Truncate(time.Microsecond))
+			if err := insertCanonicalEventRecordFixture(ctx, fixture.store, trigger); err != nil {
+				t.Fatal(err)
+			}
+			tx, err := fixture.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			var current, history int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, runID, trigger.ID()).Scan(&current); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2`, runID, trigger.ID()).Scan(&history); err != nil {
+				t.Fatal(err)
+			}
+			if current != 1 || history != 0 {
+				t.Fatalf("raw trigger event=%s current=%d history=%d, want1/0", trigger.ID(), current, history)
+			}
+			err = validateRunForkRevisionMatrix(ctx, tx, backend.name == "postgres", runID)
+			if err == nil || !strings.Contains(err.Error(), "unsupported unrevisioned events facts") {
+				t.Fatalf("raw trigger full-validator refusal without receiver loader: %v", err)
+			}
+			t.Logf("raw trigger event=%s current=%d history=%d; direct full-validator refusal=%v; receiver loader/planner not invoked", trigger.ID(), current, history, err)
+		})
+	}
+}
+
+func commitReceiverMaterializationTriggerFixture(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, postgres bool, trigger events.Event) {
+	t.Helper()
+	trigger, err := bindSemanticEventFixturePayload(trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := events.AdmitForPersistence(trigger, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := eventrecord.FromAdmitted(admitted, testRouteSettlement(admitted.Event(), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := fixture.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	effects := runforkrevision.NewEffects()
+	var inserted bool
+	if postgres {
+		inserted, err = eventrecordpostgres.Insert(ctx, tx, effects, record)
+	} else {
+		inserted, err = eventrecordsqlite.Insert(ctx, tx, effects, record)
+	}
+	if err != nil || !inserted {
+		t.Fatalf("insert receiver trigger: inserted=%t err=%v", inserted, err)
+	}
+	// This is the already-persisted root precondition, not a receiver publication.
+	// Capture only the canonical writer's own effects at the same seed boundary.
+	results, err := finalizeRunForkRevisionMatrix(ctx, tx, postgres, effects)
+	if err != nil || len(results) != 1 || !results[trigger.RunID()].Changed {
+		t.Fatalf("finalize receiver trigger: results=%+v err=%v", results, err)
+	}
+	var total, exact int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2`, trigger.RunID(), results[trigger.RunID()].Revision).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present=TRUE`, trigger.RunID(), trigger.ID()).Scan(&exact); err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || exact != 1 {
+		t.Fatalf("trigger-only seed captured other/missing facts: total=%d exact=%d", total, exact)
+	}
+	if err := validateRunForkRevisionMatrix(ctx, tx, postgres, trigger.RunID()); err != nil {
+		t.Fatalf("receiver trigger history before preparation: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Producer-boundary probe for E's ordinary source journey. No selected-fork
 // runtime or provider is involved, and no future receiver row is fabricated.
@@ -93,9 +191,7 @@ func TestReceiverFirstMaterializationNodeAndAgentAdmissionBothStores(t *testing.
 						}
 						at := time.Now().UTC().Truncate(time.Microsecond)
 						trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "start.seeded", "operator", "", []byte(`{"token":"first"}`), 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at)
-						if err := insertCanonicalEventRecordFixture(ctx, fixture.store, trigger); err != nil {
-							t.Fatal(err)
-						}
+						commitReceiverMaterializationTriggerFixture(t, ctx, fixture, backend.name == "postgres", trigger)
 						node, err := identity.AdmitExecutableNodeDeclaration(".", "controller")
 						if err != nil {
 							t.Fatal(err)

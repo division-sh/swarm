@@ -15,10 +15,15 @@ import (
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 )
 
-func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity, now time.Time) error {
+func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity, now time.Time) error {
 	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
+	}
+	sessionID := strings.TrimSpace(rec.SessionID)
+	var previousRunID string
+	if err := tx.QueryRowContext(ctx, `SELECT run_id FROM agent_conversation_audits WHERE session_id=?`, sessionID).Scan(&previousRunID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("load sqlite stateless conversation audit owner: %w", err)
 	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
@@ -33,13 +38,18 @@ func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtimell
 			flow_instance_id=excluded.flow_instance_id, flow_instance=excluded.flow_instance,
 			memory_enabled=0, memory_source=excluded.memory_source, entity_id=excluded.entity_id,
 			turn_count=agent_conversation_audits.turn_count + 1, status='active', updated_at=excluded.updated_at
-	`, strings.TrimSpace(rec.SessionID), identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+	`, sessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		string(plan.Source), sqliteNullUUID(rec.EntityID), now, now)
 	if err != nil {
 		return fmt.Errorf("ensure sqlite stateless conversation audit row: %w", err)
 	}
-	return nil
+	if previousRunID != "" {
+		if err := effects.AddFact(previousRunID, runforkrevision.FamilyAgentConversationAudits, sessionID); err != nil {
+			return err
+		}
+	}
+	return effects.AddFact(identity.RunID, runforkrevision.FamilyAgentConversationAudits, sessionID)
 }
 
 func (s *LLMSQLiteOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.AgentTurnRecord, now time.Time) error {
@@ -48,10 +58,7 @@ func (s *LLMSQLiteOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *s
 		return err
 	}
 	if !plan.Enabled {
-		if err := ensureSQLiteStatelessAuditTx(ctx, tx, rec, plan, identity, now); err != nil {
-			return err
-		}
-		return effects.Add(identity.RunID, runforkrevision.FamilyAgentConversationAudits)
+		return ensureSQLiteStatelessAuditTx(ctx, tx, effects, rec, plan, identity, now)
 	}
 	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
@@ -72,7 +79,7 @@ func (s *LLMSQLiteOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *s
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return fmt.Errorf("no exact active SQLite memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
 	}
-	return nil
+	return addAgentSessionFacts(effects, identity.RunID, rec.SessionID)
 }
 
 func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.ConversationRecord) error {
@@ -88,10 +95,7 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.
 	if err != nil {
 		return err
 	}
-	effects, err := agentSessionEffects(identity.RunID)
-	if err != nil {
-		return err
-	}
+	effects := emptyRunForkRevisionEffects()
 	return s.runRuntimeMutation(ctx, "sqlite upsert exact conversation", effects, func(txctx context.Context, tx *sql.Tx) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
@@ -114,7 +118,7 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.
 		if rows, _ := res.RowsAffected(); rows != 1 {
 			return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
 		}
-		return nil
+		return addAgentSessionFacts(effects, identity.RunID, rec.SessionID)
 	})
 }
 
@@ -155,7 +159,7 @@ func (s *LLMSQLiteOwner) ProjectCompletionConversationTx(ctx context.Context, tx
 	if rows, _ := res.RowsAffected(); rows != 1 {
 		return fmt.Errorf("sqlite completion conversation projection turn conflict: run=%s agent=%s session=%s expected_turn=%d", identity.RunID, identity.AgentID(), rec.SessionID, expectedTurnCount)
 	}
-	return effects.Add(identity.RunID, runforkrevision.FamilyAgentSessions)
+	return addAgentSessionFacts(effects, identity.RunID, rec.SessionID)
 }
 
 func (s *LLMSQLiteOwner) LoadActiveConversation(ctx context.Context, identity agentmemory.Identity) (runtimellm.ConversationRecord, bool, error) {
@@ -210,10 +214,7 @@ func (s *LLMSQLiteOwner) UpdateLiveSessionWatchdog(ctx context.Context, update r
 	if err != nil {
 		return err
 	}
-	effects, err := agentSessionEffects(identity.RunID)
-	if err != nil {
-		return err
-	}
+	effects := emptyRunForkRevisionEffects()
 	return s.runRuntimeMutation(ctx, "sqlite update exact memory watchdog", effects, func(txctx context.Context, tx *sql.Tx) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
@@ -235,6 +236,6 @@ func (s *LLMSQLiteOwner) UpdateLiveSessionWatchdog(ctx context.Context, update r
 		if rows, _ := res.RowsAffected(); rows != 1 {
 			return fmt.Errorf("no exact active memory row found for watchdog update")
 		}
-		return nil
+		return addAgentSessionFacts(effects, identity.RunID, update.SessionID)
 	})
 }

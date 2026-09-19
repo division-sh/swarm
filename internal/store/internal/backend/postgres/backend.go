@@ -5,17 +5,32 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 // Backend is the private owner of a PostgreSQL pool. Only store-private
 // persistence adapters may retain it; public selected-store facades expose
 // closed semantic operations instead.
 type Backend struct {
-	db *sql.DB
+	db               *sql.DB
+	testTransactions transactiontest.Slot
 
 	capacityMu           sync.Mutex
 	baseOpenConnections  int
 	capacityReservations int
+}
+
+func (b *Backend) InstallTransactionProbeForTest(options transactiontest.Options) (*transactiontest.Collector, func(), error) {
+	return b.testTransactions.Install(options)
+}
+
+func (b *Backend) NewSessionAuthority(conn *sql.Conn) (*SessionAuthority, error) {
+	session, err := NewSessionAuthority(conn)
+	if err == nil {
+		session.testTransactions = &b.testTransactions
+	}
+	return session, err
 }
 
 // RetainConnectionCapacity reserves one pool slot for a dedicated private
@@ -56,6 +71,17 @@ func (b *Backend) CapacityReservationsForTest() int {
 	b.capacityMu.Lock()
 	defer b.capacityMu.Unlock()
 	return b.capacityReservations
+}
+
+// ConnectionCapacity observes the pool owner without resizing it. Callers must
+// subtract dedicated reservations before allocating shared execution capacity.
+func (b *Backend) ConnectionCapacity() (maximum, dedicated int, err error) {
+	if !b.Valid() {
+		return 0, 0, fmt.Errorf("postgres backend is required")
+	}
+	b.capacityMu.Lock()
+	defer b.capacityMu.Unlock()
+	return b.db.Stats().MaxOpenConnections, b.capacityReservations, nil
 }
 
 func New(db *sql.DB) (*Backend, error) {

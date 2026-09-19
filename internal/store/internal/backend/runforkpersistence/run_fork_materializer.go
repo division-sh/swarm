@@ -661,7 +661,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 		currentState, gatesJSON, fieldsJSON, bookkeepingJSON, accJSON, entity.EnteredStateAt, now); err != nil {
 		return fmt.Errorf("insert fork entity_state %s: %w", entityID, err)
 	}
-	if err := effects.Add(forkRunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+	if err := effects.AddFact(forkRunID, privaterunforkrevision.FamilyEntityMetadata, entityID); err != nil {
 		return err
 	}
 	if err := materializeRunForkDecisionCards(ctx, decisions, tx, story, forkRunID, projection, gateBindings, now); err != nil {

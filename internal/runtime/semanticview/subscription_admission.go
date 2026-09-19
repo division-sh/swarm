@@ -389,6 +389,10 @@ func ResolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 		return NodeSubscriptionHandlerResolution{}
 	}
 	handlers := source.ExecutableNodeEventHandlers(node)
+	return resolveExecutableNodeSubscriptionHandler(source, node, eventType, handlers)
+}
+
+func resolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentity.ExecutableNode, eventType string, handlers map[string]runtimecontracts.SystemNodeEventHandler) NodeSubscriptionHandlerResolution {
 	if len(handlers) == 0 {
 		return NodeSubscriptionHandlerResolution{}
 	}

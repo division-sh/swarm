@@ -82,6 +82,9 @@ func newSQLiteStandingServiceAdapter(store *PipelineSQLiteOwner) *standingServic
 		committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
 			effects := newRevisionEffects()
 			return store.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite standing service mutation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+				if err := handoff.ResetAttempt(); err != nil {
+					return err
+				}
 				adapter.story = story
 				adapter.handoff = handoff
 				adapter.revisionEffects = effects

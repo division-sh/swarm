@@ -16,7 +16,6 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	"github.com/google/uuid"
@@ -121,7 +120,7 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 	if err := requireEventOwnedReferences(ctx, tx, false, wantIdentity); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	inserted, err := eventrecordsqlite.Insert(ctx, tx, wantIdentity)
+	inserted, err := eventrecordsqlite.Insert(ctx, tx, effects, wantIdentity)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -149,11 +148,6 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 	}
 	if err := storeactivityjournal.RecordNoDeliveryWarning(ctx, story, admitted, settlement); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	if runID := strings.TrimSpace(admitted.Event().RunID()); runID != "" {
-		if err := effects.Add(runID, privaterunforkrevision.FamilyEvents); err != nil {
-			return runtimebus.EventAppendOutcomeUnknown, err
-		}
 	}
 	return runtimebus.EventAppendInserted, nil
 }

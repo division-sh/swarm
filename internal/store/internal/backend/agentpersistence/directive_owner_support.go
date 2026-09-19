@@ -40,7 +40,9 @@ func (s *AgentSQLiteOwner) runRuntimeMutation(ctx context.Context, label string,
 }
 
 func (s *AgentSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, effects *privaterunforkrevision.Effects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	resetEffects := effects.AttemptReset()
 	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		resetEffects()
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err

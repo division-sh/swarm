@@ -512,8 +512,13 @@ func rejectSQLitePendingDrainTransition(ctx context.Context, tx *sql.Tx, req run
 
 func addLifecycleRevisionEffects(effects *privaterunforkrevision.Effects, result runtimemanager.AgentLifecycleTransitionResult) error {
 	for _, session := range result.Subordinate.Sessions {
-		if err := effects.Add(session.RunID, privaterunforkrevision.FamilyAgentSessions); err != nil {
+		if err := effects.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.PreviousSessionID); err != nil {
 			return err
+		}
+		if session.SuccessorSessionID != "" {
+			if err := effects.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.SuccessorSessionID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

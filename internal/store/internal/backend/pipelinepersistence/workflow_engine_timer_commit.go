@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -28,27 +29,23 @@ func commitWorkflowEngineTimerMutation(
 	}
 	switch mutation.Kind {
 	case runtimepipeline.WorkflowTimerMutationInsert:
-		changed, err := insertWorkflowEngineTimerActivation(ctx, tx, postgres, activation)
-		if err == nil && changed {
-			err = effects.Add(activation.RunID, privaterunforkrevision.FamilyTimers)
-		}
+		changed, err := insertWorkflowEngineTimerActivation(ctx, tx, postgres, effects, activation)
 		return activation.Ref, changed, err
 	case runtimepipeline.WorkflowTimerMutationCancel:
-		changed, err := cancelWorkflowEngineTimerActivation(ctx, tx, postgres, activation)
-		if err == nil && changed {
-			err = effects.Add(activation.RunID, privaterunforkrevision.FamilyTimers)
-		}
+		changed, err := cancelWorkflowEngineTimerActivation(ctx, tx, postgres, effects, activation)
 		return activation.Ref, changed, err
 	default:
 		return timeridentity.WorkflowTimerActivationRef{}, false, fmt.Errorf("workflow timer mutation kind %q is unsupported", mutation.Kind)
 	}
 }
 
-func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, activation runtimepipeline.WorkflowTimerActivation) (bool, error) {
+func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, effects *revisionEffects, activation runtimepipeline.WorkflowTimerActivation) (bool, error) {
 	var (
 		result sql.Result
 		err    error
+		rows   int64
 	)
+	storedRunID, storedTimerID := activation.RunID, activation.Ref.ActivationID
 	interval := ""
 	if activation.Recurring {
 		interval = activation.RecurrenceInterval.String()
@@ -58,7 +55,7 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 		return false, fmt.Errorf("encode workflow engine timer routing source: %w", err)
 	}
 	if postgres {
-		result, err = tx.ExecContext(ctx, `
+		err = tx.QueryRowContext(ctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id,
 				flow_instance, fire_event, fire_payload, routing_source, execution_mode,
@@ -70,11 +67,17 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 		        NULL, $15, 'system', 'workflow_timer', 'active', $16, NULLIF($17, '')::uuid,
 		        NULLIF($18, '')::uuid, NULLIF($19, '')::uuid, NULLIF($20, ''))
 			ON CONFLICT(timer_id) DO NOTHING
+			RETURNING CAST(run_id AS TEXT), CAST(timer_id AS TEXT)
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
 			activation.EventType, string(activation.Payload), string(routingSource), activation.ExecutionMode, activation.FireAt,
 			activation.Recurring, interval, activation.OwnerAgent, activation.CreatedAt, activation.SourceTimerID,
-			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
+			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner).Scan(&storedRunID, &storedTimerID)
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		} else if err == nil {
+			rows = 1
+		}
 	} else {
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
@@ -92,13 +95,12 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 			activation.EventType, string(activation.Payload), string(routingSource), activation.ExecutionMode, activation.FireAt,
 			activation.Recurring, interval, activation.OwnerAgent, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
+		if err == nil {
+			rows, err = result.RowsAffected()
+		}
 	}
 	if err != nil {
 		return false, fmt.Errorf("insert workflow engine timer activation: %w", err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, err
 	}
 	persisted, found, err := loadWorkflowEngineTimerActivation(ctx, tx, postgres, activation.Ref)
 	if err != nil {
@@ -110,10 +112,15 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 	if !sameWorkflowEngineTimerActivation(persisted, activation) {
 		return false, fmt.Errorf("workflow timer activation %s conflicts with persisted facts", activation.Ref.ActivationID)
 	}
+	if rows == 1 {
+		if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID); err != nil {
+			return false, err
+		}
+	}
 	return rows == 1, nil
 }
 
-func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, expected runtimepipeline.WorkflowTimerActivation) (bool, error) {
+func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, effects *revisionEffects, expected runtimepipeline.WorkflowTimerActivation) (bool, error) {
 	persisted, found, err := loadWorkflowEngineTimerActivation(ctx, tx, postgres, expected.Ref)
 	if err != nil {
 		return false, err
@@ -129,19 +136,30 @@ func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 	}
 	query := `UPDATE timers SET status = 'cancelled' WHERE timer_id = ? AND task_type = 'workflow_timer' AND status = 'active'`
 	args := []any{expected.Ref.ActivationID}
+	storedRunID, storedTimerID := persisted.RunID, persisted.Ref.ActivationID
+	var rows int64
 	if postgres {
-		query = `UPDATE timers SET status = 'cancelled' WHERE timer_id = $1::uuid AND task_type = 'workflow_timer' AND status = 'active'`
+		query = `UPDATE timers SET status = 'cancelled' WHERE timer_id = $1::uuid AND task_type = 'workflow_timer' AND status = 'active'
+			RETURNING CAST(run_id AS TEXT), CAST(timer_id AS TEXT)`
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&storedRunID, &storedTimerID)
+		if err == nil {
+			rows = 1
+		}
+	} else {
+		var result sql.Result
+		result, err = tx.ExecContext(ctx, query, args...)
+		if err == nil {
+			rows, err = result.RowsAffected()
+		}
 	}
-	result, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, err
 	}
 	if rows != 1 {
 		return false, fmt.Errorf("workflow timer cancellation changed %d rows", rows)
+	}
+	if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID); err != nil {
+		return false, err
 	}
 	return true, nil
 }

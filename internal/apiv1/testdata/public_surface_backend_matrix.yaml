@@ -384,9 +384,9 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [runs, entities, testSetup]
       runtime_deps: [WorkflowPersistence, PipelineObligations, MailboxMaterializer]
-      nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutObligationOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
+      nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutSummaryOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
       platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
-      public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
+      public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.fan_out.list, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
     - id: session_conversation
       semantic_owners: [internal/runtime session registry, internal/store conversation]
       selected_purposes: [runtime]
@@ -1053,6 +1053,17 @@ operator_read_api_parity_ledger:
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
       - {kind: go_test, name: TestSelectedStoreRunReadHandlersExecuteAcrossBackends, backends: [default_sqlite, explicit_postgres]}
+  - method: run.fan_out.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestIssue2394ServedFanOutSupportedSurfacesBothStores, backends: [default_sqlite, explicit_postgres]}
+    notes: >
+      Real served HTTP and CLI readback after admitted run.start/event.publish fan-out,
+      through the selected runs reader and shared serving observation owner. Covers
+      exact pages, cursor scope, refusals, and read-only behavior on both stores.
+      This finite consumer proof does not claim the original 500-row timing workload
+      or a positive D3 missed-opportunity incident.
   - method: run.list
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
@@ -1093,12 +1104,14 @@ operator_read_api_parity_ledger:
       - {kind: go_test, name: TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces, backends: [default_sqlite]}
       - {kind: go_test, name: TestPostgresObservabilityOwnerBacksSupportedAPISurfaces, backends: [explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+      - {kind: go_test, name: TestRuntimeLogFilterSupportedConsumersBothStores, backends: [default_sqlite, explicit_postgres]}
   - method: runtime.subscribe_logs
     classification: different_semantic_concept_with_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
       - {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}
       - {kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}
+      - {kind: go_test, name: TestRuntimeLogFilterSupportedConsumersBothStores}
     notes: WebSocket subscription/protocol surface, not an HTTP operator-read method.
 rows:
   - id: serve_source_default_sqlite
@@ -1465,10 +1478,17 @@ rows:
         name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay
       - kind: go_test
         name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound
+      - kind: go_test
+        name: TestRuntimeLogFilterSupportedConsumersBothStores
+      - kind: go_test
+        name: TestRuntimeLogPredicateBoundariesBothStores
     notes: >
       #1402 promotes runtime-log/readback to first-class selected-store
       accounting. Dashboard SQL readers are adjacent read-model consumers; this
-      row owns public API selected-store proof only.
+      row owns public API selected-store proof only. #2454 adds conjunctive
+      log filtering through authenticated HTTP, WebSocket replay/live follow
+      and CLI consumers on both stores, plus direct predicate boundary controls.
+      These additions do not prove run.trace or add SQLite cursor support.
 
   - id: mailbox_read_api_after_mailbox_write
     surface: mailbox.list and mailbox.get after handler-level mailbox_write on selected stores

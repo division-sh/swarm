@@ -22,8 +22,12 @@ func (g *generationGrant) InspectRunExecutionOwnership(ctx context.Context, runI
 	if evidence.State == GrantRetired {
 		return 0, errors.New("run execution admission generation is retired")
 	}
-	if err := g.requireExecutionAuthorityLocked(ctx, evidence); err != nil {
-		return 0, err
+	// Ordinary source-set proof belongs to the inspection transaction. Selected
+	// execution retains its separate proof and local-fence boundary.
+	if evidence.SelectedFork != nil {
+		if err := g.requireExecutionAuthorityLocked(ctx, evidence); err != nil {
+			return 0, err
+		}
 	}
 	result, err := g.owner.session.InspectRunExecutionOwnership(ctx, evidence, runID)
 	if err != nil {

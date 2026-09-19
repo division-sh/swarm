@@ -59,7 +59,7 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 		overlay[path] = []byte(source)
 	}
 	findings := strings.Join(executionAdapterFindings(t, overlay), "\n")
-	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "EvaluateFanOutOrdinal missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor", "hostileNumericPlanner bypasses checked numeric planning", "activity result writer reinterprets execution kinds as semantic DTOs", "NewMockResponsePlan missing numeric/JSON owner", "Materialize competing mock codec", "hostileMockDecoder competing mock codec"} {
+	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "PrepareFanOutEvaluation missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor", "hostileNumericPlanner bypasses checked numeric planning", "activity result writer reinterprets execution kinds as semantic DTOs", "NewMockResponsePlan missing numeric/JSON owner", "Materialize competing mock codec", "hostileMockDecoder competing mock codec"} {
 		if !strings.Contains(findings, want) {
 			t.Fatalf("missing %q: %s", want, findings)
 		}
@@ -84,7 +84,11 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 		"(*" + mock + ".MockResponsePlan).Admit":                                                     {base + "workflowexpr.ProjectSemanticValue"},
 		"(" + mock + ".AdmittedMockResponse).Materialize":                                            {base + "workflowexpr.ProjectSemanticValue"},
 		base + "workflowexpr.compileValueExpression":                                                 {base + "workflowexpr.validateWorkflowNumericEvidence", base + "workflowexpr.validateWorkflowResultType"},
-		base + "workflowexpr.EvalValueResultWithOptions":                                             {base + "workflowexpr.workflowProgram"},
+		base + "workflowexpr.EvalValueResultWithOptions":                                             {base + "workflowexpr.PrepareValueExpression"},
+		base + "workflowexpr.PrepareValueExpression":                                                 {base + "workflowexpr.workflowProgram", base + "workflowexpr.compileValueExpression"},
+		"(*" + base + "workflowexpr.PreparedValueExpression).Eval":                                   {base + "workflowexpr.ProjectCELValue", base + "workflowexpr.MissingEntityReferences", base + "workflowexpr.normalizeCELResult"},
+		"(*" + base + "engine.Executor).PrepareFanOutEvaluation":                                     {"(*" + base + "engine.Executor).bindFrameExpressionSchemas", "(*" + base + "engine.Executor).resolveEmitRoute", base + "workflowexpr.PrepareValueExpression"},
+		"(*" + base + "engine.FanOutEvaluation).EvaluateOrdinal":                                     {base + "fanoutobligation.PrepareOrdinalEmission", "(*" + base + "engine.Executor).shapeEmitPayloadWithContext", "(*" + base + "engine.Executor).newEmitIntentWithEnvelope"},
 		"(*" + base + "workflowexpr.StructuralPredicateEnv).PredicateProgram":                        {base + "workflowexpr.workflowProgram"},
 		base + "workflowexpr.workflowProgram":                                                        {base + "workflowexpr.validateWorkflowNumericEvidence"},
 		base + "workflowexpr.projectCELValue":                                                        {base + "canonicaljson.NormalizeRuntimeNumber"},
@@ -105,7 +109,7 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 				seen[owner] = true
 				admitter := owner == strings.TrimSuffix(base, "/")+".NewRuntimePayloadAdmitter"
 				binder := owner == "(*"+base+"engine.Executor).bindFrameExpressionSchemas"
-				constructor := owner == "(*"+base+"engine.Executor).newExecutionFrame" || owner == "(*"+base+"engine.Executor).EvaluateFanOutOrdinal"
+				constructor := owner == "(*"+base+"engine.Executor).newExecutionFrame" || owner == "(*"+base+"engine.Executor).PrepareFanOutEvaluation"
 				if admitter || binder || constructor {
 					seen[fn.Name.Name] = true
 				}
@@ -215,7 +219,7 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 			}
 		}
 	}
-	for _, owner := range []string{"NewRuntimePayloadAdmitter", "bindFrameExpressionSchemas", "newExecutionFrame", "EvaluateFanOutOrdinal"} {
+	for _, owner := range []string{"NewRuntimePayloadAdmitter", "bindFrameExpressionSchemas", "newExecutionFrame", "PrepareFanOutEvaluation"} {
 		if !seen[owner] {
 			findings = append(findings, "missing adapter owner "+owner)
 		}

@@ -164,6 +164,7 @@ func runtimeSourceArtifactIdentities(publication runtime.RuntimeContextPublicati
 
 func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandler {
 	return map[string]MethodHandler{
+		"run.fan_out.list": runFanOutListHandler(opts),
 		"run.get": func(ctx context.Context, req Request) (any, error) {
 			runs, err := requireRunReadStore(opts.Runs)
 			if err != nil {

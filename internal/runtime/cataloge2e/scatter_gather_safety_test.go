@@ -26,18 +26,22 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 			name                    string
 			order                   []int
 			restart, repeat, reject bool
+			hundred                 bool
 		}{
 			{name: "ordered", order: []int{0, 1, 2}},
 			{name: "reversed", order: []int{2, 1, 0}},
 			{name: "duplicate_publication", order: []int{1, 0, 2}, repeat: true},
 			{name: "partial_restart", order: []int{2, 0, 1}, restart: true},
 			{name: "rejected_input", order: []int{0, 2, 1}, reject: true},
+			{name: "hundred_reverse_completion", hundred: true},
 		} {
 			t.Run(string(backend)+"/"+variant.name, func(t *testing.T) {
 				h := newRuntimeHarnessForBackend(t, filepath.Join(canonicalrouting.RepoRoot(t), "internal/runtime/cataloge2e/testdata/scatter-gather-safety"), backend, true)
+				observePublication := scatterGatherTransactionDiagnostics(t, h)
 				var groups []catalogTranscriptGroup
 				publish := func(event string, payload map[string]any) catalogTriggerStep {
 					t.Helper()
+					defer observePublication(event)()
 					step := catalogTriggerStep{Event: event, Payload: payload, eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
 					if err := h.publishRuntimeEventResultForStep(step, 20*time.Second, false); err != nil {
 						t.Fatal(err)
@@ -47,7 +51,18 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					return step
 				}
 				items := []any{map[string]any{"item_id": "alpha", "value": "red"}, map[string]any{"item_id": "beta", "value": "green"}, map[string]any{"item_id": "gamma", "value": "blue"}}
-				publish("collector/batch.opened", map[string]any{"batch_id": "batch-one", "expected_item_ids": []any{"alpha", "beta", "gamma"}})
+				if variant.hundred {
+					items = make([]any, 100)
+					for i := range items {
+						items[i] = map[string]any{"item_id": fmt.Sprintf("item-%03d", i), "value": fmt.Sprintf("value-%03d", i)}
+					}
+				}
+				expectedIDs, expectedResults := make([]any, len(items)), make([]any, len(items))
+				for i, raw := range items {
+					item := raw.(map[string]any)
+					expectedIDs[i], expectedResults[i] = item["item_id"], item["value"]
+				}
+				publish("collector/batch.opened", map[string]any{"batch_id": "batch-one", "expected_item_ids": expectedIDs})
 				publish("batch.submitted", map[string]any{"batch_id": "batch-one", "items": items})
 				ids := map[string]string{}
 				paths := map[string]string{}
@@ -76,7 +91,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 				done := map[string]bool{}
 				check := func(completed int) {
 					t.Helper()
-					if counts := scatterGatherCounts(t, h); counts["entity_state"] != 5 {
+					if counts := scatterGatherCounts(t, h); counts["entity_state"] != len(items)+2 {
 						t.Fatalf("unexpected entity set: %v", counts)
 					}
 					for _, raw := range items {
@@ -125,11 +140,11 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					activation, found, err := joinruntime.Load(carrier.StateBuckets, identitytest.FlowNode(t, "collector", "gather"), joinruntime.ActivationKey("awaiting", "awaiting", "batch-one"))
-					if err != nil || !found || activation.Completed() != completed || activation.Expected() != 3 {
+					if err != nil || !found || activation.Completed() != completed || activation.Expected() != len(items) {
 						t.Fatalf("gather %+v found=%v err=%v", activation, found, err)
 					}
-					if completed == 3 {
-						if collector.CurrentState != "complete" || activation.CloseReason != joinruntime.CloseReasonComplete || !reflect.DeepEqual(activation.Results(), []any{"red", "green", "blue"}) {
+					if completed == len(items) {
+						if collector.CurrentState != "complete" || activation.CloseReason != joinruntime.CloseReasonComplete || !reflect.DeepEqual(activation.Results(), expectedResults) {
 							t.Fatalf("final gather: %s %+v", collector.CurrentState, activation)
 						}
 					} else if collector.CurrentState != "awaiting" || activation.Status != joinruntime.StatusOpen {
@@ -173,6 +188,17 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					}
 				}
 				check(0)
+				if variant.hundred {
+					reversed := make([]any, len(items))
+					for i, item := range items {
+						reversed[len(items)-1-i] = item
+					}
+					publish("batch.finished", map[string]any{"batch_id": "batch-one", "items": reversed})
+					for _, item := range items {
+						done[item.(map[string]any)["item_id"].(string)] = true
+					}
+					check(len(items))
+				}
 				if variant.reject {
 					before := scatterGatherCounts(t, h)
 					states := scatterGatherStates(t, h, paths)
@@ -229,8 +255,25 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 
 // A committed fan-out intent can outlive PublishAndWait's process-local tree.
 // Observe exact durable descendants, not elapsed time or a stable count of loops.
+const scatterGatherFrontierQuery = `WITH RECURSIVE run_events AS MATERIALIZED (
+	SELECT event_id,source_event_id FROM events WHERE run_id=$1 AND event_name<>'platform.runtime_log'
+), descendants(event_id) AS (
+	SELECT event_id FROM run_events WHERE event_id=$2
+	UNION
+	SELECT e.event_id FROM run_events e JOIN descendants p ON e.source_event_id=p.event_id
+), delivery_counts AS (
+	SELECT p.event_id, COUNT(d.delivery_id) AS total,
+		COALESCE(SUM(CASE WHEN d.status<>'delivered' THEN 1 ELSE 0 END),0) AS unsettled
+	FROM descendants p LEFT JOIN event_deliveries d ON d.event_id=p.event_id
+	GROUP BY p.event_id
+)
+SELECT (SELECT COUNT(*) FROM descendants),
+	(SELECT COUNT(*) FROM delivery_counts WHERE total<>1 OR unsettled<>0),
+	(SELECT COUNT(*) FROM dead_letters d JOIN descendants p ON d.original_event_id=p.event_id)`
+
 func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep) {
 	t.Helper()
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(h.ctx, 20*time.Second)
 	defer cancel()
 	tick := time.NewTicker(10 * time.Millisecond)
@@ -244,10 +287,55 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep)
 	if step.Event == "batch.finished" {
 		want *= 2
 	}
+	issued := step.Event != "batch.submitted" && step.Event != "batch.finished"
 	for {
+		if !issued {
+			var count int
+			if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND source_event_id=$2 AND status='closed' AND cardinality=$3 AND cursor=$3 AND claim_owner IS NULL`, catalogRuntimeRunID, step.eventID, cardinality).Scan(&count); err != nil {
+				logScatterGatherProgress(t, h, step.eventID)
+				t.Fatal(err)
+			}
+			if count != 1 {
+				select {
+				case <-ctx.Done():
+					logScatterGatherProgress(t, h, step.eventID)
+					t.Fatalf("%s exact issuance did not close: %v", step.Event, ctx.Err())
+				case <-tick.C:
+				}
+				continue
+			}
+			issued = true
+		}
+		// Poll only durable identities/status. Full public hydration below remains
+		// mandatory, but must not compete with issuance for every growing prefix.
+		// Match the public helper's explicit ExcludeRuntimeLogs filter.
+		var observed, unsettled, deadLetters int
+		err := h.db.QueryRowContext(ctx, scatterGatherFrontierQuery, catalogRuntimeRunID, step.eventID).Scan(&observed, &unsettled, &deadLetters)
+		if err != nil {
+			logScatterGatherProgress(t, h, step.eventID)
+			t.Fatal(err)
+		}
+		if deadLetters != 0 {
+			t.Fatalf("%s durable descendants have %d dead letters", step.Event, deadLetters)
+		}
+		if observed != want+1 || unsettled != 0 {
+			select {
+			case <-ctx.Done():
+				logScatterGatherProgress(t, h, step.eventID)
+				t.Fatalf("%s durable descendant frontier: got %d events want %d, unsettled=%d: %v", step.Event, observed, want+1, unsettled, ctx.Err())
+			case <-tick.C:
+			}
+			continue
+		}
+		if cardinality == 100 {
+			t.Logf("%s exact durable frontier settled after %s", step.Event, time.Since(started))
+		}
 		public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if cardinality == 100 {
+			t.Logf("%s full public hydration finished after %s", step.Event, time.Since(started))
 		}
 		tree := map[string]bool{step.eventID: true}
 		for changed := true; changed; {
@@ -291,9 +379,44 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep)
 		}
 		select {
 		case <-ctx.Done():
+			logScatterGatherProgress(t, h, step.eventID)
 			t.Fatalf("%s descendant frontier: got %d events want %d: %v", step.Event, len(tree), want+1, ctx.Err())
 		case <-tick.C:
 		}
+	}
+}
+
+func logScatterGatherProgress(t testing.TB, h *runtimeHarness, eventID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), time.Second)
+	defer cancel()
+	rows, err := h.db.QueryContext(ctx, `SELECT status,cardinality,cursor,COALESCE(claim_owner,''),claim_generation,CAST(lease_expires_at AS TEXT) FROM fan_out_intents WHERE run_id=$1 AND source_event_id=$2`, catalogRuntimeRunID, eventID)
+	if err != nil {
+		t.Logf("failed fan-out observation: %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status, owner string
+		var cardinality, cursor, generation int
+		var expiry any
+		if err := rows.Scan(&status, &cardinality, &cursor, &owner, &generation, &expiry); err != nil {
+			t.Logf("failed fan-out scan: %v", err)
+			return
+		}
+		t.Logf("fan-out at failed deadline: status=%s cursor=%d/%d owner=%q generation=%d lease=%v", status, cursor, cardinality, owner, generation, expiry)
+	}
+	if err := rows.Err(); err != nil {
+		t.Logf("failed fan-out rows: %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Logf("failed fan-out row close: %v", err)
+	}
+	var events, ledgers, bytes int
+	if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(DISTINCT CAST(route_settlement AS TEXT)),COALESCE(SUM(LENGTH(CAST(route_settlement AS TEXT))),0) FROM events WHERE run_id=$1 AND source_event_id=$2`, catalogRuntimeRunID, eventID).Scan(&events, &ledgers, &bytes); err != nil {
+		t.Logf("failed fan-out event size read: %v", err)
+	} else {
+		t.Logf("fan-out persisted settlement inputs: events=%d distinct=%d bytes=%d", events, ledgers, bytes)
 	}
 }
 

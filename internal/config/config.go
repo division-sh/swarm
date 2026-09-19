@@ -29,6 +29,8 @@ type Config struct {
 }
 
 type RuntimeConfig struct {
+	// Nil defers to selected-backend capacity defaults; an explicit zero is invalid.
+	FanOutWorkers                *int          `yaml:"fan_out_workers,omitempty"`
 	MaxConcurrentAgents          int           `yaml:"max_concurrent_agents"`
 	EventPollInterval            time.Duration `yaml:"event_poll_interval"`
 	RecoveryOnStartup            bool          `yaml:"recovery_on_startup"`
@@ -46,14 +48,41 @@ const RetiredExecutionPostureMessage = "runtime.execution_posture is retired; sw
 
 func (r *RuntimeConfig) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(value.Content); i += 2 {
-			if value.Content[i].Value == "execution_posture" {
-				return errors.New(RetiredExecutionPostureMessage)
+		// Resolve YAML merge keys before checking presence and scalar types.
+		var fields map[string]yaml.Node
+		if err := value.Decode(&fields); err != nil {
+			return err
+		}
+		if _, present := fields["execution_posture"]; present {
+			return errors.New(RetiredExecutionPostureMessage)
+		}
+		if workers, present := fields["fan_out_workers"]; present {
+			if workers.Kind == yaml.AliasNode {
+				workers = *workers.Alias
+			}
+			if workers.Kind != yaml.ScalarNode || workers.Tag != "!!int" {
+				return errors.New("runtime.fan_out_workers must be a positive integer")
+			}
+			var count int
+			if err := workers.Decode(&count); err != nil {
+				return fmt.Errorf("runtime.fan_out_workers must be a positive integer: %w", err)
 			}
 		}
 	}
 	type runtimeConfig RuntimeConfig
-	return value.Decode((*runtimeConfig)(r))
+	if err := value.Decode((*runtimeConfig)(r)); err != nil {
+		return err
+	}
+	return r.ValidateFanOutWorkers()
+}
+
+// ValidateFanOutWorkers checks the declaration only. Defaults, SQLite's single
+// worker, and PostgreSQL headroom are owned by actual selected-backend capacity.
+func (r RuntimeConfig) ValidateFanOutWorkers() error {
+	if r.FanOutWorkers != nil && *r.FanOutWorkers <= 0 {
+		return errors.New("runtime.fan_out_workers must be a positive integer")
+	}
+	return nil
 }
 
 type PlatformPacksConfig struct {
@@ -485,6 +514,9 @@ func (c *Config) validateRetiredLLMModelConfig() error {
 }
 
 func (c *Config) ValidateOperationalControls() error {
+	if err := c.Runtime.ValidateFanOutWorkers(); err != nil {
+		return err
+	}
 	if c.Runtime.MaxConcurrentAgents != 0 {
 		return errors.New("runtime.max_concurrent_agents is unsupported: no runtime path enforces it")
 	}

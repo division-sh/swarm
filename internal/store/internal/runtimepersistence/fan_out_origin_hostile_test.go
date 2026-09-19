@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func requireFanOutOriginNamedAdmission(t *testing.T, fixture authorActivityReceiptFixture, backend string, eventBus *bus.EventBus, ctx context.Context, claim fanoutobligation.Claim, exact events.Event, first engine.DurablePublicationPlan) {
+func requireFanOutOriginNamedAdmission(t *testing.T, fixture authorActivityReceiptFixture, backend string, eventBus *bus.EventBus, ctx context.Context, owner pipeline.FanOutObligationOwner, claim fanoutobligation.Claim, exact events.Event) {
 	t.Helper()
 	origin, found := exact.InheritedFanOutOrigin()
 	if !found {
@@ -57,34 +57,30 @@ func requireFanOutOriginNamedAdmission(t *testing.T, fixture authorActivityRecei
 			if err != nil {
 				t.Fatal(err)
 			}
-			plans, err := eventBus.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: event}})
-			if err != nil || len(plans) != 1 {
-				t.Fatalf("structural preparation must reach the named owner: %v", err)
-			}
-			defer func() {
-				if err := eventBus.ReleaseEnginePublications(ctx, plans); err != nil {
-					t.Error(err)
-				}
-			}()
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")
-			_, err = fixture.store.(selectedFanOutOwner).CommitFanOutChunk(ctx, pipeline.FanOutChunkCommand{
-				Claim: claim, Outcomes: []pipeline.FanOutChunkOutcome{{Ordinal: origin.Ordinal(), Publication: plans[0]}}, Now: time.Now().UTC(),
-			})
-			if err == nil {
-				t.Fatal("named transaction accepted mismatched origin")
-			}
-			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")) {
-				t.Fatal("refused origin mutated event/outcome/obligation/cursor or source state")
-			}
-			if variant == "bundle" {
-				// The valid first ordinal writes its event and obligations before
-				// the second ordinal fails. The entire chunk must roll back.
-				_, err := fixture.store.(selectedFanOutOwner).CommitFanOutChunk(ctx, pipeline.FanOutChunkCommand{
-					Claim: claim, Outcomes: []pipeline.FanOutChunkOutcome{{Ordinal: origin.Ordinal(), Publication: first}, {Ordinal: origin.Ordinal() + 1, Publication: plans[0]}}, Now: time.Now().UTC(),
-				})
-				if err == nil || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")) {
-					t.Fatalf("late ordinal rejection failed atomic event/origin/outcome/cursor rollback: %v", err)
+			requireRefusal := func(requests []pipeline.FanOutPublicationRequest) {
+				t.Helper()
+				group, err := owner.BeginFanOutPublicationGroup(ctx, claim)
+				if err != nil {
+					t.Fatal(err)
 				}
+				plans, prepareErr := eventBus.PrepareFanOutPublications(ctx, group, requests)
+				closeErr := group.Close(context.WithoutCancel(ctx))
+				if prepareErr == nil || !strings.Contains(prepareErr.Error(), "fan-out publication disagrees with exact inherited origin") || len(plans) != 0 || closeErr != nil {
+					t.Fatalf("exact grouped origin refusal: plans=%d prepare=%v close=%v", len(plans), prepareErr, closeErr)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")) {
+					t.Fatal("refused origin mutated event/outcome/obligation/cursor or source state")
+				}
+			}
+			requireRefusal([]pipeline.FanOutPublicationRequest{{Ordinal: origin.Ordinal(), Intent: engine.EmitIntent{Event: event}}})
+			if variant == "bundle" {
+				// Complete group admission rejects the invalid suffix before any
+				// member can write. This is not a late-SQL-rollback receipt.
+				requireRefusal([]pipeline.FanOutPublicationRequest{
+					{Ordinal: origin.Ordinal(), Intent: engine.EmitIntent{Event: exact}},
+					{Ordinal: origin.Ordinal() + 1, Intent: engine.EmitIntent{Event: event}},
+				})
 			}
 		})
 	}

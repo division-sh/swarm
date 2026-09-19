@@ -18,8 +18,10 @@ import (
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +33,7 @@ type StartupPostgresOwner struct {
 	catalogEmpty     func(context.Context) (bool, error)
 	agents           *storeagent.AgentPostgresOwner
 	destructiveReset *storeadmin.DestructiveResetPostgresOwner
+	fanOutPipeline   *storepipeline.PipelinePostgresOwner
 }
 
 type StartupSQLiteOwner struct {
@@ -41,27 +44,37 @@ type StartupSQLiteOwner struct {
 	catalogEmpty    func(context.Context) (bool, error)
 	agents          *storeagent.AgentSQLiteOwner
 	ownerMu         sync.Mutex
+	fanOutPipeline  *storepipeline.PipelineSQLiteOwner
 }
 
-func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentPostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner) (*StartupPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil || destructiveReset == nil {
-		return nil, errors.New("startup/topology PostgreSQL owner requires backend, schema guard, and agent lifecycle owner")
+func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentPostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner, pipeline *storepipeline.PipelinePostgresOwner) (*StartupPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil || destructiveReset == nil || pipeline == nil {
+		return nil, errors.New("startup/topology PostgreSQL owner requires backend, schema guard, agent lifecycle and pipeline owners")
 	}
-	return &StartupPostgresOwner{backend: backend, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents, destructiveReset: destructiveReset}, nil
-}
-
-func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
-	return NewSQLiteWithBackendIdentity(backend, path, nil, schemaGuard, catalogEmpty, agents)
-}
-
-func NewSQLiteWithBackendIdentity(backend *sqlitebackend.Backend, path string, identity *SQLiteBackendIdentity, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil {
-		return nil, errors.New("startup/topology SQLite owner requires backend, schema guard, and agent lifecycle owner")
+	if err := pipeline.BindFanOutReadiness(&fanOutReadiness{}); err != nil {
+		return nil, err
 	}
-	return &StartupSQLiteOwner{backend: backend, path: strings.TrimSpace(path), backendIdentity: identity, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents}, nil
+	return &StartupPostgresOwner{backend: backend, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents, destructiveReset: destructiveReset, fanOutPipeline: pipeline}, nil
+}
+
+func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner, pipeline *storepipeline.PipelineSQLiteOwner) (*StartupSQLiteOwner, error) {
+	return NewSQLiteWithBackendIdentity(backend, path, nil, schemaGuard, catalogEmpty, agents, pipeline)
+}
+
+func NewSQLiteWithBackendIdentity(backend *sqlitebackend.Backend, path string, identity *SQLiteBackendIdentity, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner, pipeline *storepipeline.PipelineSQLiteOwner) (*StartupSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil || pipeline == nil {
+		return nil, errors.New("startup/topology SQLite owner requires backend, schema guard, agent lifecycle and pipeline owners")
+	}
+	if err := pipeline.BindFanOutReadiness(&fanOutReadiness{sqlite: true}); err != nil {
+		return nil, err
+	}
+	return &StartupSQLiteOwner{backend: backend, path: strings.TrimSpace(path), backendIdentity: identity, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents, fanOutPipeline: pipeline}, nil
 }
 
 func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.ProcessCapability, error) {
+	if s.fanOutPipeline == nil {
+		return nil, errors.New("startup requires the assembled fan-out pipeline owner")
+	}
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -89,6 +102,11 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 		return nil, errors.Join(err, releaseErr)
 	}
 	session := &postgresSession{owner: s, lease: lease, authority: authority, releaseCapacity: releaseCapacity}
+	session.fanOutStore, err = s.fanOutPipeline.NewFanOutServingStore(&fanOutAdmission{session: session, sqlite: false})
+	if err != nil {
+		releaseCapacity()
+		return nil, errors.Join(err, lease.Release(ctx))
+	}
 	capability, err := runtimestartupownership.NewProcessCapability(session)
 	if err != nil {
 		releaseErr := lease.Release(ctx)
@@ -99,6 +117,9 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 }
 
 func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.ProcessCapability, error) {
+	if s.fanOutPipeline == nil {
+		return nil, errors.New("startup requires the assembled fan-out pipeline owner")
+	}
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
@@ -124,6 +145,10 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 		return nil, errors.Join(err, possession.Release())
 	}
 	session.authority = authority
+	session.fanOutStore, err = s.fanOutPipeline.NewFanOutServingStore(&fanOutAdmission{session: session, sqlite: true})
+	if err != nil {
+		return nil, errors.Join(err, possession.Release())
+	}
 	capability, err := runtimestartupownership.NewProcessCapability(session)
 	if err != nil {
 		return nil, errors.Join(err, possession.Release())
@@ -165,6 +190,7 @@ type postgresSession struct {
 	releaseCapacity  func()
 	terminalDeadline time.Duration
 	released         bool
+	fanOutStore      runtimestartupownership.FanOutServingStore
 }
 
 func (s *postgresSession) Authority() (runtimestartupownership.Authority, error) {
@@ -237,8 +263,9 @@ func (s *postgresSession) ProveSelectedForkGenerationGrant(ctx context.Context, 
 func (s *postgresSession) InspectRunExecutionOwnership(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (runtimemanager.RunExecutionOwnership, error) {
 	var result runtimemanager.RunExecutionOwnership
 	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.RunExecutionInspection)
 		var err error
-		result, err = storeagent.InspectRunExecutionOwnershipTx(txctx, tx, evidence, runID, false)
+		result, err = inspectRunExecutionOwnershipTx(txctx, tx, evidence, runID, false)
 		return err
 	})
 	return result, err
@@ -248,6 +275,7 @@ func (s *postgresSession) LoadSourceSet(ctx context.Context) (runtimeagenttopolo
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
 	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.SourceSetLoad)
 		var err error
 		plan, exists, err = loadSourceSetTx(txctx, tx, false)
 		return err
@@ -342,6 +370,7 @@ type sqliteSession struct {
 	terminalDeadline time.Duration
 	possession       sqlitePossession
 	released         bool
+	fanOutStore      runtimestartupownership.FanOutServingStore
 }
 
 func (s *sqliteSession) Authority() (runtimestartupownership.Authority, error) {
@@ -438,8 +467,9 @@ func (s *sqliteSession) ProveSelectedForkGenerationGrant(ctx context.Context, ev
 func (s *sqliteSession) InspectRunExecutionOwnership(ctx context.Context, evidence runtimestartupownership.GrantEvidence, runID string) (runtimemanager.RunExecutionOwnership, error) {
 	var result runtimemanager.RunExecutionOwnership
 	err := s.owner.backend.RunTransaction(ctx, "inspect run execution ownership", func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.RunExecutionInspection)
 		var err error
-		result, err = storeagent.InspectRunExecutionOwnershipTx(txctx, tx, evidence, runID, true)
+		result, err = inspectRunExecutionOwnershipTx(txctx, tx, evidence, runID, true)
 		return err
 	})
 	return result, err
@@ -449,6 +479,7 @@ func (s *sqliteSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
 	err := s.owner.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.SourceSetLoad)
 		var err error
 		plan, exists, err = loadSourceSetTx(txctx, tx, true)
 		return err
@@ -615,7 +646,11 @@ func loadTerminalAuthorityResult(ctx context.Context, reader authoritySnapshotRe
 }
 
 func loadAuthorityHeadTx(ctx context.Context, tx *sql.Tx, backend string, sqlite bool) (runtimestartupownership.Authority, bool, error) {
-	record, exists, err := loadAuthorityHeadRecord(ctx, tx, sqlite, true)
+	return loadAuthorityHeadModeTx(ctx, tx, backend, sqlite, true)
+}
+
+func loadAuthorityHeadModeTx(ctx context.Context, tx *sql.Tx, backend string, sqlite, lock bool) (runtimestartupownership.Authority, bool, error) {
+	record, exists, err := loadAuthorityHeadRecord(ctx, tx, sqlite, lock)
 	if err != nil {
 		return runtimestartupownership.Authority{}, false, err
 	}
@@ -933,9 +968,32 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 	return result, err
 }
 
+func inspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence runtimestartupownership.GrantEvidence, runID string, sqlite bool) (runtimemanager.RunExecutionOwnership, error) {
+	// Keep the established mutation fence before domain locks. The canonical
+	// source head is then held with the grant/run proof until this owner commits.
+	ownership, err := storeagent.InspectRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite)
+	if err != nil {
+		return 0, err
+	}
+	if evidence.SelectedFork == nil {
+		plan, exists, err := loadSourceSetTx(ctx, tx, sqlite)
+		if err != nil {
+			return 0, err
+		}
+		if !exists || plan.Revision != evidence.SourceSetRevision {
+			return 0, errors.New("runtime generation grant source-set revision is not current")
+		}
+	}
+	return ownership, nil
+}
+
 func loadSourceSetTx(ctx context.Context, tx *sql.Tx, sqlite bool) (runtimeagenttopology.SourceSetPlan, bool, error) {
+	return loadSourceSetModeTx(ctx, tx, sqlite, true)
+}
+
+func loadSourceSetModeTx(ctx context.Context, tx *sql.Tx, sqlite, lock bool) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	query := `SELECT revision,plan FROM agent_topology_source_set_head WHERE singleton_id = 1`
-	if !sqlite {
+	if !sqlite && lock {
 		query += ` FOR SHARE`
 	}
 	var plan runtimeagenttopology.SourceSetPlan

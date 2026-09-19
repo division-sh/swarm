@@ -17,6 +17,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -904,11 +905,12 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			cursor INTEGER NOT NULL,
 			status TEXT NOT NULL,
 			next_chunk_size INTEGER NOT NULL,
-			last_chunk_ms INTEGER NOT NULL DEFAULT 0,
 			capsule TEXT NOT NULL,
 			claim_owner TEXT,
 			claim_generation INTEGER NOT NULL DEFAULT 0,
 			lease_expires_at TIMESTAMP,
+			retry_ready_at TIMESTAMP,
+			retry_failure TEXT,
 			last_served_at TIMESTAMP,
 			blocked_reason TEXT,
 			created_at TIMESTAMP NOT NULL,
@@ -934,6 +936,9 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("create sqlite test schema: %v", err)
 		}
+	}
+	if err := deliveryfixture.CreateSQLiteDeadLetterSchema(context.Background(), db); err != nil {
+		t.Fatalf("create sqlite delivery-dependent schema: %v", err)
 	}
 }
 

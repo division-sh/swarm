@@ -6,13 +6,13 @@ import (
 	"fmt"
 )
 
-type postgresAdapter struct{ tx *sql.Tx }
+type postgresAdapter struct{ tx revisionSQL }
 
 func FinalizePostgres(ctx context.Context, tx *sql.Tx, effects *Effects) (map[string]Result, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision finalization requires an existing PostgreSQL transaction")
 	}
-	return finalize(ctx, &postgresAdapter{tx: tx}, effects)
+	return finalize(ctx, &postgresAdapter{tx: revisionQueryOwner(ctx, tx)}, effects)
 }
 
 func ValidateCompletePostgres(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -78,9 +78,6 @@ func (a *postgresAdapter) allocate(ctx context.Context, runID string) (int64, er
 	return revision, nil
 }
 
-func (a *postgresAdapter) insertFact(ctx context.Context, runID string, revision int64, family Family, key string, fact []byte, present bool) error {
-	if _, err := a.tx.ExecContext(ctx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,$2,$3,$4,$5::jsonb,$6)`, runID, revision, family, key, fact, present); err != nil {
-		return fmt.Errorf("record run fork %s fact %s at revision %d: %w", family, key, revision, err)
-	}
-	return nil
+func (a *postgresAdapter) insertFacts(ctx context.Context, runID string, revision int64, facts []revisionFactInsert) error {
+	return insertRevisionFacts(ctx, a.tx, true, runID, revision, facts)
 }

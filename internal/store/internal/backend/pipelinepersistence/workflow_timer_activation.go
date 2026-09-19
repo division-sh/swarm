@@ -180,6 +180,9 @@ func commitWorkflowTimerReconciliation(
 	defer handoff.Rollback()
 	var result runtimepipeline.CommittedWorkflowLifecycleMutation
 	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
 		var err error
 		result, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), decisions, genericSchedules, postgres, effects, command.Plan)
 		if err != nil {

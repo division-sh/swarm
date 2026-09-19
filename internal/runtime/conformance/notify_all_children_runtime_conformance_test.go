@@ -137,6 +137,7 @@ type notifyAllChildrenRuntime struct {
 	sourceArtifactFact runtimecorrelation.SourceArtifactFact
 	genericSchedules   *runtimegenericschedule.Lifecycle
 	posture            executionposture.Posture
+	fanOutServing      *runtimestartupownership.FanOutServingRegistration
 }
 
 type notifyAllChildrenRuntimeOptions struct {
@@ -147,6 +148,9 @@ type notifyAllChildrenRuntimeOptions struct {
 	sourceArtifactFact     runtimecorrelation.SourceArtifactFact
 	enableGenericSchedules bool
 	maintenanceInterval    time.Duration
+	fanOutExecutor         func(*runtimepipeline.PipelineCoordinator) runtimestartupownership.FanOutExecutor
+	fanOutWorkers          *int
+	nestedPublications     *nestedPublicationLifetime
 }
 
 type notifyAllChildrenGenericScheduleLogger struct {
@@ -165,6 +169,8 @@ type notifyAllChildrenProcessTopology struct {
 	capability        runtimestartupownership.ProcessCapability
 	runtimeInstanceID string
 	nextGeneration    uint64
+	completeSources   []semanticview.Source
+	grants            map[string]runtimestartupownership.LiveGenerationGrant
 }
 
 type notifyAllChildrenLifecycleOwner struct {
@@ -213,9 +219,9 @@ func (o *notifyAllChildrenLifecycleOwner) CommitAgentLifecycleTransition(
 	return grant.CommitAgentLifecycleTransition(ctx, req)
 }
 
-func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, selected notifyAllChildrenStore) *notifyAllChildrenProcessTopology {
+func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, selected notifyAllChildrenStore, sources ...semanticview.Source) *notifyAllChildrenProcessTopology {
 	t.Helper()
-	runtimeInstanceID := uuid.NewString()
+	runtimeInstanceID := authorActivityTestRuntimeInstanceID
 	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "notify-all-children-conformance", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
@@ -232,7 +238,10 @@ func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, sele
 			t.Errorf("release notify-all-children process topology capability: %v", err)
 		}
 	})
-	return &notifyAllChildrenProcessTopology{capability: capability, runtimeInstanceID: runtimeInstanceID}
+	return &notifyAllChildrenProcessTopology{
+		capability: capability, runtimeInstanceID: runtimeInstanceID, completeSources: sources,
+		grants: make(map[string]runtimestartupownership.LiveGenerationGrant),
+	}
 }
 
 func (p *notifyAllChildrenProcessTopology) install(
@@ -242,7 +251,7 @@ func (p *notifyAllChildrenProcessTopology) install(
 	source semanticview.Source,
 	sourceArtifactFact runtimecorrelation.SourceArtifactFact,
 	lifecycle *notifyAllChildrenLifecycleOwner,
-) {
+) runtimestartupownership.LiveGenerationGrant {
 	t.Helper()
 	if p == nil || p.capability == nil {
 		t.Fatal("notify-all-children process topology capability is required")
@@ -257,9 +266,35 @@ func (p *notifyAllChildrenProcessTopology) install(
 	if err != nil {
 		t.Fatalf("construct notify-all-children source set: %v", err)
 	}
+	if len(p.completeSources) > 0 {
+		var sources []runtimeagenttopology.SourceCoordinate
+		var agents []runtimeagenttopology.DesiredAgent
+		for _, admittedSource := range p.completeSources {
+			fact := conformanceSourceArtifactFact(t, admittedSource)
+			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+			desired, err := manager.CompileStaticTopologyDesiredAgents(admittedSource, coordinate)
+			if err != nil {
+				t.Fatalf("compile complete notify-all-children source set: %v", err)
+			}
+			sources = append(sources, coordinate)
+			agents = append(agents, desired...)
+		}
+		plan, err = runtimeagenttopology.NewSourceSetPlan(sources, agents)
+		if err != nil {
+			t.Fatalf("construct complete notify-all-children source set: %v", err)
+		}
+	}
 	current, exists, err := p.capability.CurrentSourceSet(ctx)
 	if err != nil {
 		t.Fatalf("load notify-all-children source set: %v", err)
+	}
+	for hash, previous := range p.grants {
+		if hash == bundleHash || !exists || current.Revision != plan.Revision {
+			if err := previous.Retire(ctx); err != nil {
+				t.Fatalf("retire replaced notify-all-children generation: %v", err)
+			}
+			delete(p.grants, hash)
+		}
 	}
 	if !exists || current.Revision != plan.Revision {
 		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
@@ -297,6 +332,16 @@ func (p *notifyAllChildrenProcessTopology) install(
 	if err := manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
 		t.Fatalf("reconcile notify-all-children static topology: %v", err)
 	}
+	// These compiled fixtures declare no external startup probe surfaces. The
+	// real grant still crosses both durable startup admission transitions.
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle notify-all-children startup probes: %v", err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatalf("admit notify-all-children runtime generation: %v", err)
+	}
+	p.grants[bundleHash] = grant
+	return grant
 }
 
 type notifyAllChildrenAgentGate struct {
@@ -495,6 +540,16 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 }
 
 func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends(t *testing.T) {
+	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{}, 10*time.Second)
+}
+
+func TestIssue2394ReporterFiveHundredDelayedCommitsBothStores(t *testing.T) {
+	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{
+		Delay: 300 * time.Millisecond, DelayScope: storetest.DelayAllCommits,
+	}, 2*time.Minute)
+}
+
+func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration) {
 	for _, tc := range []struct {
 		name  string
 		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
@@ -536,6 +591,13 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 				"threshold":    75,
 			})
 			assertNotifyAllChildrenMetadata(t, validCtx, selected, db, "portfolio", "portfolio_id", "portfolio-numeric-valid")
+			transactions := storetest.CollectTransactions(t, selected, transactionOptions)
+			t.Cleanup(func() {
+				if t.Failed() {
+					t.Logf("failed 500-row attempt transaction-owner snapshot (may include active work): %+v", transactions.Snapshot())
+				}
+			})
+			issuanceStarted := time.Now()
 			for batch := 0; batch < 20; batch++ {
 				rows := make([]map[string]any, 0, 25)
 				for row := 0; row < 25; row++ {
@@ -552,7 +614,21 @@ func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBoth
 					"account_ids":  rows,
 				})
 			}
-			waitNotifyAllChildrenFanOutCursor(t, runtime, db, validRunID, 500)
+			issuanceReached := waitNotifyAllChildrenFanOutCursor(t, runtime, db, validRunID, 500)
+			receipt := transactions.Snapshot()
+			t.Logf("500-row transaction-owner receipt through descendant quiescence (includes ingress, trigger, retained-session and downstream work; excludes implicit-autocommit SQL): total=%+v retained=%+v operations=%+v active=%d", receipt.Total, receipt.Retained, receipt.ByOperation, receipt.Active)
+			claims, chunks := receipt.ByOperation[storetest.TransactionFanOutClaim], receipt.ByOperation[storetest.TransactionFanOutChunk]
+			if claims.WriteCommits != 20 || chunks.WriteCommits != 20 || receipt.ByOperation[storetest.TransactionFanOutRelease].WriteCommits != 0 {
+				t.Errorf("clean 20-chunk serving must use 20 claim + 20 atomic publication/release commits and no separate release: %+v", receipt.ByOperation)
+			}
+			if chunks.LastCommitAt.IsZero() || chunks.FirstCommitAt.Before(issuanceStarted) {
+				t.Fatalf("500-row commit acknowledgement receipt is missing or predates submission: %+v", chunks)
+			}
+			issuanceElapsed := chunks.LastCommitAt.Sub(issuanceStarted)
+			t.Logf("500-row issuance from first batch submission to final durable chunk acknowledgement: %s; cursor observed at %s", issuanceElapsed, issuanceReached.Sub(issuanceStarted))
+			if !fanOutRaceBuild && issuanceElapsed > issuanceBudget {
+				t.Errorf("500-row issuance exceeded the approved %s target: %s (transaction probe %+v)", issuanceBudget, issuanceElapsed, transactionOptions)
+			}
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, validRunID, 5*time.Minute)
 
 			validSummary, err := selected.FanOutRunSummary(validCtx, validRunID, time.Now().UTC())
@@ -2053,7 +2129,11 @@ func newNotifyAllChildrenRuntime(
 		TestEngineEmitNow:       engineNow,
 		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, coordinatorOptions)
+	var coordinatorBus runtimepipeline.Bus = diagnosticBus
+	if opts.nestedPublications != nil {
+		coordinatorBus = &nestedPublicationBus{fanInBarrierDiagnosticBus: diagnosticBus, lifetime: opts.nestedPublications}
+	}
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(coordinatorBus, coordinatorOptions)
 
 	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
 	var lifecycleStore runtimemanager.AgentLifecyclePersistence = generationLifecycle
@@ -2075,7 +2155,19 @@ func newNotifyAllChildrenRuntime(
 		PersistenceRoles:   roles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
-	opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), manager, source, sourceArtifactFact, generationLifecycle)
+	grant := opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), manager, source, sourceArtifactFact, generationLifecycle)
+	var fanOutExecutor runtimestartupownership.FanOutExecutor = coordinator
+	if opts.fanOutExecutor != nil {
+		fanOutExecutor = opts.fanOutExecutor(coordinator)
+	}
+	fanOutRegistration, err := runtimestartupownership.StartFanOutServing(
+		runtimeeffects.WithExecutionMode(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), posture.RootMode()), grant, workOwner, opts.fanOutWorkers, fanOutExecutor,
+	)
+	if err != nil {
+		t.Fatalf("start notify-all-children shared fan-out serving: %v", err)
+	}
+	coordinator.InstallFanOutWorkNotifier(fanOutRegistration)
+	t.Cleanup(fanOutRegistration.Close)
 	if opts.enableGenericSchedules {
 		candidateOwner, ok := backend.(runtimerunlifecycle.CandidateOwner)
 		if !ok {
@@ -2132,6 +2224,7 @@ func newNotifyAllChildrenRuntime(
 		posture: posture,
 		bus:     eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
 		workOwner: workOwner, selected: backend, sourceArtifactFact: sourceArtifactFact, genericSchedules: genericSchedules,
+		fanOutServing: fanOutRegistration,
 	}
 }
 
@@ -2495,7 +2588,7 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 	}
 }
 
-func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRuntime, db *sql.DB, runID string, cardinality int) {
+func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRuntime, db *sql.DB, runID string, cardinality int) time.Time {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), 5*time.Minute)
 	defer cancel()
@@ -2518,11 +2611,12 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 			t.Logf("fan-out progress: total=%d cursor=%d owed=%d", total, cursor, owed)
 		}
 		if total == cardinality && cursor == cardinality && owed == 0 {
+			observed := time.Now()
 			if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatalf("wait fan-out EventBus settlement: %v", err)
 			}
 			logNotifyAllChildrenFanOutWork(t, db, runID)
-			return
+			return observed
 		}
 		var terminalFailure string
 		err := db.QueryRowContext(ctx, `SELECT CAST(d.failure AS TEXT) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE CAST(e.run_id AS TEXT)=$1 LIMIT 1`, runID).Scan(&terminalFailure)
@@ -2559,8 +2653,7 @@ func logNotifyAllChildrenFanOutWork(t *testing.T, db *sql.DB, runID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var intents, floor, minimum, maximum int
-	var lastMS float64
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN next_chunk_size=1 THEN 1 ELSE 0 END),0),COALESCE(MIN(next_chunk_size),0),COALESCE(MAX(next_chunk_size),0),COALESCE(MAX(last_chunk_ms),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &floor, &minimum, &maximum, &lastMS)
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN next_chunk_size=1 THEN 1 ELSE 0 END),0),COALESCE(MIN(next_chunk_size),0),COALESCE(MAX(next_chunk_size),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &floor, &minimum, &maximum)
 	if err != nil {
 		t.Logf("fan-out work diagnostic: %v", err)
 		return
@@ -2574,7 +2667,7 @@ func logNotifyAllChildrenFanOutWork(t *testing.T, db *sql.DB, runID string) {
 		t.Logf("fan-out fact diagnostic: %v", err)
 		return
 	}
-	t.Logf("fan-out work: intents=%d floor_one=%d next_chunk=%d..%d last_chunk_max_ms=%g committed_revisions=%d fact_revisions=%d", intents, floor, minimum, maximum, lastMS, revisions, facts)
+	t.Logf("fan-out work: intents=%d floor_one=%d next_chunk=%d..%d committed_revisions=%d fact_revisions=%d", intents, floor, minimum, maximum, revisions, facts)
 }
 
 func assertNotifyAllChildrenRunPersisted(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) {
@@ -2805,8 +2898,8 @@ func dumpNotifyAllChildrenRuntimeState(t *testing.T, ctx context.Context, backen
 	t.Helper()
 	queries := []string{
 		`SELECT event_name, event_id, payload FROM events ORDER BY created_at, event_id`,
-		`SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(failure::text, '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`,
-		`SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(failure::text, ''), COALESCE(delivery_target_route::text, '') FROM event_deliveries ORDER BY event_id, subscriber_type, subscriber_id`,
+		`SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`,
+		`SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), ''), COALESCE(CAST(delivery_target_route AS TEXT), '') FROM event_deliveries ORDER BY event_id, subscriber_type, subscriber_id`,
 		`SELECT flow_instance, current_state, fields FROM entity_state ORDER BY flow_instance`,
 		`SELECT run_id, instance_path, flow_template, status, config FROM flow_instances ORDER BY run_id, instance_path`,
 		`SELECT original_event_id, failure FROM dead_letters ORDER BY created_at`,

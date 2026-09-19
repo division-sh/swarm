@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -150,8 +151,8 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 	if err != nil {
 		t.Fatalf("serve durable fan-out turn: %v", err)
 	}
-	if more {
-		t.Fatal("terminal fan-out turn reported additional issuance work")
+	if more != fanOutTurnCommitted {
+		t.Fatalf("terminal fan-out turn = %v, want committed and continue seeking other intents", more)
 	}
 	if owner.intent.Cursor != 2 || owner.intent.Status != fanoutobligation.StatusClosed || owner.commitCalls != 1 {
 		t.Fatalf("fan-out owner after pump = intent:%#v commits:%d", owner.intent, owner.commitCalls)
@@ -185,11 +186,13 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 	recoveryOwner := newLostWakeFanOutOwner(&singleTurnFanOutOwner{intent: recoveryIntent, input: owner.input})
 	pc.workflowStore.fanOutObligations = recoveryOwner
 	pc.testMaintenanceInterval = 10 * time.Millisecond
+	wake := make(fanOutTestWake, 1)
+	pc.InstallFanOutWorkNotifier(wake)
 	maintenanceCtx, cancelMaintenance := context.WithCancel(context.Background())
 	maintenanceStopped := make(chan struct{})
 	go func() {
 		defer close(maintenanceStopped)
-		pc.RunMaintenance(maintenanceCtx)
+		runFanOutTestDriver(maintenanceCtx, pc, wake, 10*time.Millisecond)
 	}()
 	select {
 	case <-recoveryOwner.probed:
@@ -217,15 +220,38 @@ func TestSQLiteFanOutTriggerPersistsOneIntentWithoutEagerDeliveries(t *testing.T
 	if contextProbe.prepareCalls != 4 {
 		t.Fatalf("fan-out maintenance context was checked %d times, want four deferred publications", contextProbe.prepareCalls)
 	}
+	if contextProbe.prepareBatchCalls != 2 {
+		t.Fatalf("fan-out preparation batches=%d, want two exact turns", contextProbe.prepareBatchCalls)
+	}
+	if contextProbe.sealCalls != 2 || contextProbe.finalizeCalls != 2 || contextProbe.dispatchCalls != 2 || !owner.group.closed || !recoveryOwner.group.closed {
+		t.Fatalf("fan-out group lifetime: seals=%d finalizes=%d dispatches=%d closed=%v/%v", contextProbe.sealCalls, contextProbe.finalizeCalls, contextProbe.dispatchCalls, owner.group.closed, recoveryOwner.group.closed)
+	}
 }
 
 type fanOutMaintenanceContextProbe struct {
 	*recordingPipelineBus
 	runID, triggerEventID string
 	prepareCalls          int
+	prepareBatchCalls     int
+	sealCalls             int
+	finalizeCalls         int
+	dispatchCalls         int
 }
 
-func (b *fanOutMaintenanceContextProbe) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+func (b *fanOutMaintenanceContextProbe) PrepareFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, requests []FanOutPublicationRequest) ([]FanOutPublicationPreparation, error) {
+	b.prepareBatchCalls++
+	if len(requests) > fanoutobligation.InitialChunkSize {
+		return nil, fmt.Errorf("recording fan-out batch exceeds one bounded turn")
+	}
+	out := make([]FanOutPublicationPreparation, 0, len(requests))
+	for _, request := range requests {
+		plan, err := b.PrepareFanOutPublication(ctx, group, request.Ordinal, request.Intent)
+		out = append(out, FanOutPublicationPreparation{Ordinal: request.Ordinal, Publication: plan, Err: err})
+	}
+	return out, nil
+}
+
+func (b *fanOutMaintenanceContextProbe) PrepareFanOutPublication(ctx context.Context, group runtimepipelineobligation.PublicationGroup, ordinal int, intent runtimeengine.EmitIntent) (runtimeengine.DurablePublicationPlan, error) {
 	if got := runtimecorrelation.RunIDFromContext(ctx); got != b.runID {
 		return nil, fmt.Errorf("fan-out maintenance run context = %q, want %q", got, b.runID)
 	}
@@ -233,8 +259,23 @@ func (b *fanOutMaintenanceContextProbe) PrepareEnginePublications(ctx context.Co
 	if !ok || inbound.ID() != b.triggerEventID || inbound.RunID() != b.runID {
 		return nil, fmt.Errorf("fan-out maintenance inbound context = found:%v event:%s run:%s, want event:%s run:%s", ok, inbound.ID(), inbound.RunID(), b.triggerEventID, b.runID)
 	}
-	b.prepareCalls += len(intents)
-	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
+	b.prepareCalls++
+	return b.recordingPipelineBus.PrepareFanOutPublication(ctx, group, ordinal, intent)
+}
+
+func (b *fanOutMaintenanceContextProbe) SealFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, end int, plans []runtimeengine.DurablePublicationPlan) error {
+	b.sealCalls++
+	return b.recordingPipelineBus.SealFanOutPublications(ctx, group, end, plans)
+}
+
+func (b *fanOutMaintenanceContextProbe) FinalizeFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, values []runtimeengine.CommittedDurablePublication) error {
+	b.finalizeCalls++
+	return b.recordingPipelineBus.FinalizeFanOutPublications(ctx, group, values)
+}
+
+func (b *fanOutMaintenanceContextProbe) DispatchFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, values []runtimeengine.CommittedDurablePublication) error {
+	b.dispatchCalls++
+	return b.recordingPipelineBus.DispatchFanOutPublications(ctx, group, values)
 }
 
 func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *testing.T) {
@@ -269,7 +310,7 @@ func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *tes
 	}}
 	pc.sourceArtifactFact = mustPipelineTestSourceArtifactFact(parentIntent.Request.PlanRef.BundleHash)
 	pc.workflowStore.fanOutObligations = parentOwner
-	if more, err := pc.serveFanOutTurn(ctx, time.Now().UTC()); err != nil || more {
+	if more, err := pc.serveFanOutTurn(ctx, time.Now().UTC()); err != nil || more != fanOutTurnCommitted {
 		t.Fatalf("serve parent fan-out = more:%v err:%v", more, err)
 	}
 	if bus.publishedCount() != 1 {
@@ -306,7 +347,7 @@ func TestSQLiteNestedFanOutCreatesIndependentDurableIntentAndExactLineage(t *tes
 		Trigger:      child,
 	}}
 	pc.workflowStore.fanOutObligations = nestedOwner
-	if more, err := pc.serveFanOutTurn(ctx, time.Now().UTC()); err != nil || more {
+	if more, err := pc.serveFanOutTurn(ctx, time.Now().UTC()); err != nil || more != fanOutTurnCommitted {
 		t.Fatalf("serve nested fan-out = more:%v err:%v", more, err)
 	}
 	if bus.publishedCount() != 3 {
@@ -397,6 +438,223 @@ type singleTurnFanOutOwner struct {
 	claim       fanoutobligation.Claim
 	claimed     bool
 	commitCalls int
+	group       *singleTurnFanOutPublicationGroup
+}
+
+// This group bounds recording plans for the pump unit fixture. It never mints
+// selected-store claims, settlement acknowledgements or executable handoffs.
+type singleTurnFanOutPublicationGroup struct {
+	claim                         fanoutobligation.Claim
+	start, end                    int
+	plans                         []runtimeengine.DurablePublicationPlan
+	sealed, committed, dispatched bool
+	finalized                     bool
+	closed                        bool
+}
+
+var _ FanOutObligationOwner = (*singleTurnFanOutOwner)(nil)
+var _ FanOutPublicationPlanner = (*fanOutMaintenanceContextProbe)(nil)
+var _ runtimepipelineobligation.PublicationGroup = (*singleTurnFanOutPublicationGroup)(nil)
+
+func (*singleTurnFanOutPublicationGroup) Claim(context.Context, int, events.Event) (runtimepipelineobligation.Claim, error) {
+	return runtimepipelineobligation.Claim{}, errPipelineTestObligationUnavailable
+}
+
+func (*singleTurnFanOutPublicationGroup) ClaimBatch(context.Context, []runtimepipelineobligation.PublicationClaimRequest) ([]runtimepipelineobligation.Claim, error) {
+	return nil, errPipelineTestObligationUnavailable
+}
+
+func (*singleTurnFanOutPublicationGroup) RecordPrepared(context.Context, runtimepipelineobligation.Claim, runtimepipelineobligation.PublicationPreparation) error {
+	return errPipelineTestObligationUnavailable
+}
+
+func (*singleTurnFanOutPublicationGroup) Seal(context.Context, int, []runtimepipelineobligation.Claim) error {
+	return errPipelineTestObligationUnavailable
+}
+
+func (*singleTurnFanOutPublicationGroup) ValidateCommitted(context.Context, []runtimepipelineobligation.Claim) error {
+	return errPipelineTestObligationUnavailable
+}
+
+func (*singleTurnFanOutPublicationGroup) ValidateCommittedMembership([]runtimepipelineobligation.Claim) error {
+	return errPipelineTestObligationUnavailable
+}
+
+func (*singleTurnFanOutPublicationGroup) Settle(context.Context, []runtimepipelineobligation.PublicationSettlementMember) (runtimepipelineobligation.PublicationGroupOutcome, error) {
+	return runtimepipelineobligation.PublicationGroupOutcome{}, errPipelineTestObligationUnavailable
+}
+
+func (*singleTurnFanOutPublicationGroup) ReadPublicationSettlement(context.Context, []runtimepipelineobligation.PublicationSettlementMember) (runtimepipelineobligation.PublicationSettlementSnapshot, error) {
+	return runtimepipelineobligation.PublicationSettlementSnapshot{}, errPipelineTestObligationUnavailable
+}
+
+func (g *singleTurnFanOutPublicationGroup) Close(context.Context) error {
+	g.closed = true
+	if g.committed && !g.dispatched {
+		return fmt.Errorf("recording fan-out group closed before committed dispatch")
+	}
+	return nil
+}
+
+func (o *singleTurnFanOutOwner) BeginFanOutPublicationGroup(_ context.Context, claim fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error) {
+	if !o.claimed || claim != o.claim || o.group != nil {
+		return nil, fanoutobligation.ErrStaleClaim
+	}
+	end := o.intent.ChunkEndOrdinal()
+	if end <= o.intent.Cursor || end-o.intent.Cursor > fanoutobligation.InitialChunkSize {
+		return nil, fmt.Errorf("recording fan-out group requires one bounded turn")
+	}
+	o.group = &singleTurnFanOutPublicationGroup{claim: claim, start: o.intent.Cursor, end: end}
+	return o.group, nil
+}
+
+func (b *recordingPipelineBus) PrepareFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, requests []FanOutPublicationRequest) ([]FanOutPublicationPreparation, error) {
+	if len(requests) > fanoutobligation.InitialChunkSize {
+		return nil, fmt.Errorf("recording fan-out batch exceeds one bounded turn")
+	}
+	out := make([]FanOutPublicationPreparation, 0, len(requests))
+	for _, request := range requests {
+		plan, err := b.PrepareFanOutPublication(ctx, group, request.Ordinal, request.Intent)
+		out = append(out, FanOutPublicationPreparation{Ordinal: request.Ordinal, Publication: plan, Err: err})
+	}
+	return out, nil
+}
+
+func (b *recordingPipelineBus) PrepareFanOutPublication(ctx context.Context, group runtimepipelineobligation.PublicationGroup, ordinal int, intent runtimeengine.EmitIntent) (runtimeengine.DurablePublicationPlan, error) {
+	g, ok := group.(*singleTurnFanOutPublicationGroup)
+	if !ok || g == nil || g.closed || g.sealed || ordinal != g.start+len(g.plans) || ordinal >= g.end || intent.Event.RunID() != g.claim.Key.RunID {
+		return nil, fmt.Errorf("recording fan-out preparation requires its open exact ordinal/run group")
+	}
+	plans, err := b.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
+	if err != nil {
+		return nil, err
+	}
+	if len(plans) != 1 {
+		return nil, fmt.Errorf("recording fan-out preparation requires exactly one publication")
+	}
+	for _, previous := range g.plans {
+		if previous.DurablePublicationEventID() == plans[0].DurablePublicationEventID() {
+			return nil, fmt.Errorf("recording fan-out group contains a duplicate publication")
+		}
+	}
+	g.plans = append(g.plans, plans[0])
+	return plans[0], nil
+}
+
+func (*recordingPipelineBus) SealFanOutPublications(_ context.Context, group runtimepipelineobligation.PublicationGroup, end int, plans []runtimeengine.DurablePublicationPlan) error {
+	g, ok := group.(*singleTurnFanOutPublicationGroup)
+	if !ok || g == nil || g.closed || g.sealed || end != g.end || len(plans) != g.end-g.start || !reflect.DeepEqual(plans, g.plans) {
+		return fmt.Errorf("recording fan-out seal requires the complete exact prepared range")
+	}
+	g.sealed = true
+	return nil
+}
+
+func (g *singleTurnFanOutPublicationGroup) committedIntents(values []runtimeengine.CommittedDurablePublication) ([]runtimeengine.EmitIntent, error) {
+	if g == nil || g.closed || !g.sealed || !g.committed || g.dispatched || len(values) != len(g.plans) {
+		return nil, fmt.Errorf("recording fan-out requires its complete exact committed group")
+	}
+	intents := make([]runtimeengine.EmitIntent, 0, len(values))
+	for i, value := range values {
+		committed, ok := value.(pipelineTestCommittedPublication)
+		plan, planOK := g.plans[i].(pipelineTestPublicationPlan)
+		if !ok || !planOK || committed.ValidateCommittedDurablePublication() != nil || committed.eventID != plan.DurablePublicationEventID() || !reflect.DeepEqual(committed.intent, plan.intent) {
+			return nil, fmt.Errorf("recording fan-out changed committed publication %d", i)
+		}
+		intents = append(intents, committed.intent)
+	}
+	return intents, nil
+}
+
+func (b *recordingPipelineBus) FinalizeFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, values []runtimeengine.CommittedDurablePublication) error {
+	g, ok := group.(*singleTurnFanOutPublicationGroup)
+	if !ok || g == nil || g.finalized {
+		return fmt.Errorf("recording fan-out finalization requires its unfinalized group")
+	}
+	if _, err := g.committedIntents(values); err != nil {
+		return err
+	}
+	if err := b.FinalizeEnginePublications(ctx, values); err != nil {
+		return err
+	}
+	g.finalized = true
+	return nil
+}
+
+func (b *recordingPipelineBus) DispatchFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, values []runtimeengine.CommittedDurablePublication) error {
+	g, ok := group.(*singleTurnFanOutPublicationGroup)
+	if !ok || g == nil || !g.finalized {
+		return fmt.Errorf("recording fan-out dispatch requires its finalized group")
+	}
+	intents, err := g.committedIntents(values)
+	if err != nil {
+		return err
+	}
+	if err := b.EngineDispatcher().DispatchPostCommit(ctx, intents); err != nil {
+		return err
+	}
+	g.dispatched = true
+	return nil
+}
+
+func TestRecordingFanOutFinalizationRequiresExactCommittedGroup(t *testing.T) {
+	for _, name := range []string{"valid", "missing", "reordered", "duplicate", "foreign", "unsealed", "uncommitted", "closed", "already_finalized"} {
+		t.Run(name, func(t *testing.T) {
+			bus := &recordingPipelineBus{}
+			group := &singleTurnFanOutPublicationGroup{end: 2, sealed: true, committed: true}
+			values := make([]runtimeengine.CommittedDurablePublication, 0, 2)
+			for i := 0; i < 2; i++ {
+				event := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("fanout.child"), "", "", json.RawMessage(`{}`), 0, "recording-run", "", events.EventEnvelope{}, time.Now().UTC())
+				intent := runtimeengine.EmitIntent{Event: event}
+				group.plans = append(group.plans, pipelineTestPublicationPlan{intent: intent})
+				values = append(values, pipelineTestCommittedPublication{eventID: event.ID(), intent: intent})
+			}
+			switch name {
+			case "missing":
+				values = values[:1]
+			case "reordered":
+				values[0], values[1] = values[1], values[0]
+			case "duplicate":
+				values[1] = values[0]
+			case "foreign":
+				foreign := values[1].(pipelineTestCommittedPublication)
+				foreign.eventID = uuid.NewString()
+				values[1] = foreign
+			case "unsealed":
+				group.sealed = false
+			case "uncommitted":
+				group.committed = false
+			case "closed":
+				group.closed = true
+			case "already_finalized":
+				group.finalized = true
+			}
+			wasFinalized := group.finalized
+			err := bus.FinalizeFanOutPublications(context.Background(), group, values)
+			if name == "valid" {
+				if err != nil || !group.finalized || bus.outboxCount() != 2 {
+					t.Fatalf("valid finalization: finalized=%v outbox=%d err=%v", group.finalized, bus.outboxCount(), err)
+				}
+			} else if err == nil || bus.outboxCount() != 0 || group.finalized != wasFinalized {
+				t.Fatalf("invalid group reached finalization effects: finalized=%v outbox=%d err=%v", group.finalized, bus.outboxCount(), err)
+			}
+			if bus.publishedCount() != 0 || group.dispatched {
+				t.Fatal("finalization must not dispatch recording publications")
+			}
+			if err := group.ValidateCommitted(context.Background(), nil); err != errPipelineTestObligationUnavailable {
+				t.Fatalf("recording fixture must not validate real claim authority: %v", err)
+			}
+			if err := group.ValidateCommittedMembership(nil); err != errPipelineTestObligationUnavailable {
+				t.Fatalf("recording fixture must not mint static claim cleanup evidence: %v", err)
+			}
+			if err := group.RecordPrepared(context.Background(), runtimepipelineobligation.Claim{}, nil); err != errPipelineTestObligationUnavailable {
+				t.Fatalf("recording fixture must not bind canonical prepared claims: %v", err)
+			}
+			if claims, err := group.ClaimBatch(context.Background(), nil); err != errPipelineTestObligationUnavailable || len(claims) != 0 {
+				t.Fatalf("recording fixture must not mint batch claims: %v %v", claims, err)
+			}
+		})
+	}
 }
 
 func (o *singleTurnFanOutOwner) ClaimFanOutIntent(_ context.Context, request FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
@@ -425,6 +683,9 @@ func (o *singleTurnFanOutOwner) CommitFanOutChunk(_ context.Context, command Fan
 	if command.Claim != o.claim || len(command.Outcomes) != len(o.input.Items) {
 		return CommittedFanOutChunk{}, fanoutobligation.ErrStaleClaim
 	}
+	if o.group == nil || o.group.closed || !o.group.sealed || o.group.committed || o.group.claim != command.Claim || len(o.group.plans) != len(command.Outcomes) {
+		return CommittedFanOutChunk{}, fmt.Errorf("recording fan-out commit requires its sealed publication group")
+	}
 	committed := CommittedFanOutChunk{}
 	for index, outcome := range command.Outcomes {
 		wantOrdinal := o.input.StartOrdinal + index
@@ -435,6 +696,9 @@ func (o *singleTurnFanOutOwner) CommitFanOutChunk(_ context.Context, command Fan
 		if !ok {
 			return CommittedFanOutChunk{}, fmt.Errorf("fan-out publication %d has unexpected type %T", index, outcome.Publication)
 		}
+		if !reflect.DeepEqual(outcome.Publication, o.group.plans[index]) {
+			return CommittedFanOutChunk{}, fmt.Errorf("fan-out commit changed sealed publication %d", index)
+		}
 		committed.Publications = append(committed.Publications, pipelineTestCommittedPublication{eventID: plan.DurablePublicationEventID(), intent: plan.intent})
 	}
 	o.commitCalls++
@@ -443,6 +707,7 @@ func (o *singleTurnFanOutOwner) CommitFanOutChunk(_ context.Context, command Fan
 	o.intent.LastServedAt = command.Now
 	o.intent.UpdatedAt = command.Now
 	committed.Intent = o.intent
+	o.group.committed = true
 	return committed, nil
 }
 

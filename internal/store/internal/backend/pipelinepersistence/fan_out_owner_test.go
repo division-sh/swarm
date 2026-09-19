@@ -134,8 +134,9 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 				t.Fatal(err)
 			}
 			runID := uuid.NewString()
+			effects := privaterunforkrevision.NewEffects()
 			mutationID, err := insertFanOutEntitySourceRevisionTx(
-				context.Background(), tx, backend == "postgres", privaterunforkrevision.NewEffects(),
+				context.Background(), tx, backend == "postgres", effects,
 				runID, uuid.NewString(), "items",
 				[]any{map[string]any{"integer": int64(75), "double": float64(75), "exponent": json.Number("75e0")}},
 				uuid.NewString(), time.Now().UTC(),
@@ -146,6 +147,13 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 			}
 			if err := tx.Commit(); err != nil {
 				t.Fatal(err)
+			}
+			wantEffects := privaterunforkrevision.NewEffects()
+			if err := wantEffects.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(effects, wantEffects) {
+				t.Fatal("source revision must declare exactly its generated mutation UUID")
 			}
 			var raw []byte
 			if err := db.QueryRow(`SELECT new_value FROM entity_mutations WHERE mutation_id=$1`, mutationID).Scan(&raw); err != nil {
@@ -167,15 +175,20 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 
 func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, outcome := range []string{"committed", "neutral_success", "fast_success", "rolled_back", "contradictory", "acknowledged_cleanup"} {
+		for _, outcome := range []string{"committed", "neutral_success", "fast_success", "expired_after_admission", "rolled_back", "contradictory", "acknowledged_cleanup"} {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				db := fanOutReadbackTestDB(t, backend)
 				command := seedFanOutReadbackClaim(t, db)
+				if outcome == "expired_after_admission" {
+					command.Claim.LeaseUntil = time.Now().UTC().Add(150 * time.Millisecond)
+					if _, err := db.Exec(`UPDATE fan_out_intents SET lease_expires_at=$1`, command.Claim.LeaseUntil); err != nil {
+						t.Fatal(err)
+					}
+				}
 				if _, err := db.Exec(`UPDATE fan_out_intents SET next_chunk_size=1`); err != nil {
 					t.Fatal(err)
 				}
 				ackLost := errors.New("injected fan-out commit acknowledgement loss")
-				finishFailure := errors.New("injected successful-turn release failure")
 				run := func(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
 					tx, err := db.BeginTx(ctx, nil)
 					if err != nil {
@@ -184,6 +197,13 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 					if err := operation(ctx, tx, nil); err != nil {
 						_ = tx.Rollback()
 						return false, err
+					}
+					if outcome == "expired_after_admission" {
+						// Admission was valid under the lock. Expiry cannot split an
+						// already-admitted atomic publication transaction.
+						if remaining := time.Until(command.Claim.LeaseUntil.Add(10 * time.Millisecond)); remaining > 0 {
+							time.Sleep(remaining)
+						}
 					}
 					if outcome == "rolled_back" {
 						if err := tx.Rollback(); err != nil {
@@ -205,7 +225,7 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 							return false, err
 						}
 					}
-					if outcome == "neutral_success" || outcome == "fast_success" {
+					if outcome == "neutral_success" || outcome == "fast_success" || outcome == "expired_after_admission" {
 						return true, nil
 					}
 					return outcome == "acknowledged_cleanup", ackLost
@@ -217,21 +237,7 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 				}
 				committed, err := commitFanOutChunk(
 					context.Background(), nil, backend == "postgres", run,
-					func(ctx context.Context, claim fanoutobligation.Claim, status fanoutobligation.Status, nextChunk int, lastChunkMS int64, observedAt time.Time) error {
-						if outcome == "acknowledged_cleanup" {
-							return finishFailure
-						}
-						query := `UPDATE fan_out_intents SET next_chunk_size=$1,last_chunk_ms=$2,last_served_at=$3,updated_at=$3,claim_owner=NULL,lease_expires_at=NULL WHERE run_id=$4 AND triggering_delivery_id=$5 AND flow_path=$6 AND declaration_family=$7 AND semantic_path=$8 AND status=$9 AND claim_generation=$10 AND ((status='open' AND claim_owner=$11) OR (status='closed' AND claim_owner IS NULL))`
-						result, updateErr := db.ExecContext(ctx, query, nextChunk, lastChunkMS, observedAt, claim.Key.RunID, claim.Key.TriggeringDeliveryID, claim.Key.ElementRef.FlowPath, claim.Key.ElementRef.Family, claim.Key.ElementRef.SemanticPath, string(status), claim.Generation, claim.Owner)
-						if updateErr != nil {
-							return updateErr
-						}
-						rows, updateErr := result.RowsAffected()
-						if updateErr != nil || rows != 1 {
-							return errors.Join(updateErr, fanoutobligation.ErrStaleClaim)
-						}
-						return nil
-					}, time.Now,
+					time.Now,
 					func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error {
 						return nil
 					},
@@ -241,23 +247,22 @@ func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
 					readback, command,
 				)
 				var cursor, count, nextChunk int
-				var lastChunkMS int64
-				if queryErr := db.QueryRow(`SELECT cursor,next_chunk_size,last_chunk_ms,(SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id AND o.flow_path=i.flow_path AND o.declaration_family=i.declaration_family AND o.semantic_path=i.semantic_path) FROM fan_out_intents i`).Scan(&cursor, &nextChunk, &lastChunkMS, &count); queryErr != nil {
+				if queryErr := db.QueryRow(`SELECT cursor,next_chunk_size,(SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id AND o.flow_path=i.flow_path AND o.declaration_family=i.declaration_family AND o.semantic_path=i.semantic_path) FROM fan_out_intents i`).Scan(&cursor, &nextChunk, &count); queryErr != nil {
 					t.Fatal(queryErr)
 				}
 				switch outcome {
-				case "committed", "neutral_success", "fast_success":
+				case "committed", "neutral_success", "fast_success", "expired_after_admission":
 					if err != nil || cursor != 1 || count != 1 || nextChunk != 32 || committed.Intent.Cursor != 1 || committed.Intent.Status != fanoutobligation.StatusOpen || committed.Intent.NextChunkSize != 32 {
-						t.Fatalf("committed readback = cursor:%d outcomes:%d next:%d last_ms:%d result:%#v err:%v", cursor, count, nextChunk, lastChunkMS, committed.Intent, err)
+						t.Fatalf("committed readback = cursor:%d outcomes:%d next:%d result:%#v err:%v", cursor, count, nextChunk, committed.Intent, err)
 					}
-					if outcome == "committed" && (lastChunkMS < 1000 || !errors.Is(committed.PostCommitFailure, ackLost)) {
+					if outcome == "committed" && !errors.Is(committed.PostCommitFailure, ackLost) {
 						t.Fatalf("reconciled commit lost acknowledgement error: %v", committed.PostCommitFailure)
 					}
-					if outcome == "neutral_success" && lastChunkMS < 300 {
-						t.Fatalf("neutral success lost observed duration: %dms", lastChunkMS)
+					if committed.Intent.ClaimOwner != "" || !committed.Intent.LeaseExpiresAt.IsZero() || committed.Intent.LastServedAt.IsZero() {
+						t.Fatalf("publication did not atomically release and advance fairness: %+v", committed.Intent)
 					}
 				case "acknowledged_cleanup":
-					if err != nil || cursor != 1 || count != 1 || committed.Intent.Cursor != 1 || !errors.Is(committed.PostCommitFailure, ackLost) || !errors.Is(committed.PostCommitFailure, finishFailure) {
+					if err != nil || cursor != 1 || count != 1 || committed.Intent.Cursor != 1 || !errors.Is(committed.PostCommitFailure, ackLost) || committed.Intent.ClaimOwner != "" {
 						t.Fatalf("acknowledged commit lost result or independent errors: result=%+v cursor=%d count=%d err=%v", committed, cursor, count, err)
 					}
 				case "rolled_back":
@@ -295,8 +300,9 @@ func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 			source_event_id TEXT, source_run_id TEXT, source_entity_id TEXT, source_field TEXT, source_mutation_id TEXT,
 			source_resource_flow_path TEXT, source_resource_event_name TEXT, source_resource_version_id TEXT,
 			cardinality INTEGER NOT NULL, cursor INTEGER NOT NULL, status TEXT NOT NULL, next_chunk_size INTEGER NOT NULL,
-			last_chunk_ms BIGINT NOT NULL DEFAULT 0, last_served_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+			last_served_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
 			claim_owner TEXT, claim_generation BIGINT NOT NULL DEFAULT 0, lease_expires_at TIMESTAMP, blocked_reason TEXT, capsule TEXT NOT NULL,
+			retry_ready_at TIMESTAMP, retry_failure TEXT,
 			PRIMARY KEY (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path))`,
 		`CREATE TABLE fan_out_outcomes (
 			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, flow_path TEXT NOT NULL, declaration_family TEXT NOT NULL, semantic_path TEXT NOT NULL,
@@ -340,8 +346,8 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 	}
 	if _, err := db.Exec(`INSERT INTO fan_out_intents (
 		run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,
-		cardinality,cursor,status,next_chunk_size,last_chunk_ms,created_at,updated_at,claim_owner,claim_generation,lease_expires_at,capsule
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,'event_payload_field',$8,'items',2,0,'open',4,0,$9,$9,$10,1,$11,$12)`,
+		cardinality,cursor,status,next_chunk_size,created_at,updated_at,claim_owner,claim_generation,lease_expires_at,capsule
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,'event_payload_field',$8,'items',2,0,'open',4,$9,$9,$10,1,$11,$12)`,
 		runID, deliveryID, elementRef.FlowPath, elementRef.Family, elementRef.SemanticPath, "bundle-v2:sha256:"+strings.Repeat("1", 64), "sha256:"+strings.Repeat("2", 64), eventID, now, claim.Owner, claim.LeaseUntil, string(capsule)); err != nil {
 		t.Fatal(err)
 	}

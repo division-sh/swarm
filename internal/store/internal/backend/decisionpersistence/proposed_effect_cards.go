@@ -325,6 +325,9 @@ func (s *DecisionSQLiteOwner) CompleteProposedEffectRoute(ctx context.Context, c
 	defer handoff.Rollback()
 	var continuation decisioncard.ProposedEffectContinuation
 	committed, err := s.runDecisionCardMutationOutcome(ctx, "sqlite complete proposed-effect route", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
 		var changed bool
 		continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, false)
 		if err != nil || !changed {
@@ -451,6 +454,9 @@ func (s *DecisionSQLiteOwner) SupersedeProposedEffectsForLoopGenerations(ctx con
 	}
 	defer handoff.Rollback()
 	committed, err := s.runDecisionCardMutationOutcome(ctx, "sqlite supersede proposed effects for loop generation", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
 		changed, err := supersedeProposedEffectsForLoopGenerations(txctx, story, tx, runID, entityID, current, reason, at, false)
 		if err != nil || !changed {
 			return err

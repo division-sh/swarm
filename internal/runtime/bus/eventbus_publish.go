@@ -469,6 +469,9 @@ func (eb *EventBus) finalizeCommittedAgentReadiness(ctx context.Context, event e
 }
 
 func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication eventBusCommitPublishPlan) (PreparedPublish, PublicationCommand, error) {
+	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
+		return PreparedPublish{}, PublicationCommand{}, err
+	}
 	claim := publication.publicationClaim
 	if claim == nil {
 		var err error
@@ -1883,6 +1886,9 @@ func admittedEventContext(ctx context.Context, admitted events.AdmittedEvent) co
 }
 
 func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {
+	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
+		return err
+	}
 	if evt.Type() == "" {
 		return errors.New("deferred event type is required")
 	}

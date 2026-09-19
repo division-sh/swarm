@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -817,7 +818,8 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 	include *FlowInstanceRouteMaterializationRequest,
 	exclude runtimeflowidentity.RunScopedFlowInstance,
 ) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
-	staged, err := DeriveRouteTable(table.source)
+	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
+	staged, err := deriveRouteTableWithInputProducers(table.source, graph, inputProducers)
 	if err != nil {
 		return nil, nil, fmt.Errorf("derive persisted flow-instance route table: %w", err)
 	}
@@ -854,17 +856,17 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 				identity.Route.ScopeKey,
 			)
 		}
-		if err := staged.addFlowInstanceRouteForContext(ctx, FlowInstanceRouteMaterializationRequest{
+		if err := staged.addFlowInstanceRouteForContextWithInputProducers(ctx, FlowInstanceRouteMaterializationRequest{
 			Identity:            identity,
 			ActivationVariables: descriptor.AddressFields,
-		}); err != nil {
+		}, &inputProducers); err != nil {
 			return nil, nil, fmt.Errorf("derive active flow-instance route %s: %w", identity.Key(), err)
 		}
 		identities[identity] = struct{}{}
 	}
 	if include != nil {
 		req := include.Normalized()
-		if err := staged.addFlowInstanceRouteForContext(ctx, req); err != nil {
+		if err := staged.addFlowInstanceRouteForContextWithInputProducers(ctx, req, &inputProducers); err != nil {
 			return nil, nil, err
 		}
 		identities[req.Identity] = struct{}{}

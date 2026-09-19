@@ -20,9 +20,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Keep real grants and persistence; inject only at the selected startup boundary.
+// Keep native grants and persistence; hold only the selected fault controls here.
 type startupAbortGrant struct {
-	startupownership.LiveGenerationGrant
+	grant       startupownership.LiveGenerationGrant
 	evidenceErr error
 	settleErr   error
 	retireErr   error
@@ -30,28 +30,22 @@ type startupAbortGrant struct {
 	onSettle    func()
 }
 
-func (g *startupAbortGrant) Evidence() (startupownership.GrantEvidence, error) {
-	if g.evidenceErr != nil {
-		return startupownership.GrantEvidence{}, g.evidenceErr
+func (g *startupAbortGrant) probe() startupownership.GenerationGrantFaultProbeForTest {
+	return startupownership.GenerationGrantFaultProbeForTest{
+		EvidenceError: func() error { return g.evidenceErr },
+		BeforeSettlement: func() error {
+			if g.onSettle != nil {
+				g.onSettle()
+			}
+			return g.settleErr
+		},
+		BeforeRetirement: func() {
+			if g.onRetire != nil {
+				g.onRetire()
+			}
+		},
+		AfterRetirementError: func() error { return g.retireErr },
 	}
-	return g.LiveGenerationGrant.Evidence()
-}
-
-func (g *startupAbortGrant) MarkProbesSettled(ctx context.Context, ids []string) (startupownership.GrantEvidence, error) {
-	if g.onSettle != nil {
-		g.onSettle()
-	}
-	if g.settleErr != nil {
-		return startupownership.GrantEvidence{}, g.settleErr
-	}
-	return g.LiveGenerationGrant.MarkProbesSettled(ctx, ids)
-}
-
-func (g *startupAbortGrant) Retire(ctx context.Context) error {
-	if g.onRetire != nil {
-		g.onRetire()
-	}
-	return errors.Join(g.LiveGenerationGrant.Retire(ctx), g.retireErr)
 }
 
 type startupAbortUnreadyNode struct{}
@@ -161,8 +155,13 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 		if err != nil {
 			t.Fatal(err)
 		}
-		grants[i] = &startupAbortGrant{LiveGenerationGrant: grant}
-		if err := candidate.runtime.InstallStartupGrant(grants[i]); err != nil {
+		grants[i] = &startupAbortGrant{grant: grant}
+		restoreProbe, err := startupownership.InstallGenerationGrantFaultProbeForTest(grant, grants[i].probe())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(restoreProbe)
+		if err := candidate.runtime.InstallStartupGrant(grant); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -312,9 +311,6 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 	if conflictingCatalog != nil {
 		conflictingCatalog.Release()
 	}
-	if process.ActiveCount() != 0 {
-		t.Errorf("abort returned with %d runtime parent leases", process.ActiveCount())
-	}
 	for i, candidate := range candidates {
 		if strings.HasPrefix(phase, "release") && completed[i] != (i < failed) {
 			t.Errorf("context %d completed=%t; failure position=%d", i, completed[i], failed)
@@ -323,7 +319,7 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 			t.Errorf("context %d leaked runtime work", i)
 		}
 		select {
-		case <-grants[i].Done():
+		case <-grants[i].grant.Done():
 		default:
 			t.Errorf("context %d retained its generation grant", i)
 		}
@@ -355,6 +351,15 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 		if err := release(); err == nil {
 			t.Error("duplicate release reopened aborted execution")
 		}
+	}
+	// Source aborts leave the shared process observer alive. All runtime/grant
+	// checks above precede process retirement; Join cannot settle a leaked child
+	// parent lease. Keep store possession until the actual process has joined.
+	if err := closeSelectedStoreTestProcess(process, nil); err != nil {
+		t.Fatal(err)
+	}
+	if process.ActiveCount() != 0 {
+		t.Errorf("abort returned with %d runtime parent leases", process.ActiveCount())
 	}
 	// Exact parent settlement precedes releasing retained store possession.
 	if err := closeSelectedStoreTestProcess(process, capability); err != nil {

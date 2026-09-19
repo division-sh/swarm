@@ -10,3 +10,6 @@ hard:
   full_conformance_command_seconds:
     limit_seconds: 540
     justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.
+  mandatory_soak_command_seconds:
+    limit_seconds: 1500
+    justification: Lead approval 5743323725 requires each isolated backend's original 900s soak and 90s drain; 22m Go timeout includes bounded setup/readback and 25m command permits compilation/provisioning without changing ordinary budgets.

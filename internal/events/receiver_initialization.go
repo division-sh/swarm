@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
 type receiverInitializationKind uint8
@@ -124,39 +126,48 @@ func (s *ReceiverInitialization) UnmarshalJSON(raw []byte) error {
 	if err != nil {
 		return err
 	}
-	object, ok := decoded.ObjectMap()
-	if !ok {
-		return fmt.Errorf("receiver initialization requires an object")
+	value, err := decodeReceiverInitialization(raw, decoded)
+	if err != nil {
+		return err
+	}
+	*s = value
+	return nil
+}
+
+// decoded is the canonical admission of these same bytes, either standalone
+// or as the exact subtree of the enclosing materialization record.
+func decodeReceiverInitialization(raw []byte, decoded semanticvalue.Value) (ReceiverInitialization, error) {
+	if decoded.Kind() != semanticvalue.KindObject {
+		return ReceiverInitialization{}, fmt.Errorf("receiver initialization requires an object")
 	}
 	var wire receiverInitializationWire
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&wire); err != nil {
-		return err
+		return ReceiverInitialization{}, err
 	}
 	if err := d.Decode(new(any)); err != io.EOF {
-		return fmt.Errorf("receiver initialization requires one object")
+		return ReceiverInitialization{}, fmt.Errorf("receiver initialization requires one object")
 	}
 	value := ReceiverInitialization{runID: wire.RunID, eventID: wire.EventID, target: wire.Target}
 	switch wire.Kind {
 	case "flow_lifecycle":
-		if _, present := object["node"]; present {
-			return fmt.Errorf("flow initialization forbids node evidence")
+		if _, present := decoded.Lookup("node"); present {
+			return ReceiverInitialization{}, fmt.Errorf("flow initialization forbids node evidence")
 		}
 		value.kind = receiverInitializationFlow
 	case "node_delivery":
 		value.kind = receiverInitializationNode
 	default:
-		return fmt.Errorf("unknown receiver initialization supplier %q", wire.Kind)
+		return ReceiverInitialization{}, fmt.Errorf("unknown receiver initialization supplier %q", wire.Kind)
 	}
 	if wire.Node != nil {
 		value.node = *wire.Node
 	}
 	if err := value.validate(); err != nil {
-		return err
+		return ReceiverInitialization{}, err
 	}
-	*s = value
-	return nil
+	return value, nil
 }
 
 // The existing durable materialization column stores both supplier evidence
@@ -195,13 +206,12 @@ func RestoreReceiverMaterializationRecord(route DeliveryRoute, raw []byte) (Deli
 		}
 		return route, nil
 	}
-	if _, err := canonicaljson.Decode(raw); err != nil {
+	decoded, err := canonicaljson.Decode(raw)
+	if err != nil {
 		return DeliveryRoute{}, err
 	}
-	var record receiverMaterializationRecord
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&record); err != nil {
+	record, dependency, err := decodeReceiverMaterializationRecord(raw, decoded)
+	if err != nil {
 		return DeliveryRoute{}, err
 	}
 	if record.Initialization == nil || len(record.Dependency) == 0 {
@@ -214,5 +224,62 @@ func RestoreReceiverMaterializationRecord(route DeliveryRoute, raw []byte) (Deli
 	if err := route.Initialization.ValidateRoute(route); err != nil {
 		return DeliveryRoute{}, err
 	}
-	return RestoreDeliveryMaterialization(route, record.Dependency)
+	return restoreDeliveryMaterialization(route, record.Dependency, dependency)
+}
+
+func decodeReceiverMaterializationRecord(raw []byte, decoded semanticvalue.Value) (receiverMaterializationRecord, semanticvalue.Value, error) {
+	var record receiverMaterializationRecord
+	var dependency semanticvalue.Value
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if decoded.Kind() != semanticvalue.KindObject {
+		// Retain the original typed decoder's non-object error.
+		err := d.Decode(&record)
+		return record, dependency, err
+	}
+	if _, err := d.Token(); err != nil {
+		return record, dependency, err
+	}
+	var unknown error
+	for d.More() {
+		token, err := d.Token()
+		if err != nil {
+			return record, dependency, err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return record, dependency, fmt.Errorf("receiver materialization field must be a string")
+		}
+		var field json.RawMessage
+		if err := d.Decode(&field); err != nil {
+			return record, dependency, err
+		}
+		value, found := decoded.Lookup(key)
+		if !found {
+			return record, dependency, fmt.Errorf("receiver materialization field missing from canonical object")
+		}
+		switch {
+		case strings.EqualFold(key, "initialization"):
+			// Decode every case alias in wire order, as encoding/json does.
+			// A later alias must not hide an earlier invalid supplier.
+			if value.Kind() == semanticvalue.KindNull {
+				record.Initialization = nil
+				continue
+			}
+			initialization, err := decodeReceiverInitialization(field, value)
+			if err != nil {
+				return record, dependency, err
+			}
+			record.Initialization = &initialization
+		case strings.EqualFold(key, "dependency"):
+			record.Dependency, dependency = field, value
+		default:
+			if unknown == nil {
+				unknown = fmt.Errorf("json: unknown field %q", key)
+			}
+		}
+	}
+	if _, err := d.Token(); err != nil {
+		return record, dependency, err
+	}
+	return record, dependency, unknown
 }

@@ -59,16 +59,28 @@ func (s *LLMPostgresOwner) requireCurrentSchema() error { return s.requireCurren
 func (s *LLMSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
 func (s *LLMSQLiteOwner) now() time.Time                { return s.nowFn().UTC() }
 
-func agentSessionEffects(runID string) (*runforkrevision.Effects, error) {
-	return runforkrevision.ForRun(runID, runforkrevision.FamilyAgentSessions)
+func agentSessionEffects(runID, sessionID string, otherSessionIDs ...string) (*runforkrevision.Effects, error) {
+	effects := runforkrevision.NewEffects()
+	if err := addAgentSessionFacts(effects, runID, sessionID, otherSessionIDs...); err != nil {
+		return nil, err
+	}
+	return effects, nil
+}
+
+func addAgentSessionFacts(effects *runforkrevision.Effects, runID, sessionID string, otherSessionIDs ...string) error {
+	if err := effects.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID); err != nil {
+		return err
+	}
+	for _, id := range otherSessionIDs {
+		if err := effects.AddFact(runID, runforkrevision.FamilyAgentSessions, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func emptyRunForkRevisionEffects() *runforkrevision.Effects {
 	return runforkrevision.NewEffects()
-}
-
-func addAgentSessionEffect(effects *runforkrevision.Effects, runID string) error {
-	return effects.Add(runID, runforkrevision.FamilyAgentSessions)
 }
 
 func (s *LLMPostgresOwner) runPostgresRuntimeMutation(ctx context.Context, effects *runforkrevision.Effects, fn func(context.Context, *sql.Tx) error) error {
@@ -93,7 +105,9 @@ func (s *LLMSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label st
 	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
+	resetEffects := effects.AttemptReset()
 	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		resetEffects()
 		if err := fn(txctx, tx); err != nil {
 			return err
 		}

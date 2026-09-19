@@ -254,8 +254,8 @@ type Intent struct {
 	Cursor          int           `json:"cursor"`
 	Status          Status        `json:"status"`
 	NextChunkSize   int           `json:"next_chunk_size"`
-	LastChunkMS     int64         `json:"last_chunk_ms"`
 	LastServedAt    time.Time     `json:"last_served_at,omitempty"`
+	Retry           *RetryWait    `json:"retry,omitempty"`
 	CreatedAt       time.Time     `json:"created_at"`
 	UpdatedAt       time.Time     `json:"updated_at"`
 	ClaimOwner      string        `json:"claim_owner,omitempty"`
@@ -283,11 +283,19 @@ func (i Intent) Validate() error {
 	if i.Source != wantSource {
 		return errors.New("fan-out persisted source disagrees with request")
 	}
-	if i.Cursor < 0 || i.Cursor > i.Request.Cardinality || i.NextChunkSize < MinChunkSize || i.NextChunkSize > MaxChunkSize || i.LastChunkMS < 0 {
+	if i.Cursor < 0 || i.Cursor > i.Request.Cardinality || i.NextChunkSize < MinChunkSize || i.NextChunkSize > MaxChunkSize {
 		return errors.New("fan-out intent cursor or chunk size is invalid")
 	}
 	if i.CreatedAt.IsZero() || i.UpdatedAt.Before(i.CreatedAt) {
 		return errors.New("fan-out intent timestamps are invalid")
+	}
+	if i.Retry != nil {
+		if err := i.Retry.Validate(); err != nil {
+			return err
+		}
+		if i.Status != StatusOpen || i.ClaimOwner != "" {
+			return errors.New("fan-out retry wait requires open unclaimed work")
+		}
 	}
 	if strings.TrimSpace(i.ClaimOwner) == "" {
 		if !i.LeaseExpiresAt.IsZero() {
@@ -326,6 +334,64 @@ func (i Intent) Validate() error {
 	return nil
 }
 
+type RetryWait struct {
+	ReadyAt time.Time                `json:"ready_at"`
+	Failure runtimefailures.Envelope `json:"failure"`
+}
+
+func (r RetryWait) Validate() error {
+	if r.ReadyAt.IsZero() {
+		return errors.New("fan-out retry wait requires due time")
+	}
+	if err := runtimefailures.ValidateEnvelope(r.Failure); err != nil {
+		return err
+	}
+	if !r.Failure.Retryable || r.Failure.Class == runtimefailures.ClassOutcomeUncertain {
+		return errors.New("fan-out retry wait requires a safely retryable failure")
+	}
+	return nil
+}
+
+type ServingState uint8
+
+const (
+	ServingEligible ServingState = iota + 1
+	ServingLeased
+	ServingRetryWait
+	ServingBlocked
+	ServingClosed
+	ServingCanceled
+)
+
+// ServingAt projects durable facts only. Runtime/source admission and shared
+// capacity are separate evidence; absence of either cannot mean completion.
+func (i Intent) ServingAt(now time.Time) (ServingState, error) {
+	if err := i.Validate(); err != nil {
+		return 0, err
+	}
+	if now.IsZero() {
+		return 0, errors.New("fan-out serving projection requires observation time")
+	}
+	switch i.Status {
+	case StatusClosed:
+		return ServingClosed, nil
+	case StatusCanceled:
+		return ServingCanceled, nil
+	case StatusBlocked:
+		return ServingBlocked, nil
+	case StatusOpen:
+		if i.ClaimOwner != "" && i.LeaseExpiresAt.After(now) {
+			return ServingLeased, nil
+		}
+		if i.Retry != nil && i.Retry.ReadyAt.After(now) {
+			return ServingRetryWait, nil
+		}
+		return ServingEligible, nil
+	default:
+		return 0, errors.New("fan-out serving status is invalid")
+	}
+}
+
 type Claim struct {
 	Key        IntentKey `json:"key"`
 	Owner      string    `json:"owner"`
@@ -339,6 +405,23 @@ func (c Claim) Validate() error {
 	}
 	if strings.TrimSpace(c.Owner) == "" || c.Generation == 0 || c.LeaseUntil.IsZero() {
 		return errors.New("fan-out claim requires owner, generation, and lease")
+	}
+	return nil
+}
+
+// AdmitClaim checks persisted ownership at the selected store's admission time.
+// A caller's audit timestamp and claimed lease deadline cannot extend authority.
+func (i Intent) AdmitClaim(claim Claim, admittedAt time.Time) error {
+	if err := i.Validate(); err != nil {
+		return err
+	}
+	if err := claim.Validate(); err != nil {
+		return err
+	}
+	if admittedAt.IsZero() || i.Request.Key != claim.Key || i.Status != StatusOpen ||
+		i.ClaimOwner != claim.Owner || i.ClaimGeneration != claim.Generation ||
+		!i.LeaseExpiresAt.After(admittedAt) {
+		return ErrStaleClaim
 	}
 	return nil
 }
@@ -451,7 +534,6 @@ type RunSummary struct {
 	BarrierTerminal         int                            `json:"barrier_terminal"`
 	MinNextChunk            int                            `json:"min_next_chunk"`
 	MaxNextChunk            int                            `json:"max_next_chunk"`
-	LastChunkMaxMS          int64                          `json:"last_chunk_max_ms"`
 	OldestAgeMS             int64                          `json:"oldest_age_ms"`
 }
 
@@ -511,7 +593,7 @@ func (s RunSummary) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(s.RunID)); err != nil {
 		return errors.New("fan-out run summary requires canonical run identity")
 	}
-	if s.Intents < 0 || s.Open < 0 || s.Blocked < 0 || s.Cardinality < 0 || s.Cursor < 0 || s.Owed < 0 || s.Committed < 0 || s.SemanticRejected < 0 || s.Canceled < 0 || s.Settled < 0 || s.Unsettled < 0 || s.BarrierArmed < 0 || s.BarrierPending < 0 || s.BarrierTerminal < 0 || s.MinNextChunk < 0 || s.MaxNextChunk < 0 || s.LastChunkMaxMS < 0 || s.OldestAgeMS < 0 {
+	if s.Intents < 0 || s.Open < 0 || s.Blocked < 0 || s.Cardinality < 0 || s.Cursor < 0 || s.Owed < 0 || s.Committed < 0 || s.SemanticRejected < 0 || s.Canceled < 0 || s.Settled < 0 || s.Unsettled < 0 || s.BarrierArmed < 0 || s.BarrierPending < 0 || s.BarrierTerminal < 0 || s.MinNextChunk < 0 || s.MaxNextChunk < 0 || s.OldestAgeMS < 0 {
 		return errors.New("fan-out run summary counts cannot be negative")
 	}
 	if s.Cursor != s.Committed+s.SemanticRejected || s.Cardinality != s.Cursor+s.Owed+s.Canceled || s.Committed != s.Settled+s.Unsettled {

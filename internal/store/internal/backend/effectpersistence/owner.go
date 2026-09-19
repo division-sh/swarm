@@ -147,8 +147,8 @@ func (s *EffectSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label
 	if err := s.requireCurrent(); err != nil {
 		return false, err
 	}
-	effects := privaterunforkrevision.NewEffects()
 	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		effects := privaterunforkrevision.NewEffects()
 		if err := operation(txctx, tx, effects); err != nil {
 			return err
 		}

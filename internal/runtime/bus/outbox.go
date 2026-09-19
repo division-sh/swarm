@@ -37,9 +37,10 @@ type pendingOutboxDispatch struct {
 // selected-store engine mutation begins. The private store adapter can inspect
 // the closed command but cannot invoke EventBus or acquire runtime authority.
 type EnginePublicationPlan struct {
-	prepared PreparedPublish
-	command  PublicationCommand
-	intent   runtimeengine.EmitIntent
+	prepared       PreparedPublish
+	command        PublicationCommand
+	intent         runtimeengine.EmitIntent
+	admittedSource events.AdmittedEvent
 }
 
 func (p EnginePublicationPlan) DurablePublicationEventID() string {
@@ -59,6 +60,26 @@ func (p EnginePublicationPlan) ValidateDurablePublicationPlan() error {
 }
 
 func (p EnginePublicationPlan) PublicationCommand() PublicationCommand { return p.command }
+
+// ValidatePreparedFanOutEvent binds the canonical planner's input to its output.
+// Routing may project receiver facts, but cannot substitute the admitted source.
+func (p EnginePublicationPlan) ValidatePreparedFanOutEvent(original events.Event) error {
+	if err := p.ValidateDurablePublicationPlan(); err != nil {
+		return err
+	}
+	want, err := events.IntegrityProjection(original)
+	if err != nil {
+		return err
+	}
+	actual, err := events.IntegrityProjection(p.admittedSource.Event())
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(actual, want) {
+		return errors.New("prepared fan-out publication substitutes its admitted source")
+	}
+	return nil
+}
 
 // PublicationCommandForMutation discharges prospective ownership only for the
 // exact state record that the named engine transaction has compare-and-written.
@@ -126,6 +147,10 @@ func (eb *EventBus) PrepareEngineMutationPublications(ctx context.Context, inten
 }
 
 func (eb *EventBus) prepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective runtimepipeline.PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {
+	return eb.prepareEnginePublicationsWithMember(ctx, intents, prospective, nil)
+}
+
+func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, intents []runtimeengine.EmitIntent, prospective runtimepipeline.PreparedWorkflowPublicationState, member *fanOutPublicationMember) ([]runtimeengine.DurablePublicationPlan, error) {
 	if eb == nil || len(intents) == 0 {
 		return nil, nil
 	}
@@ -139,7 +164,18 @@ func (eb *EventBus) prepareEnginePublications(ctx context.Context, intents []run
 			continue
 		}
 		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
-		preparedCtx, admitted, err := eb.admitEnginePublishEvent(intentCtx, intent.Event)
+		preparedCtx := intentCtx
+		var admitted events.AdmittedEvent
+		var err error
+		if member != nil {
+			if member.claim.EventID() == "" || member.context == nil {
+				release()
+				return nil, errors.New("fan-out preparation requires exact admitted member evidence")
+			}
+			preparedCtx, admitted = member.context, member.admitted
+		} else {
+			preparedCtx, admitted, err = eb.admitEnginePublishEvent(intentCtx, intent.Event)
+		}
 		if err != nil {
 			release()
 			return nil, err
@@ -152,6 +188,14 @@ func (eb *EventBus) prepareEnginePublications(ctx context.Context, intents []run
 			}
 		}
 		publication := eventBusCommitPublishPlan{bus: eb, event: intent.Event, admitted: admitted, prospective: prospective}
+		if member != nil {
+			claim := member.claim
+			if claim.EventID() != intent.Event.ID() {
+				release()
+				return nil, errors.New("fan-out preparation lacks its exact pre-admitted claim")
+			}
+			publication.publicationClaim = &pipelinePublicationClaim{bus: eb, eventID: intent.Event.ID(), claim: claim}
+		}
 		if len(intent.Recipients) > 0 {
 			publication.direct = true
 			publication.directRecipients = append([]string(nil), intent.Recipients...)
@@ -165,11 +209,18 @@ func (eb *EventBus) prepareEnginePublications(ctx context.Context, intents []run
 		// the selected store committed, not the pre-projection engine event.
 		intent.Event = prepared.Event
 		command.prospective = prospective
-		plan := EnginePublicationPlan{prepared: prepared, command: command, intent: intent}
+		plan := EnginePublicationPlan{prepared: prepared, command: command, intent: intent, admittedSource: admitted}
 		if err := plan.ValidateDurablePublicationPlan(); err != nil {
 			_ = prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx))
 			release()
 			return nil, err
+		}
+		if member != nil {
+			if err := member.group.RecordPrepared(preparedCtx, prepared.publicationClaim.Claim(), plan); err != nil {
+				err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx)))
+				release()
+				return nil, err
+			}
 		}
 		plans = append(plans, plan)
 	}
@@ -230,6 +281,9 @@ func (eb *EventBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
 	if d.bus == nil || len(intents) == 0 {
 		return nil
+	}
+	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
+		return err
 	}
 	ctx, lease, err := d.bus.beginRuntimeWork(ctx)
 	if err != nil {
@@ -318,6 +372,11 @@ func (eb *EventBus) requireCommittedInheritedFanOut(ctx context.Context, event e
 // A continuation must never reinterpret a missing operation as permission to
 // append or dispatch a fresh event.
 func (d engineDispatcher) dispatchCommittedInterceptorPublications(ctx context.Context, events []events.Event) error {
+	if len(events) > 0 {
+		if err := flushEnclosingPublicationSettlement(ctx); err != nil {
+			return err
+		}
+	}
 	var dispatchErr error
 	for _, event := range events {
 		result, err := d.dispatchPendingOutboxOperation(ctx, runtimeengine.EmitIntent{
@@ -430,26 +489,41 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 		claimOpen = false
 		return nil
 	}
-	queued, outcome, err := d.dispatchIntent(ctx, intent)
-	if outcome.Committed && outcome.ContinueDispatch() {
-		return errors.Join(err, settle(runtimepipelineobligation.Acknowledged("pipeline_persisted")))
-	}
-	if _, retry := outcome.RetryRelease(); retry {
+	disposition, completed, err := d.dispatchIntentDisposition(ctx, intent)
+	if !completed {
 		return err
 	}
+	return errors.Join(err, settle(disposition))
+}
+
+// A completed dispatch disposition is not a persisted acknowledgement. The
+// enclosing claim owner decides when to commit it and retains ownership until
+// that write and its required handoff have completed.
+func (d engineDispatcher) dispatchIntentDisposition(ctx context.Context, intent runtimeengine.EmitIntent) (runtimepipelineobligation.Disposition, bool, error) {
+	return d.dispatchIntentDispositionWithBoundary(ctx, intent, nil)
+}
+
+func (d engineDispatcher) dispatchIntentDispositionWithBoundary(ctx context.Context, intent runtimeengine.EmitIntent, boundary publicationSettlementBoundary) (runtimepipelineobligation.Disposition, bool, error) {
+	queued, outcome, err := d.dispatchIntentWithBoundary(ctx, intent, boundary)
+	if outcome.Committed && outcome.ContinueDispatch() {
+		return runtimepipelineobligation.Acknowledged("pipeline_persisted"), true, err
+	}
+	if _, retry := outcome.RetryRelease(); retry {
+		return runtimepipelineobligation.Disposition{}, false, err
+	}
 	if disposition, ok := outcome.Disposition(); ok {
-		return errors.Join(err, settle(disposition))
+		return disposition, true, err
 	}
 	if err != nil {
 		if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) || errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-			return err
+			return runtimepipelineobligation.Disposition{}, false, err
 		}
-		return errors.Join(err, settle(runtimepipelineobligation.Terminal("pipeline_outbox_dispatch_failed", eventBusFailure(err, "dispatch_outbox"))))
+		return runtimepipelineobligation.Terminal("pipeline_outbox_dispatch_failed", eventBusFailure(err, "dispatch_outbox")), true, err
 	}
 	if queued {
-		return nil
+		return runtimepipelineobligation.Disposition{}, false, nil
 	}
-	return settle(runtimepipelineobligation.Acknowledged("pipeline_persisted"))
+	return runtimepipelineobligation.Acknowledged("pipeline_persisted"), true, nil
 }
 
 func clonePostCommitPublish(evt events.Event) events.Event {
@@ -457,6 +531,10 @@ func clonePostCommitPublish(evt events.Event) events.Event {
 }
 
 func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (queued bool, result runtimepipelineobligation.ExecutionOutcome, err error) {
+	return d.dispatchIntentWithBoundary(ctx, intent, nil)
+}
+
+func (d engineDispatcher) dispatchIntentWithBoundary(ctx context.Context, intent runtimeengine.EmitIntent, boundary publicationSettlementBoundary) (queued bool, result runtimepipelineobligation.ExecutionOutcome, err error) {
 	ctx = events.WithDeliveryContext(ctx, intent.Context)
 	if reason, err := d.bus.dispatchQueueReason(ctx, intent.Event); err != nil {
 		return false, runtimepipelineobligation.Continue(), err
@@ -478,9 +556,12 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
-	ctx, _, closeDispatch, err := d.bus.beginDeliveryDispatch(ctx, intent.Event, deliveryRoutes)
+	ctx, dispatchScope, closeDispatch, err := d.bus.beginDeliveryDispatch(ctx, intent.Event, deliveryRoutes)
 	if err != nil {
 		return false, runtimepipelineobligation.Continue(), err
+	}
+	if dispatchScope != nil {
+		dispatchScope.publicationSettlement = boundary
 	}
 	defer func() { err = errors.Join(err, closeDispatch()) }()
 	nodePassthrough := true

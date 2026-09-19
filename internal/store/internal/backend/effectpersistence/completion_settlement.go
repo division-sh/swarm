@@ -134,6 +134,9 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 	var continuation *runtimeeffects.Attempt
 	committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
 		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			providerHeadErr = nil
 			spendRecorded = false
 			originSettled = false
@@ -402,7 +405,8 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 		return err
 	}
 	u := settlement.Usage
-	_, err = tx.ExecContext(ctx, `
+	var storedRunID, storedTurnID string
+	err = tx.QueryRowContext(ctx, `
 		INSERT INTO agent_turns (
 			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
@@ -417,17 +421,18 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 			NULLIF($14,'')::uuid,NULLIF($15,''),NULLIF($16,''),$17::uuid,$18::jsonb,$19::jsonb,
 			$20::jsonb,$21::jsonb,$22::jsonb,$23,$24,$25,$26,$27::uuid,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38::jsonb,$39
 		)
+		RETURNING run_id::text, turn_id::text
 	`, t.TurnID, t.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, t.SessionID, fields.FlowInstancePath, t.Memory.Enabled, string(t.Memory.Source), t.EntityID,
 		t.TriggerEventID, t.TriggerEventType, t.TaskID, t.CapabilitySurfaceID, completionJSON(t.ToolCalls, `[]`),
 		completionJSON(t.EmittedEvents, `[]`),
 		completionNullableJSON(t.RequestPayload), completionNullableJSON(t.ResponsePayload), completionJSON(t.TurnBlocks, `[]`), t.ParseOK, t.LatencyMS, t.RetryCount,
 		agentFrame, attempt.AttemptID, attempt.Authority.ExecutionMode, u.ResolvedModel, string(u.Exactness), u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens,
-		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, nullableJSON(failure), settlement.Now.UTC())
+		u.CacheCreation5mInputTokens, u.CacheCreation1hInputTokens, u.ProviderReportedCostUSD, nullableJSON(failure), settlement.Now.UTC()).Scan(&storedRunID, &storedTurnID)
 	if err != nil {
 		return fmt.Errorf("insert completion agent turn: %w", err)
 	}
-	return effects.Add(t.RunID, privaterunforkrevision.FamilyAgentTurns)
+	return effects.AddFact(storedRunID, privaterunforkrevision.FamilyAgentTurns, storedTurnID)
 }
 
 func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, effects *revisionEffects, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, projectCurrentMemory ...bool) error {
@@ -484,7 +489,7 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm
 	if err != nil {
 		return fmt.Errorf("insert sqlite completion agent turn: %w", err)
 	}
-	return effects.Add(t.RunID, privaterunforkrevision.FamilyAgentTurns)
+	return effects.AddFact(t.RunID, privaterunforkrevision.FamilyAgentTurns, t.TurnID)
 }
 
 func completionTurnRecord(t *runtimeeffects.CompletionAgentTurn) runtimellm.AgentTurnRecord {

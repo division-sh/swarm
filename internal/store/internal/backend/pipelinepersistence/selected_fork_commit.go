@@ -62,9 +62,9 @@ func (s *PipelineSQLiteOwner) CommitSelectedForkEvent(ctx context.Context, reque
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	defer state.operationMu.Unlock()
-	effects := newRevisionEffects()
 	var result runtimebus.CommittedSelectedForkEvent
 	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite selected-fork event commit", func(txctx context.Context, tx *sql.Tx) error {
+		effects := newRevisionEffects()
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err

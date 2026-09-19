@@ -1931,12 +1931,19 @@ func SourceEventFromEvent(evt events.Event) (SourceEvent, error) {
 }
 
 func CompileConnectGraph(source semanticview.Source) CompiledConnectGraph {
+	graph, _ := compileConnectGraphWithCensus(source)
+	return graph
+}
+
+// Return operation-local evidence to composed resolvers without retaining a
+// second census on every route table or caching mutable source views globally.
+func compileConnectGraphWithCensus(source semanticview.Source) (CompiledConnectGraph, semanticview.AuthoredEventEndpointCensus) {
 	if source == nil {
-		return CompiledConnectGraph{issues: []ConnectRoutePlanIssue{{Failure: ConnectFailureSourceMissing, Detail: "semantic source is required"}}}
+		return CompiledConnectGraph{issues: []ConnectRoutePlanIssue{{Failure: ConnectFailureSourceMissing, Detail: "semantic source is required"}}}, semanticview.AuthoredEventEndpointCensus{}
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
-		return CompiledConnectGraph{issues: []ConnectRoutePlanIssue{{Failure: ConnectFailureSourceMissing, Detail: "compiled connect input is unavailable"}}}
+		return CompiledConnectGraph{issues: []ConnectRoutePlanIssue{{Failure: ConnectFailureSourceMissing, Detail: "compiled connect input is unavailable"}}}, semanticview.BuildAuthoredEventEndpointCensus(source)
 	}
 	connects := bundle.CompositionConnects()
 	plans := make([]ConnectRoutePlan, 0, len(connects))
@@ -1964,7 +1971,7 @@ func CompileConnectGraph(source semanticview.Source) CompiledConnectGraph {
 		receiverPlans:         receiverPlans,
 		issues:                issues,
 		receiverPinCollisions: compileStaticConnectReceiverPinCollisions(source, plans, census),
-	}
+	}, census
 }
 
 // lowerPublicInputReceiverPlans supplies receiver-pin registration evidence

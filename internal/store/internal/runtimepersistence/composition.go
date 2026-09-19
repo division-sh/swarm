@@ -266,7 +266,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := eventOwner.BindRunFork(runForkOwner); err != nil {
 		return nil, err
 	}
-	startupOwner, err := storestartupownership.NewPostgres(backend, store.requireCurrentSchema, schemaOwner.CatalogEmpty, agentOwner, destructiveResetOwner)
+	startupOwner, err := storestartupownership.NewPostgres(backend, store.requireCurrentSchema, schemaOwner.CatalogEmpty, agentOwner, destructiveResetOwner, pipelineOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -435,11 +435,6 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.lLMSQLiteOwner = llmOwner
-	startupOwner, err := storestartupownership.NewSQLiteWithBackendIdentity(backend, schema.Path(), backendIdentity, store.requireCurrentSchema, schema.CatalogEmpty, agentOwner)
-	if err != nil {
-		return nil, err
-	}
-	store.startupSQLiteOwner = startupOwner
 	effectOwner, err := storeeffect.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, llmOwner)
 	if err != nil {
 		return nil, err
@@ -467,6 +462,11 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
+	startupOwner, err := storestartupownership.NewSQLiteWithBackendIdentity(backend, schema.Path(), backendIdentity, store.requireCurrentSchema, schema.CatalogEmpty, agentOwner, pipelineOwner)
+	if err != nil {
+		return nil, err
+	}
+	store.startupSQLiteOwner = startupOwner
 	if err := pipelineOwner.BindGenericScheduleTxOwner(genericSchedules); err != nil {
 		return nil, err
 	}

@@ -258,48 +258,72 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 }
 
 func EvalValueResultWithOptions(expression string, ctx ValueContext, opts ValueExpressionOptions) (ValueResult, error) {
+	prepared, err := PrepareValueExpression(expression, opts)
+	if err != nil {
+		return ValueResult{}, err
+	}
+	return prepared.Eval(ctx)
+}
+
+// PreparedValueExpression retains only checked expression semantics. Each Eval
+// admits and projects a fresh activation; no execution values are retained.
+type PreparedValueExpression struct {
+	expression    string
+	program       cel.Program
+	allowBareItem bool
+	itemAlias     string
+}
+
+func PrepareValueExpression(expression string, opts ValueExpressionOptions) (*PreparedValueExpression, error) {
 	normalized := strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
 	if normalized == "" {
-		return ValueResult{}, fmt.Errorf("workflow data expression is empty")
+		return nil, fmt.Errorf("workflow data expression is empty")
 	}
 	if err := validateAuthoredContextRoots(normalized, opts); err != nil {
-		return ValueResult{}, err
+		return nil, err
 	}
 	if expressionReferencesFanOutField(normalized, "target") {
-		return ValueResult{}, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
+		return nil, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
 	}
 	if expressionReferencesFanOutField(normalized, "identity") {
-		return ValueResult{}, fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
+		return nil, fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
 	}
 	if expressionReferencesFanOutField(normalized, "item") {
-		return ValueResult{}, fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
+		return nil, fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
 	}
 	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(normalized, "index") {
-		return ValueResult{}, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
+		return nil, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
 	}
 	if !opts.AllowJoin && ExpressionReferencesRoot(normalized, "join") {
-		return ValueResult{}, fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
+		return nil, fmt.Errorf("join.* is only available inside join completion and timeout outcomes")
 	}
 	if err := ValidateEventReferences(normalized); err != nil {
-		return ValueResult{}, err
+		return nil, err
 	}
 	if err := requireStructuralExpressionRoots(normalized, opts); err != nil {
-		return ValueResult{}, err
+		return nil, err
 	}
 	env, err := dataExpressionEnvForContext(opts)
 	if err != nil {
-		return ValueResult{}, err
-	}
-	if missing := MissingEntityReferences(normalized, ctx.Entity); len(missing) > 0 {
-		return ValueResult{}, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
+		return nil, err
 	}
 	ast, err := compileValueExpression(env, RewriteLoopRoot(normalized), opts)
 	if err != nil {
-		return ValueResult{}, err
+		return nil, err
 	}
 	program, err := workflowProgram(env, ast)
 	if err != nil {
-		return ValueResult{}, err
+		return nil, err
+	}
+	return &PreparedValueExpression{expression: normalized, program: program, allowBareItem: opts.AllowBareItem, itemAlias: strings.TrimSpace(opts.ItemAlias)}, nil
+}
+
+func (p *PreparedValueExpression) Eval(ctx ValueContext) (ValueResult, error) {
+	if p == nil || p.program == nil {
+		return ValueResult{}, fmt.Errorf("workflow expression preparation is required")
+	}
+	if missing := MissingEntityReferences(p.expression, ctx.Entity); len(missing) > 0 {
+		return ValueResult{}, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
 	activation, err := ProjectCELValue(map[string]any{
 		"entity": ctx.Entity, "_entity": ctx.PlatformEntity,
@@ -312,13 +336,13 @@ func EvalValueResultWithOptions(expression string, ctx ValueContext, opts ValueE
 	}
 	activationMap := activation.(map[string]any)
 	fanOut, _ := activationMap["fan_out"].(map[string]any)
-	if opts.AllowBareItem {
+	if p.allowBareItem {
 		activationMap["item"] = fanOut["item"]
 	}
-	if alias := strings.TrimSpace(opts.ItemAlias); alias != "" {
+	if alias := p.itemAlias; alias != "" {
 		activationMap[alias] = fanOut["item"]
 	}
-	out, _, err := program.Eval(activationMap)
+	out, _, err := p.program.Eval(activationMap)
 	if err != nil {
 		return ValueResult{}, err
 	}

@@ -192,6 +192,9 @@ func (s *DecisionSQLiteOwner) CompleteHumanTaskOutcome(ctx context.Context, card
 	defer handoff.Rollback()
 	var continuation decisioncard.HumanTaskContinuation
 	committed, err := s.runDecisionCardMutationOutcome(ctx, "sqlite complete human-task outcome", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
 		var changed bool
 		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, false)
 		if err != nil || !changed {

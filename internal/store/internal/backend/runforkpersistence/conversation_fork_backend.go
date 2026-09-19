@@ -154,7 +154,11 @@ func (s conversationForkStore) runPostgresMutation(ctx context.Context, forkID *
 	if err != nil {
 		return err
 	}
-	session, err := postgresbackend.NewSessionAuthority(conn)
+	backend, ok := s.db.(*postgresbackend.Backend)
+	if !ok {
+		return errors.Join(errors.New("conversation fork requires its selected PostgreSQL backend"), conn.Close())
+	}
+	session, err := backend.NewSessionAuthority(conn)
 	if err != nil {
 		return errors.Join(err, conn.Close())
 	}

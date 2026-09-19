@@ -66,14 +66,16 @@ func InsertCanonicalEventRecord(
 		existing eventrecord.Record
 		found    bool
 	)
+	// Raw preconditions deliberately do not capture a revision frontier.
+	effects := runforkrevision.NewEffects()
 	switch dialect {
 	case authoractivityfixture.DialectPostgres:
-		inserted, err = eventrecordpostgres.Insert(ctx, db, record)
+		inserted, err = eventrecordpostgres.Insert(ctx, db, effects, record)
 		if err == nil && !inserted {
 			existing, found, err = eventrecordpostgres.Load(ctx, db, record.EventID)
 		}
 	case authoractivityfixture.DialectSQLite:
-		inserted, err = eventrecordsqlite.Insert(ctx, db, record)
+		inserted, err = eventrecordsqlite.Insert(ctx, db, effects, record)
 		if err == nil && !inserted {
 			existing, found, err = eventrecordsqlite.Load(ctx, db, record.EventID)
 		}
@@ -329,7 +331,7 @@ func commitSemanticEventWithInitialFacts(
 	var (
 		db              *sql.DB
 		deliveryAdapter *deliveryadapter.Adapter
-		insert          func(context.Context, *sql.Tx, eventrecord.Record) (bool, error)
+		insert          func(context.Context, *sql.Tx, *runforkrevision.Effects, eventrecord.Record) (bool, error)
 		load            func(context.Context, *sql.Tx, string) (eventrecord.Record, bool, error)
 		postgres        bool
 	)
@@ -338,8 +340,8 @@ func commitSemanticEventWithInitialFacts(
 		db = DatabaseForTest(selected)
 		postgres = true
 		deliveryAdapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
-		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
-			return eventrecordpostgres.Insert(ctx, tx, record)
+		insert = func(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, record eventrecord.Record) (bool, error) {
+			return eventrecordpostgres.Insert(ctx, tx, effects, record)
 		}
 		load = func(ctx context.Context, tx *sql.Tx, eventID string) (eventrecord.Record, bool, error) {
 			return eventrecordpostgres.Load(ctx, tx, eventID)
@@ -347,8 +349,8 @@ func commitSemanticEventWithInitialFacts(
 	case *store.SQLiteRuntimeStore:
 		db = DatabaseForTest(selected)
 		deliveryAdapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectSQLite)
-		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
-			return eventrecordsqlite.Insert(ctx, tx, record)
+		insert = func(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, record eventrecord.Record) (bool, error) {
+			return eventrecordsqlite.Insert(ctx, tx, effects, record)
 		}
 		load = func(ctx context.Context, tx *sql.Tx, eventID string) (eventrecord.Record, bool, error) {
 			return eventrecordsqlite.Load(ctx, tx, eventID)
@@ -397,7 +399,10 @@ func commitSemanticEventWithInitialFacts(
 		t.Fatalf("begin semantic event fixture: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	inserted, err := insert(ctx, tx, record)
+	// Every contributor shares the collector finalized by the frontier variant;
+	// ordinary semantic preconditions retain their unrevisioned fixture policy.
+	effects := runforkrevision.NewEffects()
+	inserted, err := insert(ctx, tx, effects, record)
 	if err != nil {
 		t.Fatalf("insert semantic event fixture: %v", err)
 	}
@@ -412,14 +417,14 @@ func commitSemanticEventWithInitialFacts(
 		return runtimebus.EventAppendExactDuplicate
 	}
 	authority := deliveryFixtureAuthority(t, ctx, tx, record.RunID, deliveryAdapter)
-	if _, err := deliveryAdapter.CommitInitial(ctx, tx, record.EventID, record.RunID, events.NormalizeDeliveryRoutes(routes), authority); err != nil {
+	if _, err := deliveryAdapter.CommitInitial(ctx, tx, effects, record.EventID, record.RunID, events.NormalizeDeliveryRoutes(routes), authority); err != nil {
 		t.Fatalf("commit semantic event fixture routes: %v", err)
 	}
 	if err := insertPipelineScopeFixture(ctx, tx, record.EventID, scope, postgres, time.Now().UTC()); err != nil {
 		t.Fatalf("commit semantic event fixture pipeline scope: %v", err)
 	}
 	if pipelineDisposition != nil {
-		if err := insertPipelineDispositionFixture(ctx, tx, record.EventID, *pipelineDisposition, postgres, time.Now().UTC()); err != nil {
+		if err := insertPipelineDispositionFixture(ctx, tx, effects, record.EventID, *pipelineDisposition, postgres, time.Now().UTC()); err != nil {
 			t.Fatalf("commit semantic event fixture pipeline disposition: %v", err)
 		}
 	}
@@ -427,7 +432,6 @@ func commitSemanticEventWithInitialFacts(
 		if _, ok := selectedStore.(*store.PostgresStore); !ok {
 			t.Fatalf("semantic fork frontier fixture requires PostgreSQL, got %T", selectedStore)
 		}
-		effects := runforkrevision.NewEffects()
 		if err := effects.Add(
 			record.RunID,
 			runforkrevision.FamilyEvents,
@@ -539,6 +543,7 @@ func insertPipelineScopeFixture(
 func insertPipelineDispositionFixture(
 	ctx context.Context,
 	tx *sql.Tx,
+	effects *runforkrevision.Effects,
 	eventID string,
 	disposition runtimepipelineobligation.Disposition,
 	postgres bool,
@@ -619,7 +624,7 @@ func insertPipelineDispositionFixture(
 		if err != nil {
 			return err
 		}
-		if err := adapter.CommitPipelineHandoff(ctx, tx, eventID); err != nil {
+		if err := adapter.CommitPipelineHandoff(ctx, tx, effects, eventID); err != nil {
 			return err
 		}
 	}

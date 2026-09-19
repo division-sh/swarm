@@ -152,6 +152,14 @@ type terminalRunRecoveryQueue struct {
 
 func (q terminalRunRecoveryQueue) PreflightRunQueue(context.Context, string) error { return nil }
 
+func (q terminalRunRecoveryQueue) BeginRunStop(context.Context, string) (runtimeruncontrol.StopTransition, error) {
+	return nil, errors.New("continue-only fixture cannot stop a run")
+}
+
+func (q *recordingRunRecoveryQueue) BeginRunStop(ctx context.Context, runID string) (runtimeruncontrol.StopTransition, error) {
+	return q.bus.BeginRunStop(ctx, runID)
+}
+
 func (q terminalRunRecoveryQueue) ReleaseRunQueue(
 	context.Context,
 	string,

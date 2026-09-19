@@ -29,6 +29,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -105,7 +106,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 			var proofs []runtimedelivery.DurableHandoffProof
 			commit := func(txctx context.Context, tx *sql.Tx) error {
 				var err error
-				proofs, err = adapter.CommitInitial(txctx, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
+				proofs, err = adapter.CommitInitial(txctx, tx, runforkrevision.NewEffects(), evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
 				return err
 			}
 			if backend == "sqlite" {

@@ -71,11 +71,27 @@ func processBindingForGrant(evidence startupownership.GrantEvidence) manager.Pro
 // the durable run binding in the same snapshot. A selected binding reserves the
 // child at materialization commit, before an execution or grant exists.
 func InspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite bool) (manager.RunExecutionOwnership, error) {
+	return inspectCurrentRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite, true)
+}
+
+// ObserveOrdinaryRunExecutionOwnershipTx uses the same exact-grant and run
+// classification as mutation admission, without acquiring mutation locks. The
+// caller must hold a read snapshot; this result does not authorize mutation.
+func ObserveOrdinaryRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite bool) (manager.RunExecutionOwnership, error) {
+	if evidence.SelectedFork != nil {
+		return 0, errors.New("ordinary run observation cannot inspect selected-fork authority")
+	}
+	return inspectCurrentRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite, false)
+}
+
+func inspectCurrentRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite, lock bool) (manager.RunExecutionOwnership, error) {
 	if tx == nil {
 		return 0, errors.New("run execution ownership requires a transaction")
 	}
-	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
-		return 0, err
+	if lock {
+		if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+			return 0, err
+		}
 	}
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&raw); err != nil {
@@ -96,17 +112,21 @@ func InspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence st
 	if string(actual) != string(expected) {
 		return 0, errors.New("run execution generation grant is no longer current")
 	}
-	return inspectRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite)
+	return inspectRunExecutionOwnershipModeTx(ctx, tx, evidence, runID, sqlite, lock)
 }
 
 func inspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite bool) (manager.RunExecutionOwnership, error) {
+	return inspectRunExecutionOwnershipModeTx(ctx, tx, evidence, runID, sqlite, true)
+}
+
+func inspectRunExecutionOwnershipModeTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, runID string, sqlite, lock bool) (manager.RunExecutionOwnership, error) {
 	if err := evidence.Validate(); err != nil {
 		return 0, err
 	}
 	if evidence.State == startupownership.GrantRetired {
 		return 0, errors.New("run execution generation grant is retired")
 	}
-	hash, bindingID, err := loadRunExecutionBindingTx(ctx, tx, runID, sqlite)
+	hash, bindingID, err := loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, lock)
 	if err != nil {
 		return 0, err
 	}
@@ -129,6 +149,10 @@ func inspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence st
 }
 
 func loadRunExecutionBindingTx(ctx context.Context, tx *sql.Tx, runID string, sqlite bool) (string, sql.NullString, error) {
+	return loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, true)
+}
+
+func loadRunExecutionBindingModeTx(ctx context.Context, tx *sql.Tx, runID string, sqlite, lock bool) (string, sql.NullString, error) {
 	id, err := uuid.Parse(runID)
 	if err != nil || id == uuid.Nil || id.String() != runID {
 		return "", sql.NullString{}, errors.New("run execution ownership requires a canonical nonzero run UUID")
@@ -137,7 +161,7 @@ func loadRunExecutionBindingTx(ctx context.Context, tx *sql.Tx, runID string, sq
 		FROM runs AS run
 		LEFT JOIN run_fork_selected_contract_bindings AS binding ON binding.fork_run_id=run.run_id
 		WHERE run.run_id=$1`
-	if !sqlite {
+	if !sqlite && lock {
 		query += ` FOR UPDATE OF run`
 	}
 	var hash string

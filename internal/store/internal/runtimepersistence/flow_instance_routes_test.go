@@ -448,6 +448,16 @@ func testFlowInstanceRouteTopologyAtomicity(
 	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, initial); err != nil {
 		t.Fatalf("seed route topology: %v", err)
 	}
+	// Admission is reusable only for the exact run within this transaction.
+	// A later missing run must still fail and roll back earlier route owners.
+	foreign := flowRouteTopologySets(identities[:1], "foreign")
+	foreign[0].Identity.RunID = uuid.NewString()
+	foreign[0].Routes[0].Identity = foreign[0].Identity
+	mixed := append(append([]runtimebus.FlowInstanceRouteRecordSet(nil), replacement...), foreign...)
+	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, mixed); err == nil {
+		t.Fatal("route topology borrowed another run's active admission")
+	}
+	assertFlowRouteTopologySubscribers(t, ctx, selected, identities, "initial")
 
 	removeFailure := installFlowRouteTopologySecondOwnerFailure(t, ctx, db, postgres)
 	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, replacement); err == nil {

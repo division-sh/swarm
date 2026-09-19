@@ -133,7 +133,7 @@ func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 				defer cancel()
 				var writes, commits atomic.Int32
 				probe.set(func(at, query string) error {
-					if at == "exec" && strings.Contains(strings.ToLower(query), needle) {
+					if writerMigrationObservedWrite(at, query, needle) {
 						writes.Add(1)
 						if phase == "write_cancel" {
 							cancel()
@@ -198,6 +198,14 @@ func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 			})
 		}
 	}
+}
+
+func writerMigrationObservedWrite(at, query, needle string) bool {
+	if at != "exec" && at != "query_row_returned" {
+		return false
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(query), " "))
+	return strings.HasPrefix(normalized, needle+" ")
 }
 
 func boolCount(value bool) int32 {

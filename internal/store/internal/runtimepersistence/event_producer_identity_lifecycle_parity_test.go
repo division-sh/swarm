@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
@@ -370,7 +371,8 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct source replay delivery authority: %v", err)
 	}
-	sourceProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, sourceEventID, sourceRunID, []events.DeliveryRoute{sourceRoute}, sourceAuthority)
+	effects := runforkrevision.NewEffects()
+	sourceProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, effects, sourceEventID, sourceRunID, []events.DeliveryRoute{sourceRoute}, sourceAuthority)
 	if err != nil || len(sourceProofs) != 1 {
 		t.Fatalf("commit source replay delivery fixture: proofs=%d err=%v", len(sourceProofs), err)
 	}
@@ -378,7 +380,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("construct fork replay delivery authority: %v", err)
 	}
-	forkProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, replayedEventID, forkRunID, []events.DeliveryRoute{forkRoute}, forkAuthority)
+	forkProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, effects, replayedEventID, forkRunID, []events.DeliveryRoute{forkRoute}, forkAuthority)
 	if err != nil || len(forkProofs) != 1 {
 		t.Fatalf("commit fork replay delivery fixture: proofs=%d err=%v", len(forkProofs), err)
 	}

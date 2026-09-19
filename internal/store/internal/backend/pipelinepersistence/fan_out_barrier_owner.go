@@ -21,6 +21,9 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -35,15 +38,32 @@ func foldFanOutIntentTerminalDispositions(
 	}
 	var cardinality, cursor int
 	var rawStatus string
-	err := db.QueryRowContext(ctx, `
-		SELECT cardinality, cursor, status
-		FROM fan_out_intents
-		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5
-	`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&cardinality, &cursor, &rawStatus)
-	if errors.Is(err, sql.ErrNoRows) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT i.cardinality, i.cursor, i.status, o.run_id IS NOT NULL,
+		       o.ordinal, o.outcome_kind, o.event_id, o.source_event_id, o.inherited_disposition
+		FROM fan_out_intents i
+		LEFT JOIN fan_out_outcomes o ON o.run_id=i.run_id
+		 AND o.triggering_delivery_id=i.triggering_delivery_id AND o.flow_path=i.flow_path
+		 AND o.declaration_family=i.declaration_family AND o.semantic_path=i.semantic_path
+		WHERE i.run_id=$1 AND i.triggering_delivery_id=$2 AND i.flow_path=$3 AND i.declaration_family=$4 AND i.semantic_path=$5
+		ORDER BY o.ordinal
+	`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
+	if err != nil {
+		return fanoutbarrier.Fold{}, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return fanoutbarrier.Fold{}, err
+		}
 		return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s is missing", key.String())
 	}
-	if err != nil {
+	// Validate the header before converting any outcome, as in the two-query
+	// owner. Presence uses a joined key, never a nullable/corrupt ordinal.
+	var present bool
+	var rawOutcome [5]any
+	if err := rows.Scan(&cardinality, &cursor, &rawStatus, &present,
+		&rawOutcome[0], &rawOutcome[1], &rawOutcome[2], &rawOutcome[3], &rawOutcome[4]); err != nil {
 		return fanoutbarrier.Fold{}, err
 	}
 	status := fanoutobligation.Status(strings.TrimSpace(rawStatus))
@@ -59,15 +79,6 @@ func foldFanOutIntentTerminalDispositions(
 	} else if status != fanoutobligation.StatusOpen && status != fanoutobligation.StatusClosed && status != fanoutobligation.StatusBlocked {
 		return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s has invalid status %q", key.String(), status)
 	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT ordinal, outcome_kind, event_id, source_event_id, inherited_disposition
-		FROM fan_out_outcomes
-		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5
-		ORDER BY ordinal
-	`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
-	if err != nil {
-		return fanoutbarrier.Fold{}, err
-	}
 	type outcomeFact struct {
 		ordinal       int
 		kind          string
@@ -76,13 +87,18 @@ func foldFanOutIntentTerminalDispositions(
 		disposition   sql.NullString
 	}
 	facts := make([]outcomeFact, 0, cursor)
-	for rows.Next() {
-		var fact outcomeFact
-		if err := rows.Scan(&fact.ordinal, &fact.kind, &fact.eventID, &fact.sourceEventID, &fact.disposition); err != nil {
-			rows.Close()
-			return fanoutbarrier.Fold{}, err
+	for {
+		if present {
+			var fact outcomeFact
+			if err := rows.Scan(&cardinality, &cursor, &rawStatus, &present,
+				&fact.ordinal, &fact.kind, &fact.eventID, &fact.sourceEventID, &fact.disposition); err != nil {
+				return fanoutbarrier.Fold{}, err
+			}
+			facts = append(facts, fact)
 		}
-		facts = append(facts, fact)
+		if !rows.Next() {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -98,70 +114,111 @@ func foldFanOutIntentTerminalDispositions(
 	if postgres {
 		adapter = postgresDeliveryAdapter
 	}
-	for ordinal, fact := range facts {
-		if fact.ordinal != ordinal {
-			return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s outcome ordinal %d is not contiguous at %d", key.String(), fact.ordinal, ordinal)
+	// Bound retained decoded events as well as SQL parameters. The original
+	// compact ordinal facts remain the complete membership proof for the fold.
+	for start := 0; start < len(facts); start += 128 {
+		batch := facts[start:min(start+128, len(facts))]
+		var eventIDs []string
+		for _, fact := range batch {
+			if fanoutobligation.OutcomeKind(strings.TrimSpace(fact.kind)) == fanoutobligation.OutcomeCommitted &&
+				!fact.sourceEventID.Valid && fact.eventID.Valid {
+				eventIDs = append(eventIDs, fact.eventID.String)
+			}
 		}
-		switch fanoutobligation.OutcomeKind(strings.TrimSpace(fact.kind)) {
-		case fanoutobligation.OutcomeSemanticRejected:
-			if fact.eventID.Valid || fact.sourceEventID.Valid || fact.disposition.Valid {
-				return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s rejected ordinal %d carries settlement identity", key.String(), ordinal)
-			}
-			fold.Summary.SemanticRejected++
-		case fanoutobligation.OutcomeCommitted:
-			if fact.sourceEventID.Valid {
-				if fact.eventID.Valid || !fact.disposition.Valid {
-					return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s inherited ordinal %d has contradictory settlement evidence", key.String(), ordinal)
+		var admitted []eventrecord.AdmittedRecord
+		if postgres {
+			admitted, err = eventrecordpostgres.LoadAdmittedMany(ctx, db, eventIDs)
+		} else {
+			admitted, err = eventrecordsqlite.LoadAdmittedMany(ctx, db, eventIDs)
+		}
+		if err != nil {
+			var corrupt *eventrecord.CorruptError
+			if errors.As(err, &corrupt) {
+				for _, fact := range batch {
+					if fact.eventID.String == corrupt.EventID {
+						return fanoutbarrier.Fold{}, fmt.Errorf("load fan-out ordinal %d settlement: %w", fact.ordinal, err)
+					}
 				}
-				switch fanoutobligation.InheritedTerminalDisposition(strings.TrimSpace(fact.disposition.String)) {
-				case fanoutobligation.InheritedSucceeded:
-					fold.Summary.Succeeded++
-				case fanoutobligation.InheritedDeadLettered:
-					fold.Summary.DeadLettered++
-				case fanoutobligation.InheritedNoRoute:
-					fold.Summary.NoRoute++
-				default:
-					return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s inherited ordinal %d has invalid terminal disposition %q", key.String(), ordinal, fact.disposition.String)
+			}
+			return fanoutbarrier.Fold{}, fmt.Errorf("load fan-out settlement batch: %w", err)
+		}
+		settlements := make(map[string]eventrecord.AdmittedRecord, len(admitted))
+		for i, record := range admitted {
+			if record.Event.Event().RunID() != key.RunID {
+				return fanoutbarrier.Fold{}, fmt.Errorf("fan-out outcome event %s belongs to another run", eventIDs[i])
+			}
+			settlements[eventIDs[i]] = record
+		}
+		deliveriesByEvent, err := adapter.SnapshotsForEvents(ctx, db, eventIDs)
+		if err != nil {
+			return fanoutbarrier.Fold{}, fmt.Errorf("load fan-out delivery batch: %w", err)
+		}
+		for offset, fact := range batch {
+			ordinal := start + offset
+			if fact.ordinal != ordinal {
+				return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s outcome ordinal %d is not contiguous at %d", key.String(), fact.ordinal, ordinal)
+			}
+			switch fanoutobligation.OutcomeKind(strings.TrimSpace(fact.kind)) {
+			case fanoutobligation.OutcomeSemanticRejected:
+				if fact.eventID.Valid || fact.sourceEventID.Valid || fact.disposition.Valid {
+					return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s rejected ordinal %d carries settlement identity", key.String(), ordinal)
 				}
-				continue
-			}
-			if !fact.eventID.Valid || fact.disposition.Valid {
-				return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s owned ordinal %d has contradictory settlement evidence", key.String(), ordinal)
-			}
-			_, settlement, err := loadFanOutSourceEvent(ctx, db, fact.eventID.String, postgres)
-			if err != nil {
-				return fanoutbarrier.Fold{}, fmt.Errorf("load fan-out ordinal %d settlement: %w", ordinal, err)
-			}
-			deliveries, err := adapter.SnapshotsForEvent(ctx, db, fact.eventID.String)
-			if err != nil {
-				return fanoutbarrier.Fold{}, fmt.Errorf("load fan-out ordinal %d deliveries: %w", ordinal, err)
-			}
-			switch {
-			case settlement.NoDelivery() && len(deliveries) == 0:
-				fold.Summary.NoRoute++
-			case settlement.Delivered() && len(deliveries) > 0:
-				allTerminal := true
-				deadLettered := false
+				fold.Summary.SemanticRejected++
+			case fanoutobligation.OutcomeCommitted:
+				if fact.sourceEventID.Valid {
+					if fact.eventID.Valid || !fact.disposition.Valid {
+						return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s inherited ordinal %d has contradictory settlement evidence", key.String(), ordinal)
+					}
+					switch fanoutobligation.InheritedTerminalDisposition(strings.TrimSpace(fact.disposition.String)) {
+					case fanoutobligation.InheritedSucceeded:
+						fold.Summary.Succeeded++
+					case fanoutobligation.InheritedDeadLettered:
+						fold.Summary.DeadLettered++
+					case fanoutobligation.InheritedNoRoute:
+						fold.Summary.NoRoute++
+					default:
+						return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s inherited ordinal %d has invalid terminal disposition %q", key.String(), ordinal, fact.disposition.String)
+					}
+					continue
+				}
+				if !fact.eventID.Valid || fact.disposition.Valid {
+					return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s owned ordinal %d has contradictory settlement evidence", key.String(), ordinal)
+				}
+				admitted := settlements[fact.eventID.String]
+				settlement := admitted.Settlement
+				deliveries := deliveriesByEvent[admitted.Event.ID()]
 				for _, delivery := range deliveries {
-					if !delivery.Terminal() {
-						allTerminal = false
-					}
-					if delivery.Status == runtimedelivery.StatusDeadLetter {
-						deadLettered = true
+					if delivery.RunID != key.RunID || delivery.EventID != admitted.Event.ID() {
+						return fanoutbarrier.Fold{}, fmt.Errorf("fan-out ordinal %d delivery belongs to another run or event", ordinal)
 					}
 				}
-				if !allTerminal {
-					fold.PendingCommitted++
-				} else if deadLettered {
-					fold.Summary.DeadLettered++
-				} else {
-					fold.Summary.Succeeded++
+				switch {
+				case settlement.NoDelivery() && len(deliveries) == 0:
+					fold.Summary.NoRoute++
+				case settlement.Delivered() && len(deliveries) > 0:
+					allTerminal := true
+					deadLettered := false
+					for _, delivery := range deliveries {
+						if !delivery.Terminal() {
+							allTerminal = false
+						}
+						if delivery.Status == runtimedelivery.StatusDeadLetter {
+							deadLettered = true
+						}
+					}
+					if !allTerminal {
+						fold.PendingCommitted++
+					} else if deadLettered {
+						fold.Summary.DeadLettered++
+					} else {
+						fold.Summary.Succeeded++
+					}
+				default:
+					return fanoutbarrier.Fold{}, fmt.Errorf("fan-out ordinal %d route and delivery settlement are contradictory", ordinal)
 				}
 			default:
-				return fanoutbarrier.Fold{}, fmt.Errorf("fan-out ordinal %d route and delivery settlement are contradictory", ordinal)
+				return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s ordinal %d has invalid outcome kind %q", key.String(), ordinal, fact.kind)
 			}
-		default:
-			return fanoutbarrier.Fold{}, fmt.Errorf("fan-out barrier intent %s ordinal %d has invalid outcome kind %q", key.String(), ordinal, fact.kind)
 		}
 	}
 	if err := fold.Validate(); err != nil {
@@ -415,7 +472,7 @@ func advanceFanOutDeliveryBarriersTx(
 		if err != nil || changed != 1 {
 			return nil, fmt.Errorf("fan-out barrier close lost exact armed owner")
 		}
-		if err := effects.Add(runID, privaterunforkrevision.FamilyFanOutObligations); err != nil {
+		if err := addFanOutBarrierRevisionEffect(effects, registration.IntentKey); err != nil {
 			return nil, err
 		}
 	}
@@ -453,7 +510,7 @@ func suppressSupersededArmedFanOutBarrierTx(
 	if err != nil || changed != 1 {
 		return fmt.Errorf("fan-out barrier generation suppression lost exact armed owner")
 	}
-	return effects.Add(registration.IntentKey.RunID, privaterunforkrevision.FamilyFanOutObligations)
+	return addFanOutBarrierRevisionEffect(effects, registration.IntentKey)
 }
 
 func suppressSupersededPendingFanOutBarriersTx(
@@ -499,7 +556,7 @@ func suppressSupersededPendingFanOutBarriersTx(
 		if err != nil || changed != 1 {
 			return fmt.Errorf("fan-out barrier generation suppression lost exact pending owner")
 		}
-		if err := effects.Add(runID, privaterunforkrevision.FamilyFanOutObligations); err != nil {
+		if err := addFanOutBarrierRevisionEffect(effects, registration.IntentKey); err != nil {
 			return err
 		}
 	}
@@ -657,7 +714,11 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 		if err != nil || changed != 1 {
 			return fmt.Errorf("fan-out barrier dead-letter terminalization lost exact pending owner")
 		}
-		if err := effects.Add(runID, privaterunforkrevision.FamilyFanOutObligations); err != nil {
+		key := fanoutobligation.IntentKey{
+			RunID: runID, TriggeringDeliveryID: item.triggeringDeliveryID,
+			ElementRef: runtimecontracts.FanOutElementRef{FlowPath: item.flowPath, Family: item.declarationFamily, SemanticPath: item.semanticPath},
+		}
+		if err := addFanOutBarrierRevisionEffect(effects, key); err != nil {
 			return err
 		}
 	}
@@ -752,7 +813,7 @@ func suppressRunTerminalFanOutBarriersTx(
 		if err != nil || changed != 1 {
 			return fmt.Errorf("run-terminal fan-out barrier suppression lost exact owner")
 		}
-		if err := effects.Add(runID, privaterunforkrevision.FamilyFanOutObligations); err != nil {
+		if err := addFanOutBarrierRevisionEffect(effects, candidate.key); err != nil {
 			return err
 		}
 	}
@@ -893,11 +954,11 @@ func materializeRunForkFanOutBarrierTx(
 	registration.PlanRef = selectedRef
 	registration.Handle = handle
 	registration.CreatedAt = at.UTC()
-	if err := commitFanOutBarrierRegistrationTx(ctx, tx, postgres, registration); err != nil {
+	if err := commitFanOutBarrierRegistrationTx(ctx, tx, postgres, effects, registration); err != nil {
 		return err
 	}
 	if source.Status == fanoutbarrier.StatusArmed {
-		return effects.Add(forkRunID, privaterunforkrevision.FamilyFanOutObligations)
+		return nil
 	}
 	var summaryRaw any
 	if source.Summary != nil {
@@ -945,13 +1006,14 @@ func materializeRunForkFanOutBarrierTx(
 	if err != nil || changed != 1 {
 		return fmt.Errorf("fork fan-out barrier materialization lost exact armed owner")
 	}
-	return effects.Add(forkRunID, privaterunforkrevision.FamilyFanOutObligations)
+	return addFanOutBarrierRevisionEffect(effects, registration.IntentKey)
 }
 
 func commitFanOutBarrierRegistrationTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
+	effects *privaterunforkrevision.Effects,
 	registration fanoutbarrier.Registration,
 ) error {
 	if tx == nil {
@@ -1010,7 +1072,7 @@ func commitFanOutBarrierRegistrationTx(
 	if err != nil {
 		return fmt.Errorf("insert fan-out delivery barrier: %w", err)
 	}
-	return nil
+	return addFanOutBarrierRevisionEffect(effects, registration.IntentKey)
 }
 
 func commitFanOutBarrierCompletionTx(
@@ -1076,5 +1138,13 @@ func commitFanOutBarrierCompletionTx(
 	if err != nil || changed != 1 {
 		return fmt.Errorf("fan-out barrier completion lost exact closed owner")
 	}
-	return effects.Add(runID, privaterunforkrevision.FamilyFanOutObligations)
+	return addFanOutBarrierRevisionEffect(effects, key)
+}
+
+func addFanOutBarrierRevisionEffect(effects *privaterunforkrevision.Effects, key fanoutobligation.IntentKey) error {
+	ref, err := privaterunforkrevision.FanOutBarrierFact(key)
+	if err != nil {
+		return err
+	}
+	return effects.AddFacts(key.RunID, ref)
 }

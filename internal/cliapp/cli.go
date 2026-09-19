@@ -221,6 +221,7 @@ func newRunGroupCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Com
 	cmd.AddCommand(
 		newRunCommand(root, opts),
 		newRunsCommand(opts),
+		newRunFanOutCommand(opts),
 		newStatusCommand(opts),
 		newTraceCommand(opts),
 		newForkCommand(opts),

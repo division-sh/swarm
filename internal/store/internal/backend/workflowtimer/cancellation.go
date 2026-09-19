@@ -65,7 +65,7 @@ func CancelRunsTx(ctx context.Context, tx *sql.Tx, postgres bool, effects *priva
 		if err != nil || changed != 1 {
 			return nil, fmt.Errorf("workflow timer %s cancellation changed %d rows: %w", ref.ActivationID, changed, err)
 		}
-		if err := effects.Add(ref.RunID, privaterunforkrevision.FamilyTimers); err != nil {
+		if err := effects.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID); err != nil {
 			return nil, err
 		}
 	}

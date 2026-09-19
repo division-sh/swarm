@@ -46,6 +46,8 @@ type ProfilePolicy struct {
 type UnitPolicy struct {
 	Packages      []string `yaml:"packages"`
 	Run           string   `yaml:"run,omitempty"`
+	Skip          string   `yaml:"skip,omitempty"`
+	GoTimeout     string   `yaml:"go_timeout,omitempty"`
 	CountMode     string   `yaml:"count_mode"`
 	EnvironmentID string   `yaml:"environment_id"`
 	BudgetClass   string   `yaml:"budget_class"`
@@ -146,13 +148,16 @@ func (p Policy) Validate() error {
 		if strings.TrimSpace(unit.EnvironmentID) == "" {
 			problems = append(problems, fmt.Sprintf("units.%s.environment_id must be non-empty", name))
 		}
-		if unit.BudgetClass != "broad" && unit.BudgetClass != "full" {
+		if unit.BudgetClass != "broad" && unit.BudgetClass != "full" && unit.BudgetClass != "soak" {
 			problems = append(problems, fmt.Sprintf("units.%s.budget_class %q is unsupported", name, unit.BudgetClass))
 		}
 		if unit.Run != "" {
 			if _, err := regexp.Compile(unit.Run); err != nil {
 				problems = append(problems, fmt.Sprintf("units.%s.run %q: %v", name, unit.Run, err))
 			}
+		}
+		if err := validateSoakSelection(unit.Packages, unit.Run, unit.Skip, unit.GoTimeout, unit.CountMode, unit.BudgetClass); err != nil {
+			problems = append(problems, fmt.Sprintf("units.%s: %v", name, err))
 		}
 	}
 	for name, projection := range p.Projections {

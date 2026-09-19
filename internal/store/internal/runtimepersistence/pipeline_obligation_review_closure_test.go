@@ -20,6 +20,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -841,7 +842,9 @@ func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, ev
 	if err != nil {
 		return err
 	}
-	inserted, err := eventrecordpostgres.Insert(ctx, tx, record)
+	// Snapshot fixtures intentionally omit history publication.
+	effects := runforkrevision.NewEffects()
+	inserted, err := eventrecordpostgres.Insert(ctx, tx, effects, record)
 	if err != nil {
 		return err
 	}
@@ -851,6 +854,7 @@ func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, ev
 	return insertCommittedPipelineScopeTx(
 		ctx,
 		tx,
+		effects,
 		event.ID(),
 		runtimepipelineobligation.ScopeDirect,
 		true,

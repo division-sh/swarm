@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -144,6 +145,8 @@ type processCapability struct {
 	monitorMu       sync.Mutex
 	session         RetainedSession
 	grants          map[string]*generationGrant
+	fanOutCapacity  *fanOutCapacityState
+	fanOutClosing   bool
 	done            chan struct{}
 	doneOnce        sync.Once
 	terminal        TerminalResult
@@ -154,11 +157,12 @@ type processCapability struct {
 }
 
 type generationGrant struct {
-	mu       sync.Mutex
-	owner    *processCapability
-	evidence GrantEvidence
-	done     chan struct{}
-	doneOnce sync.Once
+	mu        sync.Mutex
+	owner     *processCapability
+	evidence  GrantEvidence
+	done      chan struct{}
+	doneOnce  sync.Once
+	testProbe atomic.Pointer[GenerationGrantFaultProbeForTest]
 }
 
 type liveGenerationGrant struct {
@@ -348,6 +352,12 @@ func (p *processCapability) commitSourceSet(ctx context.Context, operation runti
 func (p *processCapability) Release(ctx context.Context) error {
 	if p == nil {
 		return nil
+	}
+	// Join serving before acquiring opMu: an admitted turn may still need that
+	// mutex to prove its generation or settle its exact claim. Never release
+	// selected-store possession while workers or the observer can still use it.
+	if err := p.stopFanOutServing(ctx); err != nil {
+		return err
 	}
 	p.stopPossessionMonitor()
 	p.opMu.Lock()
@@ -600,6 +610,11 @@ func (g *generationGrant) Evidence() (GrantEvidence, error) {
 	if g == nil {
 		return GrantEvidence{}, errors.New("runtime generation grant is missing")
 	}
+	if probe := g.testProbe.Load(); probe != nil && probe.EvidenceError != nil {
+		if err := probe.EvidenceError(); err != nil {
+			return GrantEvidence{}, err
+		}
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if err := g.owner.requireLive(); err != nil {
@@ -682,6 +697,13 @@ func (g *generationGrant) ProveCurrent(ctx context.Context) error {
 }
 
 func (g *generationGrant) MarkProbesSettled(ctx context.Context, surfaceIDs []string) (GrantEvidence, error) {
+	if g != nil {
+		if probe := g.testProbe.Load(); probe != nil && probe.BeforeSettlement != nil {
+			if err := probe.BeforeSettlement(); err != nil {
+				return GrantEvidence{}, err
+			}
+		}
+	}
 	return g.transition(ctx, GrantPrepared, GrantProbeSettled, surfaceIDs)
 }
 
@@ -797,9 +819,17 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 	return result, g.owner.requireLive()
 }
 
-func (g *generationGrant) Retire(ctx context.Context) error {
+func (g *generationGrant) Retire(ctx context.Context) (err error) {
 	if g == nil || g.owner == nil {
 		return nil
+	}
+	if probe := g.testProbe.Load(); probe != nil {
+		if probe.BeforeRetirement != nil {
+			probe.BeforeRetirement()
+		}
+		if probe.AfterRetirementError != nil {
+			defer func() { err = errors.Join(err, probe.AfterRetirementError()) }()
+		}
 	}
 	g.owner.opMu.Lock()
 	defer g.owner.opMu.Unlock()
@@ -842,8 +872,16 @@ func (g *generationGrant) retireLocal() {
 	g.doneOnce.Do(func() {
 		g.mu.Lock()
 		g.evidence.State = GrantRetired
+		grantID := g.evidence.GrantID
 		g.mu.Unlock()
 		close(g.done)
+		g.owner.mu.Lock()
+		if budget := g.owner.fanOutCapacity; budget != nil {
+			if r := budget.registrations[grantID]; r != nil && r.grant == g {
+				delete(budget.registrations, grantID)
+			}
+		}
+		g.owner.mu.Unlock()
 	})
 }
 

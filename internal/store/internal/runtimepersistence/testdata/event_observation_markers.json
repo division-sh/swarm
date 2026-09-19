@@ -1,0 +1,10 @@
+[
+  {"path":"internal/runtime/conformance/fan_out_semantic_sql_fault_test.go","scope":"semanticProofSQLFault.afterInsert","literal":"insert into events "},
+  {"path":"internal/store/internal/runtimepersistence/fan_out_group_identity_proof_test.go","scope":"TestFanOutPublicationGroupSafeRollbackBisectionBothStores","literal":"insert into events"},
+  {"path":"internal/store/internal/runtimepersistence/fan_out_group_identity_proof_test.go","scope":"TestFanOutPublicationGroupJoinedFailureCannotAuthorizeBisectionBothStores","literal":"insert into events"},
+  {"path":"internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go","scope":"const:diagnosticEventInsertSQL","literal":"insert into events"},
+  {"path":"internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go","scope":"TestLifecycleDiagnosticCleanupTransactionInterleavingsBothStores","literal":"SELECT 'insert into events ( returning delete from \"runs\"'"},
+  {"path":"internal/store/internal/runtimepersistence/lifecycle_diagnostic_barrier_adapter_test.go","scope":"TestLifecycleDiagnosticInsertBarrierMatching","literal":"\n INSERT INTO events (event_id) VALUES ($1)\n RETURNING event_id"},
+  {"path":"internal/store/internal/runtimepersistence/lifecycle_diagnostic_barrier_adapter_test.go","scope":"TestLifecycleDiagnosticInsertBarrierMatching","literal":"SELECT 'insert into events ( returning event_id'"},
+  {"path":"internal/store/internal/runtimepersistence/lifecycle_diagnostic_barrier_adapter_test.go","scope":"TestLifecycleDiagnosticInsertBarrierMatching","literal":"INSERT INTO events (event_id) VALUES ($1)"}
+]

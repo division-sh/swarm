@@ -64,7 +64,7 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 		}
 
 		type row struct {
-			sessionID, status              string
+			sessionID, runID, status       string
 			providerSessionID, retryReason sql.NullString
 			retriesFrom, leaseHolder       sql.NullString
 			leaseExpires                   sql.NullTime
@@ -73,7 +73,7 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 		}
 		var current row
 		err := tx.QueryRowContext(sqlCtx, `
-			SELECT session_id::text, status,
+			SELECT session_id::text, run_id::text, status,
 			       NULLIF(runtime_state->>'provider_session_id', ''), NULLIF(runtime_state->>'retry_reason', ''),
 			       NULLIF(runtime_state->>'retries_from_session_id', ''), lease_holder, lease_expires_at,
 			       COALESCE(conversation, '[]'::jsonb), COALESCE(runtime_state, '{}'::jsonb), COALESCE(turn_count, 0)
@@ -85,7 +85,7 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 			ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, created_at DESC
 			LIMIT 1 FOR UPDATE
 		`, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(
-			&current.sessionID, &current.status, &current.providerSessionID, &current.retryReason,
+			&current.sessionID, &current.runID, &current.status, &current.providerSessionID, &current.retryReason,
 			&current.retriesFrom, &current.leaseHolder, &current.leaseExpires,
 			&current.conversation, &current.runtimeState, &current.turnCount,
 		)
@@ -101,15 +101,16 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 			current.runtimeState = []byte("{}")
 			current.leaseHolder = sql.NullString{String: lockOwner, Valid: true}
 			current.leaseExpires = sql.NullTime{Time: now.Add(s.postgresSessionLockTTL()), Valid: true}
-			if _, err := tx.ExecContext(sqlCtx, `
+			if err := tx.QueryRowContext(sqlCtx, `
 				INSERT INTO agent_sessions (
 					session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 					agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
 					conversation, turn_count, runtime_state, lease_holder, lease_expires_at,
 					status, created_at, updated_at
 				) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]'::jsonb, 0, '{}'::jsonb, $10, $11, 'active', $12, $12)
+				RETURNING session_id::text, run_id::text
 			`, current.sessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lockOwner, current.leaseExpires.Time, now); err != nil {
+				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lockOwner, current.leaseExpires.Time, now).Scan(&current.sessionID, &current.runID); err != nil {
 				return fmt.Errorf("insert live session: %w", err)
 			}
 		} else if err != nil {
@@ -150,7 +151,7 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 			RetryReason: strings.TrimSpace(current.retryReason.String), RetriesFromSessionID: strings.TrimSpace(current.retriesFrom.String),
 			LockOwner: lockOwner, ExpiresAt: current.leaseExpires.Time,
 		}
-		effects, err := agentSessionEffects(identity.RunID)
+		effects, err := agentSessionEffects(current.runID, current.sessionID)
 		if err != nil {
 			return err
 		}
@@ -187,19 +188,21 @@ func (s *LLMPostgresOwner) Release(ctx context.Context, lease *runtimesessions.L
 		if err := storerunstate.RequirePostgresActiveTx(sqlCtx, tx, identity.RunID); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(sqlCtx, `
+		var storedSessionID, storedRunID string
+		err := tx.QueryRowContext(sqlCtx, `
 			UPDATE agent_sessions SET lease_holder=NULL, lease_expires_at=NULL, updated_at=now()
 			WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3
 			  AND agent_name_source=$4 AND agent_route_presence=$5 AND flow_scope_key=$6
 			  AND flow_instance_id=$7 AND flow_instance=$8 AND session_id=$9::uuid
 			  AND lease_holder=$10 AND status='active'
+			RETURNING session_id::text, run_id::text
 		`, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lease.SessionID, lease.LockOwner)
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lease.SessionID, lease.LockOwner).Scan(&storedSessionID, &storedRunID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("no active lease to release for agent=%s session=%s", identity.AgentID(), lease.SessionID)
+		}
 		if err != nil {
 			return fmt.Errorf("release live session lease: %w", err)
-		}
-		if rows, _ := res.RowsAffected(); rows == 0 {
-			return fmt.Errorf("no active lease to release for agent=%s session=%s", identity.AgentID(), lease.SessionID)
 		}
 		request, err := storerunlifecycle.RequestPostgresCompletionCandidateTx(sqlCtx, tx, identity.RunID, nil)
 		if err != nil {
@@ -208,7 +211,7 @@ func (s *LLMPostgresOwner) Release(ctx context.Context, lease *runtimesessions.L
 		if err := handoff.Prepare(s.runLifecycleCandidates, request); err != nil {
 			return err
 		}
-		effects, err := agentSessionEffects(identity.RunID)
+		effects, err := agentSessionEffects(storedRunID, storedSessionID)
 		if err != nil {
 			return err
 		}
@@ -247,19 +250,19 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 		if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "rotate", false); err != nil {
 			return err
 		}
-		var currentID string
+		var currentID, currentRunID string
 		var existingOwner sql.NullString
 		var existingExpiry sql.NullTime
 		var runtimeStateRaw []byte
 		if err := tx.QueryRowContext(sqlCtx, `
-			SELECT session_id::text, lease_holder, lease_expires_at, runtime_state
+			SELECT session_id::text, run_id::text, lease_holder, lease_expires_at, runtime_state
 			FROM agent_sessions
 			WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3
 			  AND agent_name_source=$4 AND agent_route_presence=$5 AND flow_scope_key=$6
 			  AND flow_instance_id=$7 AND flow_instance=$8 AND status='active'
 			ORDER BY created_at DESC LIMIT 1 FOR UPDATE
 		`, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&currentID, &existingOwner, &existingExpiry, &runtimeStateRaw); err != nil {
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&currentID, &currentRunID, &existingOwner, &existingExpiry, &runtimeStateRaw); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("no active session to rotate for agent=%s", identity.AgentID())
 			}
@@ -302,15 +305,17 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 			return err
 		}
 		expires := now.Add(s.postgresSessionLockTTL())
-		if _, err := tx.ExecContext(sqlCtx, `
+		var newRunID string
+		if err := tx.QueryRowContext(sqlCtx, `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 				memory_enabled, memory_source, conversation, turn_count, runtime_state,
 				lease_holder, lease_expires_at, status, created_at, updated_at
 			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,'active',$13,$13)
+			RETURNING session_id::text, run_id::text
 		`, newID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, string(runtimeState), lockOwner, expires, now); err != nil {
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, string(runtimeState), lockOwner, expires, now).Scan(&newID, &newRunID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(sqlCtx, `UPDATE agent_sessions SET successor_session_id=$2::uuid, updated_at=$3 WHERE session_id=$1::uuid AND status='terminated'`, currentID, newID, now); err != nil {
@@ -330,8 +335,11 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 		if err := handoff.Prepare(s.runLifecycleCandidates, request); err != nil {
 			return err
 		}
-		effects, err := agentSessionEffects(identity.RunID)
+		effects, err := agentSessionEffects(currentRunID, currentID)
 		if err != nil {
+			return err
+		}
+		if err := addAgentSessionFacts(effects, newRunID, newID); err != nil {
 			return err
 		}
 		lease = &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: currentID, LockOwner: lockOwner, ExpiresAt: expires}
@@ -360,20 +368,22 @@ func (s *LLMPostgresOwner) IncrementTurn(ctx context.Context, identity agentmemo
 		if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "increment_turn", false); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(sqlCtx, `
+		var storedSessionID, storedRunID string
+		err := tx.QueryRowContext(sqlCtx, `
 			UPDATE agent_sessions SET turn_count=turn_count+1, updated_at=now()
 			WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3
 			  AND agent_name_source=$4 AND agent_route_presence=$5 AND flow_scope_key=$6
 			  AND flow_instance_id=$7 AND flow_instance=$8 AND session_id=$9::uuid AND status='active'
+			RETURNING session_id::text, run_id::text
 		`, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, sessionID)
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, sessionID).Scan(&storedSessionID, &storedRunID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("session not found for turn increment: run=%s agent=%s flow=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), sessionID)
+		}
 		if err != nil {
 			return err
 		}
-		if rows, _ := res.RowsAffected(); rows == 0 {
-			return fmt.Errorf("session not found for turn increment: run=%s agent=%s flow=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), sessionID)
-		}
-		effects, err := agentSessionEffects(identity.RunID)
+		effects, err := agentSessionEffects(storedRunID, storedSessionID)
 		if err != nil {
 			return err
 		}
@@ -408,18 +418,18 @@ func (s *LLMPostgresOwner) AdoptSessionID(ctx context.Context, identity agentmem
 		if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "adopt_provider_session", false); err != nil {
 			return err
 		}
-		var sessionID string
+		var sessionID, storedRunID string
 		var owner sql.NullString
 		var expiry sql.NullTime
 		if err := tx.QueryRowContext(sqlCtx, `
-			SELECT session_id::text, lease_holder, lease_expires_at
+			SELECT session_id::text, run_id::text, lease_holder, lease_expires_at
 			FROM agent_sessions
 			WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3
 			  AND agent_name_source=$4 AND agent_route_presence=$5 AND flow_scope_key=$6
 			  AND flow_instance_id=$7 AND flow_instance=$8 AND status='active'
 			ORDER BY created_at DESC LIMIT 1 FOR UPDATE
 		`, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&sessionID, &owner, &expiry); err != nil {
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&sessionID, &storedRunID, &owner, &expiry); err != nil {
 			return err
 		}
 		var now time.Time
@@ -447,7 +457,7 @@ func (s *LLMPostgresOwner) AdoptSessionID(ctx context.Context, identity agentmem
 		if err := handoff.Prepare(s.runLifecycleCandidates, request); err != nil {
 			return err
 		}
-		effects, err := agentSessionEffects(identity.RunID)
+		effects, err := agentSessionEffects(storedRunID, sessionID)
 		if err != nil {
 			return err
 		}
@@ -507,13 +517,13 @@ func (s *LLMPostgresOwner) ResetAll(metadata runtimesessions.ResetMetadata) (run
 		seenRuns := make(map[string]struct{}, len(summary.OrphanedSessions))
 		effects := emptyRunForkRevisionEffects()
 		for _, disposition := range summary.OrphanedSessions {
+			if err := addAgentSessionFacts(effects, disposition.RunID, disposition.SessionID); err != nil {
+				return err
+			}
 			if _, exists := seenRuns[disposition.RunID]; exists {
 				continue
 			}
 			seenRuns[disposition.RunID] = struct{}{}
-			if err := addAgentSessionEffect(effects, disposition.RunID); err != nil {
-				return err
-			}
 			request, err := storerunlifecycle.RequestPostgresCompletionCandidateTx(sqlCtx, tx, disposition.RunID, nil)
 			if err != nil {
 				return err

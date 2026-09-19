@@ -15,7 +15,7 @@ import (
 
 const (
 	BudgetPolicyVersion    = 1
-	CommandEvidenceVersion = 3
+	CommandEvidenceVersion = 4
 	BudgetResultVersion    = 1
 
 	AttemptPrimary        = "primary"
@@ -31,6 +31,7 @@ type BudgetPolicy struct {
 type HardBudgets struct {
 	MaxShardCommandSeconds        CommandBudget `yaml:"max_shard_command_seconds"`
 	FullConformanceCommandSeconds CommandBudget `yaml:"full_conformance_command_seconds"`
+	MandatorySoakCommandSeconds   CommandBudget `yaml:"mandatory_soak_command_seconds"`
 }
 
 type CommandBudget struct {
@@ -53,6 +54,9 @@ type CommandEvidence struct {
 	Packages        []string `json:"packages"`
 	EnvironmentID   string   `json:"environment_id"`
 	CountMode       string   `json:"count_mode"`
+	Run             string   `json:"run,omitempty"`
+	Skip            string   `json:"skip,omitempty"`
+	GoTimeout       string   `json:"go_timeout,omitempty"`
 	Report          Report   `json:"report"`
 }
 
@@ -146,6 +150,12 @@ func validateBudgetPolicy(policy BudgetPolicy, document *yaml.Node) error {
 		{"hard.max_shard_command_seconds", policy.Hard.MaxShardCommandSeconds},
 		{"hard.full_conformance_command_seconds", policy.Hard.FullConformanceCommandSeconds},
 	}
+	if mappingPath(document, "hard", "mandatory_soak_command_seconds") != nil {
+		budgets = append(budgets, struct {
+			name   string
+			budget CommandBudget
+		}{"hard.mandatory_soak_command_seconds", policy.Hard.MandatorySoakCommandSeconds})
+	}
 	for _, item := range budgets {
 		if !finitePositive(item.budget.LimitSeconds) {
 			return fmt.Errorf("%s.limit_seconds must be a finite positive number", item.name)
@@ -220,6 +230,10 @@ func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan
 		if evidence.Attempt == AttemptPrimary && evidence.CountMode != unit.CountMode {
 			problems = append(problems, fmt.Sprintf("count_mode %q does not match unit %q", evidence.CountMode, unit.CountMode))
 		}
+		if evidence.Run != unit.Run || evidence.Skip != unit.Skip || evidence.GoTimeout != unit.GoTimeout {
+			problems = append(problems, "run/skip/Go timeout does not match planned selection")
+		}
+		problems = append(problems, soakEvidenceProblems(unit, evidence)...)
 	}
 	if evidence.Attempt != AttemptPrimary {
 		problems = append(problems, fmt.Sprintf("attempt %q is unsupported", evidence.Attempt))
@@ -604,6 +618,12 @@ func (result BudgetResult) ExitCode() int {
 }
 
 func (policy BudgetPolicy) budgetForClass(class string) (CommandBudget, error) {
+	if class == "soak" {
+		if !finitePositive(policy.Hard.MandatorySoakCommandSeconds.LimitSeconds) {
+			return CommandBudget{}, fmt.Errorf("mandatory soak budget is missing")
+		}
+		return policy.Hard.MandatorySoakCommandSeconds, nil
+	}
 	if class == "broad" {
 		return policy.Hard.MaxShardCommandSeconds, nil
 	}

@@ -189,7 +189,11 @@ func evalWorkflowValueExpression(base BaseContext, state ExecutionState, express
 }
 
 func evalWorkflowValueResult(base BaseContext, state ExecutionState, expression string, opts workflowexpr.ValueExpressionOptions) (workflowexpr.ValueResult, error) {
-	return workflowexpr.EvalValueResultWithOptions(expression, workflowexpr.ValueContext{
+	return workflowexpr.EvalValueResultWithOptions(expression, workflowValueContext(base, state), opts)
+}
+
+func workflowValueContext(base BaseContext, state ExecutionState) workflowexpr.ValueContext {
+	return workflowexpr.ValueContext{
 		Entity:         base.Entity.Raw(),
 		PlatformEntity: base.PlatformEntity.Raw(),
 		Event:          base.Event.Raw(),
@@ -199,10 +203,20 @@ func evalWorkflowValueResult(base BaseContext, state ExecutionState, expression 
 		FanOut:         state.FanOut,
 		Join:           state.Join,
 		Loop:           state.Loop,
-	}, opts)
+	}
 }
 
 func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontracts.EmitSpec, opts workflowexpr.ValueExpressionOptions, targetOptions func(string, workflowexpr.ValueExpressionOptions) workflowexpr.ValueExpressionOptions) (map[string]any, error) {
+	return evaluateEmitFields(spec, func(target string, valueSpec runtimecontracts.ExpressionValue) (any, bool, error) {
+		fieldOptions := opts
+		if targetOptions != nil {
+			fieldOptions = targetOptions(target, opts)
+		}
+		return evalExpressionValue(base, state, valueSpec, fieldOptions)
+	})
+}
+
+func evaluateEmitFields(spec runtimecontracts.EmitSpec, evaluate func(string, runtimecontracts.ExpressionValue) (any, bool, error)) (map[string]any, error) {
 	if len(spec.Fields) == 0 {
 		return nil, nil
 	}
@@ -212,11 +226,7 @@ func emitFieldsPayload(base BaseContext, state ExecutionState, spec runtimecontr
 		if target == "" {
 			continue
 		}
-		fieldOptions := opts
-		if targetOptions != nil {
-			fieldOptions = targetOptions(target, opts)
-		}
-		value, ok, err := evalExpressionValue(base, state, valueSpec, fieldOptions)
+		value, ok, err := evaluate(target, valueSpec)
 		if err != nil {
 			return nil, fmt.Errorf("emit field %s: %w", target, err)
 		}

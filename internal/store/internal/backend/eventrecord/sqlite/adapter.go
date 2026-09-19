@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 const hydrationBatchSize = 128
@@ -28,6 +30,36 @@ type Execer interface {
 func HydrationBatchSize() int { return hydrationBatchSize }
 
 func Load(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record, bool, error) {
+	record, found, err := loadRecord(ctx, q, eventID)
+	if err != nil || !found {
+		return eventrecord.Record{}, found, err
+	}
+	if err := record.Validate(); err != nil {
+		return eventrecord.Record{}, false, fmt.Errorf("load sqlite event record: %w", eventrecord.Corrupt(record.EventID, err))
+	}
+	if err := record.ValidateInheritedFanOutOwner(ctx, q, false); err != nil {
+		return eventrecord.Record{}, false, err
+	}
+	return record.Clone(), true, nil
+}
+
+// LoadAdmitted performs one strict admission for consumers of both projections.
+func LoadAdmitted(ctx context.Context, q RowQueryer, eventID string) (events.AdmittedEvent, events.RouteSettlement, bool, error) {
+	record, found, err := loadRecord(ctx, q, eventID)
+	if err != nil || !found {
+		return events.AdmittedEvent{}, events.RouteSettlement{}, found, err
+	}
+	admitted, settlement, err := record.DecodeWithSettlement()
+	if err != nil {
+		return events.AdmittedEvent{}, events.RouteSettlement{}, false, err
+	}
+	if err := record.ValidateInheritedFanOutOwner(ctx, q, false); err != nil {
+		return events.AdmittedEvent{}, events.RouteSettlement{}, false, err
+	}
+	return admitted, settlement, true, nil
+}
+
+func loadRecord(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record, bool, error) {
 	var record eventrecord.Record
 	var createdAt any
 	err := q.QueryRowContext(ctx, selectRecord+` WHERE e.event_id = ?`, strings.TrimSpace(eventID)).Scan(scanTargets(&record, &createdAt)...)
@@ -40,13 +72,7 @@ func Load(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record
 	if err := assignCreatedAt(&record, createdAt); err != nil {
 		return eventrecord.Record{}, false, eventrecord.Corrupt(record.EventID, err)
 	}
-	if err := record.Validate(); err != nil {
-		return eventrecord.Record{}, false, fmt.Errorf("load sqlite event record: %w", eventrecord.Corrupt(record.EventID, err))
-	}
-	if err := record.ValidateInheritedFanOutOwner(ctx, q, false); err != nil {
-		return eventrecord.Record{}, false, err
-	}
-	return record.Clone(), true, nil
+	return record, true, nil
 }
 
 func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.Record, error) {
@@ -82,7 +108,7 @@ func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.
 	return orderRecords(ordered, loaded)
 }
 
-func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, error) {
+func Insert(ctx context.Context, exec Execer, effects *runforkrevision.Effects, record eventrecord.Record) (bool, error) {
 	if err := record.Validate(); err != nil {
 		return false, fmt.Errorf("append sqlite event record: %w", err)
 	}
@@ -109,6 +135,15 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("append sqlite event record: read affected rows: %w", err)
+	}
+	if rows == 1 && record.RunID != "" {
+		ref, err := runforkrevision.NewFactRef(runforkrevision.FamilyEvents, record.EventID)
+		if err != nil {
+			return false, err
+		}
+		if err := effects.AddFacts(record.RunID, ref); err != nil {
+			return false, err
+		}
 	}
 	return rows == 1, nil
 }

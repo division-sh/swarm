@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -14,7 +15,9 @@ type pipelinePublicationClaim struct {
 	bus      *EventBus
 	eventID  string
 	claim    runtimepipelineobligation.Claim
+	opMu     sync.Mutex
 	released atomic.Bool
+	retired  atomic.Bool
 }
 
 func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string) (*pipelinePublicationClaim, error) {
@@ -41,10 +44,15 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) error {
 	if c == nil || c.bus == nil {
 		panic("pipeline publication claim owner is required")
 	}
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
 	var err error
 	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
+	}
+	if c.retired.Load() {
+		return nil
 	}
 	if !c.released.CompareAndSwap(false, true) {
 		return nil
@@ -58,6 +66,15 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) error {
 	return c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
 }
 
+// Retiring exact group callbacks transfers their remaining backend cleanup to
+// the group. Join any callback release already admitted before that transfer;
+// an atomic spent flag alone cannot establish that its SQL has finished.
+func (c *pipelinePublicationClaim) retireToPublicationGroup() {
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	c.retired.Store(true)
+}
+
 func (c *pipelinePublicationClaim) releaseAndLog(ctx context.Context) {
 	if err := c.Release(ctx); err != nil && c != nil && c.bus != nil {
 		c.bus.logRuntime(context.WithoutCancel(ctx), "error", "Releasing foreground pipeline publication claim failed", "eventbus", "pipeline_publication_claim_release_failed", c.eventID, "", "", "", "", nil, nil, eventBusDependencyFailure(err, "pipeline_publication_claim_release_failed", "release_pipeline_publication_claim"), 0)
@@ -68,12 +85,14 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 	if c == nil || c.bus == nil {
 		return fmt.Errorf("pipeline publication claim owner is required")
 	}
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
 	var err error
 	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
-	if !c.released.CompareAndSwap(false, true) {
+	if c.retired.Load() || !c.released.CompareAndSwap(false, true) {
 		return runtimepipelineobligation.ErrStaleClaim
 	}
 	if c.bus.pipelineObligations == nil {
@@ -121,15 +140,20 @@ func (eb *EventBus) settlePipelineObligationOutcome(
 }
 
 func (c *pipelinePublicationClaim) MarkDecisionProcessed(ctx context.Context) error {
+	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
+		return err
+	}
 	if c == nil || c.bus == nil {
 		return fmt.Errorf("pipeline publication claim owner is required")
 	}
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
 	var err error
 	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
 	}
-	if c.released.Load() {
+	if c.retired.Load() || c.released.Load() {
 		return runtimepipelineobligation.ErrStaleClaim
 	}
 	if c.bus.pipelineObligations == nil {

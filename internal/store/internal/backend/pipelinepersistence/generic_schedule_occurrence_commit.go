@@ -41,6 +41,10 @@ func commitGenericScheduleOccurrence(
 
 	result := runtimegenericschedule.CommitResult{}
 	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
+		result = runtimegenericschedule.CommitResult{}
 		acceptedAt, err := stampAcceptedAt(txctx, tx)
 		if err != nil {
 			return fmt.Errorf("stamp generic schedule occurrence acceptance: %w", err)
@@ -103,7 +107,7 @@ func commitGenericScheduleOccurrence(
 			if failErr != nil {
 				return failErr
 			}
-			if err := addTimerRevisionEffects(effects, persisted.Command.RunID); err != nil {
+			if err := addTimerRevisionEffects(effects, persisted.Command.RunID, persisted.ID); err != nil {
 				return err
 			}
 			result = runtimegenericschedule.CommitResult{Outcome: runtimegenericschedule.CommitTerminal, Next: failed}
@@ -119,7 +123,7 @@ func commitGenericScheduleOccurrence(
 		if outcome != runtimegenericschedule.CommitCommitted {
 			return fmt.Errorf("generic schedule changed state after event admission")
 		}
-		if err := addTimerRevisionEffects(effects, next.Command.RunID); err != nil {
+		if err := addTimerRevisionEffects(effects, next.Command.RunID, next.ID); err != nil {
 			return err
 		}
 		if next.Status == runtimegenericschedule.StatusFired && next.Command.RunID != "" {

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 type AdvisoryLockLease struct {
@@ -28,6 +30,7 @@ type AdvisoryLockLease struct {
 }
 
 type SessionAuthority struct {
+	testTransactions        *transactiontest.Slot
 	operationMu             sync.Mutex
 	fenceMu                 sync.Mutex
 	fenced                  atomic.Bool
@@ -413,7 +416,11 @@ func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run fu
 		return errors.New("PostgreSQL transaction is missing")
 	}
 	defer func() {
-		err = errors.Join(err, ctx.Err())
+		// Preserve exact operation evidence when no independent cancellation
+		// occurred. Rollback-only callers distinguish it from joined failures.
+		if callerErr := ctx.Err(); callerErr != nil {
+			err = errors.Join(err, callerErr)
+		}
 	}()
 	return run(context.WithoutCancel(ctx))
 }
@@ -441,6 +448,10 @@ func (l *AdvisoryLockLease) Release(ctx context.Context) error {
 }
 
 func (l *AdvisoryLockLease) releaseWithRetirement(ctx context.Context) error {
+	return l.releaseWithPublicationAdmission(ctx, nil)
+}
+
+func (l *AdvisoryLockLease) releaseWithPublicationAdmission(ctx context.Context, admission *PublicationAdmission) error {
 	if l == nil {
 		return nil
 	}
@@ -463,7 +474,13 @@ func (l *AdvisoryLockLease) releaseWithRetirement(ctx context.Context) error {
 	if l.testBeforeBeginOperation != nil {
 		l.testBeforeBeginOperation()
 	}
-	endOperation, operationErr := session.beginOperation()
+	var endOperation func()
+	var operationErr error
+	if admission == nil {
+		endOperation, operationErr = session.beginOperation()
+	} else {
+		endOperation, operationErr = admission.borrowOperation(session)
+	}
 	if operationErr != nil {
 		discard := session.prepareDiscardExcept(l)
 		actions := l.retireLocked()
@@ -627,6 +644,9 @@ func AcquireAdvisoryLockLeaseWith(
 		return nil, false, fmt.Errorf("acquire advisory lock connection: %w", err)
 	}
 	authority := newSessionAuthority(conn)
+	if backend, ok := db.(*Backend); ok {
+		authority.testTransactions = &backend.testTransactions
+	}
 	return AcquireAdvisoryLockLeaseOnSession(ctx, authority, lockKey, acquire, authority.release)
 }
 
@@ -637,6 +657,13 @@ func AcquireAdvisoryLockLeaseOnSession(
 	acquire AdvisoryLockAcquire,
 	releaseSession func() error,
 ) (lease *AdvisoryLockLease, acquired bool, err error) {
+	return acquireAdvisoryLockLeaseForPublication(ctx, authority, lockKey, acquire, releaseSession, nil)
+}
+
+func acquireAdvisoryLockLeaseForPublication(
+	ctx context.Context, authority *SessionAuthority, lockKey string,
+	acquire AdvisoryLockAcquire, releaseSession func() error, admission *PublicationAdmission,
+) (lease *AdvisoryLockLease, acquired bool, err error) {
 	if authority == nil || releaseSession == nil {
 		return nil, false, errors.New("acquire advisory lock requires private session authority")
 	}
@@ -646,7 +673,12 @@ func AcquireAdvisoryLockLeaseOnSession(
 	if err := ctx.Err(); err != nil {
 		return nil, false, errors.Join(err, releaseSession())
 	}
-	endOperation, err := authority.beginOperation()
+	var endOperation func()
+	if admission == nil {
+		endOperation, err = authority.beginOperation()
+	} else {
+		endOperation, err = admission.borrowOperation(authority)
+	}
 	if err != nil {
 		return nil, false, errors.Join(err, releaseSession())
 	}
@@ -759,12 +791,16 @@ func runAuthorityTransaction(
 	if fn == nil {
 		return false, nil
 	}
+	probe := session.testTransactions.Begin(opts != nil && opts.ReadOnly, true)
+	defer func() { probe.Finish(err) }()
 	tx, err := session.beginTxOptions(ctx, opts)
 	if err != nil {
 		return false, err
 	}
+	probe.Begun()
 	defer func() {
 		if tx != nil {
+			probe.RollbackAttempted()
 			cleanupErr := rollbackSessionTransaction(tx, session)
 			if cleanupErr != nil {
 				slog.Error("postgres retained transaction cleanup failed", "error", cleanupErr)
@@ -773,7 +809,7 @@ func runAuthorityTransaction(
 		}
 	}()
 	if runErr := session.runWithCallerCancellation(ctx, func(operationCtx context.Context) error {
-		return fn(operationCtx, tx)
+		return fn(transactiontest.WithAttempt(operationCtx, probe), tx)
 	}); runErr != nil {
 		return false, runErr
 	}
@@ -783,7 +819,9 @@ func runAuthorityTransaction(
 	if session.fenced.Load() {
 		return false, errors.New("PostgreSQL session authority fenced before COMMIT admission")
 	}
+	probe.BeforeCommit()
 	if commitErr := tx.Commit(); commitErr != nil {
+		probe.CommitFailed()
 		// Fence possession before endTx releases operationMu. A successor must
 		// never borrow the session between ambiguous settlement and disposal.
 		discardErr := session.prepareDiscardExcept(nil).drain()
@@ -791,6 +829,7 @@ func runAuthorityTransaction(
 		tx = nil
 		return false, errors.Join(commitErr, contextError(ctx), endErr, wrapAdvisoryDiscardError(discardErr))
 	}
+	probe.Committed()
 	committed = true
 	endErr := session.endTx(tx)
 	tx = nil

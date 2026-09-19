@@ -159,6 +159,9 @@ func runSQLiteLifecycleOperation[T any](
 		var result T
 		effects := privaterunforkrevision.NewEffects()
 		committed, err := store.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite run lifecycle operation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			var err error
 			result, err = fn(txctx, sqliteRunLifecycleMutation{
 				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), effects: effects, handoff: handoff,

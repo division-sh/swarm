@@ -458,6 +458,10 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	if !req.ExecutionPosture.Valid() {
 		return serveRuntimeBundleContext{}, fmt.Errorf("command execution purpose is required")
 	}
+	fanOutWorkers, err := configuredFanOutWorkers(req.Config)
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("runtime config validation failed: %w", err)
+	}
 	loaded := req.Loaded
 	stateStoreSummary := strings.TrimSpace(req.StateStoreSummary)
 	if stateStoreSummary == "" {
@@ -571,6 +575,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		SourceArtifactFact:               sourceArtifactFact,
 		RuntimeInstanceID:                strings.TrimSpace(req.RuntimeInstanceID),
 		ProcessWorkOwner:                 req.ProcessWorkOwner,
+		FanOutWorkers:                    fanOutWorkers,
 		Credentials:                      req.Credentials,
 		ManagedCredentials:               req.ManagedCredentials,
 		ProviderCredentials:              req.ProviderCredentials,
@@ -1534,7 +1539,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: posture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
 		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity, Publication: runtimeContextManager}),
-		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs}),
+		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs, FanOutRuntime: apiStoreCaps.FanOutRuntime}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycle(), Usage: stores.AgentUsage()}),

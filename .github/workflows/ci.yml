@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       proof_matrix: ${{ steps.plan.outputs.proof_matrix }}
+      soak_matrix: ${{ steps.plan.outputs.soak_matrix }}
       profile: ${{ steps.plan.outputs.profile }}
       plan_digest: ${{ steps.plan.outputs.plan_digest }}
       execution_sha: ${{ steps.plan.outputs.execution_sha }}
@@ -117,7 +118,8 @@ jobs:
             -markdown test-results/proof-plan.md \
             "${profile_args[@]}"
 
-          echo "proof_matrix=$(jq -c . test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "proof_matrix=$(jq -c --slurpfile plan test-results/proof-plan.json '{include: [.include[] | .unit as $id | select($plan[0].units[] | select(.id == $id) | .budget_class != "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "soak_matrix=$(jq -c --slurpfile plan test-results/proof-plan.json '{include: [.include[] | .unit as $id | select($plan[0].units[] | select(.id == $id) | .budget_class == "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "profile=$(jq -r .profile test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "plan_digest=$(jq -r .digest test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "execution_sha=$execution_sha" >> "$GITHUB_OUTPUT"
@@ -263,11 +265,13 @@ jobs:
           unit=$(jq -cer --arg id "$UNIT_ID" '.units[] | select(.id == $id)' "$plan")
           mapfile -t packages < <(jq -r '.packages[]' <<<"$unit")
           test_pattern=$(jq -r '.run // empty' <<<"$unit")
+          skip_pattern=$(jq -r '.skip // empty' <<<"$unit")
           count_mode=$(jq -r '.count_mode' <<<"$unit")
           count_args=()
           if [ "$count_mode" = "count-1" ]; then count_args=(-count=1); fi
           run_args=()
           if [ -n "$test_pattern" ]; then run_args=(-run "$test_pattern"); fi
+          if [ -n "$skip_pattern" ]; then run_args+=(-skip "$skip_pattern"); fi
           primary_json="test-results/evidence/${UNIT_ID}-primary.json"
           primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
 
@@ -292,6 +296,84 @@ jobs:
         with:
           path: ~/.cache/go-build
           key: ${{ steps.go-cache-restore.outputs.cache-primary-key }}
+      - name: Upload proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-${{ matrix.unit }}-timing
+          path: test-results/evidence
+          if-no-files-found: error
+
+  mandatory-soak:
+    name: Go proof ${{ matrix.unit }}
+    needs: [ci-plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.ci-plan.outputs.soak_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ci-plan.outputs.execution_sha }}
+      - uses: actions/setup-go@v5
+        id: go
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Download exact proof plan
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-plan
+          path: test-results/plan
+      - name: Restore shared Go modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Restore exact-head production Go cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+      - name: Run exact planned proof unit
+        shell: bash
+        env:
+          UNIT_ID: ${{ matrix.unit }}
+          SWARM_TEST_PROOF_PROFILE: ${{ needs.ci-plan.outputs.profile }}
+          SWARM_TOOL_GATEWAY_URL: ""
+          SWARM_TOOL_GATEWAY_CONTAINER_URL: ""
+          SWARM_TOOL_GATEWAY_TOKEN: ""
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/evidence
+          plan=test-results/plan/proof-plan.json
+          go run ./cmd/swarm-test-timing -assert-execution-sha \
+            -plan "$plan" -execution-sha "$(git rev-parse HEAD)"
+          unit=$(jq -cer --arg id "$UNIT_ID" '.units[] | select(.id == $id)' "$plan")
+          test "$(jq -r '.budget_class' <<<"$unit")" = soak
+          test "$(jq -r '.count_mode' <<<"$unit")" = count-1
+          test -z "$(jq -r '.skip // empty' <<<"$unit")"
+          mapfile -t packages < <(jq -r '.packages[]' <<<"$unit")
+          test_pattern=$(jq -r '.run' <<<"$unit")
+          go_timeout=$(jq -r '.go_timeout' <<<"$unit")
+          primary_json="test-results/evidence/${UNIT_ID}-primary.json"
+          primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
+          start=$(date +%s)
+          set +e
+          timeout --signal=TERM --kill-after=30s 1500s \
+            go run ./cmd/swarm-test -- "${packages[@]}" -run "$test_pattern" -count=1 -timeout "$go_timeout" -json | tee "$primary_json"
+          status=${PIPESTATUS[0]}
+          set -e
+          elapsed=$(( $(date +%s) - start ))
+          go run ./cmd/swarm-test-timing -record-evidence \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
+            -plan "$plan" -unit "$UNIT_ID" -attempt primary \
+            -input "$primary_json" -evidence "$primary_evidence" \
+            -elapsed-seconds "$elapsed" -exit-code "$status"
+          go run ./cmd/swarm-test-timing -input "$primary_json" -markdown "test-results/evidence/${UNIT_ID}-timing.md"
+          cat "test-results/evidence/${UNIT_ID}-timing.md" >> "$GITHUB_STEP_SUMMARY"
+          test "$status" -eq 0
       - name: Upload proof evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -357,7 +439,7 @@ jobs:
   timing-budget:
     name: CI timing budget
     if: always()
-    needs: [ci-plan, proof-unit]
+    needs: [ci-plan, proof-unit, mandatory-soak]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -418,7 +500,7 @@ jobs:
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
     if: always()
-    needs: [ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, proof-unit, semantic-smoke, timing-budget]
+    needs: [ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, proof-unit, mandatory-soak, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -427,12 +509,14 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
+          if [ "${{ needs.mandatory-soak.result }}" != success ]; then failed=1; fi
           for item in \
             "ci-plan:${{ needs.ci-plan.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
             "sqlite-local-dev:${{ needs.sqlite-local-dev.result }}" \
             "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
             "proof-unit:${{ needs.proof-unit.result }}" \
+            "mandatory-soak:${{ needs.mandatory-soak.result }}" \
             "semantic-smoke:${{ needs.semantic-smoke.result }}" \
             "timing-budget:${{ needs.timing-budget.result }}"
           do
@@ -445,7 +529,7 @@ jobs:
   publish-timing-model:
     name: Publish generated timing model
     if: github.event_name == 'schedule' && needs.required-tests.result == 'success'
-    needs: [required-tests, ci-plan, proof-unit]
+    needs: [required-tests, ci-plan, proof-unit, mandatory-soak]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: timing-model-publisher

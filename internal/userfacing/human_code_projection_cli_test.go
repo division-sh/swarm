@@ -293,6 +293,7 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 		"run_command.go\x00writeRunCommandReattached":                  {string(userfacing.HumanCodeRunStatus)},
 		"run_command.go\x00Write":                                      {string(userfacing.HumanCodeDeliveryStatus)},
 		"run_command.go\x00writeRunCommandTerminalSummary":             {string(userfacing.HumanCodeRunStatus)},
+		"fan_out.go\x00newRunFanOutCommand":                            {string(userfacing.HumanCodeRunStatus)},
 	}
 
 	familyValues := map[string]string{

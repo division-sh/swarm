@@ -239,6 +239,9 @@ func commitPublication(
 	result, err := withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, bool, error) {
 		result := runtimebus.CommittedPublication{}
 		committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			var err error
 			result, err = commitPublicationTx(txctx, tx, story, effects, store, postgres, command, handoff)
 			if err != nil {
@@ -428,6 +431,9 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 	}
 	result, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedAPIEventPublication, bool, error) {
 		committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite API event publication commit", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			var plan *storedurabledata.RunCreationPlan
 			if command.RunCreation != nil {
 				prepared, prepareErr := storedurabledata.PrepareRunCreationTx(s.durableData, txctx, tx, *command.RunCreation)

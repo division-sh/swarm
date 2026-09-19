@@ -92,11 +92,17 @@ func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
 }
 
 type ciWorkflowJob struct {
-	Name        string           `yaml:"name"`
-	If          string           `yaml:"if"`
-	Needs       []string         `yaml:"needs"`
-	Environment string           `yaml:"environment"`
-	Steps       []ciWorkflowStep `yaml:"steps"`
+	Name           string           `yaml:"name"`
+	If             string           `yaml:"if"`
+	Needs          []string         `yaml:"needs"`
+	Environment    string           `yaml:"environment"`
+	Steps          []ciWorkflowStep `yaml:"steps"`
+	TimeoutMinutes int              `yaml:"timeout-minutes"`
+	RunsOn         string           `yaml:"runs-on"`
+	Strategy       struct {
+		FailFast *bool  `yaml:"fail-fast"`
+		Matrix   string `yaml:"matrix"`
+	} `yaml:"strategy"`
 }
 
 func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
@@ -334,20 +340,22 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "apiv1"), apiPatterns)
-	conformancePatterns := make([]*regexp.Regexp, 0, 2)
-	for _, id := range []string{"conformance-1", "conformance-2"} {
+	var conformanceUnits []testplanning.ProofUnit
+	for _, id := range []string{"conformance-1", "conformance-2", "conformance-soak-sqlite", "conformance-soak-postgres"} {
 		unit, exists := policy.Units[id]
 		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/conformance"}) || unit.Run == "" || unit.CountMode != "count-1" {
 			t.Fatalf("%s must retain its complete uncached conformance partition", id)
 		}
-		conformancePatterns = append(conformancePatterns, regexp.MustCompile(unit.Run))
+		conformanceUnits = append(conformanceUnits, testplanning.ProofUnit{ID: id, Packages: unit.Packages, Run: unit.Run, Skip: unit.Skip, GoTimeout: unit.GoTimeout, CountMode: unit.CountMode, BudgetClass: unit.BudgetClass})
 		for name, profile := range policy.Profiles {
 			if !slices.Contains(profile.Units, id) {
 				t.Fatalf("profile %s omits conformance partition %s", name, id)
 			}
 		}
 	}
-	assertGoProofPartition(t, filepath.Join(root, "internal", "runtime", "conformance"), conformancePatterns)
+	if err := testplanning.ValidateConformanceProofPartition(filepath.Join(root, "internal", "runtime", "conformance"), conformanceUnits); err != nil {
+		t.Fatal(err)
+	}
 	storeUnit, ok := policy.Units["store-full"]
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)

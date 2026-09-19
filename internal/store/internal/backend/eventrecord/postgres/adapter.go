@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 const hydrationBatchSize = 128
@@ -27,6 +29,36 @@ type Execer interface {
 func HydrationBatchSize() int { return hydrationBatchSize }
 
 func Load(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record, bool, error) {
+	record, found, err := loadRecord(ctx, q, eventID)
+	if err != nil || !found {
+		return eventrecord.Record{}, found, err
+	}
+	if err := record.Validate(); err != nil {
+		return eventrecord.Record{}, false, fmt.Errorf("load event record: %w", eventrecord.Corrupt(record.EventID, err))
+	}
+	if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
+		return eventrecord.Record{}, false, err
+	}
+	return record.Clone(), true, nil
+}
+
+// LoadAdmitted performs one strict admission for consumers of both projections.
+func LoadAdmitted(ctx context.Context, q RowQueryer, eventID string) (events.AdmittedEvent, events.RouteSettlement, bool, error) {
+	record, found, err := loadRecord(ctx, q, eventID)
+	if err != nil || !found {
+		return events.AdmittedEvent{}, events.RouteSettlement{}, found, err
+	}
+	admitted, settlement, err := record.DecodeWithSettlement()
+	if err != nil {
+		return events.AdmittedEvent{}, events.RouteSettlement{}, false, err
+	}
+	if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
+		return events.AdmittedEvent{}, events.RouteSettlement{}, false, err
+	}
+	return admitted, settlement, true, nil
+}
+
+func loadRecord(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record, bool, error) {
 	var record eventrecord.Record
 	err := q.QueryRowContext(ctx, selectRecord+` WHERE e.event_id = $1::uuid`, strings.TrimSpace(eventID)).Scan(scanTargets(&record)...)
 	if err == sql.ErrNoRows {
@@ -36,13 +68,7 @@ func Load(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record
 		return eventrecord.Record{}, false, fmt.Errorf("load event record: %w", err)
 	}
 	record.CreatedAt = record.CreatedAt.UTC()
-	if err := record.Validate(); err != nil {
-		return eventrecord.Record{}, false, fmt.Errorf("load event record: %w", eventrecord.Corrupt(record.EventID, err))
-	}
-	if err := record.ValidateInheritedFanOutOwner(ctx, q, true); err != nil {
-		return eventrecord.Record{}, false, err
-	}
-	return record.Clone(), true, nil
+	return record, true, nil
 }
 
 func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.Record, error) {
@@ -75,11 +101,12 @@ func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.
 	return orderRecords(ordered, loaded)
 }
 
-func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, error) {
+func Insert(ctx context.Context, q RowQueryer, effects *runforkrevision.Effects, record eventrecord.Record) (bool, error) {
 	if err := record.Validate(); err != nil {
 		return false, fmt.Errorf("append event record: %w", err)
 	}
-	result, err := exec.ExecContext(ctx, `
+	var storedEventID, storedRunID string
+	err := q.QueryRowContext(ctx, `
 		INSERT INTO events (
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
@@ -94,21 +121,32 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 			$22, NULLIF($23,''), $24::jsonb, $25::jsonb, $26::jsonb,
 			$27::jsonb, NULLIF($28,'')::uuid, NULLIF($29,'')::jsonb
 		) ON CONFLICT (event_id) DO NOTHING
+		RETURNING event_id::text, COALESCE(run_id::text, '')
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
 		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
 		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
 		record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
 		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt,
 		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
+		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin)).Scan(&storedEventID, &storedRunID)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("append event record: %w", err)
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("append event record: read affected rows: %w", err)
+	// UUID columns may preserve a different spelling than the admitted input.
+	// Exact effects must name the physical row without rewriting event payloads.
+	if storedRunID != "" {
+		ref, err := runforkrevision.NewFactRef(runforkrevision.FamilyEvents, storedEventID)
+		if err != nil {
+			return false, err
+		}
+		if err := effects.AddFacts(storedRunID, ref); err != nil {
+			return false, err
+		}
 	}
-	return rows == 1, nil
+	return true, nil
 }
 
 // DeleteSelectedForkRunEvents is the event-record portion of the closed

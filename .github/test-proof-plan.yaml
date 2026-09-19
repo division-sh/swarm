@@ -62,6 +62,11 @@ profiles:
       - api-rest
       - conformance-1
       - conformance-2
+      - conformance-2394-core
+      - conformance-2394-pressure
+      - conformance-2394-reporter
+      - conformance-soak-sqlite
+      - conformance-soak-postgres
       - serveapp-other
       - serveapp-surfaces
       - serveapp-publication-text
@@ -73,6 +78,7 @@ profiles:
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
+      - store-runtime-fanout
       - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
@@ -112,6 +118,11 @@ profiles:
       - api-rest
       - conformance-1
       - conformance-2
+      - conformance-2394-core
+      - conformance-2394-pressure
+      - conformance-2394-reporter
+      - conformance-soak-sqlite
+      - conformance-soak-postgres
       - serveapp-other
       - serveapp-surfaces
       - serveapp-publication-text
@@ -123,6 +134,7 @@ profiles:
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
+      - store-runtime-fanout
       - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
@@ -162,6 +174,11 @@ profiles:
       - api-rest
       - conformance-1
       - conformance-2
+      - conformance-2394-core
+      - conformance-2394-pressure
+      - conformance-2394-reporter
+      - conformance-soak-sqlite
+      - conformance-soak-postgres
       - serveapp-other
       - serveapp-surfaces
       - serveapp-publication-text
@@ -173,6 +190,7 @@ profiles:
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
+      - store-runtime-fanout
       - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
@@ -212,6 +230,11 @@ profiles:
       - api-rest
       - conformance-1
       - conformance-2
+      - conformance-2394-core
+      - conformance-2394-pressure
+      - conformance-2394-reporter
+      - conformance-soak-sqlite
+      - conformance-soak-postgres
       - serveapp-other
       - serveapp-surfaces
       - serveapp-publication-text
@@ -223,6 +246,7 @@ profiles:
       - store-full
       - store-runtime-full-01
       - store-runtime-full-02
+      - store-runtime-fanout
       - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
@@ -241,10 +265,56 @@ units:
   conformance-2:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
-    run: '^(Test($|[^FH].*)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^FHI].*|I($|[^s].*|s($|[^s].*|s($|[^u].*|u($|[^e].*|e($|[^2].*|2($|[^3].*|3($|[^9].*|9($|[^4].*)))))))))|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
+  # Issue2394: the original aggregate exhausted240s with37 passing roots.
+  # Preserve whole roots:132 =112 general +14 core +5 pressure +1 reporter.
+  # Reservation controls alone take80s; delayed500 keeps its own240s envelope.
+  conformance-2394-core:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394(D3.*|Nested.*|Supplemental(Contention|Soak).*|TwentyIntent.*|TwoTen.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  conformance-2394-pressure:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394(Pressure.*|SupplementalPressure.*|TwentyTwoIntentPressure.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  conformance-2394-reporter:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394ReporterFiveHundredDelayedCommitsBothStores$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  # Lead approval: issue #2394 comment 5743323725. These are mandatory in every
+  # profile, not nightly substitutes. Each isolated cell executes both the full
+  # 900s pressure window and exact final drain/readback with original assertions.
+  # Go 22m = 900s window + 90s drain + 330s setup/readback/cleanup allowance.
+  # Command 25m adds 180s compilation/provisioning; job 30m adds 300s checkout,
+  # cache and evidence handling. Ordinary 240s/540s budgets remain unchanged.
+  conformance-soak-sqlite:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores$/^sqlite$'
+    go_timeout: 22m
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: soak
+  conformance-soak-postgres:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores$/^postgres$'
+    go_timeout: 22m
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: soak
   # Full-profile CI34347597064: TestO* takes 77s; other API proofs take 46s.
   # Keep whole top-level proofs, including their backend and negative-case rows.
   api-operator:
@@ -311,7 +381,7 @@ units:
   catalog-runtime:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
-    run: '^(Test($|[^CS].*|Stage.*|ScatterGatherSafetyBothStores|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedForkFlowOwnedReadinessBothStoresInitial|SelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|SelectedForkPendingRootAgentInputBothStores)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CS].*|Stage.*|ScatterGatherSafetyBothStores|ScatterGatherFrontierAggregatePreservesRefusalsBothStores|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedForkFlowOwnedReadinessBothStoresInitial|SelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|SelectedForkPendingRootAgentInputBothStores)|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -528,8 +598,16 @@ units:
   store-runtime-full-02:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    # Exact RE2 complement of TestForkG within the original D-F partition.
-    run: '^Test([D-E].*|F($|[^o].*|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
+    # Positive RE2 complement of TestFanOut and TestForkG within D-F.
+    run: '^Test([D-E].*|F($|[^ao].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-fanout:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    # Preserve each complete root, including real process death and claim expiry.
+    run: '^TestFanOut.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

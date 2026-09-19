@@ -1,0 +1,5 @@
+observer:
+  id: observer
+  model: regular
+  intent: {inline: Observe the exact selected delivery.}
+  subscriptions: [mixed.multi]

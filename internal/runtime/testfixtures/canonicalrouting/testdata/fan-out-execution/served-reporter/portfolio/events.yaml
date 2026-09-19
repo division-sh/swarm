@@ -1,0 +1,26 @@
+portfolio.account.register.requested:
+  portfolio_id: text
+  account_id: text
+portfolio.accounts.register.requested:
+  portfolio_id: text
+  account_ids: "[NumericAccount]"
+portfolio.membership.seeded:
+  portfolio_id: text
+  account_ids: "[text]"
+portfolio.notify.requested:
+  portfolio_id: text
+  command: text
+account.registered:
+  swarm:
+    consumer: external
+  key: account_id
+  portfolio_id: text
+  account_id: text
+  eng_roles: integer
+  gem_score: number
+  external_id: uuid
+  eligible: boolean
+account.notify.requested:
+  key: account_id
+  account_id: text
+  command: text

@@ -1,0 +1,12 @@
+name: notify-all-children
+pins:
+  inputs:
+    events:
+      - {event: portfolio.opened, source: external}
+  outputs:
+    events: [portfolio.opened.forwarded]
+connect:
+  - {event: portfolio.opened.forwarded, from: ., to: portfolio, rename: portfolio.opened}
+  - event: account.notify.requested
+    from: portfolio
+    to: account
