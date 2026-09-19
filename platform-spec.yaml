@@ -1077,6 +1077,14 @@ contract_formats:
         readers MUST NOT infer or repair it. Historical and operator replay consume
         the canonical decoded event and preserve every fact not explicitly changed
         by their typed replay-lineage rule.
+
+        Within one canonical record operation, eventrecord.Record.DecodeWithSettlement may return
+        the admitted event and strictly decoded settlement together for operation-local reuse.
+        FromAdmitted may validate its actual typed settlement after successful strict canonical encoding
+        without decoding those same bytes again. Full record validation and reconstructed-record equality
+        remain mandatory; no caller-supplied replacement projection, cross-read cache, inferred authority,
+        or weakened corruption rejection is permitted. This changes computation reuse, not event,
+        settlement, completion, or persistence ownership.
       payload_admission:
         owner: internal/events.PayloadAdmission
         chronology: |
@@ -3876,6 +3884,7 @@ handler_specification:
         handler value.
       durable_issuance:
         canonical_owner: runtime.pipeline.FanOutObligationOwner backed by the selected SQLite or PostgreSQL store
+        serving_owner: runtime.startupownership retained process capability, exact generation registrations and shared serving service
         intent_identity: '{run_id, triggering_delivery_id, declaration_identity}'
         activation_identity: '{intent_identity, zero_based_ordinal}'
         trigger_transaction: >-
@@ -3907,6 +3916,10 @@ handler_specification:
           Entity values remain the captured values; concrete instance names and
           live state cannot select a replacement entity schema. An absent schema
           forbids entity reads, not entityless execution that never reads entity.
+          A bounded chunk may prepare its pinned expression programs, schema binding and output route once through
+          the same semantic owners. Each ordinal still receives a fresh activation, immutable lineage and normal
+          payload shaping/admission. Preparation must not cache mutable entity state or evaluation results, suppress
+          ordinal failures, or let an input or output mutate another ordinal's captured state.
         semantic_value_projection: >-
           Event-payload, persisted and fork-projected fan-out capsules, exact entity-revision, and pinned resource-version sources enter deferred emit evaluation only
           through contract_formats.semantic_json.workflow_cel_projection. Eager and deferred evaluation consume the same
@@ -3917,22 +3930,95 @@ handler_specification:
           one immutable committed-publication or deterministic semantic-rejection outcome. Cancellation terminalizes the
           remaining suffix as one compact range fact. Issuance never copies delivery lifecycle or settlement state.
         claim_and_fairness: >-
-          The selected store claims least-recently-served intent, then creation order and structured intent identity.
-          Claim owner, monotonically increasing generation, and lease expiry fence every mutation. One claim advances at
+          The selected store claims by finite last-served time, or creation time for never-served work, then creation
+          order and structured intent identity. Never-served work has no infinite priority over already-served work.
+          Acquisition derives its lease from selected-store admission time, not a caller's saved tick or audit time.
+          Claim owner, monotonically increasing generation, and lease expiry fence execution admission. Mutation
+          admission checks the current selected-store clock after acquiring the claim row or writer lock; a transaction
+          admitted while valid may finish atomically after expiry. Evaluation reads consume the same ownership rule.
+          Caller timestamps describe events, never extend authority. Exact expired-claim cleanup may discard that
+          claim, but cannot release a successor generation. One claim advances at
           most one chunk and releases before reacquisition; process-local wakeups are advisory and periodic scanning owns
           lost-wakeup recovery.
+        shared_serving:
+          ownership: >-
+            One selected-store process capability owns the complete registered runtime/source execution set and one
+            capacity budget. Exact admitted generation and current source-set/run execution evidence authorize each
+            selected claim and mutation, not a bundle-string list. Selected-fork deferred execution remains subject
+            to its existing refusal policy. Generation replacement, source removal and process loss revoke old work;
+            accepted finite turns finish exact disposition before their permits can be reused.
+            Closing an acknowledged registration retains its evidence in the existing process registration map until
+            actual grant retirement or process release, without retaining its runtime standing lease. Selection,
+            opportunity observation and runtime readback validate the complete acknowledged grant set before excluding
+            closing registrations from serving eligibility. Retained closing evidence that becomes off-head after a
+            source-set refresh must still exactly match durable admitted grant evidence, but does not itself make the
+            current-head census incomplete. Unknown, mismatched or no-longer-admitted supplied grants remain errors;
+            never-registered and starting current-head generations still block an incomplete census.
+            Closing evidence grants no mutation authority and does not retire a generation needed
+            by accepted non-fan-out drains. Same-grant re-registration requires the predecessor's Close to have joined;
+            stale cleanup cannot remove its replacement. No second registration registry is permitted.
+          operator_setting:
+            name: runtime.fan_out_workers
+            scope: selected-store process, not flow authoring or a per-bundle limit
+            default_postgresql: 4
+            default_sqlite: 1
+            validation: >-
+              Omission chooses the backend default; explicit zero and negative values reject. SQLite requires exactly
+              one. PostgreSQL must retain at least one control/read connection after existing dedicated reservations
+              and configured workers. Observe the real pool; never resize, silently clamp or ignore this setting.
+              Registrations sharing a process must agree on the limit.
+          scheduling: >-
+            Select finite durable fairness across the complete admitted execution set. Exclude exact in-flight intents,
+            not all work from their runs. One run may use available permits when alone; no hard per-run cap strands
+            capacity. Preserve same-run revision serialization and measure its contention rather than bypassing it.
+            A permit spans actual claim entry, evaluation, publication and required disposition/post-commit handoff.
+            Recipients never need another permit from that same pool to let the handoff finish. Memory is bounded by
+            active turns and their existing chunk limit, not one goroutine or staging buffer per queued ordinal.
+          refill_and_recovery: >-
+            Completion of a short intent is not queue exhaustion. Continue selecting while capacity and eligible work
+            remain. Wakeups are coalescible hints; an independent one-second production scan recovers missed wakes and
+            due retries. Expiry maintenance does not run inline with serving. Standing watchers and finite turns use
+            the existing process/runtime work-lifetime owners; shutdown joins them before releasing store possession.
+          observed_opportunity: >-
+            A separately scheduled, generation-owned observer uses canonical eligibility, exact candidate identity and
+            available capacity. Record monotonic local observation and actual claim-operation entry, not callback
+            scheduling. An observed eligible/free-capacity opportunity remaining without a matching claim attempt for
+            more than one second emits fan_out_claim_opportunity_missed through existing typed runtime logs, once per
+            exact source/generation/candidate episode. Revalidate current evidence before reporting. An unrelated
+            attempt cannot clear the episode. Unknown or disconnected observations do not prove continuous eligibility;
+            capacity waiting, paused/terminal work, retry wait, and already-entered slow SQL claims are not violations.
+            The detector never claims work or supplies scheduler wakes. This is an observed-opportunity contract under
+            a schedulable process, not a hard real-time durable acquisition guarantee through slow SQL or process death.
+          cost_accounting: >-
+            Target two serving write transactions per clean chunk: claim, then publication/outcomes/cursor/revision/
+            fairness/budget/release atomically. Report source reads, other workload transactions, retries, revision lock
+            wait, evaluation and complete commit/handoff time separately. Do not move whole immutable source hydration
+            into the SQLite writer lock merely to reduce a read count. Runtime-only timing has explicit availability;
+            restart does not fabricate a measured zero or add a mandatory telemetry write.
         chunk_policy: >-
           Internal, observable, and not author-overridable: floor 1, initial and ceiling 32. Actual ranges are bounded by
           remaining cardinality; a closed or zero-cardinality intent owes no work despite its positive stored budget.
           Every confirmed successful chunk restores the next budget to 32, regardless of elapsed duration. Only a typed
           retryable failure advances nothing and halves the budget with ceiling division, bounded by floor 1.
+          That release atomically records a validated safely retryable FailureEnvelope and retry_ready_at one second
+          after selected-store observation, with no retained claim. Before due it projects temporary retry wait, not
+          permanent blocked status or serving eligibility. At due it is eligible through the ordinary serving owner;
+          acquisition consumes the wait. Same-run restart preserves it; fork resets it with operational claim state.
+          Retry and permanent-block mutation require current claim admission; only exact claim-discard cleanup may
+          proceed after expiry. Cancellation clears operational retry state while retaining its semantic prefix.
           Outcome uncertainty requires canonical readback before choosing success or retry. Safe semantic-rejection
-          bisection remains separate. Elapsed duration is diagnostic evidence, never sizing authority. Same-run restart
+          bisection remains separate. Elapsed duration is runtime diagnostic evidence, never sizing authority or a
+          mandatory telemetry transaction. Durable last-chunk duration fields are retired; losing the runtime
+          occurrence makes such latency unavailable, not zero. Same-run restart
           preserves valid persisted tuning; fork resets operational tuning to 32 while preserving inherited cursor,
           outcomes and source evidence. Invalid persisted evidence fails closed, without migration or repair fallback.
           Chunk boundaries never change semantic output, claim fencing, fairness or atomic publication semantics.
         failure_isolation: >-
-          Publication plans, outcomes, cursor advancement, and closure commit atomically. Only a typed emit-contract
+          Publication plans, outcomes, cursor advancement, closure, success-to-cap tuning, finite fairness position,
+          claim release and fork-revision capture commit atomically. There is no separate successful-turn release writer.
+          Lost-acknowledgement reconciliation proves the exact immutable outcome range even if a successor has already
+          advanced or canceled the intent; it must not require equality with the earlier mutable header or release a
+          successor claim. Only a typed emit-contract
           failure may become semantic_rejected. Publication-planner, authorization, conflicting-duplicate, non-emit
           schema, store, unknown, and internal failures never advance an ordinal as semantic rejection. A typed safe
           aggregate error is bisected lower-half first. Retryable infrastructure errors advance nothing.
@@ -6123,6 +6209,8 @@ engine:
           - WorkflowPersistence is constructed from a complete closed operation owner and fails closed when any required operation is absent. EventBus, PipelineCoordinator, manager, and other runtime consumers receive only named closed operations and must not receive or invoke a generic mutation callback.
           - SQLite driver busy_timeout must stay short; elapsed retry budget, cancellation, and backoff are owned by the selected mutation boundary rather than by long driver-level waits.
           - A standalone pure selected-store read executes in one caller-context, transactionally consistent read-only transaction. It does not consume SQLite process-local mutation admission or busy recovery and it does not initialize or lock mutation-only author activity, candidate handoff, or run-fork revision ownership. Transaction-scoped reads that guard an already-owned mutation remain inside that mutation transaction.
+          - ListOperatorEvents and LoadOperatorEvent on PostgreSQL and SQLite assemble each invocation's result from one database read snapshot, including candidate ID windows, consumed lookahead, canonical event admission, direct delivery membership and settlement/claim enrichment, and dead-letter evidence. Every contributing helper uses the same existing private backend RunReadTransaction transaction; PostgreSQL uses read-only REPEATABLE READ and SQLite pins one connection and read snapshot. No contributing query escapes to the pool or opens a nested transaction. The snapshot is established by a database read, not promised at HTTP arrival, and the caller-scoped transaction closes before response transmission or unrelated work.
+          - Operator event consistency is per invocation/page only. A later invocation, including a later cursor page, establishes a fresh snapshot and may observe newly committed state; there is no retained cross-page snapshot or history/fork guarantee. Canonical validation, complete evidence, ordering, filters, exact consumed-prefix/lookahead bounds, cancellation, cleanup failure, and no-partial-result behavior remain unchanged. Physical batching does not authorize validating unrelated candidates, and these pure reads acquire no mutation admission, author activity, candidate handoff, revision effects, write reservation, or process-wide lock.
           - SQLite process-local mutation admission and the complete first begin/operation/commit attempt are governed only by the caller context. The internal five-second busy-recovery clock starts after the first actual SQLite busy/locked result; subsequent backoff and re-admission consume that clock, exhaustion retains the last actual busy/locked cause, and caller cancellation or deadline wins in every phase.
           - SQLite read and write transaction attempts pin one exact connection until termination or supported bad-connection disposal finishes. Callback errors, cancellation and panic unwind the live sql.Tx before connection release; panic propagates unchanged. Failed COMMIT or unproven rollback discards that same connection, never another pooled connection or the whole pool. sql.ErrTxDone alone is not proof of physical rollback. Primary and genuine cleanup errors are retained; already-discarded connection state does not manufacture a cleanup failure.
           - A SQLite COMMIT error is not proof of rollback. Only an actual SQLite busy/locked noncommit result, with completed cleanup or disposal and no cleanup error, may enter the existing busy retry policy. Uncertain commit and cleanup failure never authorize callback replay. Subsequent unrelated reads and writes must not inherit an abandoned transaction.
@@ -14053,11 +14141,17 @@ platform_tables:
         bytes; the derived events.payload JSON projection is not revision or replay evidence. It also retains
         operator_reference_event_id as operator provenance, distinct from causal source_event_id, so fixed
         starting-input evidence and strict live loading can compare the complete original publication.
-        A transaction-local finalizer MAY omit transfer of JSON bodies for families outside its declared
-        effects, but MUST retain the complete latest-row family, key and presence validation, including
-        tombstones and unsupported-family rejection. Full consistency validation reads all thirteen
-        families. Such work reduction MUST NOT introduce a latest-state cache, defer capture, change
-        canonical equality, or weaken fixed-revision, no-change or rollback semantics.
+        The transaction-local finalizer selects current projection and latest ledger rows by the complete
+        exact fact coordinates declared by their private writers, or by an explicit whole-family effect
+        for genuine broad mutations. Both scopes use the same canonical projection, key admission,
+        validation, equality and tombstone writers; whole-family selection dominates exact contributions.
+        Exact capture validates every affected fact and dependency, but is not required to discover
+        corruption in unrelated untouched rows. Missing current facts require prior owning-run evidence
+        before being treated as deletions; unknown or foreign-run keys are not harmless no-ops.
+        Full consistency and historical/fork admission still validate all thirteen families and refuse
+        malformed, contradictory or unrevisioned evidence. No latest-state cache, deferred capture,
+        automatic full-scan fallback, changed canonical equality or reduced historical fork capability
+        follows from this selection optimization.
       ddl: |
         CREATE TABLE run_fork_fact_revisions (
             run_id    UUID NOT NULL,
@@ -15678,6 +15772,10 @@ platform_tables:
           `{bundle_hash, workflow_version}`, derive the complete topology including cross-instance observers,
           and replace each affected flow_instance owner's active materialized set. Replacement inactivates rows absent from
           the derived set and upserts expected rows with concrete flow_instance and rendered subscriber_id.
+          The same transaction may reuse its held active-run admission across that run's route owners, never across
+          runs or transactions. PostgreSQL resolves each materialized source reference and upserts the route in one
+          SQL statement, preserving source-match and absent-source semantics; this does not batch business mutations
+          or remove exact-owner replacement and rollback checks.
         terminate_flow_instance: In the same selected mutation as terminal lifecycle truth, derive topology without the
           terminal owner and exact-set replace every affected source/consumer owner plus the terminal owner's empty set.
           Every direct or composed caller must enter that selected mutation before terminal state changes; no two-transaction
@@ -16467,11 +16565,20 @@ platform_tables:
         normal_completion_operation: >
           The durable completion-candidate executor is the sole successful-completion writer. For an ordinary run, one
           selected-store transaction locks the exact current candidate revision, observes selected-store time, and
-          consumes typed run summaries from the delivery, pipeline, workflow-timer, session, decision-card,
+          consumes typed run summaries from the delivery, pipeline, fan-out, fan-out-barrier, workflow-timer, session, decision-card,
           external-effect, and entity owners. Every summary must carry the same run_id and validate its own finite
           states. Missing, malformed, identity-inconsistent, unresolved, active, or orphaned facts fail closed as a
           blocker or typed execution failure; the completion owner does not reinterpret another owner's rows. Session
           ownership classifies the complete selected-run session set, including partial or malformed lease coordinates.
+          After canonical barrier advancement, the executor may refute completion from exact-run validated delivery,
+          pipeline, or entity summaries using the same blocking predicates as the full owner fold, without repeatedly decoding
+          already-published fan-out ledgers. This fail-closed preflight must still validate the session owner's summary
+          and preserve its next-expiry wake coordinate. It neither constructs a partial public summary nor establishes
+          terminal eligibility: successful completion still requires every owner's strict full summary in the same
+          operation. This is operation-local short-circuit evaluation, not a cache, scheduler, or alternate owner;
+          full public summary and snapshot reads remain strict. The entity projection consumes the admitted terminal
+          catalog; a missing, malformed, or nonterminal entity is never guessed terminal. Once those blocking
+          predicates clear, the executor must again consume every owner's full summary before completion.
           Decision-card ownership validates exact continuation outcome events and strict typed gate activations, including
           bucket identity and terminal evidence. External-effect ownership starts from exact run-bound logical operations
           and validates prepared operations, latest-attempt coherence, terminal retry history, usage-target identity, and
@@ -16550,7 +16657,13 @@ platform_tables:
           post_commit_handoff: >
             A candidate-producing operation acquires generation work admission before its mutation becomes
             commit-capable. Commit submits the exact durable identity through a detached handoff and releases admission
-            only after representation; rollback cancels that admission. Immediately before each selected-store
+            only after representation; rollback cancels that admission. After proven rollback and cleanup, each
+            replayed transaction callback cancels the preceding attempt's candidate reservations, releases its
+            registration barriers and clears identity deduplication before new mutation. Reset failure refuses further
+            mutation or submission and retains failed cancellation tokens for cleanup. The operation occurrence lease
+            remains held across attempts; only the acknowledged committed attempt submits its exact candidates.
+            Attempt reset never occurs between contributors within one transaction, and result accumulators cannot
+            retain candidate or domain results from a rolled-back attempt. Immediately before each selected-store
             execution admission, the chain snapshots its notification generation. Selected-store result classification,
             observation of handoffs committed after that snapshot, exact successor promotion, and chain removal are one
             atomic process-local transition. A later handoff therefore forces one serialized recheck even when the
@@ -16688,11 +16801,12 @@ platform_tables:
             cursor                    BIGINT NOT NULL DEFAULT 0 CHECK (cursor >= 0 AND cursor <= cardinality),
             status                    TEXT NOT NULL CHECK (status IN ('open', 'closed', 'canceled', 'blocked')),
             next_chunk_size           BIGINT NOT NULL CHECK (next_chunk_size >= 1 AND next_chunk_size <= 32),
-            last_chunk_ms             BIGINT NOT NULL DEFAULT 0 CHECK (last_chunk_ms >= 0),
             capsule                   JSONB NOT NULL,
             claim_owner               TEXT,
             claim_generation          BIGINT NOT NULL DEFAULT 0 CHECK (claim_generation >= 0),
             lease_expires_at          TIMESTAMPTZ,
+            retry_ready_at            TIMESTAMPTZ,
+            retry_failure             JSONB,
             last_served_at            TIMESTAMPTZ,
             blocked_reason            TEXT,
             created_at                TIMESTAMPTZ NOT NULL,
@@ -16701,6 +16815,7 @@ platform_tables:
             PRIMARY KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
             CHECK ((status = 'open' AND cursor < cardinality AND blocked_reason IS NULL) OR (status = 'closed' AND cursor = cardinality AND blocked_reason IS NULL AND claim_owner IS NULL) OR (status = 'blocked' AND cursor < cardinality AND NULLIF(TRIM(blocked_reason), '') IS NOT NULL AND claim_owner IS NULL) OR (status = 'canceled' AND NULLIF(TRIM(blocked_reason), '') IS NOT NULL AND claim_owner IS NULL)),
             CHECK ((claim_owner IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND claim_generation > 0 AND lease_expires_at IS NOT NULL)),
+            CHECK ((retry_ready_at IS NULL AND retry_failure IS NULL) OR (retry_ready_at IS NOT NULL AND retry_failure IS NOT NULL AND status = 'open' AND claim_owner IS NULL)),
             CHECK ((source_kind = 'event_payload_field' AND source_event_id IS NOT NULL AND source_run_id IS NULL AND source_entity_id IS NULL AND source_mutation_id IS NULL AND NULLIF(source_field, '') IS NOT NULL AND source_resource_flow_path IS NULL AND source_resource_event_name IS NULL AND source_resource_version_id IS NULL) OR (source_kind = 'entity_field_revision' AND source_event_id IS NULL AND source_run_id IS NOT NULL AND source_entity_id IS NOT NULL AND source_mutation_id IS NOT NULL AND NULLIF(source_field, '') IS NOT NULL AND source_resource_flow_path IS NULL AND source_resource_event_name IS NULL AND source_resource_version_id IS NULL) OR (source_kind = 'resource_version' AND source_event_id IS NULL AND source_run_id IS NULL AND source_entity_id IS NULL AND source_mutation_id IS NULL AND source_field IS NULL AND source_resource_flow_path IS NOT NULL AND source_resource_event_name IS NOT NULL AND source_resource_version_id IS NOT NULL)),
             INDEX idx_fan_out_intents_work (status, last_served_at, created_at, run_id),
             INDEX idx_fan_out_intents_run (run_id, status)
@@ -17217,14 +17332,44 @@ run_model:
       - reply_contexts
       - fan_out_obligations
       write_contract: >-
-        Every named selected-store mutation declares a closed typed set of affected run IDs and families before its
-        private PostgreSQL or SQLite transaction finalizes. Private family writers contribute to that aggregate; they
-        never allocate revisions or infer effects from transaction metadata. One private finalizer compares only the
+        Every named selected-store mutation declares a closed typed set of affected run IDs and exact fact coordinates,
+        or explicit whole families for genuine broad operations, before its private PostgreSQL or SQLite transaction
+        finalizes. Private family writers contribute the complete set while they own generated IDs and mutation results;
+        they never allocate revisions or infer effects from transaction metadata. Receipt IDs are not event IDs, mutation
+        IDs are not entity IDs, and delivery IDs are not event IDs. Fan-out references carry structured intent, outcome
+        and barrier coordinates; serialized keys are never parsed into mutation authority. Joined attempt/selection
+        changes, receiver-dependent siblings, event-wide handoffs, dead-letter outcome joins, timer replacements and
+        session changes contribute every affected projected fact, including old and new coordinates for an already
+        admitted identity move. Whole-family effects dominate exact effects for the same run/family. No arbitrary SQL
+        selector, ambient write inference, cache or automatic whole-family fallback repairs an incomplete contribution.
+        Both selection scopes reuse one canonical projection and validation owner. Current projection and latest ledger
+        queries select exact affected coordinates before hydration, not after reading and decoding unrelated rows.
+        Duplicate projected identities and wrong-run or unknown coordinates fail closed, never LIMIT-one selection.
+        A removed live row requires its prior owning-run fact for tombstoning; whole-parent deletion remains distinct
+        from retained-run tombstones. One private finalizer compares only the
         declared canonical projected fact JSON and presence against the latest published revision, after all domain
         writes and before commit. Writes to excluded physical columns do not advance a family. Every changed family for
         one run shares one revision; exact no-change emits no revision; rollback publishes neither domain facts nor
-        revision facts. Multi-run finalization locks parent runs in deterministic run-ID order. No revision lock spans
+        revision facts. Retryable transaction callbacks start with the original explicit effect declarations, never
+        the generated keys or contributions of a rolled-back attempt. Multi-run finalization locks parent runs in
+        deterministic run-ID order. No revision lock spans
         external work. Retained-run deletion emits present=false for every removed fact in the same transaction.
+        A globally keyed fact that remains present under another run cannot be treated as a local deletion unless
+        the already-supported ownership move declares both the old removal and new presence. This absence check
+        uses the same canonical projection relation; run-scoped entity metadata and fan-out coordinates remain
+        independently owned across runs. Stored fact-key bytes, rather than an alternate input spelling accepted
+        by a backend UUID column, are the exact writer's revision coordinates.
+        A completed bounded publication-settlement segment under
+        durable_pipeline_processing_obligation_authority.disposition_contract.terminal_segments is one named mutation:
+        one physical transaction and one canonical revision per affected changed run, with one finalizer after all
+        member writes and their unioned family effects. Per-event receipt, disposition, failure, route, delivery
+        handoff and causal identity remain exact, but intermediate per-member settlement prefixes inside that
+        transaction are not historical cuts. A failed segment publishes no member settlement or revision facts;
+        already-committed publications, prior handler effects and earlier committed segments remain committed.
+        No synthetic subrevisions, timestamp reconstruction, auxiliary history family or compatibility revision
+        counts preserve the former individually committed settlement cuts. Deferred attempts, decision processed and
+        convergence stages, one-item recovery, initial dispositions and enclosing parent mutations retain their
+        separate named transaction boundaries.
         The event_deliveries projection captures every coordinate of the canonical DeliveryRoute: recipient class and
         identity, agent identity, target ownership, delivery context, payload projection, and connect_execution_claim.
         Stored connect execution evidence is part of route identity and is captured in the same revision as the delivery;
@@ -17237,6 +17382,13 @@ run_model:
         readers do not parse or infer a new composite-key grammar.
       read_contract: >-
         PostgreSQL and SQLite private adapters validate and decode the same thirteen-family historical projection.
+        Ordinary exact-fact writes validate affected facts and all transitive dependencies; they may leave unrelated
+        untouched corruption undiscovered. Full consistency validation and historical/fork admission remain whole-run,
+        all-thirteen-family checks and fail closed on that corruption. Differential equivalence between exact and full
+        capture applies to valid complete writes, not to corruption-detection timing. Supported arbitrary earlier-event
+        forks remain available; current-state-only selection, sparse checkpoints, deferred history and timestamp
+        substitutes are forbidden. This selection refinement does not batch additional business transactions or remove
+        any committed historical cut beyond the separately specified bounded publication-settlement contract.
         PlanRunFork exposes the same selected-store consumer on both backends: it resolves the event UUID to its first revision
         and reads all thirteen families through one read-only repeatable-read snapshot. Every generic and selected
         planning, readiness, materialization, and historical activation replan consumes that projection. RunForkPoint carries the exact selected event's
@@ -17265,6 +17417,15 @@ run_model:
         do not decode discarded payloads, resurrect tombstoned facts from current rows, or reject lawful later
         reappearance. Existing family-specific membership and lineage owners remain authoritative; contextual identity
         does not introduce global foreign-key requirements or authenticate coherently rewritten historical evidence.
+        A committed publication-settlement segment is visible as a whole at its canonical revision, never as an
+        invented per-member prefix. If A and B are published at R and their completed segment commits next at R+1,
+        neither new settlement is present before R+1 and both are present at R+1; no A-only subrevision exists.
+        If dispatch of B publishes nested C, C's first inclusive revision contains only mutations actually committed
+        by then. A required predecessor flush can publish A's settlement before C; without that committed flush,
+        readers cannot assume the former independently settled prefix. Nested and concurrent same-run mutations
+        retain their actual commit-serialized order. First-event inclusive selection, all thirteen family identities,
+        frozen business data and fork admission/refusal policy remain unchanged; final-row equality alone does not
+        prove this transaction/history contract.
       route_projection: >-
         Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
         projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
@@ -19726,12 +19887,13 @@ configuration_source_authority:
             execution_posture: retired_rejected_in_every_layer
             max_concurrent_agents: split_unsupported
             event_poll_interval: split_unsupported
+            fan_out_workers: project_safe_optional_positive_integer_selected_backend_capacity_validated
             recovery_on_startup: project_safe_default_true_explicit_false_preserved
             decision_card_first_reminder: project_safe_duration_default_4h
             decision_card_urgency: project_safe_duration_default_24h
             decision_card_reminder_interval: project_safe_duration_default_24h
             decision_card_input_draft_ttl: project_safe_duration_default_15m
-          owner: process_execution_posture for retired selector refusal; runtime_storage.runtime_store_backend_selection for runtime/store keys
+          owner: process_execution_posture for retired selector refusal; runtime_storage.runtime_store_backend_selection for runtime/store keys; handler_specification.handler_fields.fan_out.durable_issuance.shared_serving for fan_out_workers
         store:
           trust: elevated
           keys:
@@ -22937,6 +23099,10 @@ cli_specification:
           run_fork_bundle_hash: {command: swarm run fork, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
           event_publish_bundle_hash: {command: swarm event publish, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
           run_status_run: {command: swarm run status, selector: 'arg:run-id', family: run, mode: full_only}
+          run_fan_out_list_run: {command: swarm run fan-out list, selector: 'arg:run-id', family: run, mode: full_only}
+          run_fan_out_list_delivery: {command: swarm run fan-out list, selector: 'flag:triggering-delivery-id', family: none, mode: different_concept, scope_rule: 'exact run-scoped triggering delivery UUID, not an event identifier'}
+          run_fan_out_list_flow: {command: swarm run fan-out list, selector: 'flag:flow-path', family: none, mode: different_concept, scope_rule: exact authored declaration flow path}
+          run_fan_out_list_semantic: {command: swarm run fan-out list, selector: 'flag:semantic-path', family: none, mode: different_concept, scope_rule: exact authored declaration semantic path}
           run_trace_run: {command: swarm run trace, selector: 'arg:run-id', family: run, mode: full_only}
           run_start_reattach: {command: swarm run start, selector: 'flag:reattach', family: run, mode: full_only}
           run_fork_source_run: {command: swarm run fork, selector: 'arg:source-run-id', family: run, mode: full_only, safety: mutating}
@@ -23561,6 +23727,16 @@ cli_specification:
               json_shape: run.list result object
               quiet_values:
               - run_id, one per returned run, in API result order
+            run_fan_out_group:
+              command: swarm run fan-out
+              classification: exception
+              exception_rule: group_help
+            run_fan_out_list:
+              command: swarm run fan-out list
+              classification: shared_output
+              fact_owner: /v1/rpc run.fan_out.list
+              json_shape: FanOutListPage
+              quiet_values: ['Exact intent identities, one per returned intent in API order']
             status:
               command: swarm run status
               classification: shared_output
@@ -25746,6 +25922,25 @@ cli_specification:
         makes no API calls. Start-intent invocations (positional args or start flags on bare
         `swarm run`) fail closed with exit 2 and the promoted pointer message from
         topology_revision_v2_2.superseded_spellings.run_bare_start.
+    run_fan_out_group:
+      command: swarm run fan-out
+      tier: must_have
+      implementation_status: implemented
+      group: run_operate
+      owner: cobra noun-group help
+      behavior: Bare group prints help without API calls.
+    run_fan_out_list:
+      command: swarm run fan-out list <run-id>
+      tier: must_have
+      implementation_status: implemented
+      group: run_operate
+      owner: /v1/rpc run.fan_out.list
+      flags: ['--status', '--triggering-delivery-id', '--flow-path', '--semantic-path', '--limit', '--cursor']
+      read_only: true
+      pagination: One page only; --cursor explicitly continues. No automatic drain or snapshot claim.
+      filters: Exact persisted status, triggering delivery UUID, declaration flow path ('.' for selected root), and semantic path. No prefix resolution.
+      limits: Absent limit defaults to 50; supplied values are 1 through 500, never zero.
+      output: Existing human/JSON/quiet contract; human shows durable state/progress/budget/lease/retry/cause/runtime availability and continuation, plus exact live observation time/eligibility/shared capacity and nullable latest-key commit timing when available; JSON retains exact structured keys and null unavailable metrics; quiet prints exact intent identities.
     run:
       command: swarm run start [flags]
       group: run_operate
@@ -27442,6 +27637,14 @@ cli_specification:
         command: swarm run list [filters]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.runs
+      run_fan_out_group:
+        command: swarm run fan-out
+        group: run_operate
+        inherits_contract: cli_specification.command_catalog.run_fan_out_group
+      run_fan_out_list:
+        command: swarm run fan-out list <run-id>
+        group: run_operate
+        inherits_contract: cli_specification.command_catalog.run_fan_out_list
       run_status:
         command: swarm run status [<run-id>]
         group: run_operate
@@ -28539,11 +28742,112 @@ api_specification:
             type: integer
             minimum: 0
             description: Active agent/session leases for the run whose lease has not expired.
+      FanOutListFilter:
+        type: object
+        additionalProperties: false
+        properties:
+          status: {type: string, enum: [open, blocked, closed, canceled]}
+          triggering_delivery_id: {type: string, format: uuid}
+          flow_path:
+            type: string
+            minLength: 1
+            maxLength: 4096
+            description: Exact canonical authored flow path; the selected root is '.', never empty.
+          semantic_path: {type: string, minLength: 1, maxLength: 4096}
+      FanOutIntentKey:
+        type: object
+        additionalProperties: false
+        required: [run_id, triggering_delivery_id, element_ref]
+        properties:
+          run_id: {type: string, format: uuid}
+          triggering_delivery_id: {type: string, format: uuid}
+          element_ref:
+            type: object
+            additionalProperties: false
+            required: [flow_path, family, semantic_path]
+            properties:
+              flow_path: {type: string, minLength: 1}
+              family: {type: string, enum: [fan_out]}
+              semantic_path: {type: string, minLength: 1}
+      FanOutRuntimeReadback:
+        type: object
+        description: Current exact registered-runtime and canonical grant/run observation, never inferred from durable row metadata. Absent local evidence has null observation time, eligibility and metrics.
+        additionalProperties: false
+        required: [availability, reason, observed_at, eligible, workers, active_workers, last_commit_ms]
+        properties:
+          observed_at:
+            description: Exact process-local runtime observation time, distinct from the durable page observation; null when unavailable or retired.
+            oneOf: [{type: string, format: date-time}, {type: 'null'}]
+          availability: {type: string, enum: [available, unavailable, retired]}
+          reason: {type: string, minLength: 1, description: Reason supplied by the canonical runtime observation owner.}
+          eligible:
+            description: Canonical execution eligibility, distinct from durable_state and from free process capacity; null when exact local evidence is unavailable or retired.
+            oneOf: [{type: boolean}, {type: 'null'}]
+          workers:
+            description: Exact shared process fan-out worker limit, not a per-run count; null when unavailable.
+            oneOf: [{type: integer, minimum: 1}, {type: 'null'}]
+          active_workers:
+            description: Exact active shared process fan-out permits; null when unavailable.
+            oneOf: [{type: integer, minimum: 0}, {type: 'null'}]
+          last_commit_ms:
+            description: Completed commit/handoff latency retained only for the latest completed key in this runtime registration. Null for other keys, after restart, or when no exact timing exists; never a fabricated zero or total-turn duration.
+            oneOf: [{type: number, minimum: 0}, {type: 'null'}]
+      FanOutIntentReadback:
+        type: object
+        additionalProperties: false
+        required: [key, bundle_hash, status, durable_state, cardinality, cursor, owed, next_chunk_size, last_served_at, retry, claim_owner, claim_generation, lease_expires_at, failure, cancellation_reason, created_at, updated_at, runtime]
+        properties:
+          key: {$ref: '#/components/schemas/FanOutIntentKey'}
+          bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+          status: {type: string, enum: [open, blocked, closed, canceled]}
+          durable_state: {type: string, enum: [eligible, leased, retry_wait, blocked, closed, canceled]}
+          cardinality: {type: integer, minimum: 0}
+          cursor: {type: integer, minimum: 0}
+          owed:
+            type: integer
+            minimum: 0
+            description: Cardinality minus cursor only for open/blocked; canceled suffix is not owed.
+          next_chunk_size: {type: integer, minimum: 1, maximum: 32}
+          last_served_at:
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+          retry:
+            oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [ready_at, failure]
+              properties:
+                ready_at: {$ref: '#/components/schemas/Timestamp'}
+                failure: {$ref: '#/components/schemas/FailureEnvelope'}
+          claim_owner: {type: string}
+          claim_generation: {type: integer, minimum: 0}
+          lease_expires_at:
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+          failure:
+            oneOf: [{$ref: '#/components/schemas/FailureEnvelope'}, {type: 'null'}]
+          cancellation_reason: {type: string}
+          created_at: {$ref: '#/components/schemas/Timestamp'}
+          updated_at: {$ref: '#/components/schemas/Timestamp'}
+          runtime: {$ref: '#/components/schemas/FanOutRuntimeReadback'}
+      FanOutListPage:
+        type: object
+        additionalProperties: false
+        required: [run_id, run_status, observed_at, order, intents]
+        properties:
+          run_id: {type: string, format: uuid}
+          run_status: {$ref: '#/components/schemas/RunStatus'}
+          observed_at: {$ref: '#/components/schemas/Timestamp'}
+          order: {type: string, enum: [intent_identity_asc]}
+          intents:
+            type: array
+            maxItems: 500
+            items: {$ref: '#/components/schemas/FanOutIntentReadback'}
+          next_cursor: {type: string, minLength: 1, maxLength: 16384}
       FanOutRunSummary:
         description: Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.
         type: object
         additionalProperties: false
-        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, semantic_rejected, semantic_rejection_sample, canceled, settled, unsettled, barrier_armed, barrier_closed_pending, barrier_terminal, min_next_chunk, max_next_chunk, last_chunk_max_ms, oldest_age_ms]
+        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, semantic_rejected, semantic_rejection_sample, canceled, settled, unsettled, barrier_armed, barrier_closed_pending, barrier_terminal, min_next_chunk, max_next_chunk, oldest_age_ms]
         properties:
           run_id: {type: string}
           intents: {type: integer, minimum: 0}
@@ -28571,7 +28875,6 @@ api_specification:
           barrier_terminal: {type: integer, minimum: 0, description: "Fired, dead-lettered, or explicitly suppressed delivery barriers."}
           min_next_chunk: {type: integer, minimum: 0, maximum: 32}
           max_next_chunk: {type: integer, minimum: 0, maximum: 32}
-          last_chunk_max_ms: {type: integer, minimum: 0}
           oldest_age_ms: {type: integer, minimum: 0}
       FanOutSemanticRejectionSample:
         description: Structured identity and exact persisted typed failure for one deterministic rejected fan-out ordinal.
@@ -34299,6 +34602,46 @@ api_specification:
           $ref: '#/components/schemas/RunTraceListResult'
       errors:
       - RUN_NOT_FOUND
+    run.fan_out.list:
+      tier: must_have
+      description: >-
+        Read one bounded page of durable fan-out intent headers. Read-only; does not
+        claim, release, retry, repair or hydrate immutable source values or outcomes.
+        Filters are exact persisted predicates combined with AND; omitted filters
+        select all statuses, including terminal rows. Fixed ascending order is
+        triggering_delivery_id, element_ref.flow_path, element_ref.family,
+        element_ref.semantic_path, using byte collation. Progress cannot move a row.
+        Cursor is bound to run, complete filter and order; page size may change.
+        Malformed or differently scoped cursors are invalid params. Each page has
+        its own observation time and current run status; there is no cross-page
+        snapshot promise. Concurrent arrivals before the cursor are not revisited.
+        Durable state precedence consumes Intent.ServingAt: closed/canceled/blocked
+        first, then unexpired lease, then future retry readiness, otherwise eligible.
+        Expiry/due equality is eligible. Durable eligible is not runtime authorization:
+        paused/terminal runs, retired/unavailable generations, and unavailable source
+        admission must never be inferred eligible from it. Runtime evidence is separate;
+        unavailable metrics and eligibility are null, never fabricated zero/false.
+        Existing aggregate status/diagnose and direct delivery barriers are unchanged.
+      scope:
+        required: [read:runs]
+      params:
+      - name: run_id
+        required: true
+        schema: {type: string, format: uuid}
+      - name: filter
+        required: false
+        schema: {$ref: '#/components/schemas/FanOutListFilter'}
+      - name: limit
+        required: false
+        schema: {type: integer, minimum: 1, maximum: 500, default: 50}
+      - name: cursor
+        required: false
+        schema: {type: string, minLength: 1, maxLength: 16384}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/FanOutListPage'}
+      errors: [RUN_NOT_FOUND]
     run.diagnose:
       tier: must_have
       description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/internal/operatorsurface/run_operational_status_read_surface.go\
@@ -36481,6 +36824,93 @@ durable_pipeline_processing_obligation_authority:
       exact current publication-purpose claim inside the event and initial-side-effect transaction. Missing, foreign,
       wrong-purpose, stale, or released claims reject the whole operation before commit. Closed diagnostic-direct
       named operations are non-executable and are the only claim-free event commits.
+    publication_group:
+      owner: internal/runtime/pipelineobligation.Store through the selected pipelinepersistence owner
+      admission: >
+        A bounded fan-out turn explicitly opens one opaque process-local publication group before publication
+        preparation or member claim visibility. Bind the selected-store issuer, intent key, exact source occurrence,
+        run, bundle, runtime execution generation and claimed ordinal range/budget. Membership is bounded by that
+        range and the existing cap of 32; it cannot collect future chunks. This is not a durable batch journal, queue,
+        ambient context authority, arbitrary event-ID grouping or adoption of independently acquired claims.
+      membership: >
+        The lifetime is open, sealed, then closed. The canonical planner registers each accepted plan's immutable
+        event UUID, exact ordinal, causal coordinates and source/route facts; the collector cannot supply or rewrite
+        event identity. Semantic-rejected ordinals keep their ordinary fan-out outcomes without an invented event or
+        claim. Seal complete preparation membership before the first publication attempt. Duplicate or foreign
+        members, omitted accepted plans, additions after sealing and unsealed settlement fail closed. An empty group
+        with zero accepted events is valid and requires no settlement write, but still closes its finite ownership.
+        Bind preparation in two explicit stages: the claim retains the original admitted event; the canonical
+        EnginePublicationPlan privately retains that admitted source and RecordPrepared validates its exact identity,
+        run, payload, occurrence time and other immutable source facts before freezing the actual prepared event.
+        Lawful canonical receiver/route projection may differ from the original carrier, but cannot substitute its
+        business or causal facts. Seal requires this original-to-prepared binding for every accepted member; callers
+        cannot authorize preparation by supplying an unrelated source or comparing only the projected event ID.
+      reduced_prefix: >
+        Only the existing typed safe aggregate publication failure with proven rollback permits lower-half-first
+        bisection of a sealed attempt. Retire excluded suffix claims exactly, preserve retained prefix event identities
+        and designated session, and seal a fresh finite attempt for the reduced existing range before retry. This
+        does not reopen arbitrary membership. Acknowledged or outcome-uncertain attempts cannot be bisected, resealed
+        or assigned new event identities. Exact committed evidence selects the final accepted attempt; every abandoned
+        member remains accounted. Infrastructure retry and immutable ordinal outcomes retain their existing owners.
+      exact_claims_and_session: >
+        Before member acquisition the selected owner designates one private PostgreSQL SessionAuthority for the group;
+        each member still receives its own exact issuer, token, publication purpose, event claim and advisory lease on
+        that session. On PostgreSQL, bounded ClaimBatch acquires distinct exact event fences in one selected-owner
+        private admission transaction before publication plans are returned; grouping does not skip any member fence or introduce a
+        runtime fallback. Validate each original admitted source identity before preparation and its exact canonical
+        prepared binding afterward; neither shared session authority nor batch membership substitutes for either check.
+        SQLite retains its canonical claim registry and mutation owner. Preserve parent fencing, atomic
+        registry registration, existing per-lease capacity reservations and idempotent retirement. Short event-identity
+        reservations cannot hold the registry mutex across pool or lock waits. Partial acquisition failure retires all
+        acquired members and reservations. Every operation revalidates current pointers/tokens and each lease's exact
+        designated live session; the first member's session is never authority for other members. Ordinary independent
+        publication claims retain independent private sessions, not retroactive group sharing. Same-mutation siblings
+        retain their existing session-owner semantics. Individual release cannot close a session with live sibling or
+        group-root references; reducing connection count does not silently change per-lease capacity accounting.
+      operation_order: >
+        Group operations acquire the group operation lock, participating member operation locks in deterministic
+        event-ID order, then the existing private lease/session operation and SQL parent/revision locks in their
+        canonical order. Registry revalidation is brief after operation-lock acquisition and ends before session or
+        SQL waits; registry ownership never acquires a group/member/session operation lock. Group-member singleton
+        Deferred, MarkDecisionProcessed and release use the same group-first path, not recursive member-first entry.
+        Terminal callbacks retire only exact registry entries, references, capacity and terminal evidence; they do
+        not acquire group/member operation locks. PostgreSQL poison retains phased whole-session terminalization:
+        unwind the triggering lease/session operation before sibling callbacks; no sibling lease lock is acquired
+        under the triggering lease lock. A poisoned session rejects future segments. No SQL transaction or group/member
+        operation lock spans interceptor, recipient, provider or other external dispatch execution.
+      publication_and_lifetime: >
+        The existing fan-out chunk owner atomically commits accepted events, ordinal outcomes, cursor and intent
+        release. Only its exact returned committed-publication evidence authorizes dispatch. Releasing the intent
+        claim does not release retained event publication claims. Publication still checks the current intent lease
+        at mutation admission, not a saved turn timestamp. The group retains its accepted runtime occurrence; a
+        replacement joins that occurrence and cannot lend successor authority. Ordinary pause retains the accepted
+        in-flight contract, while process/session loss and invalid current authority reject new mutations.
+        A segment flush consumes only its completed claims and transfers only its committed handoffs. Untouched
+        members, the session root reference and the serving permit remain owned until the complete outer turn has
+        settled or explicitly released/transferred all remaining ownership and closed the group. Nested flushes do
+        not close the group, reacquire serving capacity or detach a handoff tail. Cleanup errors are joined without
+        relabelling a known commit as rollback; release cannot consume a successor claim.
+        Failed finalization or dispatch may retire staged process-local callbacks after the selected group's
+        ValidateCommittedMembership proves the complete exact static committed membership and publication-claim
+        objects, even when caller cancellation or failed dynamic durable admission prevents further work. This
+        cleanup-only proof grants no mutation, dispatch, settlement or handoff authority; those still require their
+        current dynamic admission. Durable unacknowledged work remains available to canonical recovery. Invalid
+        static membership or a foreign group cannot authorize cleanup, and a newer staged operation or successor
+        claim for the same event ID remains untouched; callback retirement never fabricates settlement.
+        Exact callback removal occurs under the bus registry lock, but retirement of its claim proxy occurs outside
+        that lock and before group close. The proxy serializes release, settlement and processed-decision mutation
+        against cleanup transfer, including pointers already captured by Reset while it awaits receiver retirement.
+        After transfer those captured callbacks cannot issue another SQL release or mutation through the retired
+        claim. Cleanup retirement is distinct from successful release or committed settlement: it cannot fabricate
+        acknowledgement, a processed fact, a delivery handoff or successful repeated use of a spent claim.
+        Registration close stops that registration's new turn admission and joins its already-admitted finite turns,
+        including mandatory postcommit handoff, group cleanup and permit retirement, before their runtime bus,
+        continuation, manager and completion-executor dependencies are dismantled. This registration-local join
+        neither waits for another registration's turns nor replaces the later whole-runtime occurrence drain;
+        do not join buffered delivery carriers before their required receiver-retirement protocol.
+        Runtime shutdown retains its exact generation-grant handle when durable grant retirement fails, reports
+        that failure, and retries retirement through the same owner on a later shutdown call. Local component
+        teardown is not proof of durable grant retirement; only a successful retirement consumes that handle.
     recovery: >
       Global, per-run, startup, periodic, ingress-resume, and selected-fork recovery select without an age cutoff,
       acquire the same event-identity exclusion, recheck mutable eligibility, and return one immutable event, exact
@@ -36587,9 +37017,11 @@ durable_pipeline_processing_obligation_authority:
       current claim by parent terminalization. No two claim operations may drive one PostgreSQL session concurrently. If lock acquisition executes but
       its result cannot be decoded, the exact physical session is poisoned and force-discarded; when acquisition borrowed an
       active mutation transaction, discard is mandatory immediately after that transaction unwinds. The ambiguous session is
-      never returned to the pool, no new claim capability is issued, and every earlier sibling capability is terminalized. A publication started outside an
-      existing mutation acquires its claim inside the selected-store event transaction, while a selected-fork named commit
-      reuses its already-retained claim connection. Every operation on one PostgreSQL claim is serialized by its opaque
+      never returned to the pool, no new claim capability is issued, and every earlier sibling capability is terminalized.
+      An ordinary independent publication started outside an existing mutation acquires its claim inside the
+      selected-store event transaction; a bounded publication_group instead issues exact claims on its already-designated
+      private session before visibility. A selected-fork named commit reuses its already-retained claim connection.
+      Every operation on one PostgreSQL claim is serialized by its opaque
       selected-store claim state, including selected-fork commit, settlement, release, and cursor abandonment, so the retained
       session cannot run overlapping transactions or unlock while an accepted operation is active. Current claims therefore
       cannot exhaust the persistence pool before or after their transaction begins. SQLite selected-fork commit, settlement,
@@ -36610,7 +37042,8 @@ durable_pipeline_processing_obligation_authority:
       Cursor cancellation or abandonment also releases every claim issued by that cursor. Release and failed settlement
       preserve later reclaimability; a released claim cannot settle. PostgreSQL unlock executes only through the exact
       retained session and scans pg_advisory_unlock's boolean result, which must be true. Every release call is terminal and
-      consumes the exact capability. Verified unlock closes the exact retained session. A false result or query error makes
+      consumes the exact capability. Verified unlock retires that lease's exact session reference; the physical session
+      closes only after its final live lease and any bounded publication-group root reference retire. A false result or query error makes
       session ownership absent or ambiguous, so the session is poisoned and force-discarded rather than pooled; if a borrowed
       mutation transaction is active, discard completes immediately after transaction unwind. In every result, the registry
       claim, cursor membership, private capacity, caller wrapper, and every sibling attached to the same discarded physical
@@ -36641,8 +37074,65 @@ durable_pipeline_processing_obligation_authority:
       Writes a typed schema/poison non-success row and quarantines any pending decision-route obligation. Malformed
       recovery work classified during canonical hydration must use this disposition before dispatch.
     atomicity: >
-      Receipt and decision-route mutation commit in one transaction. Any failed mutation leaves no partial disposition
-      and retains the current claim for explicit retry or release.
+      Receipt and decision-route mutation commit in one transaction. Legitimate singleton operations and completed
+      publication-group segments use one shared private validation/write kernel, not separate settlement interpreters.
+      Each member retains its exact disposition, failure, route, receipt and successful-delivery handoff facts. A
+      known-rollback mutation leaves no partial disposition or revision; still-current claims require explicit owned
+      retry or release under their existing rules. Commit uncertainty requires exact observation readback, never a
+      fabricated successful acknowledgement, blind segment resubmission or borrowing successor authority.
+    terminal_segments: >
+      Dispatch preserves ordinal order, committed routes and ordinary node/agent/no-route execution. Only normally
+      completed acknowledged, terminal_error, dead_letter or quarantined dispositions may enter a completed segment;
+      collection is not successful Settle and does not consume or release a claim. A segment is an explicit subset
+      of the sealed committed range; every omitted member retains classified ownership and disposition/lifetime.
+      Revalidate every exact committed identity, current claim and designated session before any write. Wrong,
+      duplicate, stale or mixed-session claims reject the whole segment. Apply members in original ordinal order
+      through the shared writer: receipt/disposition, applicable successful-delivery handoff, completion-candidate
+      request and unioned revision effects commit in one physical transaction with one finalizer and one canonical
+      revision per affected changed run. A typed terminal failure remains that member's failure alongside healthy
+      members. Invariant, member-write, SQL, finalizer or known commit-rollback failure rolls back the submitted
+      segment, not already-committed publications, prior handler effects or earlier committed segments.
+      Reserve required candidate occurrence before the transaction; return per-member committed/handoff results
+      and transfer ownership only after actual commit truth. Same-run candidate requests coalesce only through the
+      existing candidate owner. Lost signals recover through durable continuation/candidate obligations, not a new
+      batch queue. Cursor advancement alone is neither publication-handoff nor downstream-completion acknowledgement.
+    dependency_flush: >
+      The dispatch owner threads one narrow explicit internal FlushBeforeNestedPublication control through its
+      internal calls, without raw SQL, ambient group/session authority, a bus-global collector or route-name/graph
+      inference. Invoke it unconditionally before outer-dispatch publishDeferred publication and before recursive
+      dispatchCommittedInterceptorPublications or DispatchPostCommit entry. The canonical prepareClosedPublication
+      entry also flushes completed predecessors before nested direct Publish or engine publication preparation can
+      acquire the child claim and commit the child; a later DispatchPostCommit boundary alone is insufficient.
+      These entries consume the same scoped terminal collector, not a new owner. Flush completed predecessors also before
+      MarkDecisionProcessed, a durable Deferred singleton transition, and returning queued, blocked, incomplete,
+      RetryRelease, pause or error outcomes. A flush commits only members already finished; a still-executing member
+      is never acknowledged to unblock itself. Nested events keep their existing transaction and publication owners
+      and never join the parent's group. No nested recipient requires a recursive permit from the same serving pool.
+      Any additional synchronous dependency must preserve its required committed predecessor cut at its named boundary.
+    singleton_preservation: >
+      Durable Deferred is a singleton attempt mutation with its exact retry time and attempt semantics, not a terminal
+      segment payload or durable idempotency journal. Do not repeat an uncertain attempt to manufacture acknowledgement.
+      Decision processed acknowledgement and later convergence/completion remain distinct mutations with observable
+      processed-plus-pending state. Recovery still claims, mutates or releases one item before reconsidering later
+      eligibility; it does not bulk preclaim or reconstruct a publication group. Ordinary independent sync/async/outbox
+      settlement remains singleton through the shared kernel. Initial dispositions remain atomic with their original
+      event creation and are not re-settled as post-dispatch work. Parent terminalization remains inside its enclosing
+      named mutation; node/agent effect and delivery completion retain their separate canonical owners.
+    settlement_observation: >
+      ReadPublicationSettlement is one bounded read-only operation of the selected pipeline-obligation owner, not
+      dispatcher SQL. Its evidence contains the exact sealed committed-event identities and submitted terminal
+      dispositions, never live mutation authority. One consistent selected-store snapshot validates each event/run/source
+      identity, exact receipt/disposition and applicable decision-route and successful-delivery handoff facts. Closed
+      per-member observations are satisfied, pending or conflict; read/admission failure returns error/unavailable,
+      never pending or success. Observed satisfaction does not construct CommittedSettlement, acknowledge that this
+      process's transaction committed, mint a live claim or grant executable delivery-handoff authority. Matching
+      satisfied members are not redispatched; absent obligations remain canonical recovery work and contradictions
+      fail closed. Mixed observations after legitimate independent recovery are not evidence of a partial group commit.
+      Durable continuation/candidate recovery retains its own facts and current occurrence. Consumed capabilities
+      cannot authorize another write or successor release. Buffering finished dispatches enlarges the unacknowledged
+      crash window: no durably acknowledged prefix is replayed, while unacknowledged members may require recovery.
+      Grouping grants no new exactly-once guarantee for arbitrary unreceipted external effects; existing node/agent
+      delivery and effect ownership must still prevent repeating acknowledged effects.
   decision_route_contract:
     ordering: >
       Successful route execution first writes decision_route_processed through the current claim. Run convergence and
@@ -36674,6 +37164,14 @@ durable_pipeline_processing_obligation_authority:
       claim is current, so a late claim-owned success cannot overwrite or outlive the parent disposition. Claim registration
       and parent terminalization linearize before either durable mutation. A processed pending decision route is superseded
       without replacing its successful acknowledgement when the parent becomes inactive.
+    directive_provider_preservation: >
+      Agent directive success/failure finalization in agentpersistence/directive_operations.go and provider-origin
+      supersession/prelaunch abandonment in provider_directive_origin.go consume the same canonical
+      TerminalizePipelineObligationTx primitive inside their own enclosing named mutations. Preserve atomic directive
+      operation state, receipt, history and origin evidence, including rollback and abandonment controls. Provider
+      execution and directive finalization never join a fan-out publication group. Parent-first fencing forbids
+      incompatible publication/settlement; settlement-first preserves committed member truth and parent stop cancels
+      only still-owed work. Neither outcome permits overwriting a committed prefix or releasing successor authority.
   process_local_handoff:
     owner: process_local_work_lifetime_authority under '#2073'
     rule: >
@@ -36730,7 +37228,7 @@ durable_pipeline_processing_obligation_authority:
         - {path: internal/runtime/pipeline/workflow_gate_lifecycle_test.go, test: TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBothStores}
     PPO-REL-001:
       owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.claim_contract
-      rule: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; one bounded recovery sweep retains retry-release claims through its current examination window and terminally releases them before returning, preventing concurrent duplicate recovery without a runtime retry registry; SQLite mutation and retirement serialize through one per-claim operation lock; PostgreSQL serializes all sibling claim transactions and detached releases on one retained physical session through transaction unwind, while an exact active mutation may release inside its already-owned session boundary; every PostgreSQL release is terminal, false/error unlock poisons and force-discards the exact session, verified unlock closes it, and session-owned group terminalization retires every attached registry claim, cursor membership, wrapper, and capacity reservation exactly once while cleanup evidence is propagated; the group transition snapshots under session state, releases the triggering lease and separately acquired operation boundary, and drains sibling callbacks outside every lease, operation, and transaction boundary, while exact active-mutation release may retire only the trigger before unwind and ambiguous acquisition during a borrowed transaction queues the sibling drain until unwind releases that boundary; EventBus reset preserves pending operations until prior retirement succeeds and then attempts every terminal release; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
+      rule: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; one bounded recovery sweep retains retry-release claims through its current examination window and terminally releases them before returning, preventing concurrent duplicate recovery without a runtime retry registry; SQLite mutation and retirement serialize through one per-claim operation lock; PostgreSQL serializes all sibling claim transactions and detached releases on one retained physical session through transaction unwind, while an exact active mutation may release inside its already-owned session boundary; every PostgreSQL release is terminal, false/error unlock poisons and force-discards the exact session, verified unlock retires the exact reference and closes the session only after all lease and publication-group root references retire, and session-owned group terminalization retires every attached registry claim, cursor membership, wrapper, and capacity reservation exactly once while cleanup evidence is propagated; the group transition snapshots under session state, releases the triggering lease and separately acquired operation boundary, and drains sibling callbacks outside every lease, operation, and transaction boundary, while exact active-mutation release may retire only the trigger before unwind and ambiguous acquisition during a borrowed transaction queues the sibling drain until unwind releases that boundary; EventBus reset preserves pending operations until prior retirement succeeds and then attempts every terminal release; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
       executable_proofs:
         - {path: internal/store/internal/runtimepersistence/pipeline_obligation_review_closure_test.go, test: TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres}
     PPO-SCP-001:
@@ -36900,6 +37398,12 @@ agent_topology_authority:
       registration/adoption consume the selected-store run ownership classification through
       their current generation grant. Queued readiness work rechecks after admission and before
       topology mutation; an earlier observation is not retained permission. Missing or corrupt
+      source-set plans are not replaced by a revision-only check: ordinary run-ownership inspection
+      loads and validates the complete canonical source-set head and compares its revision in the
+      same selected-store transaction as current-grant and run classification, after the existing
+      mutation fence. The process operation mutex, retained-possession proof and final local fence
+      remain required. Selected-fork inspection retains its separate selected-execution proof and
+      local-fence boundary, without consulting the ordinary source-set head. Missing or corrupt
       run evidence, retired grants, changed selected execution fences and expired execution
       ownership fail closed. The lifecycle transaction independently checks run ownership before
       writing, so discovery filtering cannot be bypassed with a direct lifecycle request.

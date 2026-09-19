@@ -45,12 +45,8 @@ type revisionEffects = privaterunforkrevision.Effects
 
 func newRevisionEffects() *revisionEffects { return privaterunforkrevision.NewEffects() }
 
-func addRevisionEffects(effects *revisionEffects, runID string, families ...privaterunforkrevision.Family) error {
-	return effects.Add(runID, families...)
-}
-
-func addTimerRevisionEffects(effects *revisionEffects, runID string) error {
-	return addRevisionEffects(effects, runID, privaterunforkrevision.FamilyTimers)
+func addTimerRevisionEffects(effects *revisionEffects, runID, timerID string) error {
+	return effects.AddFact(runID, privaterunforkrevision.FamilyTimers, timerID)
 }
 
 type EventCommitOwner interface {
@@ -148,7 +144,8 @@ func nullUUIDString(raw string) string {
 }
 
 type PipelinePostgresOwner struct {
-	apiIdempotency *storeapiidempotency.PostgresOwner
+	fanOutReadiness FanOutReadiness
+	apiIdempotency  *storeapiidempotency.PostgresOwner
 	*storerunlifecycle.RunLifecyclePostgresOwner
 	*storedecision.DecisionPostgresOwner
 	*storedelivery.DeliveryPostgresOwner
@@ -166,7 +163,8 @@ type PipelinePostgresOwner struct {
 }
 
 type PipelineSQLiteOwner struct {
-	apiIdempotency *storeapiidempotency.SQLiteOwner
+	fanOutReadiness FanOutReadiness
+	apiIdempotency  *storeapiidempotency.SQLiteOwner
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedecision.DecisionSQLiteOwner
 	*storedelivery.DeliverySQLiteOwner
@@ -184,6 +182,7 @@ type PipelineSQLiteOwner struct {
 	nowFn                  func() time.Time
 	mutationMu             sync.Mutex
 	pipelineClaimMu        sync.Mutex
+	recoveryTransitions    pipelineRecoveryTransitions
 	pipelineClaimIssuer    *runtimepipelineobligation.ClaimIssuer
 	pipelineClaims         map[string]*pipelineClaimState
 	pipelineScanIssuer     *runtimepipelineobligation.ScanIssuer
@@ -306,7 +305,9 @@ func (s *PipelineSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, lab
 	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
+	resetEffects := effects.AttemptReset()
 	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		resetEffects()
 		if err := operation(txctx, tx); err != nil {
 			return err
 		}

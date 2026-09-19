@@ -146,6 +146,10 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		hostile, err := classifyOperatorLineageHostileRunLiterals(relative, file)
+		if err != nil {
+			violations = append(violations, relative+": "+err.Error())
+		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			literal, ok := node.(*ast.BasicLit)
 			if !ok || literal.Kind != token.STRING {
@@ -155,7 +159,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 			if err != nil || !runWrite.MatchString(value) {
 				return true
 			}
-			if allowedSemanticRunFixtureLiteral(relative, value) {
+			if hostile[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
 				return true
 			}
 			violations = append(violations, relative+": "+compactSQLForLifecycleGuard(value))
@@ -169,6 +173,87 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	sort.Strings(violations)
 	if len(violations) > 0 {
 		t.Fatalf("semantic run fixtures bypass the lifecycle owner:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func classifyOperatorLineageHostileRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {
+	if path != "internal/store/internal/runtimepersistence/operator_event_snapshot_lineage_test.go" {
+		return nil, nil
+	}
+	// This test corrupts an already lawfully created fork while its read is pinned,
+	// then restores it. Neither literal is a semantic run constructor/transition.
+	exact := map[string]int{
+		"UPDATE runs SET forked_from_run_id=$3,forked_from_event_id=$4 WHERE run_id=$1 AND forked_from_run_id=$2": 0,
+		"UPDATE runs SET forked_from_run_id=$1,forked_from_event_id=$3 WHERE run_id=$2":                           0,
+	}
+	approved := map[token.Pos]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING || eventBoundaryEnclosingScope(file, literal.Pos()) != "TestOperatorEventSnapshotInheritedLineageInterleavingBothStores" {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		value = compactSQLForLifecycleGuard(value)
+		if _, ok := exact[value]; ok {
+			exact[value]++
+			approved[literal.Pos()] = true
+		}
+		return true
+	})
+	for query, count := range exact {
+		if count != 1 {
+			return nil, fmt.Errorf("lineage hostile fixture requires exactly one %q, got %d", query, count)
+		}
+	}
+	return approved, nil
+}
+
+func TestOperatorLineageHostileRunFixtureClassificationIsExact(t *testing.T) {
+	const path = "internal/store/internal/runtimepersistence/operator_event_snapshot_lineage_test.go"
+	const scope = "TestOperatorEventSnapshotInheritedLineageInterleavingBothStores"
+	const corrupt = "UPDATE runs SET forked_from_run_id=$3,forked_from_event_id=$4 WHERE run_id=$1 AND forked_from_run_id=$2"
+	const restore = "UPDATE runs SET forked_from_run_id=$1,forked_from_event_id=$3 WHERE run_id=$2"
+	const extra = "UPDATE runs SET status='paused' WHERE run_id=$1"
+	source := "package fixture\nfunc " + scope + "() { use(" + strconv.Quote(corrupt) + "); use(" + strconv.Quote(restore) + ") }\n"
+	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
+	for _, tc := range []struct {
+		name, path, source string
+		want               bool
+	}{
+		{"exact", path, source, true},
+		{"wrong-path", "internal/runtime/other_test.go", source, false},
+		{"wrong-function", path, strings.ReplaceAll(source, scope, "Other"), false},
+		{"missing-restore", path, strings.Replace(source, strconv.Quote(restore), `"SELECT 1"`, 1), false},
+		{"missing-CAS", path, strings.Replace(source, " AND forked_from_run_id=$2", "", 1), false},
+		{"duplicate-corruption", path, strings.Replace(source, "use(", "use("+strconv.Quote(corrupt)+"); use(", 1), false},
+		{"same-function-extra", path, strings.Replace(source, "use(", "use("+strconv.Quote(extra)+"); use(", 1), false},
+		{"sibling-function", path, source + "func other() { use(" + strconv.Quote(corrupt) + ") }", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture_test.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved, err := classifyOperatorLineageHostileRunLiterals(tc.path, file)
+			allowed := err == nil
+			ast.Inspect(file, func(node ast.Node) bool {
+				literal, ok := node.(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					return true
+				}
+				value, err := strconv.Unquote(literal.Value)
+				if err == nil && runWrite.MatchString(value) && !approved[literal.Pos()] {
+					allowed = false
+				}
+				return true
+			})
+			if allowed != tc.want {
+				t.Fatalf("allowed=%t want=%t err=%v", allowed, tc.want, err)
+			}
+		})
 	}
 }
 

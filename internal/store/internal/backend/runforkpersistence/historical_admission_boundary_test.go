@@ -39,7 +39,9 @@ type historicalBoundaryAllowance struct {
 // receiver variable spellings, or every method on an otherwise trusted type.
 func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed := map[string]historicalBoundaryAllowance{
-		historicalBoundaryWriter + "loadCanonicalProjection/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":                               {1, "delivery writer validates the same status/final-selection/route relation as historical readers before recording a revision"},
+		historicalBoundaryWriter + "loadSelectedCanonicalProjection/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":                       {1, "both exact and whole projections validate the same delivery relation before recording a revision"},
+		historicalBoundaryWriter + "validateExactCapture/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":                                  {1, "affected prior ledger facts retain strict historical delivery admission"},
+		historicalBoundaryWriter + "validateExactCapture/reference:" + historicalBoundaryWriter + "FactKey":                                              {1, "affected prior ledger coordinates are checked against their canonical body key"},
 		historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory/reference:runtime/runfork::NewTerminalBarrierHistory":                              {1, "only the complete fixed-revision barrier relation may mint terminal-history admission"},
 		historicalBoundaryOwner + "loadRunForkAdmissionEvidenceFromRevision/reference:" + historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory": {1, "all fixed-revision admission consumes the terminal relation"},
 		historicalBoundaryOwner + "resolveRunForkRevisionPoint/ledger_sql":                                                                               {1, "shared event-point read; contextual admission precedes cursor construction"},
@@ -48,12 +50,17 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		historicalBoundaryOwner + "ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision/ledger_sql":                                              {1, "post-R marker existence, not historical payload admission"},
 		historicalBoundaryOwner + "ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling/ledger_sql":                                          {1, "current coupling revision safety, not historical payload admission"},
 		historicalBoundaryWriter + "latestFactReadQuery/ledger_sql":                                                                                      {2, "shared latest equality query: one local constant and its exact formatting use"},
+		historicalBoundaryWriter + "readAffectedLatestFacts/ledger_sql":                                                                                  {1, "closed exact coordinates select latest ledger rows before shared hydration"},
 		historicalBoundaryWriter + "postgresAdapter.insertFact/ledger_sql":                                                                               {1, "canonical ledger writer"},
 		historicalBoundaryWriter + "sqliteAdapter.insertFact/ledger_sql":                                                                                 {1, "canonical ledger writer"},
 		historicalBoundaryOwner + "appendRunForkHistoricalFact/raw_decode":                                                                               {2, "embedded owning-run check and contextual family decoding closure"},
 		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:" + historicalBoundaryWriter + "FactKey":                                        {1, "historical admission consumes the writer's exact key relation"},
-		historicalBoundaryWriter + "loadCanonicalProjection/reference:" + historicalBoundaryWriter + "projectionFactKey":                                 {1, "canonical writer projects only identity coordinates from its validated map"},
-		historicalBoundaryWriter + "projectionFactKey/reference:" + historicalBoundaryWriter + "FactKey":                                                 {1, "identity-only projection still consumes the exact historical key relation"},
+		historicalBoundaryWriter + "loadSelectedCanonicalProjection/reference:" + historicalBoundaryWriter + "projectionFactKey":                         {1, "one projection owner admits exact and whole selected fact keys"},
+		historicalBoundaryWriter + "newFactRef/reference:" + historicalBoundaryWriter + "admitFactKeyCoordinates":                                        {1, "exact effect construction uses the same closed coordinate grammar"},
+		historicalBoundaryWriter + "FactRef.validate/reference:" + historicalBoundaryWriter + "admitFactKeyCoordinates":                                  {1, "exact effect revalidation refuses forged coordinates"},
+		historicalBoundaryWriter + "FactKey/reference:" + historicalBoundaryWriter + "admitFactKeyCoordinates":                                           {1, "wire scalar coordinates consume the shared exact key relation after wire admission"},
+		historicalBoundaryWriter + "fanOutFactKey/reference:" + historicalBoundaryWriter + "admitFactKeyCoordinates":                                     {1, "wire fan-out coordinates consume the shared exact key relation after wire admission"},
+		historicalBoundaryWriter + "projectionFactKey/reference:" + historicalBoundaryWriter + "admitFactKeyCoordinates":                                 {1, "decoded projection coordinates consume the same exact key relation"},
 		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":                            {1, "typed historical delivery decoding under contextual admission"},
 		historicalBoundaryOwner + "resolveRunForkRevisionPoint/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "event cursor uses the same contextual relation"},
 		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "all present snapshot families use contextual admission"},
@@ -258,7 +265,7 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 					add(n, "reference:"+callee)
 				}
 				switch callee {
-				case historicalBoundaryWriter + "FactKey", historicalBoundaryWriter + "projectionFactKey", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
+				case historicalBoundaryWriter + "FactKey", historicalBoundaryWriter + "projectionFactKey", historicalBoundaryWriter + "admitFactKeyCoordinates", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
 					"runtime/runfork::NewTerminalBarrierHistory", historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory",
 					historicalBoundaryOwner + "resolveRunForkRevisionPoint", historicalBoundaryOwner + "resolveSQLiteRunForkRevisionPoint":
 					add(n, "reference:"+callee)
@@ -491,6 +498,7 @@ func (imports historicalBoundaryImports) Import(path string) (*types.Package, er
 
 func historicalBoundaryHostile(t *testing.T, imports historicalBoundaryImports) {
 	t.Helper()
+	inheritedFanOutBoundaryHostile(t, imports)
 	const source = `package runforkpersistence
 import (
     codec "encoding/json"
@@ -625,15 +633,31 @@ func ordinaryBusiness(raw []byte) error {
 	if got := historicalBoundaryProblems([]historicalBoundaryFinding{duplicate, duplicate, duplicate}, historicalBoundaryAllowances(), false); len(got) != 1 || !strings.Contains(got[0], "observed 3, audited 2") {
 		t.Fatalf("same-owner duplicate decoding must fail: %v", got)
 	}
+	for _, caller := range []string{"FactKey", "fanOutFactKey", "projectionFactKey", "newFactRef", "FactRef.validate"} {
+		duplicate := historicalBoundaryFinding{historicalBoundaryWriter + caller, "reference:" + historicalBoundaryWriter + "admitFactKeyCoordinates", "same approved function:extra coordinate admission"}
+		if got := historicalBoundaryProblems([]historicalBoundaryFinding{duplicate, duplicate}, historicalBoundaryAllowances(), false); len(got) != 1 || !strings.Contains(got[0], "observed 2, audited 1") {
+			t.Fatalf("same-owner duplicate coordinate admission must fail for %s: %v", caller, got)
+		}
+	}
 	const projectionSource = `package runforkrevision
 func projectionFactKey() {}
 func FactKey() {}
+func admitFactKeyCoordinates() {}
 type arbitrary struct{}
 func (unrelated *arbitrary) stealProjection() {
     alias := projectionFactKey
     alias()
 }
 func (unrelated *arbitrary) bypassProjection() { FactKey() }
+func (unrelated *arbitrary) directCoordinates() { admitFactKeyCoordinates() }
+func (unrelated *arbitrary) aliasCoordinates() {
+    alias := admitFactKeyCoordinates
+    alias()
+}
+func harmlessSameSpelling() {
+    admitFactKeyCoordinates := func() {}
+    admitFactKeyCoordinates()
+}
 `
 	projectionSet := token.NewFileSet()
 	projectionFile, err := parser.ParseFile(projectionSet, "projection.go", projectionSource, 0)
@@ -647,9 +671,11 @@ func (unrelated *arbitrary) bypassProjection() { FactKey() }
 	}
 	projectionFindings := historicalBoundaryCollect(projectionPkg, projectionInfo, projectionSet, projectionFile)
 	projectionProblems := historicalBoundaryProblems(projectionFindings, historicalBoundaryAllowances(), false)
-	if len(projectionProblems) != 2 ||
-		!strings.Contains(projectionProblems[0], "arbitrary.bypassProjection/reference:"+historicalBoundaryWriter+"FactKey") ||
-		!strings.Contains(projectionProblems[1], "arbitrary.stealProjection/reference:"+historicalBoundaryWriter+"projectionFactKey") {
+	if len(projectionProblems) != 4 ||
+		!strings.Contains(projectionProblems[0], "arbitrary.aliasCoordinates/reference:"+historicalBoundaryWriter+"admitFactKeyCoordinates") ||
+		!strings.Contains(projectionProblems[1], "arbitrary.bypassProjection/reference:"+historicalBoundaryWriter+"FactKey") ||
+		!strings.Contains(projectionProblems[2], "arbitrary.directCoordinates/reference:"+historicalBoundaryWriter+"admitFactKeyCoordinates") ||
+		!strings.Contains(projectionProblems[3], "arbitrary.stealProjection/reference:"+historicalBoundaryWriter+"projectionFactKey") {
 		t.Fatalf("unapproved direct and aliased key consumers in the approved file must fail: %v", projectionProblems)
 	}
 }

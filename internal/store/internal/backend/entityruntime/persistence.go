@@ -65,7 +65,9 @@ func (s *EntitySQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context
 	if err := s.schemaGuard(); err != nil {
 		return err
 	}
+	resetEffects := effects.AttemptReset()
 	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		resetEffects()
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
@@ -302,7 +304,8 @@ func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools
 		if err := storerunstate.RequirePostgresActiveTx(txctx, tx, rec.RunID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(txctx, `
+		var storedRunID, storedEntityID string
+		if err := tx.QueryRowContext(txctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, bookkeeping, accumulator, revision,
@@ -313,13 +316,14 @@ func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools
 			$6, '{}'::jsonb, $7::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
 			$8, $8, $8
 		)
-	`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, rec.Name, rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt); err != nil {
+		RETURNING run_id::text, entity_id::text
+	`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, rec.Name, rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt).Scan(&storedRunID, &storedEntityID); err != nil {
 			return fmt.Errorf("insert postgres entity: %w", err)
 		}
-		if err := effects.Add(rec.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+		if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID); err != nil {
 			return err
 		}
-		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresEntityRunSourceOwner(tx), story, effects, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresEntityRunSourceOwner(tx), story, effects, storedEntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 			CurrentState: rec.CurrentState,
 			Fields:       fields,
 		}, MutationWriter(rec.Writer)); err != nil {
@@ -353,7 +357,7 @@ func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.E
 			rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt, rec.CreatedAt, rec.CreatedAt); err != nil {
 			return fmt.Errorf("insert sqlite entity: %w", err)
 		}
-		if err := effects.Add(rec.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+		if err := effects.AddFact(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, rec.EntityID); err != nil {
 			return err
 		}
 		if err := InsertSQLiteEntityStateDiff(txctx, story, tx, effects, rec.RunID, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
@@ -815,6 +819,9 @@ func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivit
 			sqliteNullUUID(causedByEvent), rec.WriterType, rec.WriterID, sqliteNullString(rec.HandlerStep), createdAt.UTC()); err != nil {
 			return fmt.Errorf("insert sqlite entity mutation: %w", err)
 		}
+		if err := effects.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
+			return err
+		}
 		draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, createdAt)
 		if err != nil {
 			return err
@@ -824,9 +831,6 @@ func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivit
 				return err
 			}
 		}
-	}
-	if len(records) > 0 {
-		return effects.Add(runID, privaterunforkrevision.FamilyEntityMutations)
 	}
 	return nil
 }

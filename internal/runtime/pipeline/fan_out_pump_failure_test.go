@@ -17,6 +17,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -31,7 +32,26 @@ func (p fanOutFailureTestPlan) ValidateDurablePublicationPlan() error {
 }
 
 type fanOutFailureTestPlanner struct {
-	released [][]string
+	released   [][]string
+	sealedEnds []int
+}
+
+func (*fanOutFailureTestPlanner) PrepareFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, []FanOutPublicationRequest) ([]FanOutPublicationPreparation, error) {
+	return nil, errors.New("failure-algebra test does not prepare publication batches")
+}
+
+func (p *fanOutFailureTestPlanner) SealFanOutPublications(_ context.Context, _ runtimepipelineobligation.PublicationGroup, end int, _ []runtimeengine.DurablePublicationPlan) error {
+	// This unit double records the requested attempt boundary; the selected-
+	// store group tests own claim validation and proven-rollback admission.
+	p.sealedEnds = append(p.sealedEnds, end)
+	return nil
+}
+
+func (*fanOutFailureTestPlanner) DispatchFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, []runtimeengine.CommittedDurablePublication) error {
+	return errors.New("failure-algebra test does not dispatch publications")
+}
+func (*fanOutFailureTestPlanner) FinalizeFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, []runtimeengine.CommittedDurablePublication) error {
+	return errors.New("failure-algebra test does not finalize publications")
 }
 
 func (*fanOutFailureTestPlanner) PrepareEnginePublications(context.Context, []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
@@ -58,6 +78,10 @@ type fanOutFailureTestOwner struct {
 	blocks       []FanOutBlockRequest
 }
 
+func (*fanOutFailureTestOwner) BeginFanOutPublicationGroup(context.Context, fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error) {
+	return nil, errors.New("failure-algebra test does not begin publication groups")
+}
+
 func (*fanOutFailureTestOwner) ClaimFanOutIntent(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
 	return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, fmt.Errorf("failure-algebra test does not claim")
 }
@@ -76,6 +100,9 @@ func (*fanOutFailureTestOwner) ReleaseFanOutClaim(context.Context, fanoutobligat
 }
 
 func (o *fanOutFailureTestOwner) ReleaseFanOutRetryable(_ context.Context, release FanOutRetryableRelease) error {
+	if err := release.Validate(); err != nil {
+		return err
+	}
 	o.retryRelease = append(o.retryRelease, release)
 	return nil
 }
@@ -113,9 +140,12 @@ func TestFanOutCommitFailureAlgebraIsClosed(t *testing.T) {
 			}
 			return fanOutFailureCommitted(command, fanoutobligation.StatusOpen), nil
 		}}
-		committed, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, claim, fanOutFailureOutcomes(0, 4), now)
-		if err != nil || suppress || committed.Intent.Cursor != 2 || fmt.Sprint(planner.released) != "[[event-2 event-3]]" || len(owner.blocks) != 0 {
+		committed, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, nil, claim, fanOutFailureOutcomes(0, 4), now)
+		if err != nil || suppress != fanOutTurnCommitted || committed.Intent.Cursor != 2 || fmt.Sprint(planner.released) != "[[event-2 event-3]]" || len(owner.blocks) != 0 {
 			t.Fatalf("aggregate isolation = cursor:%d suppress:%v err:%v released:%v blocks:%d", committed.Intent.Cursor, suppress, err, planner.released, len(owner.blocks))
+		}
+		if got := fmt.Sprint(planner.sealedEnds); got != "[4 2]" {
+			t.Fatalf("sealed attempt boundaries = %s, want [4 2]", got)
 		}
 	})
 
@@ -132,9 +162,12 @@ func TestFanOutCommitFailureAlgebraIsClosed(t *testing.T) {
 			}
 			return fanOutFailureCommitted(command, fanoutobligation.StatusOpen), nil
 		}}
-		committed, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, claim, fanOutFailureOutcomes(0, 8), now)
-		if err != nil || suppress || committed.Intent.Cursor != 2 || len(owner.commands) != 3 || fmt.Sprint(planner.released) != "[[event-4 event-5 event-6 event-7] [event-2 event-3]]" {
+		committed, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, nil, claim, fanOutFailureOutcomes(0, 8), now)
+		if err != nil || suppress != fanOutTurnCommitted || committed.Intent.Cursor != 2 || len(owner.commands) != 3 || fmt.Sprint(planner.released) != "[[event-4 event-5 event-6 event-7] [event-2 event-3]]" {
 			t.Fatalf("recursive bisection = cursor:%d suppress:%v err:%v commands:%d released:%v", committed.Intent.Cursor, suppress, err, len(owner.commands), planner.released)
+		}
+		if got := fmt.Sprint(planner.sealedEnds); got != "[8 4 2]" {
+			t.Fatalf("sealed attempt boundaries = %s, want [8 4 2]", got)
 		}
 	})
 
@@ -151,8 +184,8 @@ func TestFanOutCommitFailureAlgebraIsClosed(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				planner := &fanOutFailureTestPlanner{}
 				owner := &fanOutFailureTestOwner{commit: func(FanOutChunkCommand) (CommittedFanOutChunk, error) { return CommittedFanOutChunk{}, tc.err }}
-				_, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, claim, fanOutFailureOutcomes(0, 1), now)
-				if err == nil || !suppress || len(owner.commands) != 1 || len(owner.blocks) != 1 || fmt.Sprint(planner.released) != "[[event-0]]" || len(owner.retryRelease) != 0 {
+				_, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, nil, claim, fanOutFailureOutcomes(0, 1), now)
+				if err == nil || suppress != fanOutTurnBlocked || len(owner.commands) != 1 || len(owner.blocks) != 1 || fmt.Sprint(planner.released) != "[[event-0]]" || len(owner.retryRelease) != 0 {
 					t.Fatalf("blocking = suppress:%v err:%v commands:%d blocks:%d retry:%d released:%v", suppress, err, len(owner.commands), len(owner.blocks), len(owner.retryRelease), planner.released)
 				}
 			})
@@ -164,8 +197,8 @@ func TestFanOutCommitFailureAlgebraIsClosed(t *testing.T) {
 		owner := &fanOutFailureTestOwner{commit: func(FanOutChunkCommand) (CommittedFanOutChunk, error) {
 			return CommittedFanOutChunk{}, retryableFailure
 		}}
-		_, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, claim, fanOutFailureOutcomes(0, 4), now)
-		if err == nil || !suppress || len(owner.retryRelease) != 1 || len(owner.blocks) != 0 || fmt.Sprint(planner.released) != "[[event-0 event-1 event-2 event-3]]" {
+		_, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, nil, claim, fanOutFailureOutcomes(0, 4), now)
+		if err == nil || suppress != fanOutTurnRetryWait || len(owner.retryRelease) != 1 || len(owner.blocks) != 0 || fmt.Sprint(planner.released) != "[[event-0 event-1 event-2 event-3]]" {
 			t.Fatalf("retryable = suppress:%v err:%v retry:%d blocks:%d released:%v", suppress, err, len(owner.retryRelease), len(owner.blocks), planner.released)
 		}
 	})
@@ -175,8 +208,8 @@ func TestFanOutCommitFailureAlgebraIsClosed(t *testing.T) {
 		owner := &fanOutFailureTestOwner{commit: func(FanOutChunkCommand) (CommittedFanOutChunk, error) {
 			return CommittedFanOutChunk{}, uncertainFailure
 		}}
-		_, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, claim, fanOutFailureOutcomes(0, 4), now)
-		if err == nil || !suppress || len(owner.retryRelease) != 0 || len(owner.blocks) != 0 || len(planner.released) != 0 {
+		_, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, nil, claim, fanOutFailureOutcomes(0, 4), now)
+		if err == nil || suppress != fanOutTurnUncertain || len(owner.retryRelease) != 0 || len(owner.blocks) != 0 || len(planner.released) != 0 {
 			t.Fatalf("uncertain = suppress:%v err:%v retry:%d blocks:%d released:%v", suppress, err, len(owner.retryRelease), len(owner.blocks), planner.released)
 		}
 	})
@@ -186,8 +219,8 @@ func TestFanOutCommitFailureAlgebraIsClosed(t *testing.T) {
 		owner := &fanOutFailureTestOwner{commit: func(FanOutChunkCommand) (CommittedFanOutChunk, error) {
 			return CommittedFanOutChunk{}, context.Canceled
 		}}
-		_, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, claim, fanOutFailureOutcomes(0, 2), now)
-		if !errors.Is(err, context.Canceled) || suppress || len(owner.retryRelease) != 0 || len(owner.blocks) != 0 || fmt.Sprint(planner.released) != "[[event-0 event-1]]" {
+		_, suppress, err := new(PipelineCoordinator).commitFanOutRange(context.Background(), owner, planner, nil, claim, fanOutFailureOutcomes(0, 2), now)
+		if !errors.Is(err, context.Canceled) || suppress != fanOutTurnYielded || len(owner.retryRelease) != 0 || len(owner.blocks) != 0 || fmt.Sprint(planner.released) != "[[event-0 event-1]]" {
 			t.Fatalf("cancellation = suppress:%v err:%v retry:%d blocks:%d released:%v", suppress, err, len(owner.retryRelease), len(owner.blocks), planner.released)
 		}
 	})
@@ -305,6 +338,7 @@ func TestFanOutPrecommitFailureAdmissionIsClosedToEmitContractEvidence(t *testin
 		{name: "internal", err: runtimefailures.New(runtimefailures.ClassInternalFailure, "fan_out_internal", "test", "plan", nil), want: fanOutFailureBlock},
 		{name: "unknown", err: errors.New("untyped planner failure"), want: fanOutFailureBlock},
 		{name: "retryable", err: runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "fan_out_dependency_unavailable", "test", "plan", nil), want: fanOutFailureRetry},
+		{name: "nondeterministic is not retry authorization", err: runtimefailures.New(runtimefailures.ClassTargetUnreachable, "target_unreachable_no_subscriber", "test", "plan", nil), want: fanOutFailureBlock},
 		{name: "cancellation", err: context.Canceled, want: fanOutFailureYield},
 	}
 
@@ -344,7 +378,7 @@ func TestFanOutEvaluatorAndPlannerFailuresConsumeClosedPrecommitOwner(t *testing
 	arguments := map[string]int{}
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Name.Name != "serveFanOutTurn" {
+		if !ok || function.Name.Name != "claimAndServeFanOutTurn" {
 			continue
 		}
 		ast.Inspect(function.Body, func(node ast.Node) bool {
@@ -360,8 +394,8 @@ func TestFanOutEvaluatorAndPlannerFailuresConsumeClosedPrecommitOwner(t *testing
 			return true
 		})
 	}
-	if len(arguments) != 2 || arguments["evalErr"] != 1 || arguments["prepareErr"] != 1 {
-		t.Fatalf("precommit failure callsites = %#v, want exact evaluator and planner consumers", arguments)
+	if len(arguments) != 4 || arguments["evalErr"] != 1 || arguments["prepareErr"] != 1 || arguments["err"] != 1 || arguments["acquisitionErr"] != 1 {
+		t.Fatalf("precommit failure callsites = %#v, want exact group admission, claim acquisition, evaluator and planner consumers", arguments)
 	}
 }
 

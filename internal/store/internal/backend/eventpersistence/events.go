@@ -20,7 +20,6 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 )
 
@@ -101,16 +100,11 @@ func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, t
 	outcome := runtimebus.EventAppendOutcomeUnknown
 	err := withEventStoreRetry(ctx, tx, func() error {
 		var err error
-		outcome, err = s.appendEventSpec(ctx, tx, story, admitted, settlement)
+		outcome, err = s.appendEventSpec(ctx, tx, story, effects, admitted, settlement)
 		return err
 	})
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	if runID := strings.TrimSpace(admitted.Event().RunID()); runID != "" {
-		if err := effects.Add(runID, privaterunforkrevision.FamilyEvents); err != nil {
-			return runtimebus.EventAppendOutcomeUnknown, err
-		}
 	}
 	return outcome, nil
 }
@@ -198,7 +192,7 @@ func (s *EventPostgresOwner) ListEventDeliveryRoutes(ctx context.Context, eventI
 	return events.NormalizeDeliveryRoutes(out), nil
 }
 
-func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	if story == nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("persisted event author activity mutation is required")
 	}
@@ -222,10 +216,6 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 	}
 	if duplicate {
 		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
-	}
-	var recordExec eventrecordpostgres.Execer = s.backend
-	if tx != nil {
-		recordExec = tx
 	}
 	var ensureErr error
 	switch admitted.RunDisposition() {
@@ -268,7 +258,7 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 	if err := requireEventOwnedReferences(ctx, tx, true, wantIdentity); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	inserted, err := eventrecordpostgres.Insert(ctx, recordExec, wantIdentity)
+	inserted, err := eventrecordpostgres.Insert(ctx, queryer, effects, wantIdentity)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}

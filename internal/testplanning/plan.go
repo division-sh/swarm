@@ -29,6 +29,8 @@ type ProofUnit struct {
 	ID            string   `json:"id"`
 	Packages      []string `json:"packages"`
 	Run           string   `json:"run,omitempty"`
+	Skip          string   `json:"skip,omitempty"`
+	GoTimeout     string   `json:"go_timeout,omitempty"`
 	CountMode     string   `json:"count_mode"`
 	EnvironmentID string   `json:"environment_id"`
 	BudgetClass   string   `json:"budget_class"`
@@ -137,6 +139,8 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 			ID:            id,
 			Packages:      unitPackages,
 			Run:           specialUnit.Run,
+			Skip:          specialUnit.Skip,
+			GoTimeout:     specialUnit.GoTimeout,
 			CountMode:     specialUnit.CountMode,
 			EnvironmentID: specialUnit.EnvironmentID,
 			BudgetClass:   specialUnit.BudgetClass,
@@ -196,8 +200,11 @@ func (p RunPlan) Validate() error {
 		if !validCountMode(unit.CountMode) || unit.EnvironmentID == "" {
 			return fmt.Errorf("unit %s has invalid count/environment identity", unit.ID)
 		}
-		if unit.BudgetClass != "broad" && unit.BudgetClass != "full" {
+		if unit.BudgetClass != "broad" && unit.BudgetClass != "full" && unit.BudgetClass != "soak" {
 			return fmt.Errorf("unit %s has unsupported budget class %q", unit.ID, unit.BudgetClass)
+		}
+		if err := validateSoakSelection(unit.Packages, unit.Run, unit.Skip, unit.GoTimeout, unit.CountMode, unit.BudgetClass); err != nil {
+			return fmt.Errorf("unit %s: %w", unit.ID, err)
 		}
 		for _, pkg := range unit.Packages {
 			for _, previous := range seenPackages[pkg] {

@@ -928,7 +928,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 			SelfCheck:      false,
 			WorkflowModule: module,
 			LLMRuntime:     noopLLMRuntime{},
-		}})
+		}}, startupRecoveryFanOutSessionForTest(t, db))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1007,7 +1007,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 			SelfCheck:      false,
 			WorkflowModule: module,
 			LLMRuntime:     noopLLMRuntime{},
-		}})
+		}}, startupRecoveryFanOutSessionForTest(t, db))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1088,7 +1088,7 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 			SelfCheck:      false,
 			WorkflowModule: module,
 			LLMRuntime:     noopLLMRuntime{},
-		}})
+		}}, startupRecoveryFanOutSessionForTest(t, db))
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}

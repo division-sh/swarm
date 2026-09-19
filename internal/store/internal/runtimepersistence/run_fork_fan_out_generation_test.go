@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -55,17 +56,17 @@ func TestOrdinaryForkOfForkFanOutOriginWriterEvaluatorBothStores(t *testing.T) {
 func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExecution, forkAgain bool) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			if store, ok := fixture.store.(*SQLiteRuntimeStore); ok && !selectedExecution {
-				// The receipt fixture freezes July settlement time; actual schedule
-				// preparation and acceptance must share the live store clock.
-				store.nowFn = func() time.Time { return time.Now().UTC() }
-			}
 			for _, cell := range []struct {
 				name             string
 				loop, historical bool
 			}{{"current", true, false}, {"historical", true, true}, {"no_loop", false, false}} {
 				t.Run(cell.name, func(t *testing.T) {
+					// Each mode owns one complete admitted source set and process grant.
+					fixture := backend.open(t)
+					if store, ok := fixture.store.(*SQLiteRuntimeStore); ok && !selectedExecution {
+						// Actual schedule preparation and acceptance share the live clock.
+						store.nowFn = func() time.Time { return time.Now().UTC() }
+					}
 					repo := canonicalrouting.RepoRoot(t)
 					completeBarrier := !selectedExecution && cell.loop && !cell.historical
 					root := canonicalrouting.CopyForkFanOutConsumer(t, cell.loop, true)
@@ -233,6 +234,13 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					if forkAgain {
 						firstChild := child.ForkRunID
 						protectedRuns = append(protectedRuns, firstChild)
+						firstActivation, err := fixture.store.(runForkSelectedLifecycleStore).ActivateRunFork(ctx, runfork.RunForkActivateRequest{
+							ForkRunID: firstChild, AllowSourceFreeze: true, OriginalLoopCarriage: original,
+							HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
+						})
+						if err != nil || !firstActivation.Activated || !firstActivation.SourceFrozen || firstActivation.SourceRunID != runID || firstActivation.ForkRunID != firstChild {
+							t.Fatalf("activate first generation before ordinary fork-of-fork: %+v err=%v", firstActivation, err)
+						}
 						checkpoint := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "fork.checkpoint", "operator", "", []byte(`{}`), 0, firstChild, events.EventEnvelope{}, eventtest.RootRoutingSource(firstChild), at.Add(3*time.Minute))
 						if err := insertCanonicalEventRecordFixture(ctx, fixture.store, checkpoint); err != nil {
 							t.Fatal(err)
@@ -280,12 +288,39 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						t.Fatal("repeated fork mutated durable evidence")
 					}
 					owner := fixture.store.(selectedFanOutOwner)
-					copied, claim, found, err := claimFanOutForRun(t, ctx, owner, child.ForkRunID, intent.PlanRef.BundleHash, at.Add(3*time.Minute))
+					key := fanoutobligation.IntentKey{RunID: child.ForkRunID, ElementRef: intent.Key.ElementRef}
+					var status, control, intentStatus, claimOwner string
+					var cursor, cardinality int
+					if err := fixture.db.QueryRowContext(ctx, `SELECT r.status,COALESCE(c.control_status,''),i.status,i.cursor,i.cardinality,COALESCE(i.claim_owner,''),i.triggering_delivery_id FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id JOIN fan_out_intents i ON i.run_id=r.run_id WHERE r.run_id=$1`, child.ForkRunID).Scan(&status, &control, &intentStatus, &cursor, &cardinality, &claimOwner, &key.TriggeringDeliveryID); err != nil {
+						t.Fatal(err)
+					}
+					if status != "paused" || control != "" || intentStatus != "open" || cursor != 0 || cardinality != 2 || claimOwner != "" {
+						t.Fatalf("materialized child eligibility: status=%s control=%q intent=%s cursor=%d/%d claim_owner=%q", status, control, intentStatus, cursor, cardinality, claimOwner)
+					}
+					request := pipeline.FanOutClaimRequest{Owner: "fork-specific-worker", BundleHash: intent.PlanRef.BundleHash, Candidate: &key, Now: time.Now().UTC(), Lease: time.Minute}
+					if _, _, found, err := owner.ClaimFanOutIntent(ctx, request); err != nil || found {
+						t.Fatalf("paused materialization admitted a new turn: found=%v err=%v", found, err)
+					}
+					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+						t.Fatal("paused child claim refusal mutated durable evidence")
+					}
+					// Ordinary materialization is paused; only its canonical activation
+					// may admit the child turn and freeze the immediate source run.
+					forkActivation, err := fixture.store.(runForkSelectedLifecycleStore).ActivateRunFork(ctx, runfork.RunForkActivateRequest{
+						ForkRunID: child.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: original,
+						HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
+					})
+					if err != nil || !forkActivation.Activated || !forkActivation.SourceFrozen || forkActivation.ForkRunStatus != runfork.RunForkActivatedStatus {
+						t.Fatalf("activate ordinary fork before child serving: %+v err=%v", forkActivation, err)
+					}
+					grantSeed := fanOutOwnerFixture{bundleHash: intent.PlanRef.BundleHash, runID: child.ForkRunID, deliveryID: key.TriggeringDeliveryID}
+					grantedOwner, _, _, _ := grantedFanOutOwnerForTest(t, ctx, owner, grantSeed)
+					copied, claim, found, err := grantedOwner.ClaimFanOutIntent(ctx, request)
 					if err != nil || !found {
 						t.Fatalf("claim child intent: found=%v %v", found, err)
 					}
 					defer func() {
-						if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+						if err := grantedOwner.ReleaseFanOutClaim(ctx, claim); err != nil {
 							if errors.Is(err, fanoutobligation.ErrStaleClaim) {
 								var status string
 								var cursor, cardinality int
@@ -297,7 +332,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 							t.Error(err)
 						}
 					}()
-					input, err := owner.LoadFanOutEvaluation(ctx, claim)
+					input, err := grantedOwner.LoadFanOutEvaluation(ctx, claim)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -346,7 +381,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 							}
 						}
 					}()
-					consumeForkFanOutEmissions(t, fixture, backend.name, source, ctx, copied, claim, emissions, expectedFailure, completeBarrier)
+					consumeForkFanOutEmissions(t, fixture, backend.name, source, ctx, grantedOwner, copied, claim, emissions, expectedFailure, completeBarrier)
 				})
 			}
 		})

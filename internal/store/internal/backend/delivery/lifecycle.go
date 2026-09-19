@@ -39,14 +39,9 @@ func (s *DeliveryPostgresOwner) CommitInitialDeliveryObligationsTx(ctx context.C
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	proofs, err := postgresDeliveryAdapter.CommitInitial(ctx, tx, eventID, runID, routes, authority)
+	proofs, err := postgresDeliveryAdapter.CommitInitial(ctx, tx, effects, eventID, runID, routes, authority)
 	if err != nil {
 		return nil, err
-	}
-	if len(proofs) > 0 {
-		if err := effects.Add(runID, privaterunforkrevision.FamilyEventDeliveries); err != nil {
-			return nil, err
-		}
 	}
 	return proofs, nil
 }
@@ -55,14 +50,9 @@ func (s *DeliverySQLiteOwner) CommitInitialDeliveryObligationsTx(ctx context.Con
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	proofs, err := sqliteDeliveryAdapter.CommitInitial(ctx, tx, eventID, runID, routes, authority)
+	proofs, err := sqliteDeliveryAdapter.CommitInitial(ctx, tx, effects, eventID, runID, routes, authority)
 	if err != nil {
 		return nil, err
-	}
-	if len(proofs) > 0 {
-		if err := effects.Add(runID, privaterunforkrevision.FamilyEventDeliveries); err != nil {
-			return nil, err
-		}
 	}
 	return proofs, nil
 }
@@ -71,12 +61,8 @@ func (s *DeliveryPostgresOwner) ActivateDeliveryAuthority(ctx context.Context, a
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	effects := privaterunforkrevision.NewEffects()
-	return s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		if err := postgresDeliveryAdapter.ActivateNormalAuthority(txctx, tx, authority); err != nil {
-			return err
-		}
-		return declareAuthorityDeliveryRuns(txctx, tx, authority, effects)
+	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
+		return postgresDeliveryAdapter.ActivateNormalAuthority(txctx, tx, effects, authority)
 	})
 }
 
@@ -84,12 +70,8 @@ func (s *DeliverySQLiteOwner) ActivateDeliveryAuthority(ctx context.Context, aut
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	effects := privaterunforkrevision.NewEffects()
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite activate delivery authority", effects, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		if err := sqliteDeliveryAdapter.ActivateNormalAuthority(txctx, tx, authority); err != nil {
-			return err
-		}
-		return declareAuthorityDeliveryRuns(txctx, tx, authority, effects)
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite activate delivery authority", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
+		return sqliteDeliveryAdapter.ActivateNormalAuthority(txctx, tx, effects, authority)
 	})
 }
 
@@ -118,8 +100,7 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
 	}
 	var result runtimedelivery.ClaimResult
-	effects := privaterunforkrevision.NewEffects()
-	err := s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
 		snapshot, err := postgresDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
 		if err != nil && !errors.Is(err, runtimedelivery.ErrNotFound) && !errors.Is(err, runtimedelivery.ErrConflict) {
 			return err
@@ -129,11 +110,11 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 				return err
 			}
 		}
-		result, err = s.receiverAdapter.ClaimExactResult(txctx, tx, story, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+		result, err = s.receiverAdapter.ClaimExactResult(txctx, tx, effects, story, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		if err != nil || strings.TrimSpace(result.Snapshot.RunID) == "" {
 			return err
 		}
-		return effects.Add(result.Snapshot.RunID, privaterunforkrevision.FamilyEventDeliveries)
+		return nil
 	})
 	return result, err
 }
@@ -143,8 +124,7 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
 	}
 	var result runtimedelivery.ClaimResult
-	effects := privaterunforkrevision.NewEffects()
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite claim delivery", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite claim delivery", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
 		snapshot, err := sqliteDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
 		if err != nil && !errors.Is(err, runtimedelivery.ErrNotFound) && !errors.Is(err, runtimedelivery.ErrConflict) {
 			return err
@@ -154,11 +134,11 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 				return err
 			}
 		}
-		result, err = s.receiverAdapter.ClaimExactResult(txctx, tx, story, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+		result, err = s.receiverAdapter.ClaimExactResult(txctx, tx, effects, story, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		if err != nil || strings.TrimSpace(result.Snapshot.RunID) == "" {
 			return err
 		}
-		return effects.Add(result.Snapshot.RunID, privaterunforkrevision.FamilyEventDeliveries)
+		return nil
 	})
 	return result, err
 }
@@ -290,11 +270,11 @@ func (s *DeliverySQLiteOwner) RenewClaim(ctx context.Context, claim runtimedeliv
 }
 
 func (s *DeliveryPostgresOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
-	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, _ *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
+	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
 		if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return postgresDeliveryAdapter.BindAgentSession(txctx, tx, claim, sessionID)
+		return postgresDeliveryAdapter.BindAgentSession(txctx, tx, effects, claim, sessionID)
 	})
 }
 
@@ -317,22 +297,16 @@ func (s *DeliverySQLiteOwner) RenewProviderOriginTx(ctx context.Context, tx *sql
 }
 
 func (s *DeliveryPostgresOwner) renewClaimTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim runtimedelivery.Claim, lease time.Duration) (runtimedelivery.Snapshot, error) {
-	snapshot, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, claim, lease)
+	snapshot, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, effects, claim, lease)
 	if err != nil {
-		return runtimedelivery.Snapshot{}, err
-	}
-	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
 	return snapshot, nil
 }
 
 func (s *DeliverySQLiteOwner) renewClaimTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim runtimedelivery.Claim, lease time.Duration) (runtimedelivery.Snapshot, error) {
-	snapshot, err := sqliteDeliveryAdapter.RenewClaim(ctx, tx, claim, lease)
+	snapshot, err := sqliteDeliveryAdapter.RenewClaim(ctx, tx, effects, claim, lease)
 	if err != nil {
-		return runtimedelivery.Snapshot{}, err
-	}
-	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
 	return snapshot, nil
@@ -347,14 +321,14 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginSuccessTx(
 	sideEffects []string,
 	duration time.Duration,
 ) error {
-	snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
+	snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, effects, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
 	if err != nil {
 		return err
 	}
 	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 		return err
 	}
-	return effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries)
+	return nil
 }
 
 func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
@@ -366,14 +340,14 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
 	sideEffects []string,
 	duration time.Duration,
 ) error {
-	snapshot, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
+	snapshot, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, effects, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
 	if err != nil {
 		return err
 	}
 	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 		return err
 	}
-	return effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries)
+	return nil
 }
 
 // SettleWorkflowNodeSuccessTx terminally settles the exact inbound node claim
@@ -388,14 +362,11 @@ func (s *DeliveryPostgresOwner) SettleWorkflowNodeSuccessTx(
 	duration time.Duration,
 	selection runtimedelivery.HandlerRuleSelectionFact,
 ) (runtimedelivery.Snapshot, error) {
-	snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, selection)
+	snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, effects, story, claim, sideEffects, duration, selection)
 	if err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
 	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
-		return runtimedelivery.Snapshot{}, err
-	}
-	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
 	return snapshot, nil
@@ -413,14 +384,11 @@ func (s *DeliverySQLiteOwner) SettleWorkflowNodeSuccessTx(
 	duration time.Duration,
 	selection runtimedelivery.HandlerRuleSelectionFact,
 ) (runtimedelivery.Snapshot, error) {
-	snapshot, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, selection)
+	snapshot, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, effects, story, claim, sideEffects, duration, selection)
 	if err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
 	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
-		return runtimedelivery.Snapshot{}, err
-	}
-	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
 	return snapshot, nil
@@ -434,14 +402,11 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginFailureTx(
 	claim runtimedelivery.Claim,
 	settlement runtimedelivery.Settlement,
 ) error {
-	snapshot, err := postgresDeliveryAdapter.SettleFailure(ctx, tx, story, claim, settlement)
+	snapshot, err := postgresDeliveryAdapter.SettleFailure(ctx, tx, effects, story, claim, settlement)
 	if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
 		return err
 	}
 	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
-		return err
-	}
-	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
 		return err
 	}
 	record, found, err := eventrecordpostgres.Load(ctx, tx, snapshot.EventID)
@@ -466,14 +431,11 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginFailureTx(
 	claim runtimedelivery.Claim,
 	settlement runtimedelivery.Settlement,
 ) error {
-	snapshot, err := sqliteDeliveryAdapter.SettleFailure(ctx, tx, story, claim, settlement)
+	snapshot, err := sqliteDeliveryAdapter.SettleFailure(ctx, tx, effects, story, claim, settlement)
 	if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
 		return err
 	}
 	if err := settleReceiverDependentsTx(ctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
-		return err
-	}
-	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
 		return err
 	}
 	record, found, err := eventrecordsqlite.Load(ctx, tx, snapshot.EventID)
@@ -498,7 +460,7 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginRecoveryFailureTx(
 	claim runtimedelivery.Claim,
 	settlement runtimedelivery.Settlement,
 ) error {
-	alreadyTerminal, err := postgresDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, claim)
+	alreadyTerminal, err := postgresDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, effects, claim)
 	if err != nil || alreadyTerminal {
 		return err
 	}
@@ -513,7 +475,7 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginRecoveryFailureTx(
 	claim runtimedelivery.Claim,
 	settlement runtimedelivery.Settlement,
 ) error {
-	alreadyTerminal, err := sqliteDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, claim)
+	alreadyTerminal, err := sqliteDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, effects, claim)
 	if err != nil || alreadyTerminal {
 		return err
 	}
@@ -521,21 +483,21 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginRecoveryFailureTx(
 }
 
 func (s *DeliverySQLiteOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, _ *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
+	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return sqliteDeliveryAdapter.BindAgentSession(txctx, tx, claim, sessionID)
+		return sqliteDeliveryAdapter.BindAgentSession(txctx, tx, effects, claim, sessionID)
 	})
 }
 
 func (s *DeliveryPostgresOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	return runhandoff.WithCandidateHandoffOutcomeResult(ctx, func(handoff *runhandoff.CandidateHandoff) (runtimedelivery.Snapshot, bool, error) {
-		return postgresDeliveryMutationOutcome(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, _ *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
+		return postgresDeliveryMutationOutcome(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
 			if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
-			snapshot, err := postgresDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration, selection)
+			snapshot, err := postgresDeliveryAdapter.SettleSuccess(txctx, tx, effects, story, claim, sideEffects, duration, selection)
 			if err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
@@ -549,11 +511,14 @@ func (s *DeliveryPostgresOwner) SettleSuccess(ctx context.Context, claim runtime
 
 func (s *DeliverySQLiteOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	return runhandoff.WithCandidateHandoffOutcomeResult(ctx, func(handoff *runhandoff.CandidateHandoff) (runtimedelivery.Snapshot, bool, error) {
-		return sqliteDeliveryMutationOutcome(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, _ *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
+		return sqliteDeliveryMutationOutcome(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
+			if err := handoff.ResetAttempt(); err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
 			if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
-			snapshot, err := sqliteDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration, selection)
+			snapshot, err := sqliteDeliveryAdapter.SettleSuccess(txctx, tx, effects, story, claim, sideEffects, duration, selection)
 			if err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
@@ -571,7 +536,7 @@ func (s *DeliveryPostgresOwner) SettleFailure(ctx context.Context, claim runtime
 			if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
-			snapshot, err := postgresDeliveryAdapter.SettleFailure(txctx, tx, story, claim, settlement)
+			snapshot, err := postgresDeliveryAdapter.SettleFailure(txctx, tx, effects, story, claim, settlement)
 			if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
 				return snapshot, err
 			}
@@ -600,10 +565,13 @@ func (s *DeliveryPostgresOwner) SettleFailure(ctx context.Context, claim runtime
 func (s *DeliverySQLiteOwner) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
 	return runhandoff.WithCandidateHandoffOutcomeResult(ctx, func(handoff *runhandoff.CandidateHandoff) (runtimedelivery.Snapshot, bool, error) {
 		return sqliteDeliveryMutationOutcome(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
+			if err := handoff.ResetAttempt(); err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
 			if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
-			snapshot, err := sqliteDeliveryAdapter.SettleFailure(txctx, tx, story, claim, settlement)
+			snapshot, err := sqliteDeliveryAdapter.SettleFailure(txctx, tx, effects, story, claim, settlement)
 			if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
 				return snapshot, err
 			}
@@ -669,8 +637,7 @@ func postgresDeliveryMutation(s *DeliveryPostgresOwner, ctx context.Context, ope
 
 func postgresDeliveryMutationOutcome(s *DeliveryPostgresOwner, ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error)) (runtimedelivery.Snapshot, bool, error) {
 	var snapshot runtimedelivery.Snapshot
-	effects := privaterunforkrevision.NewEffects()
-	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
 		var err error
 		snapshot, err = operation(txctx, tx, story, effects)
 		if err != nil || strings.TrimSpace(snapshot.RunID) == "" {
@@ -679,7 +646,7 @@ func postgresDeliveryMutationOutcome(s *DeliveryPostgresOwner, ctx context.Conte
 		if err := settleReceiverDependentsTx(txctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 			return err
 		}
-		return effects.Add(snapshot.RunID, privaterunforkrevision.FamilyEventDeliveries)
+		return nil
 	})
 	if !committed {
 		return runtimedelivery.Snapshot{}, false, err
@@ -693,7 +660,7 @@ func sqliteDeliveryMutation(s *DeliverySQLiteOwner, ctx context.Context, operati
 }
 
 func settleReceiverDependentsTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, adapter *Adapter, materializer runtimedelivery.Snapshot, recordDiagnostic func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimedeadletters.Record, bool) error) error {
-	terminalizations, err := adapter.TerminalizeMaterializationDependents(ctx, tx, story, materializer)
+	terminalizations, err := adapter.TerminalizeMaterializationDependents(ctx, tx, effects, story, materializer)
 	if err != nil || len(terminalizations) == 0 {
 		return err
 	}
@@ -719,13 +686,12 @@ func settleReceiverDependentsTx(ctx context.Context, tx *sql.Tx, story runtimeau
 			return err
 		}
 	}
-	return effects.Add(materializer.RunID, privaterunforkrevision.FamilyEventDeliveries)
+	return nil
 }
 
 func sqliteDeliveryMutationOutcome(s *DeliverySQLiteOwner, ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error)) (runtimedelivery.Snapshot, bool, error) {
 	var snapshot runtimedelivery.Snapshot
-	effects := privaterunforkrevision.NewEffects()
-	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite delivery mutation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite delivery mutation", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
 		var err error
 		snapshot, err = operation(txctx, tx, story, effects)
 		if err != nil || strings.TrimSpace(snapshot.RunID) == "" {
@@ -734,7 +700,7 @@ func sqliteDeliveryMutationOutcome(s *DeliverySQLiteOwner, ctx context.Context, 
 		if err := settleReceiverDependentsTx(txctx, tx, story, effects, s.receiverAdapter, snapshot, s.RecordDeadLetterTx); err != nil {
 			return err
 		}
-		return effects.Add(snapshot.RunID, privaterunforkrevision.FamilyEventDeliveries)
+		return nil
 	})
 	if !committed {
 		return runtimedelivery.Snapshot{}, false, err
@@ -803,8 +769,7 @@ func (s *DeliveryPostgresOwner) TerminalizeRun(ctx context.Context, runID, reaso
 		return nil, err
 	}
 	var out []runtimedelivery.Terminalization
-	effects := privaterunforkrevision.NewEffects()
-	err := s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
 		var err error
 		out, err = s.TerminalizeRunDeliveriesTx(txctx, tx, story, effects, runID, reason)
 		return err
@@ -817,8 +782,7 @@ func (s *DeliverySQLiteOwner) TerminalizeRun(ctx context.Context, runID, reason 
 		return nil, err
 	}
 	var out []runtimedelivery.Terminalization
-	effects := privaterunforkrevision.NewEffects()
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite terminalize deliveries", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite terminalize deliveries", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
 		var err error
 		out, err = s.TerminalizeRunDeliveriesTx(txctx, tx, story, effects, runID, reason)
 		return err
@@ -881,14 +845,9 @@ func (s *DeliverySQLiteOwner) SummarizeRunTx(ctx context.Context, tx *sql.Tx, ru
 }
 
 func (s *DeliveryPostgresOwner) TerminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string) ([]runtimedelivery.Terminalization, error) {
-	terminalizations, err := postgresDeliveryAdapter.TerminalizeRun(ctx, tx, story, runID, reason)
+	terminalizations, err := postgresDeliveryAdapter.TerminalizeRun(ctx, tx, effects, story, runID, reason)
 	if err != nil {
 		return nil, err
-	}
-	if len(terminalizations) > 0 {
-		if err := effects.Add(runID, privaterunforkrevision.FamilyEventDeliveries); err != nil {
-			return nil, err
-		}
 	}
 	for _, terminalization := range terminalizations {
 		record, found, err := eventrecordpostgres.Load(ctx, tx, terminalization.Current.EventID)
@@ -910,14 +869,9 @@ func (s *DeliveryPostgresOwner) TerminalizeRunDeliveriesTx(ctx context.Context, 
 }
 
 func (s *DeliverySQLiteOwner) TerminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string) ([]runtimedelivery.Terminalization, error) {
-	terminalizations, err := sqliteDeliveryAdapter.TerminalizeRun(ctx, tx, story, runID, reason)
+	terminalizations, err := sqliteDeliveryAdapter.TerminalizeRun(ctx, tx, effects, story, runID, reason)
 	if err != nil {
 		return nil, err
-	}
-	if len(terminalizations) > 0 {
-		if err := effects.Add(runID, privaterunforkrevision.FamilyEventDeliveries); err != nil {
-			return nil, err
-		}
 	}
 	for _, terminalization := range terminalizations {
 		record, found, err := eventrecordsqlite.Load(ctx, tx, terminalization.Current.EventID)

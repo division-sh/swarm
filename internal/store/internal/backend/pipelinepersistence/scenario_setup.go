@@ -53,7 +53,8 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 			if err != nil {
 				return err
 			}
-			res, err := tx.ExecContext(txctx, `
+			var storedRunID, storedEntityID string
+			err = tx.QueryRowContext(txctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, name,
 					current_state, gates, fields, bookkeeping, accumulator, revision,
@@ -65,26 +66,23 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 					$8, $8, $8
 				)
 				ON CONFLICT (run_id, entity_id) DO NOTHING
-			`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState, string(gatesJSON), string(fieldsJSON), req.CreatedAt)
-			if err != nil {
-				return fmt.Errorf("insert postgres scenario setup entity %s: %w", entity.Alias, err)
-			}
-			rows, err := res.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("inspect postgres scenario setup entity insert %s: %w", entity.Alias, err)
-			}
-			if rows == 0 {
+				RETURNING run_id::text, entity_id::text
+			`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState, string(gatesJSON), string(fieldsJSON), req.CreatedAt).Scan(&storedRunID, &storedEntityID)
+			if err == sql.ErrNoRows {
 				if err := validateExistingPostgresScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
 					return err
 				}
 				continue
 			}
-			if err := effects.Add(req.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+			if err != nil {
+				return fmt.Errorf("insert postgres scenario setup entity %s: %w", entity.Alias, err)
+			}
+			if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID); err != nil {
 				return err
 			}
 			if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-			}), story, effects, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+			}), story, effects, storedEntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 				CurrentState: entity.CurrentState,
 				Fields:       fieldsAny,
 				Gates:        gatesAny,
@@ -153,7 +151,7 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 				}
 				continue
 			}
-			if err := effects.Add(req.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+			if err := effects.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, entity.EntityID); err != nil {
 				return err
 			}
 			if err := storeentity.InsertSQLiteEntityStateDiff(txctx, story, tx, effects, req.RunID, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{

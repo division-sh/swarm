@@ -35,7 +35,7 @@ inside one transaction while its first result cursor remains open, with
 corruption was observed. The plain direct-query equivalent passes; the current
 persistence adapters use that direct-query path rather than explicit SQL
 statement reuse. The upgrade does not claim to fix or fully qualify the
-unsupported overlap pattern. Any future prepared-statement optimization must
+affected prepared-statement pattern. Any future prepared-statement optimization must
 address it explicitly rather than assuming the driver's cache is transparent.
 
 `TestDirectQueryOverlappingCursorsThroughTransactionOwner` permanently covers
@@ -47,8 +47,37 @@ busy, cancellation and commit-failure tests remain unchanged and mandatory.
 
 ## Qualification Boundary
 
+Integrated development receipt after the plain upgrade:
+`TestIssue2394TwentyIntentContentionBothStores/sqlite/independent_runs`,
+`-race -count=3 -timeout=180s`, passed in 167.168s. The three complete
+repetitions took 57.42s, 54.31s and 54.34s, retaining all twenty intents,
+500 outcomes and final histories each time. The old v1.40.1 command timed out
+at the same aggregate 180s budget. This fixes that recorded qualification
+failure without changing its envelope. It is not proof of unrelated matrices
+or a frozen full implementation commit. Raw log:
+`2394-v1590-integrated-m17-race3.log` in the retained build-artifact directory.
+
+The complete native SQLite backend package also passes on the integrated tree
+at `-race -count=3 -timeout=180s` (49.094s), including the new overlap control
+and existing real busy, rollback, cancellation, panic and commit-failure cases.
+Log: `2394-v1590-integrated-native-race3.log`. `go mod verify` reports all
+modules verified. These receipts do not imply whole-platform qualification.
+
+The integrated SQLite payload/entity/resource snapshot and mixed/failure
+isolation selections (M15/M16) pass together at race/count3 in 66.849s,
+retaining the original drain deadlines, native rollback and bisection checks.
+Log: `2394-v1590-integrated-m15-m16-race3.log`.
+
+The upgrade does not close M23: SQLite N64 race/count3 fails in 146.664s.
+All three repetitions pass cap32/cap16 but exceed the unchanged 30-second
+quiescence deadline at cap1. No race detector error was reported.
+Log: `2394-v1590-integrated-m23-n64-race3.log`. The PostgreSQL nested-entry
+five-second deadline (M29) also remains red in its diagnostic run. Neither
+failure is erased or waived by the passing dependency receipts.
+
 The dependency change does not waive any #2394 workload, operation deadline,
-same-process repetition, backend, required soak or full-suite proof. Preserve
-the known separate #2454 runtime-log filtering failures rather than treating
-this upgrade as their repair. Final PR proof must identify its tested commit
+same-process repetition, backend, required soak or full-suite proof. The lead
+subsequently authorized absorbing the distinct #2454 log-filter repair through
+issue comment 5746053255; that repair retains its own proofs and is not an effect
+of this dependency upgrade. Final PR proof must identify its tested commit
 and actual remaining failures; this decision record alone is not readiness.

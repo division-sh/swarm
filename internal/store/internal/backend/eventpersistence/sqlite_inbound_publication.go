@@ -28,6 +28,9 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 	request := command.Request.Normalized()
 	var result runtimeinbound.CommitResult
 	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite inbound publication", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
 		existing, found, err := loadSQLiteInboundPublicationTx(txctx, tx, request.Provider, request.EntityID, request.ProviderEventID)
 		if err != nil {
 			return err

@@ -13,9 +13,10 @@ import (
 // This stack-owned scope carries the result of one election through direct
 // interception and queue handoff. The coordinator remains the semantic owner.
 type deliveryDispatchScope struct {
-	eventID string
-	entries map[string]*deliveryDispatchEntry
-	closed  bool
+	eventID               string
+	entries               map[string]*deliveryDispatchEntry
+	closed                bool
+	publicationSettlement publicationSettlementBoundary
 }
 
 type deliveryDispatchEntry struct {

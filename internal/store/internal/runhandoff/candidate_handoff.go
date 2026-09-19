@@ -37,6 +37,7 @@ type CandidateHandoff struct {
 	handoffs   []candidateHandoff
 	barriers   []*candidateRegistrationBarrier
 	identities map[runtimerunlifecycle.CandidateIdentity]struct{}
+	resetErr   error
 	settled    bool
 }
 
@@ -112,6 +113,9 @@ func (r *CandidateHandoff) Prepare(
 	if r == nil {
 		return errors.New("completion candidate request requires explicit post-commit handoff ownership")
 	}
+	if r.resetErr != nil {
+		return r.resetErr
+	}
 	if sinks == nil {
 		return errors.New("completion candidate coordinator is required")
 	}
@@ -149,6 +153,9 @@ func (r *CandidateHandoff) Commit() error {
 	if r == nil || r.settled {
 		return nil
 	}
+	if r.resetErr != nil {
+		return r.resetErr
+	}
 	r.settled = true
 	var submitErr error
 	for _, handoff := range r.handoffs {
@@ -164,6 +171,35 @@ func (r *CandidateHandoff) Commit() error {
 		submitErr = errors.Join(submitErr, r.lease.Done())
 	}
 	return submitErr
+}
+
+// ResetAttempt is called at entry to a transaction callback that the selected
+// backend may replay, after the previous attempt has finished rollback/cleanup.
+// Candidate reservations belong to that attempt; the occurrence lease belongs
+// to the whole admitted operation and must remain held through recovery.
+func (r *CandidateHandoff) ResetAttempt() error {
+	if r == nil || r.settled {
+		return errors.New("candidate handoff attempt reset requires an unsettled reservation")
+	}
+	var cancelErr error
+	var retained []candidateHandoff
+	for _, handoff := range r.handoffs {
+		if err := handoff.admission.Cancel(); err != nil {
+			cancelErr = errors.Join(cancelErr, err)
+			retained = append(retained, handoff)
+		}
+	}
+	for _, barrier := range r.barriers {
+		barrier.Settle()
+	}
+	r.handoffs = retained
+	r.barriers = nil
+	r.identities = nil
+	r.resetErr = nil
+	if cancelErr != nil {
+		r.resetErr = fmt.Errorf("cancel rolled-back completion candidate admissions: %w", cancelErr)
+	}
+	return r.resetErr
 }
 
 func (r *CandidateHandoff) Rollback() {

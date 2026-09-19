@@ -74,8 +74,32 @@ func (c *pipelineGracefulConn) QueryContext(ctx context.Context, query string, a
 	if err := c.probe.call("query", query); err != nil {
 		return nil, err
 	}
-	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	if err != nil {
+		return nil, err
+	}
+	return &pipelineGracefulRows{Rows: rows, probe: c.probe, query: query}, nil
 }
+
+type pipelineGracefulRows struct {
+	driver.Rows
+	probe    *pipelineGracefulProbe
+	query    string
+	observed bool
+}
+
+func (r *pipelineGracefulRows) Next(dest []driver.Value) error {
+	if err := r.Rows.Next(dest); err != nil {
+		return err
+	}
+	// RETURNING writes have executed only once the native driver supplies a row.
+	if !r.observed {
+		r.observed = true
+		return r.probe.call("query_row_returned", r.query)
+	}
+	return nil
+}
+
 func (c *pipelineGracefulConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 	return result, errors.Join(err, c.probe.call("exec", query))

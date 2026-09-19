@@ -14,6 +14,7 @@ import (
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -26,6 +27,7 @@ import (
 type selectedAPICapabilities struct {
 	Database                  apiv1.Pinger
 	Runs                      apiv1.RunReadStore
+	FanOutRuntime             func(context.Context, fanoutobligation.ListPage) (fanoutobligation.ListPage, error)
 	Entities                  apiv1.EntityReadStore
 	Agents                    apiv1.AgentReadStore
 	Conversations             apiv1.ConversationReadStore
@@ -72,6 +74,11 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 		Conversations: owner.Conversations(), Observability: owner.Observability(),
 		RunBundleContext: owner.RunBundleContext(), TestSetup: owner.TestSetup(), Data: owner.Data(),
 		RuntimeContexts: req.RuntimeContextManager,
+	}
+	if capability := req.ProcessCapability; capability != nil {
+		caps.FanOutRuntime = func(ctx context.Context, page fanoutobligation.ListPage) (fanoutobligation.ListPage, error) {
+			return runtimestartupownership.ObserveFanOutRuntimePage(ctx, capability, page)
+		}
 	}
 	if family, available := owner.ConversationFork(); available {
 		caps.ConversationForks = family.Reader()

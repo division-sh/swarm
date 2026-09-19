@@ -362,7 +362,8 @@ func TestRetiredSpellingsWithConnectionFlagsStillPointToReplacement(t *testing.T
 // survives. Lines carrying an explicit retirement/historical marker are
 // exempt: a retirement message may name the spelling it retires, and
 // historical ledgers may record superseded decisions.
-func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
+func retiredTopologySpellingScanner(t *testing.T) func(string, string) bool {
+	t.Helper()
 	retiredWords := regexp.MustCompile("swarm (runs|agents|events|entities|conversations)([^a-z]|$)" +
 		"|swarm (status|trace)([^a-z]|$)" +
 		"|swarm fork([^a-z]|$)") // forkchat excluded by the non-letter guard
@@ -374,8 +375,19 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	// unbackticked bare-run behavioral prose ("swarm run consumes", "foreground
 	// swarm run") needs a not-followed-by-live-subcommand check that RE2 cannot
 	// express; handled below.
-	bareRunPhrase := regexp.MustCompile(`swarm run ([a-z]+)`)
-	liveRunSubcommands := map[string]bool{"start": true, "list": true, "status": true, "trace": true, "fork": true}
+	bareRunPhrase := regexp.MustCompile(`swarm run ([a-zA-Z0-9_-]+)`)
+	var stdout, stderr bytes.Buffer
+	commandRoot := newRootCommand(context.Background(), t.TempDir(), &stdout, &stderr)
+	run := findCommandByPath(commandRoot, []string{"run"})
+	if run == nil {
+		t.Fatal("live run command group missing")
+	}
+	liveRunSubcommands := map[string]bool{}
+	for _, command := range run.Commands() {
+		if !command.Hidden {
+			liveRunSubcommands[command.Name()] = true
+		}
+	}
 	bareRunHistoricalMarker := regexp.MustCompile("(?i)retired|renamed|no longer|superseded|historical|noun-group|run command group|promoted pointer message")
 	// Exemptions are line-local and explicit only: the line itself must carry
 	// historical/retirement language. No category-level shapes (field names,
@@ -388,6 +400,61 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	// itself, and it exempted itself through the marker (drift blessing drift).
 	// Split/remaining-work language is tracker state, not closed history.
 	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|--dry-run\\|")
+	return func(line, scanText string) bool {
+		wordHit := retiredWords.MatchString(line) || retiredWords.MatchString(scanText)
+		bareHit := bareRunStart.MatchString(line) || bareRunStart.MatchString(scanText)
+		for _, match := range bareRunPhrase.FindAllStringSubmatch(scanText, -1) {
+			if !liveRunSubcommands[match[1]] {
+				bareHit = true
+				break
+			}
+		}
+		return (wordHit && !historicalMarker.MatchString(scanText)) ||
+			(bareHit && !bareRunHistoricalMarker.MatchString(scanText))
+	}
+}
+
+func TestRetiredTopologySpellingScannerUsesExactLiveCommandTokens(t *testing.T) {
+	scan := retiredTopologySpellingScanner(t)
+	for _, tc := range []struct {
+		text string
+		want bool
+	}{
+		{"command: swarm run fan-out list <run-id>", false},
+		{"command: swarm run fan-out", false},
+		{`{Command: "swarm run fan-out list", Selector: "arg:run-id"}`, false},
+		{"swarm run status", false},
+		{"swarm run fan", true},
+		{"swarm run fan-outside list", true},
+		{"swarm run fan_out list", true},
+		{"swarm run status-extra", true},
+		{"swarm run status2", true},
+		{"swarm run consumes the event", true},
+		{"swarm run --event scan.requested", true},
+		{"`swarm run`", true},
+		{"swarm runs", true},
+		{"swarm status", true},
+		{"swarm fork <run-id>", true},
+		{"swarm run fan-out list and swarm run consumes", true},
+		{"swarm run fan-out list and swarm runs", true},
+		{"historical: swarm runs", false},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			if got := scan(tc.text, tc.text); got != tc.want {
+				t.Fatalf("retired spelling = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if scan("command: swarm run", "command: swarm run fan-out list <run-id>") {
+		t.Fatal("wrapped live fan-out command classified as retired")
+	}
+	if !scan("command: swarm", "command: swarm runs") {
+		t.Fatal("wrapped retired command escaped the scan")
+	}
+}
+
+func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
+	scan := retiredTopologySpellingScanner(t)
 
 	root := driftTestRepoRoot(t)
 	skipDirs := map[string]bool{".git": true, "worktrees": true, ".swarm": true, "coverage": true, "data": true}
@@ -438,26 +505,7 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 			if i+1 < len(physical) {
 				scanText = strings.TrimRight(line, " \\") + " " + strings.TrimLeft(physical[i+1], " \\")
 			}
-			wordHit := retiredWords.MatchString(line) || retiredWords.MatchString(scanText)
-			bareHit := bareRunStart.MatchString(line) || bareRunStart.MatchString(scanText)
-			if !bareHit {
-				for _, match := range bareRunPhrase.FindAllStringSubmatch(scanText, -1) {
-					if !liveRunSubcommands[match[1]] {
-						bareHit = true
-						break
-					}
-				}
-			}
-			if !wordHit && !bareHit {
-				continue
-			}
-			if wordHit && historicalMarker.MatchString(scanText) {
-				wordHit = false
-			}
-			if bareHit && bareRunHistoricalMarker.MatchString(scanText) {
-				bareHit = false
-			}
-			if !wordHit && !bareHit {
+			if !scan(line, scanText) {
 				continue
 			}
 			rel, _ := filepath.Rel(root, path)

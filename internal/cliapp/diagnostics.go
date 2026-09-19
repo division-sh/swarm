@@ -1499,6 +1499,19 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 		}
 		failures = append(failures, value)
 	}
+	blockedIntents := make([]string, 0, len(result.FanOut.BlockedIntents))
+	for _, blocked := range result.FanOut.BlockedIntents {
+		blockedIntents = append(blockedIntents, fmt.Sprintf(
+			"delivery %s, element %s/%s/%s, cursor %d, owed %d, failure %s",
+			blocked.TriggeringDeliveryID,
+			blocked.FlowPath,
+			blocked.Family,
+			blocked.SemanticPath,
+			blocked.Cursor,
+			blocked.Owed,
+			eventObservationFailureSummary(&blocked.Failure),
+		))
+	}
 	semanticRejections := []string{}
 	if sample := result.FanOut.SemanticRejectionSample; sample != nil {
 		semanticRejections = append(semanticRejections, fmt.Sprintf(
@@ -1521,6 +1534,7 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 		Sections: []cliLabeledDetailSection{
 			{Label: "notes", Items: result.Heuristics},
 			{Label: "failed deliveries", Items: failures},
+			{Label: "blocked fan-out intents", Items: blockedIntents},
 			{Label: "fan-out semantic rejection sample", Items: semanticRejections},
 		},
 	})

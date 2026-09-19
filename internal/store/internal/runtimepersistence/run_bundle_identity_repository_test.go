@@ -309,21 +309,22 @@ func TestRepositorySourceArtifactOwnershipHandoffsRequireExactOpaqueFacts(t *tes
 	}
 }
 
-func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
-	root := repositoryRootForBundleIdentityTest(t)
-	const (
-		operationMutation      = "mutation"
-		operationRetained      = "retained capability"
-		operationAdmittedChild = "already-admitted child"
-		operationPureRead      = "pure read"
-	)
-	ledger := map[string]string{
+const (
+	operationMutation      = "mutation"
+	operationRetained      = "retained capability"
+	operationAdmittedChild = "already-admitted child"
+	operationPureRead      = "pure read"
+)
+
+func eventBusSourceOperationLedger() map[string]string {
+	return map[string]string{
 		"AbandonPreparedPublish":                     operationMutation,
 		"AbandonInboundDeliveryPlan":                 operationMutation,
 		"AddFlowInstanceRoute":                       operationAdmittedChild,
 		"AddFlowInstanceRouteContext":                operationMutation,
 		"AdmitSourceArtifactFact":                    operationPureRead,
 		"BeginPipelineParentTransition":              operationMutation,
+		"BeginRunStop":                               operationMutation,
 		"CheckAPIEventPublishRecipientPlan":          operationPureRead,
 		"CheckDirectRoutes":                          operationPureRead,
 		"CheckPublishRecipientPlan":                  operationPureRead,
@@ -332,10 +333,12 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"DispatchPreparedPublishAndWait":             operationMutation,
 		"DispatchPreparedPublishAsync":               operationMutation,
 		"DispatchDeliveryContinuation":               operationMutation,
+		"DispatchFanOutPublications":                 operationMutation,
 		"EngineDispatcher":                           operationRetained,
 		"ApplyInboundDeliveryCommit":                 operationMutation,
 		"CommitDynamicFlowRuntimeCreationOccurrence": operationMutation,
 		"FinalizeEnginePublications":                 operationMutation,
+		"FinalizeFanOutPublications":                 operationMutation,
 		"FenceAgentRoute":                            operationMutation,
 		"FinalizeSelectedReceiverAdmission":          operationRetained,
 		"HasFlowInstanceRoute":                       operationPureRead,
@@ -353,6 +356,8 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"PrepareAgentRoute":                          operationRetained,
 		"PrepareEnginePublications":                  operationMutation,
 		"PrepareEngineMutationPublications":          operationMutation,
+		"PrepareFanOutPublication":                   operationMutation,
+		"PrepareFanOutPublications":                  operationMutation,
 		"PrepareInboundDeliveryBatch":                operationMutation,
 		"PrepareSelectedForkPublish":                 operationMutation,
 		"PreflightRunQueue":                          operationPureRead,
@@ -381,6 +386,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"RetireCommittedFlowInstanceRoute":           operationAdmittedChild,
 		"RouteTable":                                 operationRetained,
 		"RunLifecycleCandidateOwner":                 operationRetained,
+		"SealFanOutPublications":                     operationMutation,
 		"SetDeliveryAuthority":                       operationRetained,
 		"SetDeliveryContinuationOwner":               operationRetained,
 		"SetCommittedAgentReadinessFinalizer":        operationRetained,
@@ -406,8 +412,11 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"WaitForQuiescence":                          operationMutation,
 		"VerifyFlowInstanceRoute":                    operationPureRead,
 	}
-	found := map[string]bool{}
-	methodPattern := regexp.MustCompile(`func \([A-Za-z_][A-Za-z0-9_]* \*EventBus\) ([A-Z][A-Za-z0-9_]*)\(`)
+}
+
+func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
+	root := repositoryRootForBundleIdentityTest(t)
+	sources := map[string]string{}
 	err := filepath.WalkDir(filepath.Join(root, "internal", "runtime", "bus"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -415,29 +424,17 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
-		for _, match := range methodPattern.FindAllStringSubmatch(readRepositoryFile(t, path), -1) {
-			method := match[1]
-			category, ok := ledger[method]
-			if !ok {
-				t.Errorf("%s is an unclassified exported EventBus operation", method)
-				continue
-			}
-			switch category {
-			case operationMutation, operationRetained, operationAdmittedChild, operationPureRead:
-			default:
-				t.Errorf("%s has unknown EventBus operation category %q", method, category)
-			}
-			found[method] = true
-		}
+		sources[filepath.Base(path)] = readRepositoryFile(t, path)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk EventBus exported operations: %v", err)
 	}
-	for method := range ledger {
-		if !found[method] {
-			t.Errorf("classified EventBus operation %s no longer exists", method)
-		}
+	if err := validateEventBusSourceOperationCensus(sources, eventBusSourceOperationLedger()); err != nil {
+		t.Error(err)
+	}
+	if err := validateEventBusGroupSourceConsumers(sources); err != nil {
+		t.Error(err)
 	}
 
 	for _, operationRoot := range []struct {

@@ -462,6 +462,39 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			want: "ledger method event.publish dual_backend_served_proof backends = [default_sqlite], want [default_sqlite explicit_postgres]",
 		},
 		{
+			name: "fan-out read cannot be reclassified as non-store",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "run.fan_out.list")
+				entry.Classification = "different_semantic_concept_with_proof"
+				entry.Notes = "non-store static projection"
+			},
+			want: "operator-read ledger method run.fan_out.list must remain dual_backend_api_proof",
+		},
+		{
+			name: "fan-out read requires method-specific served proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "run.fan_out.list")
+				entry.ProofRefs = []publicSurfaceProofRef{{Kind: "go_test", Name: "TestFanOutReadAPISchema", Backends: []string{"default_sqlite", "explicit_postgres"}}}
+			},
+			want: "operator-read ledger method run.fan_out.list dual_backend_api_proof missing default_sqlite backend-scoped selected API proof_ref",
+		},
+		{
+			name: "fan-out read cannot borrow store-only pagination proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "run.fan_out.list")
+				entry.ProofRefs = []publicSurfaceProofRef{{Kind: "go_test", Name: "TestFanOutReadPaginationBothStores", Backends: []string{"default_sqlite", "explicit_postgres"}}}
+			},
+			want: "operator-read ledger method run.fan_out.list proof_ref TestFanOutReadPaginationBothStores scoped to default_sqlite is not a registered selected API proof",
+		},
+		{
+			name: "fan-out read requires both backend proof scopes",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "run.fan_out.list")
+				entry.ProofRefs[0].Backends = []string{"default_sqlite"}
+			},
+			want: "operator-read ledger method run.fan_out.list dual_backend_api_proof missing explicit_postgres backend-scoped selected API proof_ref",
+		},
+		{
 			name: "operator-read api ledger rejects unclassified method",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				matrix.OperatorReadLedger = publicSurfaceOperatorReadLedgerExcept(matrix.OperatorReadLedger, "agent.list")
@@ -1003,6 +1036,9 @@ func validatePublicSurfaceOperatorReadAPIParityLedger(root string, entries []pub
 		if _, ok := ctx.operatorReadAPIMethods[method]; !ok {
 			problems = append(problems, fmt.Sprintf("%s is not a non-mutating platform method_catalog method", label))
 		}
+		if method == "run.fan_out.list" && entry.Classification != "dual_backend_api_proof" {
+			problems = append(problems, fmt.Sprintf("%s must remain dual_backend_api_proof", label))
+		}
 		if _, ok := ctx.apiMethods[method]; !ok {
 			problems = append(problems, fmt.Sprintf("%s missing from platform method_catalog", label))
 		}
@@ -1117,6 +1153,10 @@ func publicSurfaceOperatorReadProofRefCoversMethodBackend(ref publicSurfaceProof
 
 func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelectedOperatorReadAPIProof {
 	return map[string]publicSurfaceSelectedOperatorReadAPIProof{
+		"TestIssue2394ServedFanOutSupportedSurfacesBothStores": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"run.fan_out.list"},
+		},
 		"TestChannelConnectTelegramFirstUserJourney": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"channel.onboarding_get"},
@@ -1210,6 +1250,10 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 		"TestPostgresObservabilityOwnerBacksSupportedAPISurfaces": {
 			Backends: []string{"explicit_postgres"},
 			Methods:  []string{"run.trace", "runtime.incidents", "runtime.logs"},
+		},
+		"TestRuntimeLogFilterSupportedConsumersBothStores": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"runtime.logs"},
 		},
 	}
 }

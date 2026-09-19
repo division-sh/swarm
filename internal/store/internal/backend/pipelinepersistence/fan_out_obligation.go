@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
 
@@ -25,6 +26,7 @@ func commitFanOutIntentTx(
 	triggerEventID string,
 	createdAt time.Time,
 ) error {
+	transactiontest.Mark(ctx, transactiontest.FanOutProducer)
 	if tx == nil {
 		return fmt.Errorf("fan-out intent requires private transaction")
 	}
@@ -42,14 +44,17 @@ func commitFanOutIntentTx(
 	if err != nil {
 		return fmt.Errorf("encode fan-out capsule: %w", err)
 	}
-	if createdAt.IsZero() {
-		createdAt = time.Now().UTC()
+	// Handler/source audit time must not become queue priority. Observe the
+	// selected-store clock inside the producer's admitted mutation instead.
+	bornAt, err := fanOutAdmissionTime(ctx, tx, postgres, time.Now)
+	if err != nil {
+		return err
 	}
 	status := fanoutobligation.StatusOpen
 	if request.Cardinality == 0 {
 		status = fanoutobligation.StatusClosed
 	}
-	args := fanOutIntentSQLArgs(request, persistedSource, capsule, status, createdAt)
+	args := fanOutIntentSQLArgs(request, persistedSource, capsule, status, bornAt)
 	query := `
 		INSERT INTO fan_out_intents (
 			run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
@@ -69,7 +74,11 @@ func commitFanOutIntentTx(
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert fan-out intent: %w", err)
 	}
-	return effects.Add(request.Key.RunID, privaterunforkrevision.FamilyFanOutObligations)
+	ref, err := privaterunforkrevision.FanOutIntentFact(request.Key)
+	if err != nil {
+		return err
+	}
+	return effects.AddFacts(request.Key.RunID, ref)
 }
 
 func fanOutIntentSQLArgs(request fanoutobligation.IntentRequest, source fanoutobligation.SourceRef, capsule []byte, status fanoutobligation.Status, createdAt time.Time) []any {
@@ -212,7 +221,7 @@ func insertFanOutEntitySourceRevisionTx(
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return "", fmt.Errorf("insert fan-out entity source revision: %w", err)
 	}
-	if err := effects.Add(runID, privaterunforkrevision.FamilyEntityMutations); err != nil {
+	if err := effects.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
 		return "", err
 	}
 	return mutationID, nil

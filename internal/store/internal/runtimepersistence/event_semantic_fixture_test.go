@@ -241,18 +241,19 @@ func commitDeliveryReplayEventFixture(
 	}
 	defer release()
 	return store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		effects := runforkrevision.NewEffects()
 		story, err := eventFixtureStory(txctx)
 		if err != nil {
 			return err
 		}
-		outcome, err := store.AppendAdmittedEventTxOutcome(txctx, tx, story, replayed, testHistoricalReplaySettlement([]events.DeliveryRoute{route}))
+		outcome, err := store.eventPostgresOwner.AppendAdmittedEventTxOutcome(txctx, tx, story, effects, replayed, testHistoricalReplaySettlement([]events.DeliveryRoute{route}))
 		if err != nil {
 			return err
 		}
 		if outcome != runtimebus.EventAppendInserted {
 			return fmt.Errorf("delivery-replay fixture append outcome = %d, want inserted", outcome)
 		}
-		if err := insertCommittedPipelineScopeTx(txctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
+		if err := insertCommittedPipelineScopeTx(txctx, tx, effects, forkEventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
 			return err
 		}
 		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, forkRunID)
@@ -266,7 +267,7 @@ func commitDeliveryReplayEventFixture(
 		if forkDeliveryID != "" && forkDeliveryID != obligation.DeliveryID() {
 			return fmt.Errorf("delivery-replay fixture delivery id %s does not match canonical id %s", forkDeliveryID, obligation.DeliveryID())
 		}
-		inserted, err := insertRunForkReplayDelivery(txctx, tx, runForkActivationLineage{
+		inserted, err := insertRunForkReplayDelivery(txctx, tx, effects, runForkActivationLineage{
 			SourceRunID: source.RunID(),
 			ForkRunID:   forkRunID,
 		}, runfork.RunForkHistoricalReplayExecutableWork{
@@ -283,11 +284,14 @@ func commitDeliveryReplayEventFixture(
 		if !inserted {
 			return fmt.Errorf("delivery-replay fixture delivery %s was not inserted", forkDeliveryID)
 		}
-		_, err = finalizePostgresRunForkTestRevision(txctx, tx, forkRunID,
+		if err := effects.Add(forkRunID,
 			runforkrevision.FamilyEvents,
 			runforkrevision.FamilyEventDeliveries,
 			runforkrevision.FamilyCommittedReplayScopes,
-		)
+		); err != nil {
+			return err
+		}
+		_, err = runforkrevision.FinalizePostgres(txctx, tx, effects)
 		return err
 	})
 }
@@ -534,9 +538,9 @@ func insertCanonicalEventRecordFixture(ctx context.Context, selectedStore any, e
 	var inserted bool
 	switch selected := selectedStore.(type) {
 	case *PostgresStore:
-		inserted, err = eventrecordpostgres.Insert(ctx, selected.backend.ConstructionHandle(), record)
+		inserted, err = eventrecordpostgres.Insert(ctx, selected.backend.ConstructionHandle(), runforkrevision.NewEffects(), record)
 	case *SQLiteRuntimeStore:
-		inserted, err = eventrecordsqlite.Insert(ctx, selected.backend.ConstructionHandle(), record)
+		inserted, err = eventrecordsqlite.Insert(ctx, selected.backend.ConstructionHandle(), runforkrevision.NewEffects(), record)
 	default:
 		return fmt.Errorf("canonical event record fixture store %T is unsupported", selectedStore)
 	}
@@ -575,7 +579,7 @@ func insertPostgresCanonicalEventRecordFixtureTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return err
 	}
-	inserted, err := eventrecordpostgres.Insert(ctx, tx, record)
+	inserted, err := eventrecordpostgres.Insert(ctx, tx, runforkrevision.NewEffects(), record)
 	if err != nil {
 		return err
 	}

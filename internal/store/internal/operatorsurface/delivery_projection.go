@@ -2,6 +2,7 @@ package operatorsurface
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -14,12 +15,12 @@ type deliveryLifecycleEventMetadata struct {
 	EntityID  string
 }
 
-func (s *ObservabilityPostgres) deliverySnapshotsForEvent(ctx context.Context, eventID string) ([]runtimedelivery.Snapshot, error) {
-	return operatorPostgresDelivery.SnapshotsForEvent(ctx, s.backend, eventID)
+func (s *ObservabilityPostgres) deliverySnapshotsForEvent(ctx context.Context, tx *sql.Tx, eventID string) ([]runtimedelivery.Snapshot, error) {
+	return operatorPostgresDelivery.SnapshotsForEvent(ctx, tx, eventID)
 }
 
-func (s *ObservabilitySQLite) deliverySnapshotsForEvent(ctx context.Context, eventID string) ([]runtimedelivery.Snapshot, error) {
-	return operatorSQLiteDelivery.SnapshotsForEvent(ctx, s.backend, eventID)
+func (s *ObservabilitySQLite) deliverySnapshotsForEvent(ctx context.Context, tx *sql.Tx, eventID string) ([]runtimedelivery.Snapshot, error) {
+	return operatorSQLiteDelivery.SnapshotsForEvent(ctx, tx, eventID)
 }
 
 func (s *AgentPostgres) DeliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {

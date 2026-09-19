@@ -1,0 +1,6 @@
+account_state:
+  account_id: {type: text, _unused_reason: reporter sink does not materialize registration children}
+  eng_roles: {type: integer, _unused_reason: reporter sink does not materialize registration children}
+  gem_score: {type: number, _unused_reason: reporter sink does not materialize registration children}
+  eligible: {type: boolean, _unused_reason: reporter sink does not materialize registration children}
+  last_command: text

@@ -280,6 +280,10 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm event publish", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 
 	{Command: "swarm run status", Selector: "arg:run-id", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm run fan-out list", Selector: "arg:run-id", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm run fan-out list", Selector: "flag:triggering-delivery-id", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "exact run-scoped triggering delivery UUID, not an event identifier"},
+	{Command: "swarm run fan-out list", Selector: "flag:flow-path", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "exact authored declaration flow path"},
+	{Command: "swarm run fan-out list", Selector: "flag:semantic-path", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "exact authored declaration semantic path"},
 	{Command: "swarm run trace", Selector: "arg:run-id", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm run start", Selector: "flag:reattach", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm run fork", Selector: "arg:source-run-id", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},

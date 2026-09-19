@@ -43,7 +43,8 @@ func TestCatalogExternalProofPartitionsThroughInventory(t *testing.T) {
 			u := p.Units["second"]
 			u.Run = "^TestSecond$/sqlite"
 			p.Units["second"] = u
-		}, "partial-subtest"},
+			// Policy admission rejects this before the declaration partition census.
+		}, "units.second: only the mandatory soak may set a timeout or backend filter"},
 		{"cached unit", func(_ *testing.T, _ string, p *testplanning.Policy) {
 			u := p.Units["second"]
 			u.CountMode = "cache-default"

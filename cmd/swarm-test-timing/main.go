@@ -211,6 +211,9 @@ func recordEvidence(cfg config) error {
 		Packages:        append([]string(nil), unit.Packages...),
 		EnvironmentID:   unit.EnvironmentID,
 		CountMode:       countMode,
+		Run:             unit.Run,
+		Skip:            unit.Skip,
+		GoTimeout:       unit.GoTimeout,
 		Report:          report,
 	}
 	if problems := testtiming.ValidateCommandEvidence(evidence, plan); len(problems) != 0 {

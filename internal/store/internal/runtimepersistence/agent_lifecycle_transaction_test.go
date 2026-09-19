@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -161,10 +162,19 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		if conversation != "[]" || turnCount != 0 || strings.Contains(runtimeState, "provider_session_id") || status != mutation.PreviousStatus {
 			t.Fatalf("successor retained mutable state: conversation=%s runtime_state=%s turns=%d status=%s mutation=%#v", conversation, runtimeState, turnCount, status, mutation)
 		}
+		previousRevision := requireLifecycleSessionHistory(t, ctx, db, sqlite, mutation.RunID, mutation.PreviousSessionID, "terminated")
+		successorRevision := requireLifecycleSessionHistory(t, ctx, db, sqlite, mutation.RunID, mutation.SuccessorSessionID, mutation.SuccessorStatus)
+		if previousRevision != successorRevision {
+			t.Fatalf("rotation history split across revisions: previous=%d successor=%d", previousRevision, successorRevision)
+		}
 	}
+	rotationHistory := countLifecycleSessionHistory(t, ctx, db, sqlite, activeRunID)
 	replayed, err := agentfixture.CommitStatic(t, ctx, store, rotate)
 	if err != nil || !replayed.Replayed || !reflect.DeepEqual(replayed.Subordinate, rotated.Subordinate) {
 		t.Fatalf("exact replay = %#v err=%v, want subordinate %#v", replayed, err, rotated.Subordinate)
+	}
+	if got := countLifecycleSessionHistory(t, ctx, db, sqlite, activeRunID); got != rotationHistory {
+		t.Fatalf("rotation replay appended history: got %d rows, want %d", got, rotationHistory)
 	}
 	changed := rotate
 	changed.RequestHash = "changed-plan-hash"
@@ -204,6 +214,9 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if got := countLifecycleOperation(t, ctx, db, sqlite, failedTerminate.OperationID); got != 0 {
 		t.Fatalf("failed lifecycle operation evidence rows = %d, want 0", got)
 	}
+	if got := countLifecycleSessionHistory(t, ctx, db, sqlite, activeRunID); got != rotationHistory {
+		t.Fatalf("failed termination changed session history: got %d rows, want %d", got, rotationHistory)
+	}
 
 	failedTerminate.OperationID = uuid.NewString()
 	failedTerminate.RequestHash = "successful-termination"
@@ -214,9 +227,50 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if len(terminated.Subordinate.Sessions) != 1 || countCurrentLifecycleSessions(t, ctx, db, sqlite, activeRunID, agentID) != 0 {
 		t.Fatalf("termination outcome = %#v", terminated.Subordinate)
 	}
+	for _, mutation := range terminated.Subordinate.Sessions {
+		requireLifecycleSessionHistory(t, ctx, db, sqlite, mutation.RunID, mutation.PreviousSessionID, "terminated")
+	}
 	if got := countCurrentLifecycleSessions(t, ctx, db, sqlite, suspendedRunID, agentID); got != 1 {
 		t.Fatalf("sibling-run suspended sessions after exact termination = %d, want 1", got)
 	}
+}
+
+func requireLifecycleSessionHistory(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, sessionID, status string) int64 {
+	t.Helper()
+	query := `SELECT revision, fact, present FROM run_fork_fact_revisions WHERE run_id=? AND family='agent_sessions' AND fact_key=? ORDER BY revision DESC LIMIT 1`
+	if !sqlite {
+		query = `SELECT revision, fact, present FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='agent_sessions' AND fact_key=$2 ORDER BY revision DESC LIMIT 1`
+	}
+	var revision int64
+	var body []byte
+	var present bool
+	if err := db.QueryRowContext(ctx, query, runID, sessionID).Scan(&revision, &body, &present); err != nil {
+		t.Fatalf("load session history %s: %v", sessionID, err)
+	}
+	var fact struct {
+		SessionID string `json:"session_id"`
+		Status    string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &fact); err != nil {
+		t.Fatalf("decode session history %s: %v", sessionID, err)
+	}
+	if !present || fact.SessionID != sessionID || fact.Status != status {
+		t.Fatalf("session history %s: present=%t body=%s, want status=%s", sessionID, present, body, status)
+	}
+	return revision
+}
+
+func countLifecycleSessionHistory(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID string) int {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=? AND family='agent_sessions'`
+	if !sqlite {
+		query = `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='agent_sessions'`
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, query, runID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
 }
 
 func loadLifecycleSuccessorState(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, sessionID string) (string, string, int, string) {

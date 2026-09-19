@@ -329,7 +329,7 @@ func newRuntimeTestProcessCapability(t testing.TB, manager *runtimemanager.Agent
 	return newRuntimeTestProcessCapabilityWithSession(t, manager, source, fact, runtimeInstanceID, nil)
 }
 
-func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, session *runtimeTestRetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant, error) {
+func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimemanager.AgentManager, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, session *runtimeTestRetainedSession, decorators ...func(*runtimeTestRetainedSession) runtimestartupownership.RetainedSession) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant, error) {
 	t.Helper()
 	bundleHash := fact.BundleHash()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
@@ -360,7 +360,14 @@ func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimema
 	session.mu.Lock()
 	session.plan = plan
 	session.mu.Unlock()
-	capability, err := runtimestartupownership.NewProcessCapability(session)
+	var selectedSession runtimestartupownership.RetainedSession = session
+	if len(decorators) > 1 {
+		return nil, nil, errors.New("runtime test fixture accepts one explicit session decoration")
+	}
+	if len(decorators) == 1 {
+		selectedSession = decorators[0](session)
+	}
+	capability, err := runtimestartupownership.NewProcessCapability(selectedSession)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -685,7 +692,7 @@ func testAuthorActivityContextForBundle(ctx context.Context, bundleHash string) 
 	))
 }
 
-func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
+func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, decorators ...func(*runtimeTestRetainedSession) runtimestartupownership.RetainedSession) (*Runtime, error) {
 	t.Helper()
 	if deps.Options.WorkflowModule != nil {
 		if bundle, ok := semanticview.Bundle(deps.Options.WorkflowModule.SemanticSource()); ok {
@@ -760,7 +767,7 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 			if deps.Options.WorkflowModule != nil {
 				source = deps.Options.WorkflowModule.SemanticSource()
 			}
-			_, grant, grantErr := newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.SourceArtifactFact, deps.Options.RuntimeInstanceID, retainedSession)
+			_, grant, grantErr := newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.SourceArtifactFact, deps.Options.RuntimeInstanceID, retainedSession, decorators...)
 			if grantErr != nil {
 				return nil, grantErr
 			}

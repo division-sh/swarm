@@ -14,6 +14,18 @@ func ResolveNonConnectFlowInputProducer(source Source, flowID, eventType string)
 }
 
 func ResolveNonConnectFlowInputProducerWithOptions(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) runtimecontracts.FlowInputProducerResolution {
+	return resolveNonConnectFlowInputProducer(source, flowID, eventType, opts, func() AuthoredEventEndpointCensus {
+		return BuildAuthoredEventEndpointCensus(source)
+	})
+}
+
+// ResolveNonConnectFlowInputProducer consumes this census's own source. A
+// composed compilation need not rebuild the same endpoint evidence per query.
+func (census AuthoredEventEndpointCensus) ResolveNonConnectFlowInputProducer(flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) runtimecontracts.FlowInputProducerResolution {
+	return resolveNonConnectFlowInputProducer(census.source, flowID, eventType, opts, func() AuthoredEventEndpointCensus { return census })
+}
+
+func resolveNonConnectFlowInputProducer(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, censusForSource func() AuthoredEventEndpointCensus) runtimecontracts.FlowInputProducerResolution {
 	flowID = strings.TrimSpace(flowID)
 	eventType = eventidentity.Normalize(eventType)
 	out := runtimecontracts.FlowInputProducerResolution{FlowID: flowID, EventType: eventType}
@@ -57,7 +69,7 @@ func ResolveNonConnectFlowInputProducerWithOptions(source Source, flowID, eventT
 		return out
 	}
 
-	census := BuildAuthoredEventEndpointCensus(source)
+	census := censusForSource()
 	var pins []runtimecontracts.CompiledFlowInputPin
 	if isInputEvent {
 		pins = flowInputPinsForEvent(source, census, flowID, eventType)

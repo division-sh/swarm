@@ -10,30 +10,26 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func (a *Adapter) materializationEvent(ctx context.Context, q queryer, eventID string) (events.Event, error) {
 	var absent events.Event
-	var record eventrecord.Record
+	var admitted events.AdmittedEvent
 	var found bool
 	var err error
 	if a.dialect == DialectSQLite {
-		record, found, err = eventrecordsqlite.Load(ctx, q, eventID)
+		admitted, _, found, err = eventrecordsqlite.LoadAdmitted(ctx, q, eventID)
 	} else {
-		record, found, err = eventrecordpostgres.Load(ctx, q, eventID)
+		admitted, _, found, err = eventrecordpostgres.LoadAdmitted(ctx, q, eventID)
 	}
 	if err != nil {
 		return absent, err
 	}
 	if !found {
 		return absent, fmt.Errorf("receiver materialization publication %s is missing", eventID)
-	}
-	admitted, err := record.Decode()
-	if err != nil {
-		return absent, err
 	}
 	return admitted.Event(), nil
 }
@@ -173,7 +169,7 @@ func (a *Adapter) continuationWithMaterialization(ctx context.Context, q queryer
 
 // TerminalizeMaterializationDependents is part of the materializer's terminal
 // transaction. It never runs an agent or fabricates a successful materialization.
-func (a *Adapter) TerminalizeMaterializationDependents(ctx context.Context, tx *sql.Tx, story authoractivity.Mutation, materializer deliverylifecycle.Snapshot) ([]deliverylifecycle.Terminalization, error) {
+func (a *Adapter) TerminalizeMaterializationDependents(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story authoractivity.Mutation, materializer deliverylifecycle.Snapshot) ([]deliverylifecycle.Terminalization, error) {
 	if !materializer.Route.Recipient.IsNode() || (materializer.Status != deliverylifecycle.StatusDeadLetter && materializer.Status != deliverylifecycle.StatusDelivered) {
 		return nil, nil
 	}
@@ -224,5 +220,5 @@ func (a *Adapter) TerminalizeMaterializationDependents(ctx context.Context, tx *
 	if !ok {
 		return nil, fmt.Errorf("construct receiver materialization failure")
 	}
-	return a.terminalizeDeliveries(ctx, tx, story, ids, reason, failure)
+	return a.terminalizeDeliveries(ctx, tx, effects, story, ids, reason, failure)
 }

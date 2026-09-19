@@ -99,8 +99,7 @@ func (s runCompletionOwnerSummaries) validate() error {
 }
 
 func (s runCompletionOwnerSummaries) blocksCompletion() bool {
-	return !s.Delivery.Settled() ||
-		s.Pipeline.BlocksCompletion() ||
+	return runDeliveryWorkBlocksCompletion(s.Delivery, s.Pipeline) ||
 		s.FanOut.BlocksCompletion() ||
 		s.Barriers.BlocksCompletion() ||
 		s.Timers.BlocksCompletion() ||
@@ -108,6 +107,104 @@ func (s runCompletionOwnerSummaries) blocksCompletion() bool {
 		s.Decisions.BlocksCompletion() ||
 		s.Effects.BlocksCompletion() ||
 		!s.Entities.ReadyForCompletion()
+}
+
+func runDeliveryWorkBlocksCompletion(delivery runtimedelivery.RunSummary, pipeline runtimepipelineobligation.RunSummary) bool {
+	return !delivery.Settled() || pipeline.BlocksCompletion()
+}
+
+func validateRunDeliveryWork(runID string, delivery runtimedelivery.RunSummary, pipeline runtimepipelineobligation.RunSummary) error {
+	if err := delivery.Validate(); err != nil {
+		return err
+	}
+	if err := pipeline.Validate(); err != nil {
+		return err
+	}
+	if delivery.RunID != runID || pipeline.RunID != runID {
+		return fmt.Errorf("completion delivery work does not belong to exact run %s", runID)
+	}
+	return nil
+}
+
+// A validated nonterminal obligation can refute completion without repeatedly
+// decoding every already-published fan-out ledger. This never establishes
+// successful completion or constructs a partial public summary.
+func (s *RunLifecyclePostgresOwner) pendingPostgresRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.TerminalCatalog) (bool, *time.Time, error) {
+	delivery, err := postgresDeliveryAdapter.SummarizeRun(ctx, tx, runID)
+	if err != nil {
+		return false, nil, err
+	}
+	pipeline, err := s.pipeline.SummarizeRunTx(ctx, tx, runID)
+	if err != nil {
+		return false, nil, err
+	}
+	if err := validateRunDeliveryWork(runID, delivery, pipeline); err != nil {
+		return false, nil, err
+	}
+	if !runDeliveryWorkBlocksCompletion(delivery, pipeline) {
+		entities, err := entitystore.ReadRunSummary(ctx, tx, entitystore.SummaryDialectPostgres, runID, catalog)
+		if err != nil {
+			return false, nil, err
+		}
+		pending, err := entityWorkBlocksCompletion(runID, entities)
+		if err != nil || !pending {
+			return false, nil, err
+		}
+	}
+	sessions, err := sessionstore.ReadRunSummary(ctx, tx, sessionstore.SummaryDialectPostgres, runID, now)
+	if err != nil {
+		return false, nil, err
+	}
+	return pendingRunDeliveryWorkWake(runID, sessions)
+}
+
+func (s *RunLifecycleSQLiteOwner) pendingSQLiteRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.TerminalCatalog) (bool, *time.Time, error) {
+	delivery, err := sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
+	if err != nil {
+		return false, nil, err
+	}
+	pipeline, err := s.pipeline.SummarizeRunTx(ctx, tx, runID)
+	if err != nil {
+		return false, nil, err
+	}
+	if err := validateRunDeliveryWork(runID, delivery, pipeline); err != nil {
+		return false, nil, err
+	}
+	if !runDeliveryWorkBlocksCompletion(delivery, pipeline) {
+		entities, err := entitystore.ReadRunSummary(ctx, tx, entitystore.SummaryDialectSQLite, runID, catalog)
+		if err != nil {
+			return false, nil, err
+		}
+		pending, err := entityWorkBlocksCompletion(runID, entities)
+		if err != nil || !pending {
+			return false, nil, err
+		}
+	}
+	sessions, err := sessionstore.ReadRunSummary(ctx, tx, sessionstore.SummaryDialectSQLite, runID, now)
+	if err != nil {
+		return false, nil, err
+	}
+	return pendingRunDeliveryWorkWake(runID, sessions)
+}
+
+func entityWorkBlocksCompletion(runID string, entities runtimeentity.RunSummary) (bool, error) {
+	if err := entities.Validate(); err != nil {
+		return false, err
+	}
+	if entities.RunID != runID {
+		return false, fmt.Errorf("completion entity summary does not belong to exact run %s", runID)
+	}
+	return !entities.ReadyForCompletion(), nil
+}
+
+func pendingRunDeliveryWorkWake(runID string, sessions runtimesessions.RunSummary) (bool, *time.Time, error) {
+	if err := sessions.Validate(); err != nil {
+		return false, nil, err
+	}
+	if sessions.RunID != runID {
+		return false, nil, fmt.Errorf("completion session summary does not belong to exact run %s", runID)
+	}
+	return true, optionalWake(sessions.NextExpiry), nil
 }
 
 func (s *RunLifecyclePostgresOwner) loadPostgresRunCompletionOwnerSummaries(

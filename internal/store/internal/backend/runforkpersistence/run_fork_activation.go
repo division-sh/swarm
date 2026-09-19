@@ -209,6 +209,9 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 	var historicalReplayExecution runfork.RunForkHistoricalReplayExecution
 	var replayResult runfork.RunForkDeliveryEventReplayResult
 	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite run fork activation", func(txctx context.Context, tx *sql.Tx) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err

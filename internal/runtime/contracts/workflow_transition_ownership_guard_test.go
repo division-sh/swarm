@@ -312,7 +312,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/manager.terminalFlowSelfRetiringAgent::call internal/runtime/correlation.InboundEventFromContext":                            1,
 		"internal/runtime/pipeline.PipelineCoordinator.publish::call internal/runtime/correlation.InboundEventFromContext":                             1,
 		"internal/runtime/pipeline.PipelineCoordinator.publishDirect::call internal/runtime/correlation.InboundEventFromContext":                       1,
-		"internal/runtime/pipeline.PipelineCoordinator.serveFanOutTurn::call internal/runtime/correlation.WithInboundEvent":                            1,
+		"internal/runtime/pipeline.PipelineCoordinator.claimAndServeFanOutTurn::call internal/runtime/correlation.WithInboundEvent":                    1,
 		"internal/runtime/pipeline.pipelineActivityDispatcher.logActivityRuntime::call internal/runtime/correlation.InboundEventFromContext":           1,
 		"internal/store/internal/backend/entityruntime.InsertSQLiteEntityStateDiff::call internal/runtime/correlation.InboundEventFromContext":         1,
 		"internal/store/internal/backend/mutationlog.InsertSQLiteWithStory::call internal/runtime/correlation.InboundEventFromContext":                 1,

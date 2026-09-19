@@ -1,0 +1,10 @@
+start-portfolio:
+  execution_type: system_node
+  subscribes_to: [portfolio.opened]
+  event_handlers:
+    portfolio.opened:
+      emit:
+        event: portfolio.opened.forwarded
+        fields:
+          portfolio_id: payload.portfolio_id
+          threshold: payload.threshold

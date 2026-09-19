@@ -1,0 +1,7 @@
+name: agent-only
+mode: static
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events: [mixed.agent]

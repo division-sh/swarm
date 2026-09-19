@@ -39,6 +39,10 @@ func commitWorkflowTimerOccurrence(
 
 	result := runtimepipeline.CommittedWorkflowTimerOccurrence{}
 	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		if err := handoff.ResetAttempt(); err != nil {
+			return err
+		}
+		result = runtimepipeline.CommittedWorkflowTimerOccurrence{}
 		activation, found, err := loadWorkflowEngineTimerActivation(txctx, tx, postgres, command.Activation.Ref)
 		if err != nil {
 			return err
@@ -124,24 +128,33 @@ func advanceWorkflowEngineTimerOccurrence(
 		WHERE timer_id = ? AND task_type = 'workflow_timer' AND status = 'active' AND fire_at = ?
 	`
 	args := []any{nextStatus, next.FiredAt, next.FireAt, activation.Ref.ActivationID, activation.FireAt}
+	storedRunID, storedTimerID := activation.RunID, activation.Ref.ActivationID
+	var rows int64
+	var err error
 	if postgres {
 		query = `
 			UPDATE timers SET status = $1, fired_at = $2, fire_at = $3
 			WHERE timer_id = $4::uuid AND task_type = 'workflow_timer' AND status = 'active' AND fire_at = $5
+			RETURNING CAST(run_id AS TEXT), CAST(timer_id AS TEXT)
 		`
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&storedRunID, &storedTimerID)
+		if err == nil {
+			rows = 1
+		}
+	} else {
+		var updated sql.Result
+		updated, err = tx.ExecContext(ctx, query, args...)
+		if err == nil {
+			rows, err = updated.RowsAffected()
+		}
 	}
-	updated, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return runtimepipeline.WorkflowTimerActivation{}, fmt.Errorf("advance workflow timer occurrence: %w", err)
-	}
-	rows, err := updated.RowsAffected()
-	if err != nil {
-		return runtimepipeline.WorkflowTimerActivation{}, err
 	}
 	if rows != 1 {
 		return runtimepipeline.WorkflowTimerActivation{}, fmt.Errorf("workflow timer occurrence advanced %d rows", rows)
 	}
-	if err := addTimerRevisionEffects(effects, activation.RunID); err != nil {
+	if err := addTimerRevisionEffects(effects, storedRunID, storedTimerID); err != nil {
 		return runtimepipeline.WorkflowTimerActivation{}, err
 	}
 	next.Status = nextStatus

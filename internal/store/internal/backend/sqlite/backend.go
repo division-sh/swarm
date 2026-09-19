@@ -5,13 +5,16 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 // Backend is the private owner of a SQLite pool. Only store-private
 // persistence adapters may retain it; public selected-store facades expose
 // closed semantic operations instead.
 type Backend struct {
-	db *sql.DB
+	db               *sql.DB
+	testTransactions transactiontest.Slot
 
 	mutationToken chan struct{}
 	mutationState struct {
@@ -20,6 +23,10 @@ type Backend struct {
 	}
 	firstBusyObservation         sync.Once
 	firstCancellationObservation sync.Once
+}
+
+func (b *Backend) InstallTransactionProbeForTest(options transactiontest.Options) (*transactiontest.Collector, func(), error) {
+	return b.testTransactions.Install(options)
 }
 
 func New(db *sql.DB) (*Backend, error) {

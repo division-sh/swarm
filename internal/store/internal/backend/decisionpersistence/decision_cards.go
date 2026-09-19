@@ -972,6 +972,9 @@ func (s *DecisionPostgresOwner) SupersedeDecisionCardsForStage(ctx context.Conte
 func (s *DecisionSQLiteOwner) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
 	return withRunLifecycleCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
 		return s.runDecisionCardMutationOutcome(ctx, "sqlite supersede decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+			if err := handoff.ResetAttempt(); err != nil {
+				return err
+			}
 			changed, err := supersedeDecisionCardsForStageWithStory(txctx, story, tx, runID, entityID, activationID, reason, now, false)
 			if err != nil || !changed {
 				return err

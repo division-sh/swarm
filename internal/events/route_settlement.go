@@ -1,6 +1,7 @@
 package events
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -347,50 +348,204 @@ type settlementLedgerWire struct {
 }
 
 func (w *settlementLedgerWire) UnmarshalJSON(raw []byte) error {
-	type wire settlementLedgerWire
-	var decoded wire
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	var decoded settlementLedgerWire
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&decoded); err != nil {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if err := decoded.decodeObject(decoder, token); err != nil {
 		return err
 	}
 	if err := requireJSONEOF(decoder); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	*w = decoded
+	return nil
+}
+
+// The root has already read the opening token to distinguish a nil evaluation
+// pointer from an object. Standalone decoding passes its opening token here too.
+func (w *settlementLedgerWire) decodeObject(decoder *json.Decoder, token json.Token) error {
+	var decoded settlementLedgerWire
+	if token != json.Delim('{') {
+		return fmt.Errorf("route settlement evaluation must be an object")
+	}
+	// Exact-key presence is independent of case-folded struct-field matching:
+	// a later alias may replace the decoded value, but not the exact-key fact.
+	plansPresent := false
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := token.(string)
+		if !ok || !strings.EqualFold(key, "plans") {
+			return fmt.Errorf("json: unknown field %q", key)
+		}
+		token, err = decoder.Token()
+		if err != nil {
+			return err
+		}
+		switch token {
+		case nil:
+			decoded.Plans = nil
+		case json.Delim('['):
+			decoded.Plans = decoded.Plans[:0]
+			for decoder.More() {
+				// Each custom plan decode starts fresh, even in duplicate arrays.
+				var plan settlementPlanWire
+				if err := plan.decodeObject(decoder); err != nil {
+					return err
+				}
+				decoded.Plans = append(decoded.Plans, plan)
+			}
+			if _, err := decoder.Token(); err != nil {
+				return err
+			}
+			if len(decoded.Plans) == 0 {
+				decoded.Plans = []settlementPlanWire{}
+			}
+		default:
+			return fmt.Errorf("route settlement evaluation plans must be an array")
+		}
+		if key == "plans" {
+			plansPresent = decoded.Plans != nil
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
 		return err
 	}
-	plans, ok := fields["plans"]
-	if !ok || string(plans) == "null" {
+	if !plansPresent {
 		return fmt.Errorf("route settlement evaluation plans are required")
 	}
-	*w = settlementLedgerWire(decoded)
+	*w = decoded
 	return nil
 }
 
 func (w *settlementPlanWire) UnmarshalJSON(raw []byte) error {
-	type wire settlementPlanWire
-	var decoded wire
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	var decoded settlementPlanWire
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&decoded); err != nil {
+	if err := decoded.decodeObject(decoder); err != nil {
 		return err
 	}
 	if err := requireJSONEOF(decoder); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	*w = decoded
+	return nil
+}
+
+// decodeObject also serves the ledger's array reader, avoiding a whole-array
+// scan followed by a custom-unmarshaler rescan of each plan. Its caller owns EOF.
+func (w *settlementPlanWire) decodeObject(decoder *json.Decoder) error {
+	var decoded settlementPlanWire
+	token, err := decoder.Token()
+	if err != nil {
 		return err
 	}
-	for _, field := range []string{"targets", "candidates"} {
-		value, ok := fields[field]
-		if !ok || string(value) == "null" {
-			return fmt.Errorf("route settlement plan %s are required", field)
+	if token != json.Delim('{') {
+		return fmt.Errorf("route settlement plan must be an object")
+	}
+	targetsPresent, candidatesPresent := false, false
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return fmt.Errorf("route settlement plan field must be a string")
+		}
+		switch {
+		case strings.EqualFold(key, "plan_sha256"):
+			err = decoder.Decode(&decoded.PlanID)
+		case strings.EqualFold(key, "resolution"):
+			err = decoder.Decode(&decoded.Resolution)
+		case strings.EqualFold(key, "targets"):
+			err = decoder.Decode(&decoded.Targets)
+			if key == "targets" {
+				targetsPresent = decoded.Targets != nil
+			}
+		case strings.EqualFold(key, "candidates"):
+			err = decoder.Decode(&decoded.Candidates)
+			if key == "candidates" {
+				candidatesPresent = decoded.Candidates != nil
+			}
+		default:
+			return fmt.Errorf("json: unknown field %q", key)
+		}
+		if err != nil {
+			return err
 		}
 	}
-	*w = settlementPlanWire(decoded)
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	if !targetsPresent {
+		return fmt.Errorf("route settlement plan targets are required")
+	}
+	if !candidatesPresent {
+		return fmt.Errorf("route settlement plan candidates are required")
+	}
+	*w = decoded
+	return nil
+}
+
+func (w *routeSettlementWire) decodeObject(decoder *json.Decoder) error {
+	var decoded routeSettlementWire
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if token == nil {
+		*w = decoded
+		return nil
+	}
+	if token != json.Delim('{') {
+		return fmt.Errorf("route settlement must be an object")
+	}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return fmt.Errorf("route settlement field must be a string")
+		}
+		switch {
+		case strings.EqualFold(key, "write_class"):
+			err = decoder.Decode(&decoded.WriteClass)
+		case strings.EqualFold(key, "arm"):
+			err = decoder.Decode(&decoded.Arm)
+		case strings.EqualFold(key, "reason"):
+			err = decoder.Decode(&decoded.Reason)
+		case strings.EqualFold(key, "evaluation"):
+			token, err = decoder.Token()
+			if err == nil {
+				if token == nil {
+					decoded.Evaluation = nil
+				} else {
+					if decoded.Evaluation == nil {
+						decoded.Evaluation = &settlementLedgerWire{}
+					}
+					err = decoded.Evaluation.decodeObject(decoder, token)
+				}
+			}
+		default:
+			return fmt.Errorf("json: unknown field %q", key)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	*w = decoded
 	return nil
 }
 
@@ -430,9 +585,9 @@ func (s *RouteSettlement) UnmarshalJSON(raw []byte) error {
 		return fmt.Errorf("route settlement destination is nil")
 	}
 	var wire routeSettlementWire
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil {
+	if err := wire.decodeObject(decoder); err != nil {
 		return fmt.Errorf("decode route settlement: %w", err)
 	}
 	if err := requireJSONEOF(decoder); err != nil {
@@ -556,14 +711,23 @@ func normalizeSettlementTargets(targets []RouteIdentity) []RouteIdentity {
 }
 
 func normalizeCandidateEvidence(in []ConnectCandidateEvidence) ([]ConnectCandidateEvidence, error) {
-	out := append([]ConnectCandidateEvidence(nil), in...)
-	sort.Slice(out, func(i, j int) bool {
-		left := out[i].receiver.String() + "\x00" + out[i].recipient.Code() + "\x00" + out[i].recipient.ID() + "\x00" + out[i].path + "\x00" + out[i].agent.Description() + "\x00" + out[i].outcome.Code()
-		right := out[j].receiver.String() + "\x00" + out[j].recipient.Code() + "\x00" + out[j].recipient.ID() + "\x00" + out[j].path + "\x00" + out[j].agent.Description() + "\x00" + out[j].outcome.Code()
-		return left < right
+	if len(in) == 0 {
+		return nil, nil
+	}
+	type keyedCandidate struct {
+		value ConnectCandidateEvidence
+		key   string
+	}
+	ordered := make([]keyedCandidate, len(in))
+	for i, candidate := range in {
+		ordered[i] = keyedCandidate{value: candidate, key: candidate.receiver.String() + "\x00" + candidate.recipient.Code() + "\x00" + candidate.recipient.ID() + "\x00" + candidate.path + "\x00" + candidate.agent.Description() + "\x00" + candidate.outcome.Code()}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].key < ordered[j].key
 	})
-	compacted := out[:0]
-	for _, candidate := range out {
+	compacted := make([]ConnectCandidateEvidence, 0, len(in))
+	for _, entry := range ordered {
+		candidate := entry.value
 		if len(compacted) > 0 && sameCandidateIdentity(compacted[len(compacted)-1], candidate) {
 			if compacted[len(compacted)-1].outcome != candidate.outcome {
 				return nil, fmt.Errorf("connect candidate has conflicting outcomes for receiver %s and recipient %s", candidate.receiver.String(), candidate.recipient.ID())

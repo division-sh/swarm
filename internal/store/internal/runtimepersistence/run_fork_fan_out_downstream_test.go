@@ -41,7 +41,7 @@ func (m forkFanOutConsumerModule) ActionRegistry() pipeline.ActionRegistry {
 	return pipeline.NewContractActionRegistry(m.source)
 }
 
-func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixture, backend string, source semanticview.Source, ctx context.Context, intent fanoutobligation.Intent, claim fanoutobligation.Claim, emissions []engine.EmitIntent, expectedFailure string, completeBarrier bool) {
+func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixture, backend string, source semanticview.Source, ctx context.Context, owner pipeline.FanOutObligationOwner, intent fanoutobligation.Intent, claim fanoutobligation.Claim, emissions []engine.EmitIntent, expectedFailure string, completeBarrier bool) {
 	t.Helper()
 	selected := fixture.store.(storeTestDurableEventBusStore)
 	workflow := fixture.store.(workflowTestSelectedStore)
@@ -91,11 +91,47 @@ func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixtu
 		emissions[ordinal].Event = admitted
 		outcomes = append(outcomes, pipeline.FanOutChunkOutcome{Ordinal: ordinal, Publication: plan})
 	}
-	beforeCommit := snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")
-	if _, inherited := emissions[0].Event.InheritedFanOutOrigin(); inherited {
-		requireFanOutOriginNamedAdmission(t, fixture, backend, eventBus, childCtx, claim, emissions[0].Event, prepared[0])
+	if err := eventBus.ReleaseEnginePublications(childCtx, prepared); err != nil {
+		t.Fatal(err)
 	}
-	committed, err := fixture.store.(selectedFanOutOwner).CommitFanOutChunk(childCtx, pipeline.FanOutChunkCommand{Claim: claim, Outcomes: outcomes, Now: time.Now().UTC()})
+	if _, inherited := emissions[0].Event.InheritedFanOutOrigin(); inherited {
+		requireFanOutOriginNamedAdmission(t, fixture, backend, eventBus, childCtx, owner, claim, emissions[0].Event)
+	}
+	group, err := owner.BeginFanOutPublicationGroup(childCtx, claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := group.Close(context.WithoutCancel(childCtx)); err != nil {
+			t.Error(err)
+		}
+	}()
+	requests := make([]pipeline.FanOutPublicationRequest, len(emissions))
+	for ordinal, emission := range emissions {
+		requests[ordinal] = pipeline.FanOutPublicationRequest{Ordinal: ordinal, Intent: emission}
+	}
+	grouped, err := eventBus.PrepareFanOutPublications(childCtx, group, requests)
+	if err != nil || len(grouped) != len(prepared) {
+		t.Fatalf("prepare exact inherited group: count=%d err=%v", len(grouped), err)
+	}
+	for ordinal, member := range grouped {
+		publication, ok := member.Publication.(bus.EnginePublicationPlan)
+		if member.Err != nil || !ok || member.Ordinal != ordinal {
+			t.Fatalf("prepare inherited ordinal %d: %+v", ordinal, member)
+		}
+		previous := prepared[ordinal].(bus.EnginePublicationPlan).PublicationCommand().Commit
+		actual := publication.PublicationCommand().Commit
+		if !reflect.DeepEqual(previous.Event.Event(), actual.Event.Event()) || !reflect.DeepEqual(previous.DeliveryRoutes, actual.DeliveryRoutes) {
+			t.Fatal("group preparation changed exact admitted event or child recipients")
+		}
+		prepared[ordinal] = member.Publication
+		outcomes[ordinal].Publication = member.Publication
+	}
+	if err := eventBus.SealFanOutPublications(childCtx, group, len(emissions), prepared); err != nil {
+		t.Fatal(err)
+	}
+	beforeCommit := snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")
+	committed, err := owner.CommitFanOutChunk(childCtx, pipeline.FanOutChunkCommand{Claim: claim, Outcomes: outcomes, Now: time.Now().UTC()})
 	if err != nil || committed.Intent.Cursor != len(emissions) {
 		if !reflect.DeepEqual(beforeCommit, snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")) {
 			t.Fatal("failed ordinal commit mutated persisted state")
@@ -116,7 +152,7 @@ func consumeForkFanOutEmissions(t *testing.T, fixture authorActivityReceiptFixtu
 		t.Fatal("real pipeline dependencies incomplete")
 	}
 	eventBus.SetInterceptors(coordinator)
-	if err := eventBus.FinalizeEnginePublications(childCtx, committed.Publications); err != nil {
+	if err := eventBus.FinalizeFanOutPublications(childCtx, group, committed.Publications); err != nil {
 		t.Fatal(err)
 	}
 	for _, emit := range emissions {

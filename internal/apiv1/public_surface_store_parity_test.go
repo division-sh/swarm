@@ -217,6 +217,40 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 			want: "composite owner runtime_workflow role census missing WorkflowEngineMutationOwner",
 		},
 		{
+			name: "workflow fan-out summary role cannot disappear",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				claim := storeParityClaimByID(t, matrix, "workflow_runtime")
+				claim.NestedRoles["runtime_workflow"] = storeParityStringsExcept(claim.NestedRoles["runtime_workflow"], "FanOutSummaryOwner")
+			},
+			want: "composite owner runtime_workflow role census missing FanOutSummaryOwner",
+		},
+		{
+			name: "workflow fan-out summary is not raw claim authority",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				claim := storeParityClaimByID(t, matrix, "workflow_runtime")
+				claim.NestedRoles["runtime_workflow"] = append(claim.NestedRoles["runtime_workflow"], "FanOutObligationOwner")
+			},
+			want: "composite owner runtime_workflow role census contains stale FanOutObligationOwner",
+		},
+		{
+			name: "fan-out public read cannot disappear",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				claim := storeParityClaimByID(t, matrix, "workflow_runtime")
+				claim.PublicMethods = storeParityStringsExcept(claim.PublicMethods, "run.fan_out.list")
+			},
+			want: "public method census missing run.fan_out.list",
+		},
+		{
+			name: "fan-out public read cannot move to unrelated owner",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				claim := storeParityClaimByID(t, matrix, "workflow_runtime")
+				claim.PublicMethods = storeParityStringsExcept(claim.PublicMethods, "run.fan_out.list")
+				other := storeParityClaimByID(t, matrix, "operator_channels")
+				other.PublicMethods = append(other.PublicMethods, "run.fan_out.list")
+			},
+			want: "store parity claim workflow_runtime must own run.fan_out.list",
+		},
+		{
 			name: "optional product",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				claim := storeParityClaimByID(t, matrix, "selected_contract_fork")
@@ -556,6 +590,9 @@ func validatePublicSurfaceStoreParity(root string, layer publicSurfaceStoreParit
 	}
 	if len(claimsByID) == 0 {
 		problems = append(problems, "store parity claims are required")
+	}
+	if !publicSurfaceHasValue(claimsByID["workflow_runtime"].PublicMethods, "run.fan_out.list") {
+		problems = append(problems, "store parity claim workflow_runtime must own run.fan_out.list")
 	}
 	purposeIDs := map[string]struct{}{}
 	for _, purpose := range layer.SelectedPurposes {

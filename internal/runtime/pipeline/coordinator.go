@@ -98,7 +98,7 @@ type PipelineCoordinator struct {
 	runtimeReceiver                  bool
 	testMaintenanceInterval          time.Duration
 	fanOutOwnerID                    string
-	fanOutWake                       chan struct{}
+	fanOutNotifier                   FanOutWorkNotifier
 }
 
 type WorkflowNodeHandlerStartHook func(context.Context, string, events.Event) error
@@ -318,7 +318,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		runtimeReceiver:                  requireObligationOwner,
 		entityLocks:                      make(map[string]*sync.Mutex),
 		fanOutOwnerID:                    uuid.NewString(),
-		fanOutWake:                       make(chan struct{}, 1),
 	}
 	var workflowStore *workflowInstanceStore
 	if storeTemplate != nil {
@@ -415,10 +414,21 @@ func (pc *PipelineCoordinator) SetTestLifecycleProbe(probe runtimelifecycleprobe
 func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 	draftExpiry := pc.decisionDraftExpiry
 	humanTaskExpiry := pc.humanTaskExpiry
-	if draftExpiry == nil && humanTaskExpiry == nil && pc.workflowStore == nil {
+	if draftExpiry == nil && humanTaskExpiry == nil {
 		return
 	}
 	run := func() {
+		if pc.workOwner == nil {
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "admit_pipeline_maintenance", "", "", runtimeWorkflowID, "", nil, errors.New("pipeline maintenance requires its runtime work owner"))
+			return
+		}
+		lease, err := pc.workOwner.Begin(ctx)
+		if err != nil {
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "admit_pipeline_maintenance", "", "", runtimeWorkflowID, "", nil, err)
+			return
+		}
+		defer lease.Done()
+		ctx := lease.Context()
 		now := time.Now().UTC()
 		if draftExpiry != nil {
 			if _, err := draftExpiry.ExpireDecisionCardInputDrafts(ctx, now); err != nil {
@@ -428,15 +438,6 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 		if humanTaskExpiry != nil {
 			if err := pc.expireHumanTaskCards(ctx, humanTaskExpiry, now, 200); err != nil {
 				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_human_task_cards", "", "", runtimeWorkflowID, "", nil, err)
-			}
-		}
-		if pc.workflowStore != nil && pc.workflowStore.fanOutObligations != nil {
-			served, err := pc.serveFanOutTurn(ctx, now)
-			if err != nil {
-				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "serve_fan_out_obligation", "", "", runtimeWorkflowID, "", nil, err)
-			}
-			if served {
-				pc.signalFanOutWork()
 			}
 		}
 	}
@@ -453,8 +454,6 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-pc.fanOutWake:
-			run()
 		case <-ticker.C:
 			run()
 		}
@@ -462,13 +461,23 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 }
 
 func (pc *PipelineCoordinator) signalFanOutWork() {
-	if pc == nil || pc.fanOutWake == nil {
+	if pc == nil {
 		return
 	}
-	select {
-	case pc.fanOutWake <- struct{}{}:
-	default:
+	pc.mu.Lock()
+	notifier := pc.fanOutNotifier
+	pc.mu.Unlock()
+	if notifier != nil {
+		notifier.Wake()
 	}
+}
+
+type FanOutWorkNotifier interface{ Wake() }
+
+func (pc *PipelineCoordinator) InstallFanOutWorkNotifier(notifier FanOutWorkNotifier) {
+	pc.mu.Lock()
+	pc.fanOutNotifier = notifier
+	pc.mu.Unlock()
 }
 
 func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry HumanTaskExpiry, now time.Time, limit int) error {

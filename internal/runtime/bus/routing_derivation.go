@@ -184,7 +184,12 @@ type routeResolvedPattern struct {
 }
 
 func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
-	rt := newRouteTable(source)
+	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
+	return deriveRouteTableWithInputProducers(source, graph, inputProducers)
+}
+
+func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, inputProducers runtimepinrouting.FlowInputProducerResolver) (*RouteTable, error) {
+	rt := newRouteTableWithGraph(source, graph)
 	if source == nil {
 		return rt, nil
 	}
@@ -197,9 +202,9 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 			return nil, err
 		}
 		flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		localEvents := routeFlowLocalEventSet(source, scope)
+		localEvents := routeFlowLocalEventSetWithInputProducers(scope, inputProducers)
 		if strings.EqualFold(scope.Mode, "template") || routeFlowStanding(source, scope.ID) {
-			subscribers, err := routeSubscriberTemplates(source, scope, agents)
+			subscribers, err := routeSubscriberTemplates(source, scope, agents, localEvents)
 			if err != nil {
 				return nil, err
 			}
@@ -215,19 +220,19 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 			rt.authoredScopes[flowPath] = struct{}{}
 		}
 		rt.addAuthoredEventPathsLocked(flowPath, localEvents)
-		if err := rt.addAgentPatternsLocked(source, scope.ID, scope.InputEvents, flowPath, localEvents, agents); err != nil {
+		if err := rt.addAgentPatternsLocked(source, scope.ID, scope.InputEvents, flowPath, localEvents, agents, inputProducers); err != nil {
 			return nil, err
 		}
 		nodes, err := routeExecutableNodeDeclarations(source, scope.ID, scope.Nodes)
 		if err != nil {
 			return nil, err
 		}
-		if err := rt.addNodePatternsLocked(source, scope.ID, scope.ID, scope.InputEvents, flowPath, localEvents, nodes); err != nil {
+		if err := rt.addNodePatternsLocked(source, scope.ID, scope.ID, scope.InputEvents, flowPath, localEvents, nodes, inputProducers); err != nil {
 			return nil, err
 		}
 	}
 
-	if err := rt.addRootInputFlowNodeRoutesLocked(source); err != nil {
+	if err := rt.addRootInputFlowNodeRoutesLocked(source, inputProducers); err != nil {
 		return nil, err
 	}
 	rt.rebuildLocked()
@@ -395,15 +400,10 @@ func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEv
 }
 
 func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
-	if rt == nil {
-		return fmt.Errorf("route table is required")
-	}
-	rt.generationMu.Lock()
-	defer rt.generationMu.Unlock()
-	return rt.addFlowInstanceRoute(req)
+	return rt.addFlowInstanceRouteForContextWithInputProducers(nil, req, nil)
 }
 
-func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
+func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) error {
 
 	req = req.Normalized()
 
@@ -424,6 +424,10 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	templateDef, ok := rt.templates[templateScope]
 	if !ok {
 		return fmt.Errorf("route template %q not found", templateScope)
+	}
+	if inputProducers == nil {
+		_, prepared := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(rt.source)
+		inputProducers = &prepared
 	}
 	rt.instanceOwners[identity] = identity
 	rt.instanceEventPath[identity] = rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
@@ -470,7 +474,7 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 			if err := rt.addConnectRecipientLocked(templateDef.FlowID, templateDef.InputEvents, rawPattern, admittedSubscriber, identity.RunID, instancePath); err != nil {
 				return err
 			}
-			resolvedPatterns, err := routeResolveSubscriberPatterns(rt.source, subscriberTemplate.Kind, templateDef.FlowID, templateDef.InputEvents, templateScope, instancePath, templateDef.LocalEvents, rawPattern)
+			resolvedPatterns, err := routeResolveSubscriberPatternsWithInputProducers(rt.source, subscriberTemplate.Kind, templateDef.FlowID, templateDef.InputEvents, templateScope, instancePath, templateDef.LocalEvents, rawPattern, *inputProducers)
 			if err != nil {
 				return err
 			}
@@ -648,6 +652,10 @@ func (rt *RouteTable) MaterializedRoutes(identity runtimeflowidentity.RunScopedF
 }
 
 func newRouteTable(source semanticview.Source) *RouteTable {
+	return newRouteTableWithGraph(source, runtimepinrouting.CompileConnectGraph(source))
+}
+
+func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
 	return &RouteTable{
 		generation:        1,
 		source:            source,
@@ -660,7 +668,7 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 		instanceOwners:    make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance),
 		instanceEventPath: make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
 		templateObservers: make(map[string][]routeTemplateSourceObserver),
-		connectGraph:      runtimepinrouting.CompileConnectGraph(source),
+		connectGraph:      graph,
 	}
 }
 
@@ -693,12 +701,23 @@ func (rt *RouteTable) snapshotGenerationCurrent(snapshot routeTableSnapshotGener
 }
 
 func (rt *RouteTable) addFlowInstanceRouteForContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
+	return rt.addFlowInstanceRouteForContextWithInputProducers(ctx, req, nil)
+}
+
+// A supplied resolver belongs only to the current unchanged-source topology
+// operation; the table retains its graph but never retains this resolver.
+func (rt *RouteTable) addFlowInstanceRouteForContextWithInputProducers(ctx context.Context, req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) error {
+	if rt == nil {
+		return fmt.Errorf("route table is required")
+	}
 	if ctx != nil {
 		if lease, _ := ctx.Value(routeTableGenerationLeaseKey{}).(routeTableGenerationLease); lease.table == rt {
-			return rt.addFlowInstanceRoute(req)
+			return rt.addFlowInstanceRoute(req, inputProducers)
 		}
 	}
-	return rt.AddFlowInstanceRoute(req)
+	rt.generationMu.Lock()
+	defer rt.generationMu.Unlock()
+	return rt.addFlowInstanceRoute(req, inputProducers)
 }
 
 func (rt *RouteTable) removeFlowInstanceRouteForContext(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
@@ -724,7 +743,7 @@ func rootInputFlowOwnsNodeRoute(source semanticview.Source, node runtimeidentity
 	return false
 }
 
-func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Source) error {
+func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Source, inputProducers runtimepinrouting.FlowInputProducerResolver) error {
 	if rt == nil || source == nil {
 		return nil
 	}
@@ -741,11 +760,11 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 		if flowID == "" || flowPath == "" {
 			continue
 		}
-		admittedInputs := routeAdmittedFlowIngressEventSet(source, scope, rootInputs)
+		admittedInputs := routeAdmittedFlowIngressEventSet(source, scope, rootInputs, inputProducers)
 		if len(admittedInputs) == 0 {
 			continue
 		}
-		identityScope := routeEventIdentityScope(flowPath, routeFlowLocalEventSet(source, scope), scope.InputEvents)
+		identityScope := routeEventIdentityScope(flowPath, routeFlowLocalEventSetWithInputProducers(scope, inputProducers), scope.InputEvents)
 		for _, eventType := range sortedStringKeys(admittedInputs) {
 			localEvent := eventidentity.Normalize(identityScope.LocalizeInput(eventType))
 			if localEvent == "" || !normalizedStringListContains(scope.InputEvents, localEvent) {
@@ -782,11 +801,13 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 	return nil
 }
 
-func routeAdmittedFlowIngressEventSet(source semanticview.Source, scope semanticview.FlowScope, rootInputs map[string]struct{}) map[string]struct{} {
+func routeAdmittedFlowIngressEventSet(source semanticview.Source, scope semanticview.FlowScope, rootInputs map[string]struct{}, inputProducers runtimepinrouting.FlowInputProducerResolver) map[string]struct{} {
 	out := cloneStringSet(rootInputs)
 	flowID := strings.TrimSpace(scope.ID)
 	for _, localEvent := range scope.InputEvents {
-		resolution := semanticview.ResolveNonConnectFlowInputProducer(source, flowID, localEvent)
+		// Connect evidence does not add or suppress intrinsic ingress. Keep
+		// this exact admission predicate while sharing the operation's census.
+		resolution := inputProducers.Resolve(flowID, localEvent)
 		if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
 			continue
 		}
@@ -979,6 +1000,7 @@ func (rt *RouteTable) addAgentPatternsLocked(
 	agentPath string,
 	localEvents map[string]struct{},
 	agents []routeAgentDeclaration,
+	inputProducers runtimepinrouting.FlowInputProducerResolver,
 ) error {
 	for _, agent := range agents {
 		declaration := agent.Declaration
@@ -1012,7 +1034,7 @@ func (rt *RouteTable) addAgentPatternsLocked(
 			if err := rt.addConnectRecipientLocked(agentFlowID, inputEvents, rawPattern, subscriber, "", ""); err != nil {
 				return err
 			}
-			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberAgent, agentFlowID, inputEvents, agentPath, agentPath, localEvents, rawPattern)
+			resolvedPatterns, err := routeResolveSubscriberPatternsWithInputProducers(source, subscriberAgent, agentFlowID, inputEvents, agentPath, agentPath, localEvents, rawPattern, inputProducers)
 			if err != nil {
 				return err
 			}
@@ -1027,7 +1049,7 @@ func (rt *RouteTable) addAgentPatternsLocked(
 	return nil
 }
 
-func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, routingFlowID, connectFlowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes []routeExecutableNodeDeclaration) error {
+func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, routingFlowID, connectFlowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes []routeExecutableNodeDeclaration, inputProducers runtimepinrouting.FlowInputProducerResolver) error {
 	for _, declaration := range nodes {
 		entry := declaration.Entry
 		handlerNode := declaration.Node
@@ -1056,7 +1078,7 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, routingF
 			if err := rt.addConnectRecipientLocked(connectFlowID, inputEvents, rawPattern, admittedSubscriber, "", ""); err != nil {
 				return err
 			}
-			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberNode, routingFlowID, inputEvents, basePath, basePath, localEvents, rawPattern)
+			resolvedPatterns, err := routeResolveSubscriberPatternsWithInputProducers(source, subscriberNode, routingFlowID, inputEvents, basePath, basePath, localEvents, rawPattern, inputProducers)
 			if err != nil {
 				return err
 			}
@@ -1270,6 +1292,11 @@ func (rt *RouteTable) rebuildLocked() {
 }
 
 func routeFlowLocalEventSet(source semanticview.Source, scope semanticview.FlowScope) map[string]struct{} {
+	_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
+	return routeFlowLocalEventSetWithInputProducers(scope, inputProducers)
+}
+
+func routeFlowLocalEventSetWithInputProducers(scope semanticview.FlowScope, inputProducers runtimepinrouting.FlowInputProducerResolver) map[string]struct{} {
 	out := routeEventKeys(scope.Events)
 	for _, eventType := range scope.OutputEvents {
 		eventType = strings.TrimSpace(eventType)
@@ -1280,7 +1307,7 @@ func routeFlowLocalEventSet(source semanticview.Source, scope semanticview.FlowS
 	}
 	for _, eventType := range scope.InputEvents {
 		eventType = strings.TrimSpace(eventType)
-		if eventType == "" || routeFlowInputHasExternalProducer(source, scope.ID, eventType) {
+		if eventType == "" || routeFlowInputProducerIsExternal(inputProducers.Resolve(scope.ID, eventType)) {
 			continue
 		}
 		out[eventType] = struct{}{}
@@ -1296,6 +1323,10 @@ func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, event
 		return false
 	}
 	resolution := runtimepinrouting.ResolveFlowInputProducer(source, flowID, eventType)
+	return routeFlowInputProducerIsExternal(resolution)
+}
+
+func routeFlowInputProducerIsExternal(resolution runtimecontracts.FlowInputProducerResolution) bool {
 	switch {
 	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress):
 		return true
@@ -1322,9 +1353,8 @@ func routeEventKeys(events map[string]runtimecontracts.EventCatalogEntry) map[st
 	return out
 }
 
-func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope, agents []routeAgentDeclaration) ([]routeSubscriberTemplate, error) {
+func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope, agents []routeAgentDeclaration, localEvents map[string]struct{}) ([]routeSubscriberTemplate, error) {
 	out := make([]routeSubscriberTemplate, 0, len(agents)+len(scope.Nodes))
-	localEvents := routeFlowLocalEventSet(source, scope)
 	for _, agent := range agents {
 		declaration := agent.Declaration
 		key := strings.TrimSpace(declaration.LocalID)
@@ -1449,6 +1479,11 @@ func routeFlowIDForPath(source semanticview.Source, flowPath string) string {
 }
 
 func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberKind, flowID string, inputEvents []string, authorityPath, routePath string, localEvents map[string]struct{}, raw string) ([]routeResolvedPattern, error) {
+	_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
+	return routeResolveSubscriberPatternsWithInputProducers(source, kind, flowID, inputEvents, authorityPath, routePath, localEvents, raw, inputProducers)
+}
+
+func routeResolveSubscriberPatternsWithInputProducers(source semanticview.Source, kind subscriberKind, flowID string, inputEvents []string, authorityPath, routePath string, localEvents map[string]struct{}, raw string, inputProducers runtimepinrouting.FlowInputProducerResolver) ([]routeResolvedPattern, error) {
 	raw = eventidentity.Normalize(raw)
 	flowID = strings.TrimSpace(flowID)
 	if raw == "" {
@@ -1460,7 +1495,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberK
 	}
 	localEvent := admission.LocalEvent()
 	if !admission.Pattern() && flowID != "" && source != nil && source.FlowHasInputEvent(flowID, localEvent) {
-		patterns := routeInputProducerPatterns(runtimepinrouting.ResolveFlowInputProducer(source, flowID, localEvent).AutoWireResolution())
+		patterns := routeInputProducerPatterns(inputProducers.Resolve(flowID, localEvent).AutoWireResolution())
 		if len(patterns) > 0 {
 			return patterns, nil
 		}

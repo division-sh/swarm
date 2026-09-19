@@ -26,6 +26,38 @@ func (s *censusCountingSource) FlowScopeByID(id string) (semanticview.FlowScope,
 	return s.Source.FlowScopeByID(id)
 }
 
+func (s *censusCountingSource) FlowHasInputEvent(flowID, eventType string) bool {
+	return !s.withdraw && s.Source.FlowHasInputEvent(flowID, eventType)
+}
+
+func TestResolveFlowInputProducerSharesOnlyOperationLocalCensus(t *testing.T) {
+	for _, tc := range targetFreeSyntheticProjectionCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			base, endpoint := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
+			source := &censusCountingSource{Source: base}
+			want := ResolveFlowInputProducer(base, endpoint.FlowID, endpoint.Event.Local)
+			if len(want.Evidence) == 0 || want.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
+				t.Fatalf("fixture lacks admitted input evidence: %+v", want)
+			}
+			for calls := 1; calls <= 2; calls++ {
+				got := ResolveFlowInputProducer(source, endpoint.FlowID, endpoint.Event.Local)
+				if source.builds != calls || !reflect.DeepEqual(got, want) {
+					t.Fatalf("builds=%d want=%d; got=%+v want=%+v", source.builds, calls, got, want)
+				}
+				got.Evidence[0].Kind = "mutated returned evidence"
+			}
+			source.withdraw = true
+			got := ResolveFlowInputProducer(source, endpoint.FlowID, endpoint.Event.Local)
+			if source.builds != 3 || !got.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
+				t.Fatalf("later resolution reused withdrawn input: builds=%d result=%+v", source.builds, got)
+			}
+		})
+	}
+	if got := ResolveFlowInputProducer(nil, "", ""); !got.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
+		t.Fatalf("nil source accepted: %+v", got)
+	}
+}
+
 func TestCompileConnectGraphSharesOnlyOperationLocalCensus(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {

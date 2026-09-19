@@ -406,7 +406,8 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load delivery authority: %v", err)
 	}
-	result, err := postgresDeliveryAdapter.ClaimExactResult(deliveryTxCtx, deliveryTx, story, snapshot.Authority, seedEvent, route, runtimedelivery.DefaultLeaseTTL)
+	deliveryEffects := runforkrevision.NewEffects()
+	result, err := postgresDeliveryAdapter.ClaimExactResult(deliveryTxCtx, deliveryTx, deliveryEffects, story, snapshot.Authority, seedEvent, route, runtimedelivery.DefaultLeaseTTL)
 	if err != nil {
 		t.Fatalf("stage delivery start: %v", err)
 	}
@@ -428,8 +429,12 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 			deliveryCapture <- captureResult{err: err}
 			return
 		}
-		revision, err := finalizePostgresRunForkTestRevision(deliveryTxCtx, deliveryTx, runID, runforkrevision.FamilyEventDeliveries)
-		deliveryCapture <- captureResult{revision: revision, err: err}
+		if err := deliveryEffects.Add(runID, runforkrevision.FamilyEventDeliveries); err != nil {
+			deliveryCapture <- captureResult{err: err}
+			return
+		}
+		results, err := runforkrevision.FinalizePostgres(deliveryTxCtx, deliveryTx, deliveryEffects)
+		deliveryCapture <- captureResult{revision: results[runID].Revision, err: err}
 	}()
 	waitForPostgresBackendLock(t, ctx, db, deliveryBackendPID)
 

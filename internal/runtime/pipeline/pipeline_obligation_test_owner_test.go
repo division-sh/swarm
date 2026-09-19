@@ -29,6 +29,12 @@ type unavailablePipelineTestObligationOwner struct{}
 
 type unavailablePipelineTestFanOutOwner struct{}
 
+var _ FanOutObligationOwner = unavailablePipelineTestFanOutOwner{}
+
+func (unavailablePipelineTestFanOutOwner) BeginFanOutPublicationGroup(context.Context, fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error) {
+	return nil, errPipelineTestObligationUnavailable
+}
+
 func (unavailablePipelineTestFanOutOwner) ClaimFanOutIntent(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
 	return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, errPipelineTestObligationUnavailable
 }

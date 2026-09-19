@@ -34,9 +34,18 @@ type projectionColumn struct {
 }
 
 type projectionSpec struct {
-	query   string
-	columns []projectionColumn
-	build   func(map[string]any) map[string]any
+	query    string
+	source   string
+	runAlias string
+	columns  []projectionColumn
+	build    func(map[string]any) map[string]any
+	parts    []projectionPart
+}
+
+type projectionPart struct {
+	query string
+	alias string
+	kind  string
 }
 
 type canonicalFact struct {
@@ -45,16 +54,45 @@ type canonicalFact struct {
 }
 
 func loadCanonicalProjection(ctx context.Context, q queryer, runID string, family Family) ([]canonicalFact, error) {
+	return loadSelectedCanonicalProjection(ctx, q, runID, family, nil)
+}
+
+func loadSelectedCanonicalProjection(ctx context.Context, q queryer, runID string, family Family, refs []FactRef) ([]canonicalFact, error) {
+	if len(refs) > exactFactReadBatch {
+		var all []canonicalFact
+		seen := make(map[string]bool, len(refs))
+		for start := 0; start < len(refs); start += exactFactReadBatch {
+			end := min(start+exactFactReadBatch, len(refs))
+			facts, err := loadSelectedCanonicalProjection(ctx, q, runID, family, refs[start:end])
+			if err != nil {
+				return nil, err
+			}
+			for _, fact := range facts {
+				if seen[fact.key] {
+					return nil, fmt.Errorf("duplicate %s projection fact %s", family, fact.key)
+				}
+				seen[fact.key] = true
+				all = append(all, fact)
+			}
+		}
+		sort.Slice(all, func(i, j int) bool { return all[i].key < all[j].key })
+		return all, nil
+	}
 	spec, ok := canonicalProjectionSpec(family)
 	if !ok {
 		return nil, fmt.Errorf("run fork revision owner has no canonical projection for family %q", family)
 	}
-	rows, err := q.QueryContext(ctx, spec.query, runID)
+	query, args, err := selectedProjectionQuery(spec, family, runID, refs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query %s projection: %w", family, err)
 	}
 	defer rows.Close()
 	facts := make([]canonicalFact, 0)
+	seen := make(map[string]bool)
 	raw := make([]any, len(spec.columns))
 	dest := make([]any, len(raw))
 	for i := range raw {
@@ -88,6 +126,10 @@ func loadCanonicalProjection(ctx context.Context, q queryer, runID string, famil
 		if err != nil {
 			return nil, fmt.Errorf("key %s projection: %w", family, err)
 		}
+		if seen[key] {
+			return nil, fmt.Errorf("duplicate %s projection fact %s", family, key)
+		}
+		seen[key] = true
 		facts = append(facts, canonicalFact{key: key, fact: encoded})
 	}
 	if err := rows.Err(); err != nil {
@@ -95,6 +137,57 @@ func loadCanonicalProjection(ctx context.Context, q queryer, runID string, famil
 	}
 	sort.Slice(facts, func(i, j int) bool { return facts[i].key < facts[j].key })
 	return facts, nil
+}
+
+func selectedProjectionQuery(spec projectionSpec, family Family, runID string, refs []FactRef) (string, []any, error) {
+	args := []any{runID}
+	if refs == nil {
+		return spec.query, args, nil
+	}
+	if len(refs) == 0 {
+		return "", nil, fmt.Errorf("exact projection requires fact coordinates")
+	}
+	fields, err := factKeyFields(family)
+	if err != nil {
+		return "", nil, err
+	}
+	var queries []string
+	for _, part := range spec.parts {
+		var alternatives []string
+		for _, ref := range refs {
+			if err := ref.validate(runID); err != nil {
+				return "", nil, err
+			}
+			if ref.family != family {
+				return "", nil, fmt.Errorf("exact projection has a foreign family")
+			}
+			if family == FamilyFanOutObligations && ref.coordinates.Kind != part.kind {
+				continue
+			}
+			columns, values := fields[:1], []any{ref.coordinates.Key}
+			if family == FamilyFanOutObligations {
+				columns = fields[1:5]
+				values = []any{ref.coordinates.TriggeringDeliveryID, ref.coordinates.FlowPath, ref.coordinates.DeclarationFamily, ref.coordinates.SemanticPath}
+				if part.kind == "outcome" {
+					columns = fields[1:]
+					values = append(values, *ref.coordinates.Ordinal)
+				}
+			}
+			conditions := make([]string, len(columns))
+			for i, column := range columns {
+				args = append(args, values[i])
+				conditions[i] = fmt.Sprintf("%s.%s=$%d", part.alias, column, len(args))
+			}
+			alternatives = append(alternatives, "("+strings.Join(conditions, " AND ")+")")
+		}
+		if len(alternatives) != 0 {
+			queries = append(queries, part.query+" AND ("+strings.Join(alternatives, " OR ")+")")
+		}
+	}
+	if len(queries) == 0 {
+		return "", nil, fmt.Errorf("exact projection has no admitted source part")
+	}
+	return strings.Join(queries, " UNION ALL "), args, nil
 }
 
 func normalizeProjectionValue(raw any, kind valueKind) (any, error) {
@@ -220,8 +313,8 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				e.idempotency_key, CAST(e.source_event_id AS TEXT), e.created_at,
 				CAST(e.run_id AS TEXT), e.event_class, e.execution_mode, e.task_id, e.inherited_fan_out_origin,
 				e.payload_schema_bundle_hash, e.payload_schema_flow_id, e.payload_schema_event_key,
-				e.payload_schema_digest, e.payload_schema_class, CAST(e.operator_reference_event_id AS TEXT)
-			FROM events e WHERE e.run_id = $1`,
+				e.payload_schema_digest, e.payload_schema_class, CAST(e.operator_reference_event_id AS TEXT)`,
+			source: "events e", runAlias: "e",
 			columns: typedColumns(map[string]valueKind{
 				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime, "inherited_fan_out_origin": valueJSON,
@@ -238,12 +331,14 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 	case FamilyEntityMutations:
 		spec = projectionSpec{
-			query:   `SELECT CAST(m.mutation_id AS TEXT), CAST(m.entity_id AS TEXT), m.domain, m.path, m.new_value, CAST(m.caused_by_event AS TEXT), m.created_at FROM entity_mutations m WHERE m.run_id = $1`,
+			query:  `SELECT CAST(m.mutation_id AS TEXT), CAST(m.entity_id AS TEXT), m.domain, m.path, m.new_value, CAST(m.caused_by_event AS TEXT), m.created_at`,
+			source: "entity_mutations m", runAlias: "m",
 			columns: typedColumns(map[string]valueKind{"new_value": valueJSON, "created_at": valueTime}, "mutation_id", "entity_id", "domain", "path", "new_value", "caused_by_event", "created_at"),
 		}
 	case FamilyEntityMetadata:
 		spec = projectionSpec{
-			query:   `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name, e.created_at FROM entity_state e WHERE e.run_id = $1`,
+			query:  `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name, e.created_at`,
+			source: "entity_state e", runAlias: "e",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at"),
 		}
 	case FamilyEventDeliveries:
@@ -254,11 +349,10 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				d.delivery_target_route, d.delivery_context, d.delivery_payload_projection, d.connect_execution_claim, d.receiver_materialization_plan, d.status,
 				d.retry_count, d.max_retries, d.next_eligible_at, d.claim_version, current_attempt.lease_expires_at,
 				d.reason_code, d.failure, CAST(current_attempt.active_session_id AS TEXT), d.started_at, d.settled_at, d.created_at, d.updated_at,
-				CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label
-			FROM event_deliveries d
+				CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label`,
+			source: `event_deliveries d
 			LEFT JOIN event_delivery_attempts current_attempt ON current_attempt.delivery_id = d.delivery_id AND current_attempt.claim_version = d.current_attempt_version AND current_attempt.open_marker = TRUE
-			LEFT JOIN event_delivery_handler_rule_selections s ON s.delivery_id = d.delivery_id
-			WHERE d.run_id = $1`,
+			LEFT JOIN event_delivery_handler_rule_selections s ON s.delivery_id = d.delivery_id`, runAlias: "d",
 			columns: typedColumns(map[string]valueKind{
 				"delivery_target_ownership": valueJSON, "delivery_context": valueJSON,
 				"delivery_payload_projection": valueJSON, "connect_execution_claim": valueJSON, "receiver_materialization_plan": valueJSON, "failure": valueJSON,
@@ -295,21 +389,22 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 	case FamilyCommittedReplayScopes:
 		spec = projectionSpec{
-			query:   `SELECT CAST(s.event_id AS TEXT), CAST(s.run_id AS TEXT), s.scope, s.created_at, s.updated_at FROM committed_replay_scopes s WHERE s.run_id = $1`,
+			query:  `SELECT CAST(s.event_id AS TEXT), CAST(s.run_id AS TEXT), s.scope, s.created_at, s.updated_at`,
+			source: "committed_replay_scopes s", runAlias: "s",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "updated_at": valueTime}, "event_id", "run_id", "scope", "created_at", "updated_at"),
 		}
 	case FamilyEventReceipts:
 		spec = projectionSpec{
-			query:   `SELECT CAST(r.receipt_id AS TEXT), CAST(r.event_id AS TEXT), r.subscriber_type, r.subscriber_id, r.outcome, r.reason_code, r.processed_at FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1`,
+			query:  `SELECT CAST(r.receipt_id AS TEXT), CAST(r.event_id AS TEXT), r.subscriber_type, r.subscriber_id, r.outcome, r.reason_code, r.processed_at`,
+			source: "event_receipts r JOIN events e ON e.event_id = r.event_id", runAlias: "e",
 			columns: typedColumns(map[string]valueKind{"processed_at": valueTime}, "receipt_id", "event_id", "subscriber_type", "subscriber_id", "outcome", "reason_code", "processed_at"),
 		}
 	case FamilyDeadLetters:
 		spec = projectionSpec{
 			query: `SELECT CAST(d.dead_letter_id AS TEXT), CAST(d.original_event_id AS TEXT), COALESCE(CAST(d.delivery_id AS TEXT), ''), d.handler_node, d.created_at,
-				COALESCE(d.claim_version, 0), o.outcome, o.reason_code, o.failure, o.settled_at
-				FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id
-				LEFT JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id AND o.claim_version = d.claim_version
-				WHERE e.run_id = $1`,
+				COALESCE(d.claim_version, 0), o.outcome, o.reason_code, o.failure, o.settled_at`,
+			source: `dead_letters d JOIN events e ON e.event_id = d.original_event_id
+				LEFT JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id AND o.claim_version = d.claim_version`, runAlias: "e",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "outcome_settled_at": valueTime, "outcome_failure": valueJSON}, "dead_letter_id", "original_event_id", "delivery_id", "handler_node", "created_at", "claim_version", "outcome", "outcome_reason_code", "outcome_failure", "outcome_settled_at"),
 		}
 	case FamilyFanOutObligations:
@@ -323,8 +418,8 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			"barrier_route_scope_key", "barrier_route_instance_id", "barrier_route_instance_path", "barrier_entity_id",
 			"barrier_routing_source", "barrier_execution_mode", "barrier_timer_handle", "barrier_status", "barrier_summary", "barrier_schedule_key", "barrier_schedule_activation_id", "barrier_updated_at",
 		}
-		spec = projectionSpec{
-			query: `
+		parts := []projectionPart{
+			{kind: "intent", alias: "i", query: `
 				SELECT
 					'intent', CAST(i.triggering_delivery_id AS TEXT), i.flow_path, i.declaration_family, i.semantic_path, i.bundle_hash, i.semantic_digest,
 					i.source_kind, CAST(i.source_event_id AS TEXT), CAST(i.source_run_id AS TEXT), CAST(i.source_entity_id AS TEXT), i.source_field, CAST(i.source_mutation_id AS TEXT),
@@ -332,16 +427,16 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					i.cardinality, i.cursor, i.status, CAST(i.capsule AS TEXT), i.blocked_reason,
 					CAST(i.created_at AS TEXT), NULL, NULL, NULL, NULL, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
-				FROM fan_out_intents i WHERE i.run_id=$1
-				UNION ALL
+				FROM fan_out_intents i WHERE i.run_id=$1`},
+			{kind: "outcome", alias: "o", query: `
 				SELECT
 					'outcome', CAST(o.triggering_delivery_id AS TEXT), o.flow_path, o.declaration_family, o.semantic_path, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL,
 					CAST(o.created_at AS TEXT), o.ordinal, o.outcome_kind, CAST(o.event_id AS TEXT), CAST(o.source_event_id AS TEXT), o.inherited_disposition, CAST(o.failure AS TEXT),
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
-				FROM fan_out_outcomes o WHERE o.run_id=$1
-				UNION ALL
+				FROM fan_out_outcomes o WHERE o.run_id=$1`},
+			{kind: "barrier", alias: "b", query: `
 				SELECT
 					'barrier', CAST(b.triggering_delivery_id AS TEXT), b.flow_path, b.declaration_family, b.semantic_path, b.bundle_hash, b.semantic_digest,
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -350,7 +445,11 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					b.target_flow_path, b.target_node_id, b.handler_event, b.join_id,
 					b.route_scope_key, CAST(b.route_instance_id AS TEXT), b.route_instance_path, CAST(b.entity_id AS TEXT),
 					CAST(b.routing_source AS TEXT), b.execution_mode, CAST(b.timer_handle AS TEXT), b.status, CAST(b.summary AS TEXT), b.schedule_key, CAST(b.schedule_activation_id AS TEXT), CAST(b.updated_at AS TEXT)
-				FROM fan_out_obligation_barriers b WHERE b.run_id=$1`,
+				FROM fan_out_obligation_barriers b WHERE b.run_id=$1`},
+		}
+		spec = projectionSpec{
+			query: parts[0].query + " UNION ALL " + parts[1].query + " UNION ALL " + parts[2].query,
+			parts: parts,
 			columns: typedColumns(map[string]valueKind{
 				"capsule": valueJSON, "failure": valueJSON, "created_at": valueTime,
 				"barrier_routing_source": valueJSON, "barrier_timer_handle": valueJSON, "barrier_summary": valueJSON, "barrier_updated_at": valueTime,
@@ -359,7 +458,8 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 	case FamilyTimers:
 		names := []string{"timer_id", "timer_name", "schedule_scope", "schedule_key", "immutable_hash", "run_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id", "reconstruction_owner", "entity_id", "flow_scope_key", "flow_instance_id", "flow_instance", "fire_event", "fire_payload", "routing_source", "execution_mode", "fire_at", "initial_fire_at", "recurring", "recurrence_interval", "owner_node", "owner_agent", "owner_kind", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "reply_context_id", "task_id", "due_basis_kind", "due_basis_absolute", "due_basis_duration", "due_basis_cron", "occurrence_event_id", "occurrence_admitted_at", "accepted_at", "cancel_cause", "cancelled_at", "failure_code", "failure_message", "failed_at", "task_type", "status", "fired_at", "created_at"}
 		spec = projectionSpec{
-			query: `SELECT CAST(t.timer_id AS TEXT), t.timer_name, t.schedule_scope, t.schedule_key, t.immutable_hash, CAST(t.run_id AS TEXT), CAST(t.source_timer_id AS TEXT), CAST(t.forked_from_run_id AS TEXT), CAST(t.forked_from_event_id AS TEXT), t.reconstruction_owner, CAST(t.entity_id AS TEXT), t.flow_scope_key, CAST(t.flow_instance_id AS TEXT), t.flow_instance, t.fire_event, t.fire_payload, t.routing_source, t.execution_mode, t.fire_at, t.initial_fire_at, t.recurring, t.recurrence_interval, t.owner_node, t.owner_agent, t.owner_kind, t.agent_name_owner, t.agent_name_source, t.agent_route_presence, t.agent_flow_scope_key, CAST(t.agent_flow_instance_id AS TEXT), t.reply_context_id, t.task_id, t.due_basis_kind, t.due_basis_absolute, t.due_basis_duration, t.due_basis_cron, CAST(t.occurrence_event_id AS TEXT), t.occurrence_admitted_at, t.accepted_at, t.cancel_cause, t.cancelled_at, t.failure_code, t.failure_message, t.failed_at, t.task_type, t.status, t.fired_at, t.created_at FROM timers t WHERE t.run_id = $1`,
+			query:  `SELECT CAST(t.timer_id AS TEXT), t.timer_name, t.schedule_scope, t.schedule_key, t.immutable_hash, CAST(t.run_id AS TEXT), CAST(t.source_timer_id AS TEXT), CAST(t.forked_from_run_id AS TEXT), CAST(t.forked_from_event_id AS TEXT), t.reconstruction_owner, CAST(t.entity_id AS TEXT), t.flow_scope_key, CAST(t.flow_instance_id AS TEXT), t.flow_instance, t.fire_event, t.fire_payload, t.routing_source, t.execution_mode, t.fire_at, t.initial_fire_at, t.recurring, t.recurrence_interval, t.owner_node, t.owner_agent, t.owner_kind, t.agent_name_owner, t.agent_name_source, t.agent_route_presence, t.agent_flow_scope_key, CAST(t.agent_flow_instance_id AS TEXT), t.reply_context_id, t.task_id, t.due_basis_kind, t.due_basis_absolute, t.due_basis_duration, t.due_basis_cron, CAST(t.occurrence_event_id AS TEXT), t.occurrence_admitted_at, t.accepted_at, t.cancel_cause, t.cancelled_at, t.failure_code, t.failure_message, t.failed_at, t.task_type, t.status, t.fired_at, t.created_at`,
+			source: "timers t", runAlias: "t",
 			columns: typedColumns(map[string]valueKind{
 				"fire_payload": valueJSON, "routing_source": valueJSON,
 				"recurring": valueBool,
@@ -369,26 +469,49 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 	case FamilyAgentSessions:
 		spec = projectionSpec{
-			query:   `SELECT CAST(s.session_id AS TEXT), s.status, s.created_at, s.terminated_at FROM agent_sessions s WHERE s.run_id = $1`,
+			query:  `SELECT CAST(s.session_id AS TEXT), s.status, s.created_at, s.terminated_at`,
+			source: "agent_sessions s", runAlias: "s",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "terminated_at": valueTime}, "session_id", "status", "created_at", "terminated_at"),
 		}
 	case FamilyAgentTurns:
 		spec = projectionSpec{
-			query:   `SELECT CAST(t.turn_id AS TEXT), CAST(t.session_id AS TEXT), t.created_at FROM agent_turns t WHERE t.run_id = $1`,
+			query:  `SELECT CAST(t.turn_id AS TEXT), CAST(t.session_id AS TEXT), t.created_at`,
+			source: "agent_turns t", runAlias: "t",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime}, "turn_id", "session_id", "created_at"),
 		}
 	case FamilyAgentConversationAudits:
 		spec = projectionSpec{
-			query:   `SELECT CAST(a.session_id AS TEXT), a.status, a.created_at, a.updated_at FROM agent_conversation_audits a WHERE a.run_id = $1`,
+			query:  `SELECT CAST(a.session_id AS TEXT), a.status, a.created_at, a.updated_at`,
+			source: "agent_conversation_audits a", runAlias: "a",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "updated_at": valueTime}, "session_id", "status", "created_at", "updated_at"),
 		}
 	case FamilyReplyContexts:
 		spec = projectionSpec{
-			query:   `SELECT r.reply_context_id, CAST(r.request_event_id AS TEXT), r.state, r.created_at, r.updated_at, r.terminal_at FROM reply_contexts r WHERE r.run_id = $1`,
+			query:  `SELECT r.reply_context_id, CAST(r.request_event_id AS TEXT), r.state, r.created_at, r.updated_at, r.terminal_at`,
+			source: "reply_contexts r", runAlias: "r",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "updated_at": valueTime, "terminal_at": valueTime}, "reply_context_id", "request_event_id", "state", "created_at", "updated_at", "terminal_at"),
 		}
 	default:
 		return projectionSpec{}, false
+	}
+	if len(spec.parts) == 0 {
+		// These aliases are the canonical projection sources above, not
+		// caller-controlled SQL or a second fact codec.
+		aliases := map[Family]string{
+			FamilyEvents: "e", FamilyEntityMutations: "m", FamilyEntityMetadata: "e",
+			FamilyEventDeliveries: "d", FamilyCommittedReplayScopes: "s",
+			FamilyEventReceipts: "r", FamilyDeadLetters: "d", FamilyTimers: "t",
+			FamilyAgentSessions: "s", FamilyAgentTurns: "t",
+			FamilyAgentConversationAudits: "a", FamilyReplyContexts: "r",
+		}
+		alias, ok := aliases[family]
+		if !ok {
+			return projectionSpec{}, false
+		}
+		if spec.source != "" {
+			spec.query += " FROM " + spec.source + " WHERE " + spec.runAlias + ".run_id = $1"
+		}
+		spec.parts = []projectionPart{{query: spec.query, alias: alias}}
 	}
 	return spec, true
 }

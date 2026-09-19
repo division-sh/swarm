@@ -21,6 +21,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -279,6 +280,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"mailbox.get",
 		"mailbox.list",
 		"run.diagnose",
+		"run.fan_out.list",
 		"run.get",
 		"run.list",
 		"run.trace",
@@ -313,6 +315,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"mailbox.get":                {Params: map[string]any{"mailbox_id": "card-1"}, ResultKeys: []string{"kind", "decision_card"}},
 		"mailbox.list":               {Params: map[string]any{}, ResultKeys: []string{"items"}},
 		"run.diagnose":               {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run", "operational_state", "blocking_layer", "blocking_reason", "heuristics", "test_quiescence"}},
+		"run.fan_out.list":           {Params: map[string]any{"run_id": fanOutReadProbeRunID}, ResultKeys: []string{"run_id", "run_status", "observed_at", "order", "intents"}},
 		"run.get":                    {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
 		"run.list":                   {Params: map[string]any{}, ResultKeys: []string{"runs"}},
 		"run.trace":                  {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"trace"}},
@@ -475,6 +478,12 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			},
 		},
 		{
+			Method:  "run.fan_out.list",
+			Params:  map[string]any{"run_id": "dd8200af-3a7d-4a51-bf58-599f963a342a"},
+			Code:    RunNotFoundCode,
+			Options: func(t *testing.T) testOperatorCapabilities { return readOnlyRuntimeProbeOptions(t) },
+		},
+		{
 			Method: "run.trace",
 			Params: map[string]any{"run_id": "missing"},
 			Code:   RunNotFoundCode,
@@ -530,6 +539,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			}},
 		},
 		Runs: &fakeRunReadStore{
+			fanOutPage: func() *fanoutobligation.ListPage { page := fanOutReadProbePage(); return &page }(),
 			headers: map[string]operatorread.RunHeader{
 				runID: {
 					RunID:       runID,

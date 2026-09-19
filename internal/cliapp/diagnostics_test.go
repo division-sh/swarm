@@ -287,7 +287,7 @@ func TestStatusProjectsTypedFanOutSemanticRejectionEvidence(t *testing.T) {
 		},
 		"canceled": 0, "settled": 0, "unsettled": 0,
 		"barrier_armed": 0, "barrier_closed_pending": 0, "barrier_terminal": 0,
-		"min_next_chunk": 4, "max_next_chunk": 4, "last_chunk_max_ms": 0, "oldest_age_ms": 0,
+		"min_next_chunk": 4, "max_next_chunk": 4, "oldest_age_ms": 0,
 	}
 
 	for _, test := range []struct {
@@ -1915,7 +1915,7 @@ func validDiagnosticFanOutSummary(runID string) map[string]any {
 		"cardinality": 0, "cursor": 0, "owed": 0, "committed": 0, "semantic_rejected": 0,
 		"semantic_rejection_sample": nil, "canceled": 0, "settled": 0, "unsettled": 0,
 		"barrier_armed": 0, "barrier_closed_pending": 0, "barrier_terminal": 0,
-		"min_next_chunk": 0, "max_next_chunk": 0, "last_chunk_max_ms": 0, "oldest_age_ms": 0,
+		"min_next_chunk": 0, "max_next_chunk": 0, "oldest_age_ms": 0,
 	}
 }
 

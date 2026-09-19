@@ -11,6 +11,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -45,7 +46,7 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 	if err != nil {
 		t.Fatalf("begin pipeline scope fixture: %v", err)
 	}
-	if err := insertCommittedPipelineScopeTx(ctx, tx, eventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
+	if err := insertCommittedPipelineScopeTx(ctx, tx, runforkrevision.NewEffects(), eventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("seed committed pipeline scope: %v", err)
 	}

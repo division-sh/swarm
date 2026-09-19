@@ -105,6 +105,12 @@ func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettleme
 		return Record{}, fmt.Errorf("admitted event payload schema binding is required")
 	}
 	payloadBinding := payloadAdmission.Binding()
+	// The concrete encoder already uses json.Marshal on its wire value, including
+	// escaping. Avoid encoding/json's second scan of the Marshaler output.
+	rawSettlement, err := settlement.MarshalJSON()
+	if err != nil {
+		return Record{}, fmt.Errorf("event record route settlement: %w", &json.MarshalerError{Type: reflect.TypeOf(settlement), Err: err})
+	}
 	record := Record{
 		Class:                   event.AdmissionClass(),
 		EventID:                 event.ID(),
@@ -131,7 +137,7 @@ func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettleme
 		SourceRoute:             marshalRoute(event.RoutingSource().Route()),
 		TargetRoute:             marshalRoute(envelope.Target),
 		TargetSet:               marshalRouteSet(envelope.TargetSet),
-		RouteSettlement:         marshalSettlement(settlement),
+		RouteSettlement:         rawSettlement,
 	}
 	if provenance, ok := event.OperatorReference(); ok {
 		record.OperatorReferencedEventID = provenance.ReferencedEventID()
@@ -149,10 +155,11 @@ func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettleme
 			return Record{}, err
 		}
 	}
-	if err := record.Validate(); err != nil {
+	if err := record.validateWithSettlement(settlement); err != nil {
 		return Record{}, err
 	}
-	return record.Clone(), nil
+	// Payload() clones; every other byte slice above comes from a fresh encoding.
+	return record, nil
 }
 
 func (r Record) Clone() Record {
@@ -166,6 +173,16 @@ func (r Record) Clone() Record {
 }
 
 func (r Record) Validate() error {
+	settlement, err := r.DecodeSettlement()
+	if err != nil {
+		return fmt.Errorf("event record route settlement: %w", err)
+	}
+	return r.validateWithSettlement(settlement)
+}
+
+// Only the strict decoder or the constructor's successful canonical encoding
+// supplies settlement here. Never retain this projection across record reads.
+func (r Record) validateWithSettlement(settlement events.RouteSettlement) error {
 	for field, value := range map[string]string{
 		"event_class": string(r.Class), "event_id": r.EventID, "run_id": r.RunID, "event_name": r.EventName,
 		"task_id": r.TaskID, "entity_id": r.EntityID, "produced_by": r.ProducedBy,
@@ -225,10 +242,6 @@ func (r Record) Validate() error {
 	}
 	if _, err := events.NewPayloadAdmission(r.Payload, payloadBinding); err != nil {
 		return fmt.Errorf("event record payload admission: %w", err)
-	}
-	settlement, err := r.DecodeSettlement()
-	if err != nil {
-		return fmt.Errorf("event record route settlement: %w", err)
 	}
 	if err := validateSettlementEventClass(r.Class, events.EventType(r.EventName), settlement.WriteClass()); err != nil {
 		return fmt.Errorf("event record route settlement: %w", err)
@@ -329,15 +342,26 @@ func (r Record) validateClassFacts() error {
 }
 
 func (r Record) Decode() (events.AdmittedEvent, error) {
-	admitted, err := r.decode()
-	if err != nil {
-		return events.AdmittedEvent{}, Corrupt(r.EventID, err)
-	}
-	return admitted, nil
+	admitted, _, err := r.DecodeWithSettlement()
+	return admitted, err
 }
 
-func (r Record) decode() (events.AdmittedEvent, error) {
-	if err := r.Validate(); err != nil {
+// DecodeWithSettlement returns the two views validated in this single decode.
+// Consumers needing both must not decode the same settlement a second time.
+func (r Record) DecodeWithSettlement() (events.AdmittedEvent, events.RouteSettlement, error) {
+	settlement, err := r.DecodeSettlement()
+	if err != nil {
+		return events.AdmittedEvent{}, events.RouteSettlement{}, Corrupt(r.EventID, fmt.Errorf("event record route settlement: %w", err))
+	}
+	admitted, err := r.decodeWithSettlement(settlement)
+	if err != nil {
+		return events.AdmittedEvent{}, events.RouteSettlement{}, Corrupt(r.EventID, err)
+	}
+	return admitted, settlement, nil
+}
+
+func (r Record) decodeWithSettlement(settlement events.RouteSettlement) (events.AdmittedEvent, error) {
+	if err := r.validateWithSettlement(settlement); err != nil {
 		return events.AdmittedEvent{}, err
 	}
 	envelope, err := r.decodeEnvelope()
@@ -415,10 +439,6 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("decode event record %s: %w", strings.TrimSpace(r.EventID), err)
 	}
-	settlement, err := r.DecodeSettlement()
-	if err != nil {
-		return events.AdmittedEvent{}, err
-	}
 	decoded, err := FromAdmitted(restored, settlement)
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("decode event record %s: reconstruct durable record: %w", strings.TrimSpace(r.EventID), err)
@@ -469,16 +489,9 @@ func (r Record) DecodeSettlement() (events.RouteSettlement, error) {
 		return events.RouteSettlement{}, fmt.Errorf("route_settlement is required")
 	}
 	var settlement events.RouteSettlement
-	decoder := json.NewDecoder(bytes.NewReader(r.RouteSettlement))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&settlement); err != nil {
-		return events.RouteSettlement{}, fmt.Errorf("decode route_settlement: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return events.RouteSettlement{}, fmt.Errorf("decode route_settlement: unexpected trailing JSON value")
-		}
+	// The sealed settlement codec owns strict fields, required arrays and EOF.
+	// An outer JSON decoder would scan the same complete document again.
+	if err := settlement.UnmarshalJSON(r.RouteSettlement); err != nil {
 		return events.RouteSettlement{}, fmt.Errorf("decode route_settlement: %w", err)
 	}
 	return settlement, nil
@@ -526,11 +539,6 @@ func marshalRouteSet(routes []events.RouteIdentity) []byte {
 	return raw
 }
 
-func marshalSettlement(settlement events.RouteSettlement) []byte {
-	raw, _ := json.Marshal(settlement)
-	return raw
-}
-
 func unmarshalRoute(label string, raw []byte) (events.RouteIdentity, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return events.RouteIdentity{}, fmt.Errorf("%s is required", label)
@@ -555,6 +563,15 @@ func jsonEqual(left, right []byte) bool {
 }
 
 func decodeJSON(raw []byte) (any, error) {
+	// Direct decoding avoids the streaming decoder's buffer copies. Numeric
+	// documents retain UseNumber, including values outside float64's range.
+	if !jsonMayContainNumber(raw) {
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, err
+		}
+		return value, nil
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	var value any
@@ -569,6 +586,34 @@ func decodeJSON(raw []byte) (any, error) {
 		return nil, err
 	}
 	return value, nil
+}
+
+// This only selects a decoder; it never admits JSON. Both paths still validate
+// the complete document. Skip quoted spans without interpreting their contents.
+func jsonMayContainNumber(raw []byte) bool {
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		if c == '"' {
+			for {
+				start := i + 1
+				end := bytes.IndexByte(raw[start:], '"')
+				if end < 0 {
+					return false
+				}
+				i = start + end
+				escaped := false
+				for j := i - 1; j >= start && raw[j] == '\\'; j-- {
+					escaped = !escaped
+				}
+				if !escaped {
+					break
+				}
+			}
+		} else if c == '-' || c >= '0' && c <= '9' {
+			return true
+		}
+	}
+	return false
 }
 
 func equalJSONValue(left, right any) bool {

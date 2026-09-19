@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
@@ -105,11 +106,14 @@ func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Di
 		return err
 	}
 	var inserted bool
+	// This fixture seeds intentionally unrevisioned state. History-aware tests
+	// use the selected-store fixture owner that finalizes its enclosing mutation.
+	effects := runforkrevision.NewEffects()
 	switch dialect {
 	case authoractivityfixture.DialectPostgres:
-		inserted, err = eventrecordpostgres.Insert(ctx, exec, record)
+		inserted, err = eventrecordpostgres.Insert(ctx, exec, effects, record)
 	case authoractivityfixture.DialectSQLite:
-		inserted, err = eventrecordsqlite.Insert(ctx, exec, record)
+		inserted, err = eventrecordsqlite.Insert(ctx, exec, effects, record)
 	default:
 		return fmt.Errorf("canonical event fixture dialect %q is unsupported", dialect)
 	}

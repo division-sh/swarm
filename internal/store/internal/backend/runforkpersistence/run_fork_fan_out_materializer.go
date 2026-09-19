@@ -47,6 +47,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			claimOwner                                                                 sql.NullString
 			claimGeneration                                                            uint64
 			leaseExpires, lastServed                                                   any
+			retryReadyAt, retryFailure                                                 any
 		)
 		intentQuery := `
 			SELECT bundle_hash, semantic_digest, source_kind,
@@ -54,7 +55,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 				COALESCE(source_field, ''), source_mutation_id,
 				source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 				cardinality, cursor, status, next_chunk_size, capsule,
-				claim_owner, claim_generation, lease_expires_at, last_served_at, COALESCE(blocked_reason, '')
+				claim_owner, claim_generation, lease_expires_at, last_served_at, COALESCE(blocked_reason, ''), retry_ready_at, retry_failure
 			FROM fan_out_intents
 			WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`
 		if postgres {
@@ -68,7 +69,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			&sourceEvent, &sourceRun, &sourceEntity, &sourceField, &sourceMutation,
 			&resourceFlowPath, &resourceEvent, &resourceVersion,
 			&cardinality, &cursor, &status, &nextChunk, &capsuleRaw,
-			&claimOwner, &claimGeneration, &leaseExpires, &lastServed, &blockedReason,
+			&claimOwner, &claimGeneration, &leaseExpires, &lastServed, &blockedReason, &retryReadyAt, &retryFailure,
 		); err != nil {
 			return fmt.Errorf("load materialized fork fan-out %s: %w", sourceIntent.Request.Key.String(), err)
 		}
@@ -92,7 +93,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			strings.TrimSpace(sourceMutation.String) != strings.TrimSpace(source.MutationID) || strings.TrimSpace(resourceFlowPath.String) != strings.TrimSpace(source.Declaration.FlowPath) ||
 			strings.TrimSpace(resourceEvent.String) != strings.TrimSpace(source.Declaration.EventName) || strings.TrimSpace(resourceVersion.String) != strings.TrimSpace(string(source.VersionID)) ||
 			cardinality != sourceIntent.Request.Cardinality || cursor != sourceIntent.Cursor || status != string(sourceIntent.Status) || nextChunk != fanoutobligation.InitialChunkSize ||
-			!capsule.Equal(projectedCapsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires != nil || lastServed != nil || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
+			!capsule.Equal(projectedCapsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires != nil || lastServed != nil || retryReadyAt != nil || retryFailure != nil || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
 			return fmt.Errorf("fork materialization %s fan-out intent conflicts with fixed plan", forkRunID)
 		}
 		outcomeQuery := `
@@ -237,6 +238,7 @@ func materializeRunForkFanOutObligations(
 		intent.Cursor = obligation.Intent.Cursor
 		intent.NextChunkSize = fanoutobligation.InitialChunkSize
 		intent.LastServedAt = time.Time{}
+		intent.Retry = nil
 		intent.ClaimOwner = ""
 		intent.ClaimGeneration = 0
 		intent.LeaseExpiresAt = time.Time{}
@@ -275,6 +277,13 @@ func materializeRunForkFanOutObligations(
 			intent.Request.Cardinality, intent.Cursor, string(intent.Status), intent.NextChunkSize, capsule, now, nullableRunForkString(intent.BlockedReason)); err != nil {
 			return 0, fmt.Errorf("insert materialized fork fan-out %s: %w", intent.Request.Key.String(), err)
 		}
+		intentRef, err := runforkrevision.FanOutIntentFact(intent.Request.Key)
+		if err != nil {
+			return 0, err
+		}
+		if err := effects.AddFacts(forkRunID, intentRef); err != nil {
+			return 0, err
+		}
 		for _, sourceOutcome := range obligation.Outcomes {
 			outcome := sourceOutcome
 			outcome.CreatedAt = now
@@ -301,6 +310,13 @@ func materializeRunForkFanOutObligations(
 				outcome.Ordinal, string(outcome.Kind), nullableRunForkString(outcome.EventID), nullableRunForkString(outcome.SourceEventID), nullableRunForkString(string(outcome.InheritedDisposition)), failure, now); err != nil {
 				return 0, fmt.Errorf("insert inherited fork fan-out outcome %d: %w", outcome.Ordinal, err)
 			}
+			outcomeRef, err := runforkrevision.FanOutOutcomeFact(intent.Request.Key, outcome.Ordinal)
+			if err != nil {
+				return 0, err
+			}
+			if err := effects.AddFacts(forkRunID, outcomeRef); err != nil {
+				return 0, err
+			}
 		}
 		if obligation.Barrier != nil {
 			if barriers == nil {
@@ -309,11 +325,6 @@ func materializeRunForkFanOutObligations(
 			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, tx, effects, forkRunID, *obligation.Barrier, planRef, generation, now); err != nil {
 				return 0, err
 			}
-		}
-	}
-	if len(plan.FanOutObligations) > 0 {
-		if err := effects.Add(forkRunID, runforkrevision.FamilyFanOutObligations); err != nil {
-			return 0, err
 		}
 	}
 	return len(plan.FanOutObligations), nil
@@ -330,7 +341,6 @@ func bindRunForkFanOutPendingReplays(
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		return err
 	}
-	changed := false
 	for _, obligation := range plan.FanOutObligations {
 		for _, replay := range obligation.PendingReplays {
 			forkEventID := deterministicRunForkReplayEventID(forkRunID, replay.SourceEventID)
@@ -361,7 +371,17 @@ func bindRunForkFanOutPendingReplays(
 			if err != nil {
 				return err
 			}
-			changed = changed || inserted
+			if inserted {
+				key := obligation.Intent.Request.Key
+				key.RunID = forkRunID
+				ref, err := runforkrevision.FanOutOutcomeFact(key, replay.Ordinal)
+				if err != nil {
+					return err
+				}
+				if err := effects.AddFacts(forkRunID, ref); err != nil {
+					return err
+				}
+			}
 			var ownedEvent, sourceEvent, inherited sql.NullString
 			if err := tx.QueryRowContext(ctx, `
 				SELECT event_id, source_event_id, inherited_disposition
@@ -376,9 +396,6 @@ func bindRunForkFanOutPendingReplays(
 				return fmt.Errorf("fork fan-out pending ordinal %d conflicts with child-local replay", replay.Ordinal)
 			}
 		}
-	}
-	if changed {
-		return effects.Add(forkRunID, runforkrevision.FamilyFanOutObligations)
 	}
 	return nil
 }

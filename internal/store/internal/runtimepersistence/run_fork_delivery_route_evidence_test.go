@@ -348,11 +348,11 @@ func proveRouteEvidenceRollback(t testing.TB, ctx context.Context, fixture autho
 		if err != nil {
 			return err
 		}
-		if _, err := adapter.CommitInitial(txctx, tx, rollbackEvent.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
-			return err
-		}
 		effects, err := runforkrevision.ForRun(event.RunID(), runforkrevision.FamilyEventDeliveries)
 		if err != nil {
+			return err
+		}
+		if _, err := adapter.CommitInitial(txctx, tx, effects, rollbackEvent.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
 			return err
 		}
 		results, err := finalizeRunForkRevisionMatrix(txctx, tx, postgres, effects)

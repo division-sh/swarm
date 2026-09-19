@@ -50,13 +50,50 @@ func (c *completionOutcomeConn) BeginTx(ctx context.Context, opts driver.TxOptio
 
 func (c *completionOutcomeConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
-	if c.control.enabled.Load() && strings.Contains(query, "INSERT INTO agent_turns") {
-		c.control.writes.Add(1)
-		if c.control.phase == "callback_cancel" {
-			c.control.cancel()
-		}
+	if err == nil && completionOutcomeAgentTurnInsert(query) {
+		c.control.observeWrite()
 	}
 	return result, err
+}
+
+func (c *completionOutcomeConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
+	if err == nil && completionOutcomeAgentTurnInsert(query) {
+		// PostgreSQL contributes stored coordinates via INSERT RETURNING. Observe
+		// the successful native row, not query entry or an unrelated history read.
+		return &completionOutcomeRows{Rows: rows, control: c.control}, nil
+	}
+	return rows, err
+}
+
+func completionOutcomeAgentTurnInsert(query string) bool {
+	normalized := strings.Join(strings.Fields(strings.ToUpper(query)), " ")
+	return strings.HasPrefix(normalized, "INSERT INTO AGENT_TURNS (")
+}
+
+func (c *completionOutcomeConnector) observeWrite() {
+	if !c.enabled.Load() {
+		return
+	}
+	c.writes.Add(1)
+	if c.phase == "callback_cancel" {
+		c.cancel()
+	}
+}
+
+type completionOutcomeRows struct {
+	driver.Rows
+	control  *completionOutcomeConnector
+	observed bool
+}
+
+func (r *completionOutcomeRows) Next(dest []driver.Value) error {
+	err := r.Rows.Next(dest)
+	if err == nil && !r.observed {
+		r.observed = true
+		r.control.observeWrite()
+	}
+	return err
 }
 
 type completionOutcomeTx struct {

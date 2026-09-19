@@ -1,6 +1,7 @@
 package deliverylifecycle
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -44,7 +45,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		CreatedAt                 time.Time                        `json:"created_at"`
 		UpdatedAt                 time.Time                        `json:"updated_at"`
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&fact); err != nil {
 		return Snapshot{}, fmt.Errorf("decode historical delivery snapshot: %w", err)

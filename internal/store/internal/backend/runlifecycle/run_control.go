@@ -86,20 +86,24 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 	defer handoff.Rollback()
 	var state runtimeruncontrol.State
 	effects := runforkrevision.NewEffects()
-	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	mutate := s.runPrivateAuthorActivityMutationOutcome
+	if action == "stop" {
+		mutate = s.runStopMutationOutcome
+	}
+	committed, err := mutate(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		state, err = lockRunControlState(txctx, tx, runID)
 		if err != nil {
-			return err
+			return runControlStageFailure(action, "lock_run", err)
 		}
 		occurrenceScope, err := runtimeauthoractivity.BundleScopeForSource(txctx, state.BundleHash)
 		if err != nil {
-			return fmt.Errorf("run control source scope: %w", err)
+			return runControlStageFailure(action, "source_scope", fmt.Errorf("run control source scope: %w", err))
 		}
 		switch action {
 		case "stop":
 			if err := rejectPostgresStandingRunStopTx(txctx, tx, runID); err != nil {
-				return err
+				return runtimeruncontrol.StopFailure("standing_admission", err)
 			}
 			state, err = s.stopRunControlTx(txctx, tx, story, effects, state, req)
 		case "pause":
@@ -250,7 +254,7 @@ func (s *RunLifecyclePostgresOwner) continueRunControlTx(ctx context.Context, tx
 func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
-		return runtimeruncontrol.State{}, err
+		return runtimeruncontrol.State{}, runtimeruncontrol.StopFailure("validate_run", err)
 	}
 	if !lifecycleState.Active() {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
@@ -262,7 +266,7 @@ func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sq
 	if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 		RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC(),
 	}); err != nil {
-		return runtimeruncontrol.State{}, err
+		return runtimeruncontrol.State{}, runtimeruncontrol.StopFailure("terminal_state", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at)
@@ -275,7 +279,7 @@ func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sq
 			paused_at = NULL,
 			stopped_at = COALESCE(run_control_state.stopped_at, $4)
 	`, state.RunID, req.Reason, req.ControlledBy, req.Now.UTC()); err != nil {
-		return runtimeruncontrol.State{}, fmt.Errorf("persist run stop control state: %w", err)
+		return runtimeruncontrol.State{}, runtimeruncontrol.StopFailure("control_state", err)
 	}
 	state.Status = "cancelled"
 	state.ControlStatus = "stopped"
@@ -301,17 +305,17 @@ func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID stri
 func (s *RunLifecyclePostgresOwner) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, runID, reason string, now time.Time) (int, []runtimetimercancellation.Ref, error) {
 	deliveries, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, runID, "run_stopped")
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, runtimeruncontrol.StopFailure("deliveries", err)
 	}
 	if _, err := s.pipeline.TerminalizeRunTx(ctx, tx, effects, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), now); err != nil {
-		return 0, nil, err
+		return 0, nil, runtimeruncontrol.StopFailure("pipeline", err)
 	}
 	if _, err := terminateActiveRunSessionsTx(ctx, tx, effects, []string{runID}, "run_stopped", now); err != nil {
-		return 0, nil, err
+		return 0, nil, runtimeruncontrol.StopFailure("sessions", err)
 	}
 	cancellations, err := cancelActiveRunTimerFamiliesTx(ctx, tx, true, effects, []string{runID}, "run_stopped", now)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, runtimeruncontrol.StopFailure("timers", err)
 	}
 	return len(deliveries), cancellations, nil
 }

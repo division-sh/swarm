@@ -396,6 +396,8 @@ type SessionTerminalOwner interface {
 // never crosses process composition; callers receive ProcessCapability.
 type RetainedSession interface {
 	runtimedestructivereset.OperationStore
+	// Inspection proves the full current source-set plan for ordinary evidence
+	// in the same transaction as current-grant and run classification.
 	InspectRunExecutionOwnership(context.Context, GrantEvidence, string) (runtimemanager.RunExecutionOwnership, error)
 	ProveSelectedForkGenerationGrant(context.Context, GrantEvidence) error
 	Authority() (Authority, error)

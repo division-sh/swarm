@@ -1,0 +1,20 @@
+name: portfolio
+mode: singleton
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - portfolio.opened
+      - event: portfolio.account.register.requested
+        source: external
+      - event: portfolio.accounts.register.requested
+        source: external
+      - event: portfolio.membership.seeded
+        source: external
+      - event: portfolio.notify.requested
+        source: external
+  outputs:
+    events:
+      - account.registered
+      - account.notify.requested

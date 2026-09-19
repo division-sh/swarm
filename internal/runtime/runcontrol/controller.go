@@ -106,7 +106,12 @@ type Store interface {
 type QueueReleaser interface {
 	PreflightRunQueue(context.Context, string) error
 	ReleaseRunQueue(context.Context, string, int) (runtimepipelineobligation.SweepResult, error)
+	BeginRunStop(context.Context, string) (StopTransition, error)
 }
+
+// StopTransition retains the existing pipeline parent exclusion until the
+// selected stop transaction settles. It does not revoke foreground claims.
+type StopTransition = runtimepipelineobligation.ParentTransition
 
 type TimerCancellationReconciler interface {
 	Reconcile(context.Context, []runtimetimercancellation.Ref) error
@@ -152,6 +157,16 @@ func (c *Controller) Stop(ctx context.Context, req TransitionRequest) (Transitio
 		return TransitionResult{}, fmt.Errorf("run control owner is not configured")
 	}
 	req = c.normalize(req)
+	if c.queue != nil {
+		transition, err := c.queue.BeginRunStop(ctx, req.RunID)
+		if err != nil {
+			return TransitionResult{}, StopFailure("pipeline_drain", err)
+		}
+		if transition == nil {
+			return TransitionResult{}, StopFailure("pipeline_drain", errors.New("run stop transition is required"))
+		}
+		defer transition.Done()
+	}
 	state, err := c.store.StopRunControl(ctx, req)
 	if err != nil {
 		return TransitionResult{}, err

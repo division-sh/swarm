@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -55,6 +56,8 @@ type RuntimeIdentityHandlerOptions struct {
 
 type RunReadHandlerOptions struct {
 	Runs RunReadStore
+	// Optional process-local enrichment. Store-only readers remain explicitly unavailable.
+	FanOutRuntime func(context.Context, fanoutobligation.ListPage) (fanoutobligation.ListPage, error)
 }
 
 type DataHandlerOptions struct {

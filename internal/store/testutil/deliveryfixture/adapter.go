@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type Adapter struct {
@@ -33,6 +35,11 @@ func NewAdapter(dialect Dialect) (*Adapter, error) {
 	return &Adapter{Adapter: owner, dialect: dialect}, nil
 }
 
+// These fixture operations seed unrevisioned lifecycle preconditions.
+// Tests that capture history use the underlying Adapter with their finalizer's
+// explicit collector instead; do not add a finalizer to this fixture boundary.
+func unrevisionedEffects() *runforkrevision.Effects { return runforkrevision.NewEffects() }
+
 func (a *Adapter) privateDialect() privateauthoractivity.Dialect {
 	if a.dialect == DialectPostgres {
 		return privateauthoractivity.DialectPostgres
@@ -53,7 +60,7 @@ func (a *Adapter) withStory(ctx context.Context, tx *sql.Tx, fn func(*privateaut
 
 func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (result runtimedelivery.ClaimResult, err error) {
 	err = a.withStory(ctx, tx, func(story *privateauthoractivity.Mutation) error {
-		result, err = a.Adapter.ClaimExactResult(ctx, tx, story, authority, event, route, leaseTTL)
+		result, err = a.Adapter.ClaimExactResult(ctx, tx, unrevisionedEffects(), story, authority, event, route, leaseTTL)
 		return err
 	})
 	return result, err
@@ -61,15 +68,19 @@ func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, authority ru
 
 func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
 	err = a.withStory(ctx, tx, func(story *privateauthoractivity.Mutation) error {
-		snapshot, err = a.Adapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, selection)
+		snapshot, err = a.Adapter.SettleSuccess(ctx, tx, unrevisionedEffects(), story, claim, sideEffects, duration, selection)
 		return err
 	})
 	return snapshot, err
 }
 
+func (a *Adapter) SettleSuccessWithinMutation(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
+	return a.Adapter.SettleSuccess(ctx, tx, unrevisionedEffects(), story, claim, sideEffects, duration, selection)
+}
+
 func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (snapshot runtimedelivery.Snapshot, err error) {
 	err = a.withStory(ctx, tx, func(story *privateauthoractivity.Mutation) error {
-		snapshot, err = a.Adapter.SettleFailure(ctx, tx, story, claim, settlement)
+		snapshot, err = a.Adapter.SettleFailure(ctx, tx, unrevisionedEffects(), story, claim, settlement)
 		return err
 	})
 	return snapshot, err
@@ -77,18 +88,18 @@ func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, claim runtimede
 
 func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason string) (terminalizations []runtimedelivery.Terminalization, err error) {
 	err = a.withStory(ctx, tx, func(story *privateauthoractivity.Mutation) error {
-		terminalizations, err = a.Adapter.TerminalizeRun(ctx, tx, story, runID, reason)
+		terminalizations, err = a.Adapter.TerminalizeRun(ctx, tx, unrevisionedEffects(), story, runID, reason)
 		return err
 	})
 	return terminalizations, err
 }
 
 func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error) {
-	return a.Adapter.CommitInitial(ctx, tx, eventID, runID, routes, authority)
+	return a.Adapter.CommitInitial(ctx, tx, unrevisionedEffects(), eventID, runID, routes, authority)
 }
 
 func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, authority runtimedelivery.ExecutionAuthority) error {
-	return a.Adapter.ActivateNormalAuthority(ctx, tx, authority)
+	return a.Adapter.ActivateNormalAuthority(ctx, tx, unrevisionedEffects(), authority)
 }
 
 func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (runtimedelivery.ContinuationPage, error) {
@@ -96,7 +107,11 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority r
 }
 
 func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, leaseTTL time.Duration) (runtimedelivery.Snapshot, error) {
-	return a.Adapter.RenewClaim(ctx, tx, claim, leaseTTL)
+	return a.Adapter.RenewClaim(ctx, tx, unrevisionedEffects(), claim, leaseTTL)
+}
+
+func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
+	return a.Adapter.BindAgentSession(ctx, tx, unrevisionedEffects(), claim, sessionID)
 }
 
 func (a *Adapter) ObserveContinuation(ctx context.Context, db *sql.DB, authority runtimedelivery.ExecutionAuthority, deliveryID string) (runtimedelivery.ContinuationObservation, error) {

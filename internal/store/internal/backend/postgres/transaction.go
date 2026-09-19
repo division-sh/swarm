@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 func (b *Backend) RunTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) (err error) {
@@ -54,9 +56,12 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	}
 	discard := false
 	var tx *sql.Tx
+	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
+	defer func() { probe.Finish(err) }()
 	defer func() {
 		var cleanupErr error
 		if tx != nil {
+			probe.RollbackAttempted()
 			rollbackErr := tx.Rollback()
 			if rollbackErr != nil {
 				discard = true
@@ -98,6 +103,8 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		}
 		return false, err
 	}
+	probe.Begun()
+	sqlCtx = transactiontest.WithAttempt(sqlCtx, probe)
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -110,10 +117,13 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	probe.BeforeCommit()
 	if commitErr := tx.Commit(); commitErr != nil {
+		probe.CommitFailed()
 		discard = true
 		return false, commitErr
 	}
+	probe.Committed()
 	tx = nil
 	return true, nil
 }

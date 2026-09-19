@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 const (
@@ -253,9 +255,12 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	}
 	var tx *sql.Tx
 	discard := false
+	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
+	defer func() { probe.Finish(err) }()
 	defer func() {
 		var cleanupErr error
 		if tx != nil {
+			probe.RollbackAttempted()
 			rollbackErr := tx.Rollback()
 			// ErrTxDone describes Go's handle, not the physical transaction. A
 			// concurrent cancellation may already be disposing this connection.
@@ -279,6 +284,8 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		discard = true
 		return false, err
 	}
+	probe.Begun()
+	ctx = transactiontest.WithAttempt(ctx, probe)
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
@@ -288,7 +295,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
+	probe.BeforeCommit()
 	if err = tx.Commit(); err != nil {
+		probe.CommitFailed()
 		discard = true
 		// Only this owner's Commit result is classified here. Automatic rollback
 		// can win after the context check; callback and cleanup errors stay intact.
@@ -301,6 +310,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		}
 		return false, err
 	}
+	probe.Committed()
 	tx = nil
 	return true, nil
 }

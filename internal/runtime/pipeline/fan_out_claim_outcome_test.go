@@ -3,11 +3,13 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type fanOutClaimOutcomeOwner struct {
@@ -15,6 +17,12 @@ type fanOutClaimOutcomeOwner struct {
 	claimFn   func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error)
 	releaseFn func(context.Context, fanoutobligation.Claim) error
 	loads     int
+	groups    int
+}
+
+func (o *fanOutClaimOutcomeOwner) BeginFanOutPublicationGroup(context.Context, fanoutobligation.Claim) (runtimepipelineobligation.PublicationGroup, error) {
+	o.groups++
+	return nil, errors.New("claim/evaluation error must stop publication group admission")
 }
 
 func (o *fanOutClaimOutcomeOwner) ClaimFanOutIntent(ctx context.Context, request FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
@@ -32,12 +40,30 @@ func (o *fanOutClaimOutcomeOwner) LoadFanOutEvaluation(context.Context, fanoutob
 
 type fanOutClaimOutcomeBus struct {
 	recordingPipelineBus
-	prepares int
+	prepares  int
+	finalizes int
 }
+
+var _ FanOutPublicationPlanner = (*fanOutClaimOutcomeBus)(nil)
 
 func (b *fanOutClaimOutcomeBus) PrepareEnginePublications(context.Context, []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
 	b.prepares++
 	return nil, errors.New("claim error must stop publication preparation")
+}
+
+func (b *fanOutClaimOutcomeBus) PrepareFanOutPublication(context.Context, runtimepipelineobligation.PublicationGroup, int, runtimeengine.EmitIntent) (runtimeengine.DurablePublicationPlan, error) {
+	b.prepares++
+	return nil, errors.New("claim error must stop fan-out publication preparation")
+}
+
+func (b *fanOutClaimOutcomeBus) PrepareFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, []FanOutPublicationRequest) ([]FanOutPublicationPreparation, error) {
+	b.prepares++
+	return nil, errors.New("claim error must stop batch fan-out publication preparation")
+}
+
+func (b *fanOutClaimOutcomeBus) FinalizeFanOutPublications(context.Context, runtimepipelineobligation.PublicationGroup, []runtimeengine.CommittedDurablePublication) error {
+	b.finalizes++
+	return errors.New("claim error must stop fan-out publication finalization")
 }
 
 func TestFanOutClaimErrorSettlesAcknowledgedOwnershipWithoutRetry(t *testing.T) {
@@ -100,7 +126,7 @@ func TestFanOutClaimErrorSettlesAcknowledgedOwnershipWithoutRetry(t *testing.T) 
 				bus:                bus,
 			}
 			reenter, err := pc.serveFanOutTurn(ctx, time.Now())
-			if reenter || !errors.Is(err, tc.claimErr) || (tc.releaseErr != nil && !errors.Is(err, tc.releaseErr)) {
+			if reenter.refill() || !errors.Is(err, tc.claimErr) || (tc.releaseErr != nil && !errors.Is(err, tc.releaseErr)) {
 				t.Fatalf("turn = reenter:%v err:%v, want claim:%v release:%v", reenter, err, tc.claimErr, tc.releaseErr)
 			}
 			wantReleases := 0
@@ -110,8 +136,58 @@ func TestFanOutClaimErrorSettlesAcknowledgedOwnershipWithoutRetry(t *testing.T) 
 			if claims != 1 || releases != wantReleases {
 				t.Fatalf("claims:%d releases:%d, want 1/%d before return", claims, releases, wantReleases)
 			}
-			if owner.loads != 0 || len(owner.commands) != 0 || len(owner.retryRelease) != 0 || len(owner.blocks) != 0 || bus.prepares != 0 || len(bus.outboxIntents) != 0 || len(bus.publishes) != 0 || len(bus.directPublishes) != 0 {
+			if owner.loads != 0 || owner.groups != 0 || len(owner.commands) != 0 || len(owner.retryRelease) != 0 || len(owner.blocks) != 0 || bus.prepares != 0 || bus.finalizes != 0 || len(bus.outboxIntents) != 0 || len(bus.publishes) != 0 || len(bus.directPublishes) != 0 {
 				t.Fatalf("claim outcome entered evaluation/chunk/retry/provider work: owner:%#v bus:%#v", owner, bus)
+			}
+		})
+	}
+}
+
+type fanOutCleanupOutcomeOwner struct {
+	*fanOutClaimOutcomeOwner
+	blockErr error
+}
+
+func (o *fanOutCleanupOutcomeOwner) BlockFanOutClaim(context.Context, FanOutBlockRequest) error {
+	return o.blockErr
+}
+
+func TestFanOutPreparationFailureReportsUnsettledCleanup(t *testing.T) {
+	blockErr := errors.New("blocking transaction failed")
+	releaseErr := errors.New("cleanup transaction failed")
+	for _, cleanupFails := range []bool{false, true} {
+		t.Run(fmt.Sprint(cleanupFails), func(t *testing.T) {
+			claim := fanOutFailureTestClaim()
+			releases := 0
+			owner := &fanOutCleanupOutcomeOwner{
+				blockErr: blockErr,
+				fanOutClaimOutcomeOwner: &fanOutClaimOutcomeOwner{
+					claimFn: func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
+						return fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: claim.Key}}, claim, true, nil
+					},
+					releaseFn: func(ctx context.Context, got fanoutobligation.Claim) error {
+						releases++
+						if ctx.Err() != nil || got != claim {
+							t.Fatal("cleanup lost exact claim or inherited cancellation")
+						}
+						if cleanupFails {
+							return releaseErr
+						}
+						return nil
+					},
+				},
+			}
+			pc := &PipelineCoordinator{
+				workflowStore:      &workflowInstanceStore{fanOutObligations: owner},
+				sourceArtifactFact: mustPipelineTestSourceArtifactFact(pipelineTestBundleHash),
+				fanOutOwnerID:      claim.Owner,
+			}
+			disposition, err := pc.serveFanOutTurn(context.Background(), time.Now())
+			if disposition != fanOutTurnAwaitScan || !errors.Is(err, blockErr) || errors.Is(err, releaseErr) != cleanupFails {
+				t.Fatalf("disposition=%v err=%v; failed cleanup must remain observable", disposition, err)
+			}
+			if releases != 1 || owner.loads != 1 || owner.groups != 0 || len(owner.commands) != 0 || len(owner.retryRelease) != 0 {
+				t.Fatalf("loads=%d releases=%d; preparation failure must not enter publication or retry", owner.loads, releases)
 			}
 		})
 	}

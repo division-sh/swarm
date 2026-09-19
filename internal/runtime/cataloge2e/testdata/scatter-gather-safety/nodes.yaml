@@ -11,7 +11,7 @@ scatter:
         items_from: payload.items
         as: entry
         identity: entry.item_id
-        max_items: 50
+        max_items: 100
         emit:
           event: item.registered
           fields:
@@ -23,7 +23,7 @@ scatter:
         items_from: payload.items
         as: entry
         identity: entry.item_id
-        max_items: 50
+        max_items: 100
         emit:
           event: item.finished
           fields:

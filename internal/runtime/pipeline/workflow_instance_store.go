@@ -623,7 +623,7 @@ type workflowInstanceStore struct {
 	lifecycleOwner         workflowInstanceLifecycleOwner
 	runLifecycle           runtimerunlifecycle.OperationOwner
 	engineMutations        WorkflowEngineMutationOwner
-	fanOutObligations      FanOutObligationOwner
+	fanOutObligations      FanOutSummaryOwner
 	cardMutations          DecisionCardMutationOwner
 	timerOccurrences       WorkflowTimerOccurrenceOwner
 	timerActivations       WorkflowTimerActivationPersistence
@@ -684,7 +684,7 @@ type WorkflowPersistenceOwner interface {
 	GateRouteAdmissionReader
 	runtimetimerobligation.Reader
 	WorkflowEngineMutationOwner
-	FanOutObligationOwner
+	FanOutSummaryOwner
 	DecisionCardMutationOwner
 	WorkflowTimerOccurrenceOwner
 	WorkflowTimerActivationPersistence

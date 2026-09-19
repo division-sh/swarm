@@ -1,0 +1,62 @@
+portfolio-coordinator:
+  execution_type: system_node
+  subscribes_to:
+    - portfolio.opened
+    - portfolio.account.register.requested
+    - portfolio.accounts.register.requested
+    - portfolio.membership.seeded
+    - portfolio.notify.requested
+  event_handlers:
+    portfolio.opened:
+      create_entity: true
+      data_accumulation:
+        writes:
+          - source_field: portfolio_id
+            target_field: portfolio_id
+          - source_field: threshold
+            target_field: threshold
+    portfolio.account.register.requested:
+      emit:
+        event: account.registered
+        fields:
+          account_id: payload.account_id
+          portfolio_id: payload.portfolio_id
+          eng_roles: {literal: 0}
+          gem_score: {literal: 0.25}
+          eligible: {literal: true}
+          external_id: {literal: "11111111-1111-4111-8111-111111111111"}
+    portfolio.accounts.register.requested:
+      data_accumulation:
+        writes:
+          - source_field: account_ids
+            target_field: account_ids
+      fan_out:
+        items_from: payload.account_ids
+        as: account
+        identity: account.account_id
+        max_items: 100
+        emit:
+          event: account.registered
+          fields:
+            portfolio_id: payload.portfolio_id
+            account_id: account.account_id
+            eng_roles: account.eng_roles
+            gem_score: account.gem_score
+            external_id: account.external_id
+            eligible: entity.threshold >= 70
+    portfolio.membership.seeded:
+      data_accumulation:
+        writes:
+          - source_field: account_ids
+            target_field: account_ids
+    portfolio.notify.requested:
+      fan_out:
+        items_from: entity.account_ids
+        as: account
+        identity: account.account_id
+        max_items: 100
+        emit:
+          event: account.notify.requested
+          fields:
+            account_id: account.account_id
+            command: payload.command

@@ -3533,18 +3533,22 @@ func (e *Executor) emitFieldsPayload(frame *executionFrame, spec runtimecontract
 	flowID := strings.TrimSpace(frame.req.ExecutionFlowID.String())
 	resolution := semanticview.ResolveEventSchema(e.deps.Source, flowID, strings.TrimSpace(eventType))
 	return emitFieldsPayload(e.currentContext(frame), frame.state, spec, options, func(target string, base workflowexpr.ValueExpressionOptions) workflowexpr.ValueExpressionOptions {
-		if !resolution.HasStructural {
-			return base
-		}
-		field, ok := resolution.StructuralType.FieldPath(target)
-		if !ok {
-			return base
-		}
-		valueType := field.Type.Clone()
-		base.ResultType = &valueType
-		base.ResultOptional = field.IsOptional
-		return base
+		return emitFieldExpressionOptions(resolution, target, base)
 	})
+}
+
+func emitFieldExpressionOptions(resolution semanticview.EventSchemaResolution, target string, base workflowexpr.ValueExpressionOptions) workflowexpr.ValueExpressionOptions {
+	if !resolution.HasStructural {
+		return base
+	}
+	field, ok := resolution.StructuralType.FieldPath(target)
+	if !ok {
+		return base
+	}
+	valueType := field.Type.Clone()
+	base.ResultType = &valueType
+	base.ResultOptional = field.IsOptional
+	return base
 }
 
 func (e *Executor) shapeEmitPayloadWithContext(ctx context.Context, frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
@@ -3566,11 +3570,6 @@ func admittedDeclarativeEmitEventType(frame *executionFrame, eventType string) (
 }
 
 func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.EmitSpec, eventType string, payload map[string]any, chainDepth int) (EmitIntent, error) {
-	encoded, err := encodePayload(payload)
-	if err != nil {
-		return EmitIntent{}, err
-	}
-	createdAt := nextPersistenceSafeEmitTime(e.emitNow(), frame.lastEmitCreatedAt)
 	sourceRoute := emitSourceRoute(frame)
 	entityID := sourceRoute.EntityID
 	flowInstance := sourceRoute.FlowInstance
@@ -3582,20 +3581,29 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	if err != nil {
 		return EmitIntent{}, err
 	}
+	return e.newEmitIntentWithEnvelope(frame, eventType, payload, chainDepth, resolution.Envelope)
+}
+
+func (e *Executor) newEmitIntentWithEnvelope(frame *executionFrame, eventType string, payload map[string]any, chainDepth int, envelope events.EventEnvelope) (EmitIntent, error) {
+	encoded, err := encodePayload(payload)
+	if err != nil {
+		return EmitIntent{}, err
+	}
+	createdAt := nextPersistenceSafeEmitTime(e.emitNow(), frame.lastEmitCreatedAt)
 	routingSource := frame.req.ProducerSource
 	if routingSource.Empty() {
 		return EmitIntent{}, fmt.Errorf("construct emitted event: execution is missing admitted producer source")
 	}
 	if !routingSource.Empty() {
-		resolution.Envelope = events.EnvelopeForSourceRoute(resolution.Envelope, routingSource.Route())
+		envelope = events.EnvelopeForSourceRoute(envelope, routingSource.Route())
 	} else {
-		resolution.Envelope.Source = events.RouteIdentity{}
+		envelope.Source = events.RouteIdentity{}
 	}
 	lineage := events.LineageFromEvent(frame.req.Event)
 	facts := events.EventFacts{
 		Type:     events.EventType(strings.TrimSpace(eventType)),
 		Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: frame.req.Node.Key()},
-		Payload:  encoded, ChainDepth: chainDepth, Envelope: resolution.Envelope,
+		Payload:  encoded, ChainDepth: chainDepth, Envelope: envelope,
 		RoutingSource: routingSource, CreatedAt: createdAt,
 	}
 	var evt events.Event

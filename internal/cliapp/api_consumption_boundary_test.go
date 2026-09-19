@@ -31,6 +31,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"entities.go":        {},
 		"event_publish.go":   {},
 		"events.go":          {},
+		"fan_out.go":         {},
 		"fork.go":            {},
 		"forkchat.go":        {},
 		"incidents.go":       {},
@@ -137,6 +138,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 	}{
 		{name: "runs", args: []string{"run", "list"}},
 		{name: "status", args: []string{"run", "status", "run-1"}},
+		{name: "fan-out list", args: []string{"run", "fan-out", "list", "11111111-1111-1111-1111-111111111111"}},
 		{name: "trace", args: []string{"run", "trace", "run-1"}},
 		{name: "trace follow", args: []string{"run", "trace", "run-1", "--follow"}},
 		{name: "health", args: []string{"health"}},

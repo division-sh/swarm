@@ -10,6 +10,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
 )
@@ -81,7 +82,7 @@ func CommitPersistedEventDeliveryFixtureForTest(ctx context.Context, selected an
 			if err != nil {
 				return err
 			}
-			_, err = adapter.CommitInitial(txctx, tx, eventID, runID, routes, authority)
+			_, err = adapter.CommitInitial(txctx, tx, runforkrevision.NewEffects(), eventID, runID, routes, authority)
 			return err
 		})
 	case *SQLiteRuntimeStore:
@@ -97,7 +98,7 @@ func CommitPersistedEventDeliveryFixtureForTest(ctx context.Context, selected an
 			if err != nil {
 				return err
 			}
-			_, err = adapter.CommitInitial(txctx, tx, eventID, runID, routes, authority)
+			_, err = adapter.CommitInitial(txctx, tx, runforkrevision.NewEffects(), eventID, runID, routes, authority)
 			return err
 		})
 	default:

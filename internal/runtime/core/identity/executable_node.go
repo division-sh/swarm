@@ -118,7 +118,7 @@ func validIdentityToken(value string) bool {
 }
 
 func (d DeclarationIdentity) Valid() bool {
-	parsed, err := AdmitDeclarationIdentity(d.flow.String(), d.family, d.semanticPath)
+	parsed, err := AdmitDeclarationIdentity(d.flow.value, d.family, d.semanticPath)
 	return err == nil && parsed == d
 }
 
@@ -131,7 +131,7 @@ func (d DeclarationIdentity) Key() string {
 	if !d.Valid() {
 		return ""
 	}
-	parts := []string{d.flow.String(), d.family, d.semanticPath}
+	parts := []string{d.flow.value, d.family, d.semanticPath}
 	for index := range parts {
 		parts[index] = base64.RawURLEncoding.EncodeToString([]byte(parts[index]))
 	}
@@ -218,7 +218,7 @@ func (r ExecutableNode) FlowPath() string {
 	if !r.Valid() {
 		return ""
 	}
-	return r.declaration.Flow().String()
+	return r.declaration.flow.value
 }
 func (r ExecutableNode) NodeID() string {
 	if !r.Valid() {
@@ -232,7 +232,8 @@ func (r ExecutableNode) Key() string {
 	if !r.Valid() {
 		return ""
 	}
-	parts := []string{r.FlowPath(), r.NodeID()}
+	// Valid admitted all coordinates; accessors would repeat that same check.
+	parts := []string{r.declaration.flow.value, r.declaration.semanticPath}
 	for index := range parts {
 		parts[index] = base64.RawURLEncoding.EncodeToString([]byte(parts[index]))
 	}

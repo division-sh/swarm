@@ -87,6 +87,7 @@ type RuntimeOptions struct {
 	SourceArtifactFact               runtimecorrelation.SourceArtifactFact
 	RuntimeInstanceID                string
 	ProcessWorkOwner                 *worklifetime.Process
+	FanOutWorkers                    *int
 	WorkflowModule                   runtimepipeline.WorkflowModule
 	LLMRuntime                       llm.Runtime
 	Credentials                      runtimecredentials.Store
@@ -233,6 +234,8 @@ type Runtime struct {
 	startCtx                   context.Context
 	cancelStart                context.CancelFunc
 	startupGrant               runtimestartupownership.LiveGenerationGrant
+	fanOutServing              *runtimestartupownership.FanOutServingRegistration
+	fanOutContext              context.Context
 	startupLifecyclePrepared   bool
 	replacementQuiesced        bool
 	workOccurrence             *worklifetime.RuntimeOccurrence
@@ -665,7 +668,42 @@ func (p *PreparedSourceSetGenerationRefresh) Commit(
 	if predecessor != nil {
 		commitErr = errors.Join(commitErr, predecessor.Retire(context.Background()))
 	}
+	if commitErr == nil && predecessor != nil {
+		p.runtime.lifecycleMu.Lock()
+		serving := p.runtime.fanOutServing != nil
+		p.runtime.lifecycleMu.Unlock()
+		if serving {
+			commitErr = p.runtime.replaceFanOutServing()
+		}
+	}
 	return commitErr
+}
+
+func (rt *Runtime) replaceFanOutServing() error {
+	rt.lifecycleMu.Lock()
+	grant, startCtx := rt.startupGrant, rt.fanOutContext
+	rt.lifecycleMu.Unlock()
+	if grant == nil || startCtx == nil || rt.Pipeline == nil {
+		return errors.New("fan-out serving requires the started runtime and its admitted generation")
+	}
+	registration, err := runtimestartupownership.StartFanOutServing(startCtx, grant, rt.workOccurrence, rt.Options.FanOutWorkers, rt.Pipeline)
+	if err != nil {
+		return fmt.Errorf("register shared fan-out serving: %w", err)
+	}
+	rt.lifecycleMu.Lock()
+	if rt.startupGrant != grant || rt.cancelStart == nil || startCtx.Err() != nil {
+		rt.lifecycleMu.Unlock()
+		registration.Close()
+		return errors.New("runtime generation changed during fan-out registration")
+	}
+	previous := rt.fanOutServing
+	rt.fanOutServing = registration
+	rt.Pipeline.InstallFanOutWorkNotifier(registration)
+	rt.lifecycleMu.Unlock()
+	if previous != nil {
+		previous.Close()
+	}
+	return nil
 }
 
 const bootstrapSelfCheckSubscriberID = "bootstrap-self-check"
@@ -1933,7 +1971,13 @@ func (rt *Runtime) releaseAutonomousStartupProducers(ctx, startCtx context.Conte
 		}
 	}
 	if rt.Pipeline != nil {
-		lease, err := rt.workOccurrence.Begin(startCtx)
+		rt.lifecycleMu.Lock()
+		rt.fanOutContext = startCtx
+		rt.lifecycleMu.Unlock()
+		if err := rt.replaceFanOutServing(); err != nil {
+			return err
+		}
+		lease, err := rt.workOccurrence.BeginStanding(startCtx)
 		if err != nil {
 			return fmt.Errorf("admit pipeline maintenance after topology completion: %w", err)
 		}
@@ -2094,6 +2138,16 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
 	var shutdownErr error
+	// Finite fan-out turns may still complete committed handoffs through these
+	// consumers. Join only this producer before retiring its dependencies.
+	rt.lifecycleMu.Lock()
+	fanOutServing := rt.fanOutServing
+	rt.fanOutServing = nil
+	rt.fanOutContext = nil
+	rt.lifecycleMu.Unlock()
+	if fanOutServing != nil {
+		fanOutServing.Close()
+	}
 	if rt.runLifecycleExecutor != nil {
 		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil {
 			shutdownErr = errors.Join(
@@ -2133,6 +2187,9 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	rt.lifecycleMu.Unlock()
 	if cancelStart != nil {
 		cancelStart()
+	}
+	if rt.Pipeline != nil {
+		rt.Pipeline.InstallFanOutWorkNotifier(nil)
 	}
 	if err := rt.shutdownGate.Wait(context.Background()); err != nil {
 		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime ingress admission join: %w", err))
@@ -2187,12 +2244,15 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	}
 	if grant != nil {
 		grantRetireCtx, cancelGrantRetire := context.WithTimeout(context.Background(), grace)
-		if err := grant.Retire(grantRetireCtx); err != nil {
-			shutdownErr = errors.Join(shutdownErr, err)
+		retireErr := grant.Retire(grantRetireCtx)
+		if retireErr != nil {
+			shutdownErr = errors.Join(shutdownErr, retireErr)
 		}
 		cancelGrantRetire()
 		rt.lifecycleMu.Lock()
-		if rt.startupGrant == grant {
+		// A failed durable transition still needs an owned retry. Losing this
+		// handle can leave an admitted generation stranded after local shutdown.
+		if retireErr == nil && rt.startupGrant == grant {
 			rt.startupGrant = nil
 		}
 		rt.lifecycleMu.Unlock()

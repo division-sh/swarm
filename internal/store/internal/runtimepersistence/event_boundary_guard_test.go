@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -44,6 +46,14 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 }
 
 var eventRecordImportFiles = map[string]struct{}{
+	// Barrier outcomes load canonical complete records through LoadAdmittedMany.
+	"internal/store/internal/backend/pipelinepersistence/fan_out_barrier_owner.go": {},
+	// Sealed-group readback uses LoadAdmitted before comparing exact member integrity.
+	"internal/store/internal/backend/pipelinepersistence/publication_group.go": {},
+	// Operator hydration uses canonical admitted records and canonical delivery snapshots.
+	"internal/store/internal/operatorsurface/operator_event_batch.go":                {},
+	"internal/store/internal/operatorsurface/operator_observability_read_surface.go": {},
+	"internal/store/internal/operatorsurface/sqlite_runtime_observability.go":        {},
 	// The materialization dependency owner decodes complete publication records; it does not reconstruct event identity.
 	"internal/store/internal/backend/delivery/receiver_materialization.go": {},
 	// Historical inherited ordinals are revalidated by the complete-record decoder before the shared fan-out owner.
@@ -85,8 +95,6 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 }
 
 var directEventSQLTestFixtures = map[string]int{
-	// Transparent driver observation of the real diagnostic INSERT, not a fixture writer.
-	"internal/store/internal/runtimepersistence/lifecycle_diagnostic_cleanup_interleaving_test.go": 1,
 	// Canonically reminted, never-executed requests must fail real fork activation.
 	"internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":                         1,
 	"internal/cliapp/raw_sql_boundary_test.go":                                                   1,
@@ -169,6 +177,7 @@ func TestEventAdmittedPersistenceBoundaryGuard(t *testing.T) {
 
 func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
 	repoRoot := eventBoundaryRepositoryRoot(t)
+	markers := loadEventObservationMarkers(t)
 	got := map[string]int{}
 	for _, rootName := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, rootName)
@@ -194,9 +203,16 @@ func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			observations, err := classifyEventObservationMarkers(relative, file, markers)
+			if err != nil {
+				return err
+			}
 			ast.Inspect(file, func(node ast.Node) bool {
 				literal, ok := node.(*ast.BasicLit)
 				if !ok || literal.Kind != token.STRING {
+					return true
+				}
+				if observations[literal.Pos()] {
 					return true
 				}
 				raw, err := strconv.Unquote(literal.Value)
@@ -220,6 +236,165 @@ func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
 	for path, count := range got {
 		if _, ok := directEventSQLTestFixtures[path]; !ok {
 			t.Fatalf("%s contains %d unclassified direct event inserts; use class-specific semantic fixtures", path, count)
+		}
+	}
+}
+
+type eventObservationMarker struct {
+	Path    string `json:"path"`
+	Scope   string `json:"scope"`
+	Literal string `json:"literal"`
+}
+
+func loadEventObservationMarkers(t *testing.T) []eventObservationMarker {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/event_observation_markers.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var markers []eventObservationMarker
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&markers); err != nil {
+		t.Fatal(err)
+	}
+	if len(markers) != 8 {
+		t.Fatalf("observation marker census = %d, want 8 exact non-writer controls", len(markers))
+	}
+	seen := map[eventObservationMarker]bool{}
+	for _, marker := range markers {
+		if seen[marker] || marker.Scope == "" || !eventInsertSQL.MatchString(marker.Literal) {
+			t.Fatalf("invalid or duplicate observation marker: %+v", marker)
+		}
+		if _, err := os.Stat(filepath.Join(eventBoundaryRepositoryRoot(t), marker.Path)); err != nil {
+			t.Fatal(err)
+		}
+		seen[marker] = true
+	}
+	return markers
+}
+
+// These exact literals observe native writes or test the observer's matcher;
+// they confer no permission on other SQL in the same file or function.
+func classifyEventObservationMarkers(path string, file *ast.File, markers []eventObservationMarker) (map[token.Pos]bool, error) {
+	positions := map[token.Pos]bool{}
+	for _, marker := range markers {
+		if marker.Path != path {
+			continue
+		}
+		count := 0
+		ast.Inspect(file, func(node ast.Node) bool {
+			literal, ok := node.(*ast.BasicLit)
+			if !ok || literal.Kind != token.STRING {
+				return true
+			}
+			raw, err := strconv.Unquote(literal.Value)
+			if err != nil || raw != marker.Literal {
+				return true
+			}
+			scope := eventBoundaryEnclosingScope(file, literal.Pos())
+			for _, decl := range file.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.CONST {
+					continue
+				}
+				for _, spec := range gen.Specs {
+					value := spec.(*ast.ValueSpec)
+					if len(value.Names) == 1 && value.Pos() <= literal.Pos() && literal.End() <= value.End() {
+						scope = "const:" + value.Names[0].Name
+					}
+				}
+			}
+			if scope == marker.Scope {
+				positions[literal.Pos()] = true
+				count++
+			}
+			return true
+		})
+		if count != 1 {
+			return nil, fmt.Errorf("%s %s observation %q occurs %d times, want exactly 1", path, marker.Scope, marker.Literal, count)
+		}
+	}
+	return positions, nil
+}
+
+func TestHostileEventObservationMarkerClassificationIsExact(t *testing.T) {
+	for _, marker := range loadEventObservationMarkers(t) {
+		t.Run(marker.Scope+"/"+marker.Literal, func(t *testing.T) {
+			declaration := func(scope, literal string) string {
+				if strings.HasPrefix(scope, "const:") {
+					return fmt.Sprintf("const %s = %q\n", strings.TrimPrefix(scope, "const:"), literal)
+				}
+				if receiver, method, ok := strings.Cut(scope, "."); ok {
+					return fmt.Sprintf("type %s struct{}\nfunc (*%s) %s() { _ = %q }\n", receiver, receiver, method, literal)
+				}
+				return fmt.Sprintf("func %s() { _ = %q }\n", scope, literal)
+			}
+			exact := declaration(marker.Scope, marker.Literal)
+			for _, tc := range []struct {
+				name, path, source     string
+				approved, unclassified int
+				wantErr                bool
+			}{
+				{"exact", marker.Path, exact, 1, 0, false},
+				{"wrong-path", marker.Path + ".sibling", exact, 0, 1, false},
+				{"wrong-scope", marker.Path, declaration(marker.Scope+"Sibling", marker.Literal), 0, 0, true},
+				{"missing", marker.Path, "", 0, 0, true},
+				{"duplicate", marker.Path, exact + exact, 0, 0, true},
+				{"altered-literal", marker.Path, declaration(marker.Scope, marker.Literal+" "), 0, 0, true},
+				{"sibling-write", marker.Path, exact + declaration("Sibling", marker.Literal), 1, 1, false},
+				{"same-scope-extra-write", marker.Path, exact + declaration(marker.Scope, marker.Literal+" "), 1, 1, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					file, err := parser.ParseFile(token.NewFileSet(), "fixture_test.go", "package fixture\n"+tc.source, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					positions, err := classifyEventObservationMarkers(tc.path, file, []eventObservationMarker{marker})
+					if (err != nil) != tc.wantErr {
+						t.Fatalf("classification error = %v", err)
+					}
+					if tc.wantErr {
+						return
+					}
+					unclassified := 0
+					ast.Inspect(file, func(node ast.Node) bool {
+						literal, ok := node.(*ast.BasicLit)
+						if !ok || literal.Kind != token.STRING || positions[literal.Pos()] {
+							return true
+						}
+						raw, _ := strconv.Unquote(literal.Value)
+						unclassified += len(eventInsertSQL.FindAllString(raw, -1))
+						return true
+					})
+					if len(positions) != tc.approved || unclassified != tc.unclassified {
+						t.Fatalf("approved/unclassified = %d/%d, want %d/%d", len(positions), unclassified, tc.approved, tc.unclassified)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestHostileEventRecordConsumerClassificationDoesNotGrantSQL(t *testing.T) {
+	for _, path := range []string{
+		"internal/store/internal/backend/pipelinepersistence/fan_out_barrier_owner.go",
+		"internal/store/internal/backend/pipelinepersistence/publication_group.go",
+		"internal/store/internal/operatorsurface/operator_event_batch.go",
+		"internal/store/internal/operatorsurface/operator_observability_read_surface.go",
+		"internal/store/internal/operatorsurface/sqlite_runtime_observability.go",
+	} {
+		if _, ok := eventRecordImportFiles[path]; !ok {
+			t.Errorf("missing canonical consumer %s", path)
+		}
+		if _, ok := eventRecordImportFiles[strings.TrimSuffix(path, ".go")+"_sibling.go"]; ok {
+			t.Errorf("sibling consumer authorized: %s", path)
+		}
+		if _, ok := eventRecordSQLFiles[path]; ok {
+			t.Errorf("consumer gained event SQL: %s", path)
+		}
+		if _, ok := eventPayloadBytesSQLFiles[path]; ok {
+			t.Errorf("consumer gained payload SQL: %s", path)
 		}
 	}
 }
