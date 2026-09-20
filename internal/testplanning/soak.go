@@ -46,7 +46,7 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 // It does not permit arbitrary partial-subtest filters.
 func ValidateConformanceProofPartition(dir string, units []ProofUnit) error {
 	backends := map[string]bool{}
-	var runs []string
+	var matchers []func(string) bool
 	for _, unit := range units {
 		if err := validateSoakSelection(unit.Packages, unit.Run, unit.Skip, unit.GoTimeout, unit.CountMode, unit.BudgetClass); err != nil {
 			return err
@@ -66,12 +66,15 @@ func ValidateConformanceProofPartition(dir string, units []ProofUnit) error {
 		if pattern.MatchString(SoakTest) && unit.Skip != SoakRun {
 			return fmt.Errorf("ordinary unit %s also executes the soak", unit.ID)
 		}
-		runs = append(runs, unit.Run)
+		matchers = append(matchers, func(name string) bool {
+			return pattern.MatchString(name) && !(unit.Skip == SoakRun && name == SoakTest)
+		})
 	}
 	if !backends["sqlite"] || !backends["postgres"] {
 		return fmt.Errorf("mandatory soak requires both sqlite and postgres cells")
 	}
-	// The ordinary top-level partition still owns the declaration exactly once;
-	// its sole exact exclusion is replaced by the complete backend pair above.
-	return ValidateGoProofPartition(dir, runs)
+	// The validated complete backend pair owns the declaration once, whether
+	// ordinary selectors exclude it structurally or use the sole exact skip.
+	matchers = append(matchers, func(name string) bool { return name == SoakTest })
+	return validateGoProofMatchers(dir, matchers)
 }

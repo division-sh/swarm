@@ -17,7 +17,7 @@ func ValidateGoProofPartition(dir string, runs []string) error {
 	if len(runs) == 0 {
 		return fmt.Errorf("proof package %s has no execution units", dir)
 	}
-	patterns := make([]*regexp.Regexp, len(runs))
+	matchers := make([]func(string) bool, len(runs))
 	for i, run := range runs {
 		if strings.Contains(run, "/") {
 			return fmt.Errorf("proof partition %d has partial-subtest filter %q", i, run)
@@ -29,13 +29,19 @@ func ValidateGoProofPartition(dir string, runs []string) error {
 		if err != nil {
 			return fmt.Errorf("proof partition %d: %w", i, err)
 		}
-		patterns[i] = pattern
+		matchers[i] = pattern.MatchString
 	}
+	return validateGoProofMatchers(dir, matchers)
+}
+
+// Match effective top-level ownership after a caller has validated any exact
+// exclusion and its separately executed replacement.
+func validateGoProofMatchers(dir string, matchers []func(string) bool) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
-	matched := make([]bool, len(runs))
+	matched := make([]bool, len(matchers))
 	proofs := 0
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
@@ -56,8 +62,8 @@ func ValidateGoProofPartition(dir string, runs []string) error {
 			}
 			proofs++
 			owners := 0
-			for i, pattern := range patterns {
-				if pattern.MatchString(name) {
+			for i, matches := range matchers {
+				if matches(name) {
 					owners++
 					matched[i] = true
 				}
