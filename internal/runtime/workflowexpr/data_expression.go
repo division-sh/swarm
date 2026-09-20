@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -40,6 +41,98 @@ type ValueContext struct {
 	FanOut         map[string]any
 	Join           map[string]any
 	Loop           map[string]any
+	evaluation     *ValueEvaluation
+}
+
+// ValueEvaluation owns one sequential field evaluation over a raw JSON snapshot.
+// Projection is deferred until the first Eval that passes expression-specific
+// checks. Discard it after the current ordinal; expressions never retain it.
+type ValueEvaluation struct {
+	context    ValueContext
+	activation map[string]any
+}
+
+// TryNewValueEvaluation snapshots closed raw JSON containers without admitting
+// numbers. It returns nil for other carriers (including CEL containers and typed
+// Go maps/slices); callers must retain ordinary per-field Eval for those inputs.
+// This is an ownership optimization, not a new input-validation boundary.
+func TryNewValueEvaluation(ctx ValueContext) *ValueEvaluation {
+	seen := make(map[evaluationSnapshotVisit]bool)
+	for _, root := range []*map[string]any{&ctx.Entity, &ctx.PlatformEntity, &ctx.Event, &ctx.Payload, &ctx.Policy, &ctx.Computed, &ctx.FanOut, &ctx.Join, &ctx.Loop} {
+		value, ok := snapshotEvaluationValue(*root, seen)
+		if !ok {
+			return nil
+		}
+		*root = value.(map[string]any)
+	}
+	accumulated, ok := snapshotEvaluationValue(ctx.Accumulated, seen)
+	if !ok {
+		return nil
+	}
+	ctx.Accumulated = accumulated
+	ctx.evaluation = nil
+	return &ValueEvaluation{context: ctx}
+}
+
+func (e *ValueEvaluation) Eval(p *PreparedValueExpression) (ValueResult, error) {
+	ctx := e.context
+	ctx.evaluation = e
+	return p.Eval(ctx)
+}
+
+type evaluationSnapshotVisit struct {
+	kind reflect.Kind
+	ptr  uintptr
+}
+
+// Copy raw JSON containers without normalizing numeric kinds or surfacing a
+// projection error before the current field's missing-entity diagnostic.
+func snapshotEvaluationValue(value any, seen map[evaluationSnapshotVisit]bool) (any, bool) {
+	switch typed := value.(type) {
+	case nil, bool, string, json.Number, int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, float32, float64, semanticvalue.Value:
+		return typed, true
+	case map[string]any:
+		if typed == nil {
+			return typed, true
+		}
+		visit := evaluationSnapshotVisit{reflect.Map, reflect.ValueOf(typed).Pointer()}
+		if seen[visit] {
+			return nil, false
+		}
+		seen[visit] = true
+		defer delete(seen, visit)
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			cloned, ok := snapshotEvaluationValue(item, seen)
+			if !ok {
+				return nil, false
+			}
+			out[key] = cloned
+		}
+		return out, true
+	case []any:
+		if typed == nil {
+			return typed, true
+		}
+		visit := evaluationSnapshotVisit{reflect.Slice, reflect.ValueOf(typed).Pointer()}
+		if seen[visit] {
+			return nil, false
+		}
+		seen[visit] = true
+		defer delete(seen, visit)
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			cloned, ok := snapshotEvaluationValue(item, seen)
+			if !ok {
+				return nil, false
+			}
+			out[i] = cloned
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 type ValueExpressionOptions struct {
@@ -265,8 +358,9 @@ func EvalValueResultWithOptions(expression string, ctx ValueContext, opts ValueE
 	return prepared.Eval(ctx)
 }
 
-// PreparedValueExpression retains only checked expression semantics. Each Eval
-// admits and projects a fresh activation; no execution values are retained.
+// PreparedValueExpression retains only checked expression semantics. Ordinary
+// Eval calls project fresh activations; an explicit ValueEvaluation may own one
+// ordinal's projection, but the prepared expression retains no execution values.
 type PreparedValueExpression struct {
 	expression    string
 	program       cel.Program
@@ -325,16 +419,33 @@ func (p *PreparedValueExpression) Eval(ctx ValueContext) (ValueResult, error) {
 	if missing := MissingEntityReferences(p.expression, ctx.Entity); len(missing) > 0 {
 		return ValueResult{}, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
-	activation, err := ProjectCELValue(map[string]any{
-		"entity": ctx.Entity, "_entity": ctx.PlatformEntity,
-		"event": ctx.Event, "payload": ctx.Payload, "policy": ctx.Policy,
-		"computed": ctx.Computed, "accumulated": ctx.Accumulated,
-		"fan_out": ctx.FanOut, "join": ctx.Join, "_loop": ctx.Loop,
-	})
-	if err != nil {
-		return ValueResult{}, err
+	var activationMap map[string]any
+	if ctx.evaluation != nil {
+		activationMap = ctx.evaluation.activation
 	}
-	activationMap := activation.(map[string]any)
+	if activationMap == nil {
+		activation, err := ProjectCELValue(map[string]any{
+			"entity": ctx.Entity, "_entity": ctx.PlatformEntity,
+			"event": ctx.Event, "payload": ctx.Payload, "policy": ctx.Policy,
+			"computed": ctx.Computed, "accumulated": ctx.Accumulated,
+			"fan_out": ctx.FanOut, "join": ctx.Join, "_loop": ctx.Loop,
+		})
+		if err != nil {
+			return ValueResult{}, err
+		}
+		activationMap = activation.(map[string]any)
+		if ctx.evaluation != nil {
+			ctx.evaluation.activation = activationMap
+		}
+	}
+	if ctx.evaluation != nil {
+		// Aliases belong to the individual program, not the shared activation.
+		bindings := make(map[string]any, len(activationMap)+2)
+		for key, value := range activationMap {
+			bindings[key] = value
+		}
+		activationMap = bindings
+	}
 	fanOut, _ := activationMap["fan_out"].(map[string]any)
 	if p.allowBareItem {
 		activationMap["item"] = fanOut["item"]

@@ -182,6 +182,17 @@ func (p *FanOutEvaluation) EvaluateOrdinal(ctx context.Context, item any, ordina
 	state.FanOut = map[string]any{"item": item, "index": ordinal, "count": p.intent.Request.Cardinality}
 	frame.state, frame.req.State = state, state.State
 	base := p.executor.currentContext(&frame)
+	// Ref/literal results may alias raw inputs during output-path assembly.
+	// Share a projection only when every evaluated field has CEL result isolation.
+	shareProjection := true
+	for target, expression := range p.emit.Fields {
+		if strings.TrimSpace(target) != "" && !expression.IsZero() && expression.Kind != runtimecontracts.ExpressionKindCEL {
+			shareProjection = false
+			break
+		}
+	}
+	var evaluation *workflowexpr.ValueEvaluation
+	evaluationAttempted := false
 	transformed, err := evaluateEmitFields(p.emit, func(target string, expression runtimecontracts.ExpressionValue) (any, bool, error) {
 		field := p.fields[fanOutFieldKey{target, expression.CEL, expression.Kind}]
 		if expression.Kind != runtimecontracts.ExpressionKindCEL || expression.IsZero() {
@@ -189,6 +200,16 @@ func (p *FanOutEvaluation) EvaluateOrdinal(ctx context.Context, item any, ordina
 		}
 		if field.err != nil {
 			return nil, false, field.err
+		}
+		if shareProjection {
+			if !evaluationAttempted {
+				evaluation = workflowexpr.TryNewValueEvaluation(workflowValueContext(base, state))
+				evaluationAttempted = true
+			}
+			if evaluation != nil {
+				result, err := evaluation.Eval(field.program)
+				return result.Value(), result.Present(), err
+			}
 		}
 		result, err := field.program.Eval(workflowValueContext(base, state))
 		return result.Value(), result.Present(), err
