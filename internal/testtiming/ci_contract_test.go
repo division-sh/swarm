@@ -341,7 +341,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "apiv1"), apiPatterns)
 	var conformanceUnits []testplanning.ProofUnit
-	for _, id := range []string{"conformance-1", "conformance-2", "conformance-soak-sqlite", "conformance-soak-postgres"} {
+	for _, id := range []string{"conformance-1", "conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-2394-reporter", "conformance-soak-sqlite", "conformance-soak-postgres"} {
 		unit, exists := policy.Units[id]
 		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/conformance"}) || unit.Run == "" || unit.CountMode != "count-1" {
 			t.Fatalf("%s must retain its complete uncached conformance partition", id)
@@ -360,7 +360,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
 	}
-	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-06"}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fanout", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
 	for _, unitID := range storeRuntimeUnits {
 		unit, exists := policy.Units[unitID]

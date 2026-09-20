@@ -132,21 +132,16 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	}
 	t.Log("complete disjoint census:132 =112 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
-		// The exact two backend commands were checked above. Represent their
-		// shared root once for this separate top-level declaration census.
-		runs := []string{"^" + conformance2394Soak + "$"}
+		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {
-			if id == "conformance-soak-sqlite" || id == "conformance-soak-postgres" {
-				continue
-			}
 			u := policy.Units[id]
 			for _, pkg := range u.Packages {
 				if pkg == policy.Module+"/internal/runtime/conformance" {
-					runs = append(runs, u.Run)
+					units = append(units, ProofUnit{ID: id, Packages: u.Packages, Run: u.Run, Skip: u.Skip, GoTimeout: u.GoTimeout, CountMode: u.CountMode, BudgetClass: u.BudgetClass})
 				}
 			}
 		}
-		if err := ValidateGoProofPartition(dir, runs); err != nil {
+		if err := ValidateConformanceProofPartition(dir, units); err != nil {
 			t.Fatalf("%s: %v", profile, err)
 		}
 	}

@@ -55,6 +55,7 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 			for _, mutation := range []string{"missing sqlite", "missing postgres", "duplicate", "ordinary overlap", "broad skip", "partial cell", "wrong timeout", "cached cell"} {
 				t.Run(mutation, func(t *testing.T) {
 					changed := slices.Clone(units)
+					applied := false
 					for i, u := range changed {
 						backend, soak := testplanning.SoakBackend(u.Run)
 						switch {
@@ -62,9 +63,10 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 							changed = append(changed[:i], changed[i+1:]...)
 						case mutation == "duplicate" && soak:
 							changed = append(changed, u)
-						case mutation == "ordinary overlap" && u.Skip != "":
+						case mutation == "ordinary overlap" && !soak:
+							changed[i].Run = "(" + u.Run + ")|(" + testplanning.SoakRun + ")"
 							changed[i].Skip = ""
-						case mutation == "broad skip" && u.Skip != "":
+						case mutation == "broad skip" && !soak:
 							changed[i].Skip = "^TestIssue2394.*$"
 						case mutation == "partial cell" && soak:
 							changed[i].Run += "/^partial$"
@@ -75,7 +77,11 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 						default:
 							continue
 						}
+						applied = true
 						break
+					}
+					if !applied {
+						t.Fatal("hostile mutation did not alter a unit")
 					}
 					if err := testplanning.ValidateConformanceProofPartition(dir, changed); err == nil {
 						t.Fatal("accepted incomplete/overlapping partition")
