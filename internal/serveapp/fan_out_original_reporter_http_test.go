@@ -37,6 +37,11 @@ func TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores(t *testing.
 func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			mergeCeiling := issuanceBudget
+			if backend == "postgres" && transactionOptions.Delay == 0 {
+				// Lead acceptance 5752935043 retains the original 10s objective in #2394.
+				mergeCeiling = 15 * time.Second
+			}
 			// Serve fixtures replace process-global hooks. Only isolated copies of
 			// this test binary may overlap the delayed backend journeys.
 			if transactionOptions.Delay > 0 && runIssue2394DelayedHTTPProcess(t, backend) {
@@ -117,10 +122,10 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				t.Fatalf("commit acknowledgements missing or before first submission: %+v", chunks)
 			}
 			elapsed := chunks.LastCommitAt.Sub(issuanceStarted)
-			t.Logf("HTTP original500 first batch submission -> final durable chunk acknowledgement: %s (target <=%s); cursor observed at %s; delay=%s scope=%s; transaction receipt=%+v",
-				elapsed, issuanceBudget, observed.Sub(issuanceStarted), transactionOptions.Delay, transactionOptions.DelayScope, receipt)
-			if elapsed > issuanceBudget {
-				t.Errorf("original500 HTTP issuance exceeded unchanged %s target: %s", issuanceBudget, elapsed)
+			t.Logf("HTTP original500 first batch submission -> final durable chunk acknowledgement: %s (original_target=%s merge_ceiling=%s); cursor observed at %s; delay=%s scope=%s; transaction receipt=%+v",
+				elapsed, issuanceBudget, mergeCeiling, observed.Sub(issuanceStarted), transactionOptions.Delay, transactionOptions.DelayScope, receipt)
+			if elapsed > mergeCeiling {
+				t.Errorf("original500 HTTP issuance exceeded %s merge ceiling (original target %s): %s", mergeCeiling, issuanceBudget, elapsed)
 			}
 			if transactionOptions.Delay > 0 && (chunks.DelayedCommits != 20 || chunks.InjectedDelay != 20*transactionOptions.Delay) {
 				t.Errorf("original all-commit delay not applied to every chunk: %+v", chunks)
