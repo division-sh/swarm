@@ -17,7 +17,7 @@ import (
 func TestIssue2394NestedCapacityOneHandoffBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, false, 5*time.Second)
+			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, false, 5*time.Second, 30*time.Second)
 		})
 	}
 }
@@ -25,7 +25,7 @@ func TestIssue2394NestedCapacityOneHandoffBothStores(t *testing.T) {
 func TestIssue2394NestedDirectBarrierMembershipBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, true, 5*time.Second)
+			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, true, 5*time.Second, 30*time.Second)
 		})
 	}
 }
@@ -42,12 +42,17 @@ func TestIssue2394NestedManyIntentRetainedHandoffBothStores(t *testing.T) {
 				// Gate A 5749347759 preserves every subsequent phase deadline.
 				childEntryTimeout = time.Minute
 			}
-			proveNestedCapacityOneHandoff(t, backend, accounts, true, childEntryTimeout)
+			finalDrainTimeout := 30 * time.Second
+			if backend == "sqlite" && fanOutRaceBuild {
+				// Lead exception 5752572474 changes only M29's SQLite race drain.
+				finalDrainTimeout = time.Minute
+			}
+			proveNestedCapacityOneHandoff(t, backend, accounts, true, childEntryTimeout, finalDrainTimeout)
 		})
 	}
 }
 
-func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []string, holdChild bool, childEntryTimeout time.Duration, rejection ...*nestedPreparedRejection) {
+func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []string, holdChild bool, childEntryTimeout, finalDrainTimeout time.Duration, rejection ...*nestedPreparedRejection) {
 	t.Helper()
 	source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t))
 	probe := newNestedServingProbe(t)
@@ -149,7 +154,14 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		t.Logf("held child actual event=%s handler=%s: parent direct barrier fired; durable intents=%d owed=%d live plans/carriers=%d highwater=%d", signal.EventID, signal.SubscriberID, intents, owed, live, peak)
 		gates[0].open()
 	}
-	waitNotifyAllChildrenRuntime(t, rt, runID)
+	drainStarted := time.Now()
+	defer func() {
+		if t.Failed() {
+			t.Logf("final-drain observation elapsed=%s original_target=30s merge_ceiling=%s backend=%s race=%t", time.Since(drainStarted), finalDrainTimeout, backend, fanOutRaceBuild)
+		}
+	}()
+	waitNotifyAllChildrenRuntimeWithin(t, rt, runID, finalDrainTimeout)
+	t.Logf("final drain elapsed=%s original_target=30s merge_ceiling=%s backend=%s race=%t; original performance obligation remains open in #2394", time.Since(drainStarted), finalDrainTimeout, backend, fanOutRaceBuild)
 	assertNestedServingDrained(t, probe)
 
 	reader := nestedPublicReader(t, rt.selected)

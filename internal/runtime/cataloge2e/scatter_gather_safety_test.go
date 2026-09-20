@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/replayconformance"
 	"github.com/google/uuid"
 )
 
@@ -43,10 +45,21 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					t.Helper()
 					defer observePublication(event)()
 					step := catalogTriggerStep{Event: event, Payload: payload, eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
-					if err := h.publishRuntimeEventResultForStep(step, 20*time.Second, false); err != nil {
+					var phaseStart, phaseDeadline time.Time
+					publishTimeout := 20 * time.Second
+					if backend == catalogBackendPostgres && variant.hundred && (event == "batch.submitted" || event == "batch.finished") {
+						// Lead exception 5752572474: one budget, never reset on progress.
+						phaseStart = time.Now()
+						phaseDeadline = phaseStart.Add(time.Minute)
+						publishTimeout = time.Until(phaseDeadline)
+						defer func() {
+							t.Logf("%s phase elapsed=%s original_target=20s merge_ceiling=60s; original performance obligation remains open in #2394", event, time.Since(phaseStart))
+						}()
+					}
+					if err := h.publishRuntimeEventResultForStep(step, publishTimeout, false); err != nil {
 						t.Fatal(err)
 					}
-					scatterGatherWait(t, h, step)
+					scatterGatherWait(t, h, step, phaseStart, phaseDeadline)
 					groups = append(groups, catalogTranscriptGroup{steps: []catalogTriggerStep{step}})
 					return step
 				}
@@ -287,10 +300,14 @@ SELECT (SELECT COUNT(*) FROM descendants),
 	(SELECT COUNT(*) FROM delivery_counts WHERE total<>1 OR unsettled<>0),
 	(SELECT COUNT(*) FROM dead_letters d JOIN descendants p ON d.original_event_id=p.event_id)`
 
-func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep) {
+func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep, phaseStart, phaseDeadline time.Time) {
 	t.Helper()
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(h.ctx, 20*time.Second)
+	deadline := started.Add(20 * time.Second)
+	if !phaseDeadline.IsZero() {
+		started, deadline = phaseStart, phaseDeadline
+	}
+	ctx, cancel := context.WithDeadline(h.ctx, deadline)
 	defer cancel()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
@@ -346,7 +363,16 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep)
 		if cardinality == 100 {
 			t.Logf("%s exact durable frontier settled after %s", step.Event, time.Since(started))
 		}
-		public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+		public, err := func() (map[string]operatorread.OperatorEventFull, error) {
+			if phaseDeadline.IsZero() {
+				return catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+			}
+			lister, err := h.catalogOperatorEventLister()
+			if err != nil {
+				return nil, err
+			}
+			return replayconformance.LoadOperatorEvents(testAuthorActivityContext(ctx), lister, catalogRuntimeRunID)
+		}()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -390,6 +416,9 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep)
 				if count != 1 {
 					t.Fatalf("%s lacks exact closed %d-item issuance", step.Event, cardinality)
 				}
+			}
+			if !phaseDeadline.IsZero() && !time.Now().Before(phaseDeadline) {
+				t.Fatalf("%s exceeded its non-resetting 60s phase ceiling: %s", step.Event, time.Since(started))
 			}
 			return
 		}
