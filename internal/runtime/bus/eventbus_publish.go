@@ -341,6 +341,7 @@ type eventBusCommitPublishPlan struct {
 	admitted              events.AdmittedEvent
 	publicationClaim      *pipelinePublicationClaim
 	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
+	outputConsumers       *runtimepinrouting.OutputConsumerResolver
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, error) {
@@ -584,7 +585,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		targetFailureInput:    targetFailureInput,
 		providerRawSettlement: publication.providerRawSettlement,
 	}
-	prepared.settlement, err = eb.routeSettlementForPlan(evt, targetFailureInput, routePlan, events.EventWriteNormalPublication, prepared.providerRawSettlement)
+	prepared.settlement, err = eb.routeSettlementForPlan(evt, targetFailureInput, routePlan, events.EventWriteNormalPublication, prepared.providerRawSettlement, publication.outputConsumers)
 	if err != nil {
 		return releaseFailure(err)
 	}
@@ -799,7 +800,7 @@ func (p PreparedPublish) SelectedForkCommitRequest(lineage runfork.RunForkSelect
 	}
 }
 
-func (eb *EventBus) routeSettlementForPlan(evt, inbound events.Event, plan RoutePlan, class events.EventWriteClass, providerRaw providerRawSettlementAdmission) (events.RouteSettlement, error) {
+func (eb *EventBus) routeSettlementForPlan(evt, inbound events.Event, plan RoutePlan, class events.EventWriteClass, providerRaw providerRawSettlementAdmission, outputConsumers *runtimepinrouting.OutputConsumerResolver) (events.RouteSettlement, error) {
 	routes := plan.DeliveryRoutes()
 	if len(routes) > 0 {
 		return events.NewDeliverySettlement(class, plan.ConnectEvaluation)
@@ -812,8 +813,13 @@ func (eb *EventBus) routeSettlementForPlan(evt, inbound events.Event, plan Route
 		reason = events.NoDeliveryResolutionBlocked
 	case plan.CanonicalRouteOwnerMatched():
 		reason = events.NoDeliveryMatchedNoRecipient
-	case runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(evt.Type()), evt.RoutingSource()).DeliberateNoSubscriber():
-		reason = events.NoDeliveryNoSubscriberByDesign
+	default:
+		if outputConsumers == nil {
+			outputConsumers = runtimepinrouting.NewOutputConsumerResolver(eb.semanticSource)
+		}
+		if outputConsumers.Classify(string(evt.Type()), evt.RoutingSource()).DeliberateNoSubscriber() {
+			reason = events.NoDeliveryNoSubscriberByDesign
+		}
 	}
 	return events.NewNoDeliverySettlement(class, reason, plan.ConnectEvaluation)
 }
@@ -950,7 +956,7 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 		authorScope:        authorScope, hasAuthorScope: hasAuthorScope,
 		authorDescriptor: authorDescriptor, hasAuthorDescriptor: hasAuthorDescriptor,
 	}
-	prepared.settlement, err = eb.routeSettlementForPlan(evt, evt, plan, events.EventWriteSelectedForkPublication, providerRawSettlementAdmission{})
+	prepared.settlement, err = eb.routeSettlementForPlan(evt, evt, plan, events.EventWriteSelectedForkPublication, providerRawSettlementAdmission{}, nil)
 	if err != nil {
 		return PreparedPublish{}, errors.Join(err, publicationClaim.Release(preparedCtx))
 	}

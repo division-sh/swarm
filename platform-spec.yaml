@@ -1086,6 +1086,14 @@ contract_formats:
         or weakened corruption rejection is permitted. This changes computation reuse, not event,
         settlement, completion, or persistence ownership.
 
+        One bounded fan-out publication preparation may lazily share compiled connect and endpoint
+        census evidence from its exact admitted contract source across its ordinals. Every ordinal
+        still receives fresh source/event admission, routing and output-consumer classification;
+        classification results and selected-store observations are not retained by this reuse. The
+        compiled evidence ends with that preparation invocation, never with a later retry, source
+        revision, selected fork, or another publication group. Ordinary and selected-fork single
+        publications continue to compile their own evidence at the original classification boundary.
+
         SQLite may retain named, fixed read-statement handles for canonical single-event lookup,
         active flow-instance descriptors, and selected-run target owners under its existing pool owner.
         These handles retain no rows, absence decisions, snapshots, or execution authority. Every call
