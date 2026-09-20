@@ -221,6 +221,22 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					step := publish("batch.finished", map[string]any{"batch_id": "batch-one", "items": []any{items[member]}})
 					done[items[member].(map[string]any)["item_id"].(string)] = true
 					check(index + 1)
+					if variant.name == "ordered" {
+						frontier, err := scatterGatherDeliveryProgress(h.ctx, h, step.eventID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						var count int
+						for _, entry := range frontier {
+							if entry.status != "delivered" || entry.reason != "" {
+								t.Fatalf("settled diagnostic frontier contains unfinished work: %+v", frontier)
+							}
+							count += entry.count
+						}
+						if count != 3 {
+							t.Fatalf("diagnostic frontier must include ingress, worker and collector, not other publications: %+v", frontier)
+						}
+					}
 					if variant.repeat {
 						before := scatterGatherCounts(t, h)
 						states := scatterGatherStates(t, h, paths)
@@ -418,6 +434,59 @@ func logScatterGatherProgress(t testing.TB, h *runtimeHarness, eventID string) {
 	} else {
 		t.Logf("fan-out persisted settlement inputs: events=%d distinct=%d bytes=%d", events, ledgers, bytes)
 	}
+	logScatterGatherDeliveryProgress(t, ctx, h, eventID)
+}
+
+func logScatterGatherDeliveryProgress(t testing.TB, ctx context.Context, h *runtimeHarness, eventID string) {
+	t.Helper()
+	frontier, err := scatterGatherDeliveryProgress(ctx, h, eventID)
+	if err != nil {
+		t.Logf("failed descendant delivery observation: %v", err)
+		return
+	}
+	for _, entry := range frontier {
+		t.Logf("descendant delivery frontier: class=%s subscriber=%s status=%s reason=%q count=%d", entry.class, entry.subscriber, entry.status, entry.reason, entry.count)
+	}
+}
+
+type scatterGatherDeliveryCount struct {
+	class, subscriber, status, reason string
+	count                             int
+}
+
+func scatterGatherDeliveryProgress(ctx context.Context, h *runtimeHarness, eventID string) ([]scatterGatherDeliveryCount, error) {
+	// Inspect the failed publication's entire causal tree, not only its issued
+	// ordinals. A closed cursor does not imply that downstream receivers settled.
+	rows, err := h.db.QueryContext(ctx, `
+		WITH RECURSIVE descendants(event_id) AS (
+			SELECT event_id FROM events WHERE run_id=$1 AND event_id=$2
+			UNION
+			SELECT child.event_id FROM events child
+			JOIN descendants parent ON child.source_event_id=parent.event_id
+			WHERE child.run_id=$1
+		)
+		SELECT d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,''),COUNT(*)
+		FROM event_deliveries d JOIN descendants event ON event.event_id=d.event_id
+		WHERE d.run_id=$1
+		GROUP BY d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,'')
+		ORDER BY d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,'')
+	`, catalogRuntimeRunID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []scatterGatherDeliveryCount
+	for rows.Next() {
+		var entry scatterGatherDeliveryCount
+		if err := rows.Scan(&entry.class, &entry.subscriber, &entry.status, &entry.reason, &entry.count); err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, rows.Close()
 }
 
 func scatterGatherLoad(t testing.TB, h *runtimeHarness, path string) pipeline.WorkflowInstance {
