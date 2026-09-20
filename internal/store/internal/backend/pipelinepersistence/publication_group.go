@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -455,7 +458,7 @@ func (g *publicationGroup) Close(ctx context.Context) error {
 	return err
 }
 
-func (g *publicationGroup) validateCommittedMemberTx(ctx context.Context, tx *sql.Tx, member *publicationGroupMember) error {
+func (g *publicationGroup) validateCommittedMemberTx(ctx context.Context, tx pipelineQueryer, member *publicationGroupMember) error {
 	if !g.sealed || member.ordinal >= g.end {
 		return errors.New("publication group lacks exact sealed attempt evidence")
 	}
@@ -472,8 +475,7 @@ func (g *publicationGroup) validateCommittedMemberTx(ctx context.Context, tx *sq
 	if kind != string(fanoutobligation.OutcomeCommitted) || eventID != member.event.ID() {
 		return errors.New("publication group durable ordinal identity conflicts")
 	}
-	// Read and admit this exact member once in the current transaction; replay
-	// batch hydration would validate and then decode the same settlement again.
+	// Read and admit this exact singleton once in the current transaction.
 	var admitted events.AdmittedEvent
 	var found bool
 	if g.postgres != nil {
@@ -484,7 +486,14 @@ func (g *publicationGroup) validateCommittedMemberTx(ctx context.Context, tx *sq
 	if err != nil {
 		return err
 	}
-	if !found || admitted.Event().RunID() == "" {
+	if !found {
+		return errors.New("publication group committed event is absent or corrupt")
+	}
+	return validatePublicationMemberEvent(member, admitted)
+}
+
+func validatePublicationMemberEvent(member *publicationGroupMember, admitted events.AdmittedEvent) error {
+	if admitted.Event().RunID() == "" {
 		return errors.New("publication group committed event is absent or corrupt")
 	}
 	want, err := events.IntegrityProjection(member.event)
@@ -497,6 +506,113 @@ func (g *publicationGroup) validateCommittedMemberTx(ctx context.Context, tx *sq
 	}
 	if !reflect.DeepEqual(want, actual) {
 		return errors.New("publication group committed event changed")
+	}
+	return nil
+}
+
+// This evidence is local to one transaction invocation, never a replacement for
+// the fresh settlement observation or the group's immutable membership proof.
+func (g *publicationGroup) validateCommittedMembersTx(ctx context.Context, tx pipelineQueryer, members []*publicationGroupMember) error {
+	if len(members) > fanoutobligation.MaxChunkSize {
+		return errors.New("publication settlement exceeds bounded range")
+	}
+	if len(members) == 0 {
+		return nil
+	}
+	if len(members) == 1 {
+		return g.validateCommittedMemberTx(ctx, tx, members[0])
+	}
+	// On invalid evidence retain the singleton's member-order error precedence,
+	// missing-event error and canonical corruption wrappers. No writes precede it.
+	individual := func(fallback error) error {
+		for _, member := range members {
+			if err := g.validateCommittedMemberTx(ctx, tx, member); err != nil {
+				return err
+			}
+		}
+		// Never turn failed batch evidence into authority if an independent
+		// writer changes it while the error-path reads are in progress.
+		return fallback
+	}
+	key := g.claim.Key
+	args := []any{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath}
+	placeholders := make([]string, len(members))
+	ids := make([]string, len(members))
+	wanted := make(map[int]bool, len(members))
+	for i, member := range members {
+		if !g.sealed || member.ordinal >= g.end {
+			return individual(errors.New("publication group lacks exact sealed attempt evidence"))
+		}
+		if wanted[member.ordinal] {
+			return errors.New("duplicate or excluded settlement member")
+		}
+		wanted[member.ordinal] = true
+		args = append(args, member.ordinal)
+		placeholders[i] = fmt.Sprintf("$%d", len(args))
+		ids[i] = member.event.ID()
+	}
+	eventIDColumn := "event_id"
+	if g.postgres != nil {
+		eventIDColumn = "event_id::text"
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT ordinal,outcome_kind,COALESCE(`+eventIDColumn+`,'') FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return err
+	}
+	type outcome struct{ kind, eventID string }
+	outcomes := make(map[int]outcome, len(members))
+	for rows.Next() {
+		var ordinal int
+		var fact outcome
+		if err := rows.Scan(&ordinal, &fact.kind, &fact.eventID); err != nil {
+			rows.Close()
+			return individual(err)
+		}
+		if !wanted[ordinal] {
+			rows.Close()
+			return errors.New("publication group durable ordinal identity conflicts")
+		}
+		delete(wanted, ordinal)
+		outcomes[ordinal] = fact
+	}
+	readErr := rows.Err()
+	closeErr := rows.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	for _, member := range members {
+		fact, found := outcomes[member.ordinal]
+		if !found {
+			return individual(sql.ErrNoRows)
+		}
+		if fact.kind != string(fanoutobligation.OutcomeCommitted) || fact.eventID != member.event.ID() {
+			return individual(errors.New("publication group durable ordinal identity conflicts"))
+		}
+	}
+	var admitted []eventrecord.AdmittedRecord
+	if g.postgres != nil {
+		admitted, err = eventrecordpostgres.LoadAdmittedMany(ctx, tx, ids)
+	} else {
+		admitted, err = eventrecordsqlite.LoadAdmittedMany(ctx, tx, ids)
+	}
+	if err != nil {
+		if errors.Is(err, eventrecord.ErrMissing) || errors.Is(err, eventrecord.ErrCorrupt) {
+			if errors.Is(err, eventrecord.ErrMissing) {
+				err = errors.New("publication group committed event is absent or corrupt")
+			}
+			return individual(err)
+		}
+		// SQL failures may abort a PostgreSQL transaction. Preserve the batch
+		// loader's context and wrapped native cause, without attempting a replay.
+		return err
+	}
+	for i, member := range members {
+		if err := validatePublicationMemberEvent(member, admitted[i].Event); err != nil {
+			return individual(err)
+		}
 	}
 	return nil
 }
@@ -590,9 +706,9 @@ func (g *publicationGroup) Settle(ctx context.Context, requests []pipelineobliga
 			if err := g.current(member); err != nil {
 				return err
 			}
-			if err := g.validateCommittedMemberTx(ctx, tx, member); err != nil {
-				return err
-			}
+		}
+		if err := g.validateCommittedMembersTx(ctx, tx, members); err != nil {
+			return err
 		}
 		for _, member := range members {
 			candidates, now := g.candidatesAndClock()

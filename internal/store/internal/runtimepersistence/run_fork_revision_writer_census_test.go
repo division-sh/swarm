@@ -293,7 +293,7 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 		},
 		{
 			Path: "internal/store/internal/backend/pipelinepersistence/publication_group.go", Writer: "Settle",
-			WriterTokens: []string{"effects := newRevisionEffects()", "validateCommittedMemberTx", "settlePipelineMemberTx", "RunAuthorityTransactionOutcome", "FinalizePostgres", "g.sqlite.runRuntimeMutationOutcome"},
+			WriterTokens: []string{"effects := newRevisionEffects()", "validateCommittedMembersTx", "settlePipelineMemberTx", "RunAuthorityTransactionOutcome", "FinalizePostgres", "g.sqlite.runRuntimeMutationOutcome"},
 			ProofPath:    "internal/store/internal/runtimepersistence/fan_out_publication_group_history_test.go", Proof: "TestFanOutPublicationGroupHistoryAtomicCutsBothStores",
 			ProofTokens: []string{"DispatchFanOutPublications", "receipt.Total.WriteCommits != 1", "receipt.Total.Revision.Finalizations != 1", "requireReceipts", "requireForkPoint"},
 		},
