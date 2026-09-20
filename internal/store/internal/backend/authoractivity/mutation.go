@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -128,10 +129,19 @@ func (m *Mutation) Finalize(ctx context.Context) error {
 func (m *Mutation) lock(ctx context.Context) error {
 	switch m.dialect {
 	case DialectPostgres:
+		const lockOrder = `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`
+		if err := m.tx.QueryRowContext(ctx, lockOrder).Scan(&m.last); !errors.Is(err, sql.ErrNoRows) {
+			if err != nil {
+				return fmt.Errorf("lock author activity order: %w", err)
+			}
+			return nil
+		}
+		// A fresh store has no ordering row yet. Read again after initialization:
+		// a concurrent initializer may have committed while INSERT waited.
 		if _, err := m.tx.ExecContext(ctx, `INSERT INTO author_activity_order (singleton_id, last_sequence) VALUES (1, 0) ON CONFLICT (singleton_id) DO NOTHING`); err != nil {
 			return fmt.Errorf("initialize author activity order: %w", err)
 		}
-		if err := m.tx.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`).Scan(&m.last); err != nil {
+		if err := m.tx.QueryRowContext(ctx, lockOrder).Scan(&m.last); err != nil {
 			return fmt.Errorf("lock author activity order: %w", err)
 		}
 	case DialectSQLite:
