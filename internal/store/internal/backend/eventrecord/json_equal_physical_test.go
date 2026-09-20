@@ -163,12 +163,32 @@ func TestJSONEqualPhysicalNumericAndMalformedContracts(t *testing.T) {
 		{`null`, "\u00a0null", false},
 		{`9007199254740992`, `9007199254740993`, false},
 		{`{"a":1e1000001,"a":"x"}`, `{"a":"x"}`, true},
+		{`{"n":1e1000001}`, `{"n":1e1000001}`, false},
+		{`{"text":"1e1000001","ok":true}`, `{"text":"1e1000001","ok":true}`, true},
+		{`{"unfinished":`, `{"unfinished":`, true},
 	} {
 		if got := jsonEqualBefore([]byte(tc.left), []byte(tc.right)); got != tc.want {
 			t.Fatalf("frozen contract(%q,%q)=%v want=%v", tc.left, tc.right, got, tc.want)
 		}
 		assertJSONEqualPhysicalParity(t, []byte(tc.left), []byte(tc.right))
 	}
+	t.Run("identical nonnumeric bytes avoid decoding", func(t *testing.T) {
+		_, settlement, _ := admittedSerializationFixture(t, 18, "consumer/quoted123")
+		raw, err := settlement.MarshalJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		other := bytes.Clone(raw)
+		if jsonMayContainNumber(raw) || !jsonEqualBefore(raw, other) {
+			t.Fatal("fixture must contain identical nonnumeric settlement facts")
+		}
+		allocations := testing.AllocsPerRun(50, func() {
+			jsonEqualPhysicalSink = jsonEqual(raw, other)
+		})
+		if !jsonEqualPhysicalSink || allocations != 0 {
+			t.Fatalf("identical nonnumeric equality=%t allocations=%v, want true/0", jsonEqualPhysicalSink, allocations)
+		}
+	})
 }
 
 func TestRecordEqualPhysicalJSONFields(t *testing.T) {
@@ -271,6 +291,9 @@ func BenchmarkJSONEqualPhysical(b *testing.B) {
 		formatted := equalityFormattedJSON(b, raw)
 		b.Run(fmt.Sprintf("plans%d", plans), func(b *testing.B) {
 			benchmarkJSONEqualPair(b, raw, formatted)
+		})
+		b.Run(fmt.Sprintf("identical_plans%d", plans), func(b *testing.B) {
+			benchmarkJSONEqualPair(b, raw, bytes.Clone(raw))
 		})
 	}
 	b.Run("numbers", func(b *testing.B) {
