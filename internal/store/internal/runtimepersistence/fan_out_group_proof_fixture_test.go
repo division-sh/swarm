@@ -112,6 +112,13 @@ type groupProofStmt struct {
 	query string
 }
 
+func (s *groupProofStmt) Close() error {
+	if err := s.Stmt.Close(); err != nil {
+		return err
+	}
+	return s.owner.call("after_stmt_close", s.query)
+}
+
 func (s *groupProofStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
 	if err := s.owner.call("before_exec", s.query); err != nil {
 		return nil, err

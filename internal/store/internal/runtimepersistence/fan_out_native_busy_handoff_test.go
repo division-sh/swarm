@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -90,9 +91,15 @@ func TestSQLiteFanOutChunkNativeCommitBusyRetry(t *testing.T) {
 			injected := errors.New("second fan-out callback refused after attempt reset")
 			var afterResetIntentReads atomic.Int32
 			var commits atomic.Int32
+			var outcomeCloses atomic.Int32
 			f.probe.set(func(phase, query string) error {
+				if phase == "after_stmt_close" && strings.HasPrefix(query, "INSERT INTO fan_out_outcomes ") {
+					outcomeCloses.Add(1)
+				}
 				if phase == "before_commit" {
-					commits.Add(1)
+					if attempt := commits.Add(1); outcomeCloses.Load() != attempt {
+						return fmt.Errorf("fan-out attempt %d did not close its own outcome statement: %d", attempt, outcomeCloses.Load())
+					}
 				}
 				// Admission's first intent read precedes the callback reset.
 				// Once cancellation has happened this is lockClaimedFanOutIntent;
@@ -114,6 +121,9 @@ func TestSQLiteFanOutChunkNativeCommitBusyRetry(t *testing.T) {
 			}
 			if chunk.Begun != 2 || chunk.CommitAttempts != wantCommits || chunk.CommitFailures != 1 || chunk.WriteCommits != wantWrites || chunk.RollbackAttempts != wantRollbacks || receipt.Active != 0 || uint64(commits.Load()) != wantCommits {
 				t.Fatalf("native fan-out retry accounting: %+v driverCommits=%d", receipt, commits.Load())
+			}
+			if uint64(outcomeCloses.Load()) != wantCommits {
+				t.Fatalf("fresh retry statement closes=%d want=%d", outcomeCloses.Load(), wantCommits)
 			}
 			sink.mu.Lock()
 			admissions := append([]*fanOutRetryAdmission(nil), sink.admissions...)
