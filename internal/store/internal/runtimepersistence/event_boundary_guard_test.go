@@ -61,6 +61,7 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/eventfixture/event.go":                                                                {},
 	"internal/store/internal/backend/delivery/lifecycle.go":                                               {},
 	"internal/store/internal/backend/eventpersistence/event_persistence_identity.go":                      {},
+	"internal/store/internal/backend/eventpersistence/owner.go":                                           {}, // Owns the named canonical SingleEventReader handle, not another decoder.
 	"internal/store/internal/backend/eventpersistence/runtime_log_persistence.go":                         {}, // Exact named diagnostic replay validation.
 	"internal/store/internal/backend/eventpersistence/event_reference_integrity.go":                       {},
 	"internal/store/internal/backend/eventpersistence/events.go":                                          {},
