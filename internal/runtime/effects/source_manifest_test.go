@@ -38,6 +38,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/channelactivation/presentation.go:Acquire:http_do:1":                                                                ownerRuntimeDependency, // sync.Once request release, not HTTP.
 	"internal/runtime/bus/eventbus.go:acquire:http_do:1":                                                                                  ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus.go:Done:http_do:1":                                                                                     ownerRuntimeDependency,
+	"internal/runtime/core/pinrouting/pinrouting.go:classify:http_do:1":                                                                   ownerRuntimeDependency, // sync.Once operation-local compilation, not HTTP.
 	"internal/runtime/deliverylifecycle/heartbeat.go:Finish:http_do:1":                                                                    ownerRuntimeDependency,
 	"internal/runtime/deliverylifecycle/heartbeat.go:Abort:http_do:1":                                                                     ownerRuntimeDependency,
 	"internal/runtime/deliverylifecycle/heartbeat.go:MarkCommitted:http_do:1":                                                             ownerRuntimeDependency,
