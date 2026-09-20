@@ -183,6 +183,13 @@ func (r Record) Validate() error {
 // Only the strict decoder or the constructor's successful canonical encoding
 // supplies settlement here. Never retain this projection across record reads.
 func (r Record) validateWithSettlement(settlement events.RouteSettlement) error {
+	_, err := r.validateWithSettlementEnvelope(settlement)
+	return err
+}
+
+// The decoded facts belong only to this validation invocation, never a later
+// read of the record. Class validation must finish before a caller uses them.
+func (r Record) validateWithSettlementEnvelope(settlement events.RouteSettlement) (decodedRecordEnvelope, error) {
 	for field, value := range map[string]string{
 		"event_class": string(r.Class), "event_id": r.EventID, "run_id": r.RunID, "event_name": r.EventName,
 		"task_id": r.TaskID, "entity_id": r.EntityID, "produced_by": r.ProducedBy,
@@ -198,11 +205,11 @@ func (r Record) validateWithSettlement(settlement events.RouteSettlement) error 
 		"payload_schema_digest": r.PayloadSchemaDigest, "payload_schema_class": string(r.PayloadSchemaClass),
 	} {
 		if value != strings.TrimSpace(value) {
-			return fmt.Errorf("event record %s is not canonical", field)
+			return decodedRecordEnvelope{}, fmt.Errorf("event record %s is not canonical", field)
 		}
 	}
 	if r.FlowInstance != strings.Trim(strings.TrimSpace(r.FlowInstance), "/") {
-		return fmt.Errorf("event record flow_instance is not canonical")
+		return decodedRecordEnvelope{}, fmt.Errorf("event record flow_instance is not canonical")
 	}
 	switch r.Class {
 	case events.EventAdmissionRootIngress,
@@ -215,57 +222,58 @@ func (r Record) validateWithSettlement(settlement events.RouteSettlement) error 
 		events.EventAdmissionRuntimeDiagnostic,
 		events.EventAdmissionDiagnosticDirect:
 	default:
-		return fmt.Errorf("event record class %q is invalid", r.Class)
+		return decodedRecordEnvelope{}, fmt.Errorf("event record class %q is invalid", r.Class)
 	}
 	if strings.TrimSpace(r.EventID) == "" {
-		return fmt.Errorf("event record event_id is required")
+		return decodedRecordEnvelope{}, fmt.Errorf("event record event_id is required")
 	}
 	if strings.TrimSpace(r.EventName) == "" {
-		return fmt.Errorf("event record event_name is required")
+		return decodedRecordEnvelope{}, fmt.Errorf("event record event_name is required")
 	}
 	if r.CreatedAt.IsZero() {
-		return fmt.Errorf("event record created_at is required")
+		return decodedRecordEnvelope{}, fmt.Errorf("event record created_at is required")
 	}
 	_, offset := r.CreatedAt.Zone()
 	if offset != 0 || r.CreatedAt.Nanosecond()%1000 != 0 {
-		return fmt.Errorf("event record created_at must be canonical UTC microsecond precision")
+		return decodedRecordEnvelope{}, fmt.Errorf("event record created_at must be canonical UTC microsecond precision")
 	}
 	if !json.Valid(r.Payload) {
-		return fmt.Errorf("event record payload must be valid JSON")
+		return decodedRecordEnvelope{}, fmt.Errorf("event record payload must be valid JSON")
 	}
 	payloadBinding, err := events.RestorePayloadSchemaBinding(events.PayloadSchemaBindingInput{
 		BundleHash: r.PayloadSchemaBundleHash, FlowID: r.PayloadSchemaFlowID,
 		EventKey: r.PayloadSchemaEventKey, SchemaDigest: r.PayloadSchemaDigest, SchemaClass: r.PayloadSchemaClass,
 	})
 	if err != nil {
-		return fmt.Errorf("event record payload schema binding: %w", err)
+		return decodedRecordEnvelope{}, fmt.Errorf("event record payload schema binding: %w", err)
 	}
 	if _, err := events.NewPayloadAdmission(r.Payload, payloadBinding); err != nil {
-		return fmt.Errorf("event record payload admission: %w", err)
+		return decodedRecordEnvelope{}, fmt.Errorf("event record payload admission: %w", err)
 	}
 	if err := validateSettlementEventClass(r.Class, events.EventType(r.EventName), settlement.WriteClass()); err != nil {
-		return fmt.Errorf("event record route settlement: %w", err)
+		return decodedRecordEnvelope{}, fmt.Errorf("event record route settlement: %w", err)
 	}
 	if r.ChainDepth < 0 {
-		return fmt.Errorf("event record chain_depth must be nonnegative")
+		return decodedRecordEnvelope{}, fmt.Errorf("event record chain_depth must be nonnegative")
 	}
 	if !r.ExecutionMode.Valid() {
-		return fmt.Errorf("event record execution_mode must be live or mock")
+		return decodedRecordEnvelope{}, fmt.Errorf("event record execution_mode must be live or mock")
 	}
 	producer, err := events.NewProducerIdentity(r.ProducedByType, r.ProducedBy)
 	if err != nil {
-		return fmt.Errorf("event record producer identity: %w", err)
+		return decodedRecordEnvelope{}, fmt.Errorf("event record producer identity: %w", err)
 	}
 	if err := events.ValidateEventStructuralContract(r.Class, events.EventType(r.EventName), producer, r.RunID, r.Scope); err != nil {
-		return fmt.Errorf("event record identity contract: %w", err)
+		return decodedRecordEnvelope{}, fmt.Errorf("event record identity contract: %w", err)
 	}
-	if _, err := r.decodeEnvelope(); err != nil {
-		return fmt.Errorf("event record envelope: %w", err)
+	envelope, err := r.decodeEnvelope()
+	if err != nil {
+		return decodedRecordEnvelope{}, fmt.Errorf("event record envelope: %w", err)
 	}
 	if err := r.validateClassFacts(); err != nil {
-		return err
+		return decodedRecordEnvelope{}, err
 	}
-	return nil
+	return envelope, nil
 }
 
 func validateSettlementEventClass(class events.EventAdmissionClass, eventType events.EventType, writeClass events.EventWriteClass) error {
@@ -361,18 +369,11 @@ func (r Record) DecodeWithSettlement() (events.AdmittedEvent, events.RouteSettle
 }
 
 func (r Record) decodeWithSettlement(settlement events.RouteSettlement) (events.AdmittedEvent, error) {
-	if err := r.validateWithSettlement(settlement); err != nil {
-		return events.AdmittedEvent{}, err
-	}
-	envelope, err := r.decodeEnvelope()
+	decodedEnvelope, err := r.validateWithSettlementEnvelope(settlement)
 	if err != nil {
 		return events.AdmittedEvent{}, err
 	}
-	routingSourceRoute, err := unmarshalRoute("source_route", r.SourceRoute)
-	if err != nil {
-		return events.AdmittedEvent{}, err
-	}
-	routingSource, err := events.RestoreRoutingSource(r.RoutingSourceKind, routingSourceRoute, r.RoutingSourceAuthority)
+	routingSource, err := events.RestoreRoutingSource(r.RoutingSourceKind, decodedEnvelope.routingSourceRoute, r.RoutingSourceAuthority)
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("event record routing source: %w", err)
 	}
@@ -383,7 +384,7 @@ func (r Record) decodeWithSettlement(settlement events.RouteSettlement) (events.
 		TaskID:        r.TaskID,
 		Payload:       bytes.Clone(r.Payload),
 		ChainDepth:    r.ChainDepth,
-		Envelope:      envelope,
+		Envelope:      decodedEnvelope.envelope,
 		RoutingSource: routingSource,
 		CreatedAt:     r.CreatedAt,
 		ExecutionMode: r.ExecutionMode,
@@ -497,33 +498,40 @@ func (r Record) DecodeSettlement() (events.RouteSettlement, error) {
 	return settlement, nil
 }
 
-func (r Record) decodeEnvelope() (events.EventEnvelope, error) {
+type decodedRecordEnvelope struct {
+	envelope           events.EventEnvelope
+	routingSourceRoute events.RouteIdentity
+}
+
+func (r Record) decodeEnvelope() (decodedRecordEnvelope, error) {
 	source, err := unmarshalRoute("source_route", r.SourceRoute)
 	if err != nil {
-		return events.EventEnvelope{}, err
+		return decodedRecordEnvelope{}, err
 	}
+	// External ingress keeps its stored routing source but has no envelope source.
+	routingSourceRoute := source
 	if r.RoutingSourceKind == events.RoutingSourceExternalIngress.StorageCode() {
 		source = events.RouteIdentity{}
 	}
 	target, err := unmarshalRoute("target_route", r.TargetRoute)
 	if err != nil {
-		return events.EventEnvelope{}, err
+		return decodedRecordEnvelope{}, err
 	}
 	var targets []events.RouteIdentity
 	if len(bytes.TrimSpace(r.TargetSet)) == 0 {
-		return events.EventEnvelope{}, fmt.Errorf("target_set is required")
+		return decodedRecordEnvelope{}, fmt.Errorf("target_set is required")
 	}
 	if err := json.Unmarshal(r.TargetSet, &targets); err != nil {
-		return events.EventEnvelope{}, fmt.Errorf("decode target_set: %w", err)
+		return decodedRecordEnvelope{}, fmt.Errorf("decode target_set: %w", err)
 	}
 	envelope := events.EventEnvelope{
 		EntityID: strings.TrimSpace(r.EntityID), FlowInstance: strings.Trim(strings.TrimSpace(r.FlowInstance), "/"),
 		Scope: r.Scope, Source: source, Target: target, TargetSet: targets,
 	}
 	if err := events.ValidateEnvelope(envelope); err != nil {
-		return events.EventEnvelope{}, err
+		return decodedRecordEnvelope{}, err
 	}
-	return envelope.Normalized(), nil
+	return decodedRecordEnvelope{envelope: envelope.Normalized(), routingSourceRoute: routingSourceRoute}, nil
 }
 
 func marshalRoute(route events.RouteIdentity) []byte {
