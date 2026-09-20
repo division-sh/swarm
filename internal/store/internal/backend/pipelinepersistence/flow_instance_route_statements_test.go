@@ -9,6 +9,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 func sqliteRouteStatementFixture(t testing.TB, owners int) (*sql.DB, []runtimebus.FlowInstanceRouteRecordSet) {
@@ -20,10 +21,12 @@ func sqliteRouteStatementFixture(t testing.TB, owners int) (*sql.DB, []runtimebu
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	for _, query := range []string{
-		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT, bundle_hash TEXT)`,
-		`CREATE TABLE source_artifacts (bundle_hash TEXT PRIMARY KEY)`,
-		`INSERT INTO source_artifacts VALUES ('bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')`,
-		`INSERT INTO runs VALUES ('run', 'running', 'bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')`,
+		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT, bundle_hash TEXT,
+		 origin_kind TEXT, trigger_event_id TEXT, trigger_event_type TEXT,
+		 origin_service_id TEXT, origin_generation INTEGER, forked_from_run_id TEXT,
+		 forked_from_event_id TEXT, started_at TIMESTAMP)`,
+		`CREATE TABLE source_artifacts (bundle_hash TEXT PRIMARY KEY, source_blob BLOB,
+		 member_count INTEGER, total_bytes INTEGER, created_at TIMESTAMP)`,
 		`CREATE TABLE routing_rules (
 		 rule_id INTEGER PRIMARY KEY, event_pattern TEXT, subscriber_type TEXT, subscriber_id TEXT,
 		 run_id TEXT, flow_instance TEXT, source_flow TEXT, is_wildcard BOOLEAN,
@@ -35,6 +38,9 @@ func sqliteRouteStatementFixture(t testing.TB, owners int) (*sql.DB, []runtimebu
 			t.Fatal(err)
 		}
 	}
+	runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{
+		RunID: "run", Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+	})
 	sets := make([]runtimebus.FlowInstanceRouteRecordSet, owners)
 	for i := range sets {
 		id := flowidentity.RunScopedFlowInstance{RunID: "run", Route: flowidentity.DeriveRoute("review", fmt.Sprintf("i%03d", i))}
