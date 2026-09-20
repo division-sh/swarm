@@ -121,7 +121,9 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []int{112, 14, 5, 1}
+	// Prepared/raw native fault parity adds one general conformance root;
+	// no prior root, backend, or command envelope moves between partitions.
+	want := []int{113, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -130,7 +132,11 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 			t.Logf("%s\t%s", conformance2394Units[i], name)
 		}
 	}
-	t.Log("complete disjoint census:132 =112 general +14 core +5 pressure +1 reporter")
+	const preparedFaultProof = "TestSemanticProofPreparedFaultMatchesRawBothStores"
+	if i := sort.SearchStrings(groups[0], preparedFaultProof); i == len(groups[0]) || groups[0][i] != preparedFaultProof {
+		t.Fatalf("general conformance partition omitted %s", preparedFaultProof)
+	}
+	t.Log("complete disjoint census:133 =113 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {

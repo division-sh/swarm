@@ -96,6 +96,9 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 }
 
 var directEventSQLTestFixtures = map[string]int{
+	// Isolated aggregate-query schema admits NULL/foreign rows deliberately;
+	// these are not executable event fixtures or an event publication path.
+	"internal/store/internal/backend/pipelinepersistence/pipeline_run_summary_materialization_test.go": 4,
 	// Canonically reminted, never-executed requests must fail real fork activation.
 	"internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":                         1,
 	"internal/cliapp/raw_sql_boundary_test.go":                                                   1,
