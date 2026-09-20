@@ -1104,6 +1104,9 @@ contract_formats:
         write, or rollback obligation. Every retried transaction creates and closes its own outcome
         insertion handle before its callback returns; a close failure rejects an otherwise successful
         callback and does not authorize uncertain-commit reconciliation.
+        SQLite pipeline-run summaries may materialize their diagnostic classification within
+        the same SQL statement. All six aggregates, joined membership, validation, and fresh
+        transaction observations remain unchanged; no classified rowset survives the query.
       payload_admission:
         owner: internal/events.PayloadAdmission
         chronology: |
