@@ -632,12 +632,22 @@ func commitFanOutChunk(
 	effects := newRevisionEffects()
 	result := runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
 	operationComplete := false
-	committed, err := run(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	committed, err := run(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (resultErr error) {
 		if err := handoff.ResetAttempt(); err != nil {
 			return err
 		}
 		result = runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
 		operationComplete = false
+		// Each retry owns a fresh handle; no outcome or admission facts survive it.
+		var outcomeInsert *sql.Stmt
+		defer func() {
+			if outcomeInsert != nil {
+				if err := outcomeInsert.Close(); err != nil && resultErr == nil {
+					resultErr = err
+					operationComplete = false
+				}
+			}
+		}()
 		intent, err := lockClaimedFanOutIntent(txctx, tx, postgres, command.Claim, observeNow)
 		if err != nil {
 			return err
@@ -703,14 +713,20 @@ func commitFanOutChunk(
 			} else {
 				failure = string(outcome.Failure)
 			}
-			query := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULL,NULL,$9,$10)`
-			if postgres {
-				query = strings.ReplaceAll(query, "NULLIF($8,'')", "NULLIF($8,'')::uuid")
-				query = strings.ReplaceAll(query, "$9", "$9::jsonb")
-			} else {
-				query = postgresPlaceholdersToSQLite(query, 10)
+			if outcomeInsert == nil {
+				query := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULL,NULL,$9,$10)`
+				if postgres {
+					query = strings.ReplaceAll(query, "NULLIF($8,'')", "NULLIF($8,'')::uuid")
+					query = strings.ReplaceAll(query, "$9", "$9::jsonb")
+				} else {
+					query = postgresPlaceholdersToSQLite(query, 10)
+				}
+				outcomeInsert, err = tx.PrepareContext(txctx, query)
+				if err != nil {
+					return fmt.Errorf("insert fan-out outcome ordinal %d: %w", outcome.Ordinal, err)
+				}
 			}
-			if _, err := tx.ExecContext(txctx, query, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, outcome.Ordinal, string(kind), nullableText(eventID), failure, command.Now.UTC()); err != nil {
+			if _, err := outcomeInsert.ExecContext(txctx, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, outcome.Ordinal, string(kind), nullableText(eventID), failure, command.Now.UTC()); err != nil {
 				return fmt.Errorf("insert fan-out outcome ordinal %d: %w", outcome.Ordinal, err)
 			}
 			ref, err := privaterunforkrevision.FanOutOutcomeFact(command.Claim.Key, outcome.Ordinal)
