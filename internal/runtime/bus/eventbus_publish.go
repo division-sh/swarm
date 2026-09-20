@@ -639,13 +639,16 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 	if table == nil || lister == nil {
 		return nil, errors.New("flow activation publication requires route topology owners")
 	}
-	staged, identities, err := eb.deriveFlowInstanceRouteTopology(
+	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
+	staged, identities, err := eb.deriveFlowInstanceRouteTopologyWithInputProducers(
 		ctx,
 		table,
 		lister,
 		plans[0].Readiness.RunID,
 		nil,
 		runtimeflowidentity.RunScopedFlowInstance{},
+		graph,
+		inputProducers,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("derive active route topology before activation: %w", err)
@@ -663,7 +666,7 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 			Identity:            identity,
 			ActivationVariables: plan.ActivationVariables,
 		}
-		if err := staged.AddFlowInstanceRoute(request); err != nil {
+		if err := staged.addFlowInstanceRouteForContextWithInputProducers(nil, request, &inputProducers); err != nil {
 			return nil, fmt.Errorf("derive publication activation route %d: %w", index, err)
 		}
 		identity = request.Normalized().Identity

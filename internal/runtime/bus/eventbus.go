@@ -819,6 +819,19 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 	exclude runtimeflowidentity.RunScopedFlowInstance,
 ) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
 	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
+	return eb.deriveFlowInstanceRouteTopologyWithInputProducers(ctx, table, lister, runID, include, exclude, graph, inputProducers)
+}
+
+func (eb *EventBus) deriveFlowInstanceRouteTopologyWithInputProducers(
+	ctx context.Context,
+	table *RouteTable,
+	lister ActiveFlowInstanceDescriptorLister,
+	runID string,
+	include *FlowInstanceRouteMaterializationRequest,
+	exclude runtimeflowidentity.RunScopedFlowInstance,
+	graph runtimepinrouting.CompiledConnectGraph,
+	inputProducers runtimepinrouting.FlowInputProducerResolver,
+) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
 	staged, err := deriveRouteTableWithInputProducers(table.source, graph, inputProducers)
 	if err != nil {
 		return nil, nil, fmt.Errorf("derive persisted flow-instance route table: %w", err)
