@@ -62,7 +62,7 @@ func LoadAdmitted(ctx context.Context, q RowQueryer, eventID string) (events.Adm
 func loadRecord(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record, bool, error) {
 	var record eventrecord.Record
 	var createdAt any
-	err := q.QueryRowContext(ctx, selectRecord+` WHERE e.event_id = ?`, strings.TrimSpace(eventID)).Scan(scanTargets(&record, &createdAt)...)
+	err := q.QueryRowContext(ctx, selectSingleRecord, strings.TrimSpace(eventID)).Scan(scanTargets(&record, &createdAt)...)
 	if err == sql.ErrNoRows {
 		return eventrecord.Record{}, false, nil
 	}
@@ -185,6 +185,8 @@ const selectRecord = `
 			GROUP BY fork_event_id, source_run_id, source_event_id, selection_authority
 		) candidate
 	) sf ON sf.fork_event_id = e.event_id`
+
+const selectSingleRecord = selectRecord + ` WHERE e.event_id = ?`
 
 func scanTargets(record *eventrecord.Record, createdAt *any) []any {
 	return []any{

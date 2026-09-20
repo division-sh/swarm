@@ -127,7 +127,7 @@ func (s *EventSQLiteOwner) LoadPreparedPublishEvent(ctx context.Context, eventID
 	if s == nil || s.backend == nil {
 		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("sqlite runtime store is required")
 	}
-	admitted, settlement, found, err := eventrecordsqlite.LoadAdmitted(ctx, s.backend, eventID)
+	admitted, settlement, found, err := s.preparedPublishEvent.LoadAdmitted(ctx, s.backend, eventID)
 	if err != nil || !found {
 		return runtimebus.PreparedPublishEvent{}, found, err
 	}
