@@ -74,6 +74,88 @@ type groupProofConn struct {
 	owner *groupProofConnector
 }
 
+func (c *groupProofConn) Prepare(query string) (driver.Stmt, error) {
+	stmt, err := c.Conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	return &groupProofStmt{Stmt: stmt, owner: c.owner, query: query}, nil
+}
+
+func (c *groupProofConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if prepare, ok := c.Conn.(driver.ConnPrepareContext); ok {
+		stmt, err := prepare.PrepareContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		return &groupProofStmt{Stmt: stmt, owner: c.owner, query: query}, nil
+	}
+	stmt, err := c.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = stmt.Close()
+		return nil, err
+	}
+	return stmt, nil
+}
+
+// Preparation itself is not an execution boundary. Each execution gets the
+// same hooks as the connection path, including fresh first-row observation.
+type groupProofStmt struct {
+	driver.Stmt
+	owner *groupProofConnector
+	query string
+}
+
+func (s *groupProofStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	if err := s.owner.call("before_exec", s.query); err != nil {
+		return nil, err
+	}
+	result, err := s.Stmt.(driver.StmtExecContext).ExecContext(ctx, args)
+	if err != nil {
+		return result, err
+	}
+	return result, s.owner.call("after_exec", s.query)
+}
+
+func (s *groupProofStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	if err := s.owner.call("before_query", s.query); err != nil {
+		return nil, err
+	}
+	rows, err := s.Stmt.(driver.StmtQueryContext).QueryContext(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	return &groupProofRows{Rows: rows, owner: s.owner, query: s.query}, nil
+}
+
+func (s *groupProofStmt) Exec(args []driver.Value) (driver.Result, error) {
+	if err := s.owner.call("before_exec", s.query); err != nil {
+		return nil, err
+	}
+	result, err := s.Stmt.Exec(args)
+	if err != nil {
+		return result, err
+	}
+	return result, s.owner.call("after_exec", s.query)
+}
+
+func (s *groupProofStmt) Query(args []driver.Value) (driver.Rows, error) {
+	if err := s.owner.call("before_query", s.query); err != nil {
+		return nil, err
+	}
+	rows, err := s.Stmt.Query(args)
+	if err != nil {
+		return nil, err
+	}
+	return &groupProofRows{Rows: rows, owner: s.owner, query: s.query}, nil
+}
+
 func (c *groupProofConn) IsValid() bool {
 	if valid, ok := c.Conn.(driver.Validator); ok {
 		return valid.IsValid()
