@@ -820,7 +820,7 @@ func (s *DeliveryPostgresOwner) DeliverySnapshotsForEventTx(ctx context.Context,
 }
 
 func (s *DeliverySQLiteOwner) DeliverySnapshotsForEvent(ctx context.Context, eventID string) ([]runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.SnapshotsForEvent(ctx, s.backend, eventID)
+	return s.receiverAdapter.SnapshotsForEvent(ctx, s.backend, eventID)
 }
 
 func (s *DeliverySQLiteOwner) DeliverySnapshotsForEventTx(ctx context.Context, tx *sql.Tx, eventID string) ([]runtimedelivery.Snapshot, error) {

@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -50,7 +51,14 @@ func (a *Adapter) SnapshotsForEvents(ctx context.Context, q queryer, eventIDs []
 		predicate := ` IN (` + strings.Join(placeholders, ", ") + `)`
 		// The canonical record join can hide a corrupt run/event relationship.
 		// Select direct membership independently, as the scalar adapter does.
-		rows, err := q.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT), CAST(event_id AS TEXT) FROM event_deliveries WHERE event_id`+predicate, args...)
+		membershipQuery := `SELECT CAST(delivery_id AS TEXT), CAST(event_id AS TEXT) FROM event_deliveries WHERE event_id` + predicate
+		var rows *sql.Rows
+		reads := a.poolReads(q)
+		if reads != nil && len(ids) == 1 {
+			rows, err = reads.singletonMembership.QueryContext(ctx, reads.backend, membershipQuery, args...)
+		} else {
+			rows, err = q.QueryContext(ctx, membershipQuery, args...)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -75,7 +83,12 @@ func (a *Adapter) SnapshotsForEvents(ctx context.Context, q queryer, eventIDs []
 		if closeErr != nil {
 			return nil, closeErr
 		}
-		rows, err = q.QueryContext(ctx, a.selectRecord()+` WHERE d.event_id`+predicate+` ORDER BY d.created_at, d.delivery_id`, args...)
+		recordsQuery := a.selectRecord() + ` WHERE d.event_id` + predicate + ` ORDER BY d.created_at, d.delivery_id`
+		if reads != nil && len(ids) == 1 {
+			rows, err = reads.singletonRecords.QueryContext(ctx, reads.backend, recordsQuery, args...)
+		} else {
+			rows, err = q.QueryContext(ctx, recordsQuery, args...)
+		}
 		if err != nil {
 			return nil, err
 		}
