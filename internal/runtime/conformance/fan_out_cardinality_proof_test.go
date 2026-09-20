@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestFanOutServingCardinalityMixedOutputPartitionEquivalenceBothStores(t *testing.T) {
@@ -42,7 +43,18 @@ func TestFanOutServingCardinalityMixedOutputPartitionEquivalenceBothStores(t *te
 						release()
 						// This is semantic partition equivalence, including repeated
 						// safe rejections after cap reset, not the 500-item latency gate.
-						waitNotifyAllChildrenRuntime(t, f.runtime, f.runID)
+						timeout := 30 * time.Second
+						if fanOutRaceBuild && count == 64 && limit == 1 {
+							// Gate A 5749347759 changes only this race-mode phase.
+							timeout = time.Minute
+						}
+						started := time.Now()
+						waitNotifyAllChildrenRuntimeWithin(t, f.runtime, f.runID, timeout)
+						if elapsed := time.Since(started); elapsed >= timeout {
+							t.Fatalf("N%d limit%d quiescence took %s, must be below %s", count, limit, elapsed, timeout)
+						} else {
+							t.Logf("N%d limit%d quiescence=%s bound=%s race=%t", count, limit, elapsed, timeout, fanOutRaceBuild)
+						}
 						outputs := f.assertOutcomes(t, trigger, rows, 75, rejected)
 						if limit == 32 {
 							baseline = outputs

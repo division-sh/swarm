@@ -53,13 +53,23 @@ func (g *nestedChildHandlerGate) open() { g.once.Do(func() { close(g.release) })
 
 func (g *nestedChildHandlerGate) wait(t *testing.T) lifecycleprobe.Signal {
 	t.Helper()
+	return g.waitUntil(t, time.Now().Add(5*time.Second))
+}
+
+func (g *nestedChildHandlerGate) waitUntil(t *testing.T, deadline time.Time) lifecycleprobe.Signal {
+	t.Helper()
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
 	select {
 	case signal := <-g.started:
+		if !time.Now().Before(deadline) {
+			t.Fatal("real nested handler reached execution gate after deadline")
+		}
 		if signal.EventID == "" || signal.SubscriberID == "" || signal.SubscriberType != "node" {
 			t.Fatalf("held child lacks actual event/handler identity: %+v", signal)
 		}
 		return signal
-	case <-time.After(5 * time.Second):
+	case <-timer.C:
 		t.Fatalf("real nested handler %s never reached execution gate", g.eventName)
 	}
 	return lifecycleprobe.Signal{}
