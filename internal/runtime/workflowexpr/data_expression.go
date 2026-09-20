@@ -362,10 +362,10 @@ func EvalValueResultWithOptions(expression string, ctx ValueContext, opts ValueE
 // Eval calls project fresh activations; an explicit ValueEvaluation may own one
 // ordinal's projection, but the prepared expression retains no execution values.
 type PreparedValueExpression struct {
-	expression    string
-	program       cel.Program
-	allowBareItem bool
-	itemAlias     string
+	entityAccesses []entityExpressionAccess
+	program        cel.Program
+	allowBareItem  bool
+	itemAlias      string
 }
 
 func PrepareValueExpression(expression string, opts ValueExpressionOptions) (*PreparedValueExpression, error) {
@@ -409,14 +409,14 @@ func PrepareValueExpression(expression string, opts ValueExpressionOptions) (*Pr
 	if err != nil {
 		return nil, err
 	}
-	return &PreparedValueExpression{expression: normalized, program: program, allowBareItem: opts.AllowBareItem, itemAlias: strings.TrimSpace(opts.ItemAlias)}, nil
+	return &PreparedValueExpression{entityAccesses: entityExpressionAccesses(normalized), program: program, allowBareItem: opts.AllowBareItem, itemAlias: strings.TrimSpace(opts.ItemAlias)}, nil
 }
 
 func (p *PreparedValueExpression) Eval(ctx ValueContext) (ValueResult, error) {
 	if p == nil || p.program == nil {
 		return ValueResult{}, fmt.Errorf("workflow expression preparation is required")
 	}
-	if missing := MissingEntityReferences(p.expression, ctx.Entity); len(missing) > 0 {
+	if missing := missingEntityReferencesForAccesses(p.entityAccesses, ctx.Entity); len(missing) > 0 {
 		return ValueResult{}, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
 	}
 	var activationMap map[string]any

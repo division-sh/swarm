@@ -28,6 +28,10 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 		"engine/fan_out_evaluator.go":        {{"e.bindFrameExpressionSchemas(frame)", ""}},
 		"pipeline/activity_engine.go":        {{"raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)", "_, _ = canonicaljson.FromGo(payload)\nraw, err := canonicaljson.MarshalPreservingNumberKinds(payload)"}},
 		"workflowexpr/numeric_expression.go": {},
+		"workflowexpr/data_expression.go": {
+			{"entityAccesses: entityExpressionAccesses(normalized)", "entityAccesses: nil"},
+			{"missingEntityReferencesForAccesses(p.entityAccesses, ctx.Entity)", "[]string(nil)"},
+		},
 		"../providerconnectors/mock_response_plan.go": {
 			{"value, err = canonicaljson.FromGo(response)", "raw, encodeErr := json.Marshal(response)\nif encodeErr != nil { return nil, encodeErr }; value, err = canonicaljson.Decode(raw)"},
 			{"return workflowexpr.ProjectSemanticValue(r.value)", "raw, err := canonicaljson.Encode(r.value); if err != nil { return nil, err }; var value any; err = json.Unmarshal(raw, &value); return value, err"},
@@ -59,6 +63,14 @@ func TestExecutionAdapterGuardRejectsCompetingInterpretations(t *testing.T) {
 		overlay[path] = []byte(source)
 	}
 	findings := strings.Join(executionAdapterFindings(t, overlay), "\n")
+	for _, want := range []string{
+		"PrepareValueExpression missing numeric/JSON owner github.com/division-sh/swarm/internal/runtime/workflowexpr.entityExpressionAccesses",
+		"Eval missing numeric/JSON owner github.com/division-sh/swarm/internal/runtime/workflowexpr.missingEntityReferencesForAccesses",
+	} {
+		if !strings.Contains(findings, want) {
+			t.Fatalf("missing prepared-access guard %q: %s", want, findings)
+		}
+	}
 	for _, want := range []string{"missing strict original-byte admission", "erasing execution writer", "PrepareFanOutEvaluation missing shared schema binding", "hostileLocalSchema competing frame schema writer", "hostileConstructor unaccounted frame constructor", "hostileNumericPlanner bypasses checked numeric planning", "activity result writer reinterprets execution kinds as semantic DTOs", "NewMockResponsePlan missing numeric/JSON owner", "Materialize competing mock codec", "hostileMockDecoder competing mock codec"} {
 		if !strings.Contains(findings, want) {
 			t.Fatalf("missing %q: %s", want, findings)
@@ -85,8 +97,9 @@ func executionAdapterFindings(t *testing.T, overlay map[string][]byte) []string 
 		"(" + mock + ".AdmittedMockResponse).Materialize":                                            {base + "workflowexpr.ProjectSemanticValue"},
 		base + "workflowexpr.compileValueExpression":                                                 {base + "workflowexpr.validateWorkflowNumericEvidence", base + "workflowexpr.validateWorkflowResultType"},
 		base + "workflowexpr.EvalValueResultWithOptions":                                             {base + "workflowexpr.PrepareValueExpression"},
-		base + "workflowexpr.PrepareValueExpression":                                                 {base + "workflowexpr.workflowProgram", base + "workflowexpr.compileValueExpression"},
-		"(*" + base + "workflowexpr.PreparedValueExpression).Eval":                                   {base + "workflowexpr.ProjectCELValue", base + "workflowexpr.MissingEntityReferences", base + "workflowexpr.normalizeCELResult"},
+		base + "workflowexpr.PrepareValueExpression":                                                 {base + "workflowexpr.workflowProgram", base + "workflowexpr.compileValueExpression", base + "workflowexpr.entityExpressionAccesses"},
+		base + "workflowexpr.MissingEntityReferences":                                                {base + "workflowexpr.entityExpressionAccesses", base + "workflowexpr.missingEntityReferencesForAccesses"},
+		"(*" + base + "workflowexpr.PreparedValueExpression).Eval":                                   {base + "workflowexpr.ProjectCELValue", base + "workflowexpr.missingEntityReferencesForAccesses", base + "workflowexpr.normalizeCELResult"},
 		"(*" + base + "engine.Executor).PrepareFanOutEvaluation":                                     {"(*" + base + "engine.Executor).bindFrameExpressionSchemas", "(*" + base + "engine.Executor).resolveEmitRoute", base + "workflowexpr.PrepareValueExpression"},
 		"(*" + base + "engine.FanOutEvaluation).EvaluateOrdinal":                                     {base + "fanoutobligation.PrepareOrdinalEmission", "(*" + base + "engine.Executor).shapeEmitPayloadWithContext", "(*" + base + "engine.Executor).newEmitIntentWithEnvelope"},
 		"(*" + base + "workflowexpr.StructuralPredicateEnv).PredicateProgram":                        {base + "workflowexpr.workflowProgram"},

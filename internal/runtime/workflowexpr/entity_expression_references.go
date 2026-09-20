@@ -134,8 +134,12 @@ func EntityReferences(expression string) []string {
 }
 
 func MissingEntityReferences(expression string, entity map[string]any) []string {
+	return missingEntityReferencesForAccesses(entityExpressionAccesses(expression), entity)
+}
+
+func missingEntityReferencesForAccesses(accesses []entityExpressionAccess, entity map[string]any) []string {
 	missing := map[string]struct{}{}
-	for _, access := range entityExpressionAccesses(expression) {
+	for _, access := range accesses {
 		if !access.required {
 			continue
 		}
