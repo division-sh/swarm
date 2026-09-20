@@ -61,6 +61,64 @@ func (c *semanticProofConnector) Connect(ctx context.Context) (driver.Conn, erro
 
 type semanticProofConn struct{ driver.Conn }
 
+func (c *semanticProofConn) Prepare(query string) (driver.Stmt, error) {
+	stmt, err := c.Conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	return &semanticProofStmt{Stmt: stmt, query: query}, nil
+}
+
+func (c *semanticProofConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if prepare, ok := c.Conn.(driver.ConnPrepareContext); ok {
+		stmt, err := prepare.PrepareContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		return &semanticProofStmt{Stmt: stmt, query: query}, nil
+	}
+	stmt, err := c.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = stmt.Close()
+		return nil, err
+	}
+	return stmt, nil
+}
+
+// A prepared handle retains SQL only. Fault authority comes from each execution
+// context, after native mutation (or its first successful RETURNING row).
+type semanticProofStmt struct {
+	driver.Stmt
+	query string
+}
+
+func (s *semanticProofStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	result, err := s.Stmt.(driver.StmtExecContext).ExecContext(ctx, args)
+	if err != nil {
+		return result, err
+	}
+	fault, _ := ctx.Value(semanticProofSQLFaultKey{}).(*semanticProofSQLFault)
+	return result, fault.afterInsert(s.query)
+}
+
+func (s *semanticProofStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	rows, err := s.Stmt.(driver.StmtQueryContext).QueryContext(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	fault, _ := ctx.Value(semanticProofSQLFaultKey{}).(*semanticProofSQLFault)
+	if fault == nil {
+		return rows, nil
+	}
+	return &semanticProofRowsFault{Rows: rows, fault: fault, query: s.query}, nil
+}
+
 func (c *semanticProofConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
 }
