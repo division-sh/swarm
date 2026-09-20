@@ -2869,8 +2869,13 @@ func summarizePipelineRun(ctx context.Context, q pipelineQueryer, runID string, 
 		diagnosticPredicate = postgresDiagnosticDirectReplayExclusionSQL("e", 1)
 		runPlaceholder = fmt.Sprintf("$%d::uuid", len(diagnostics)+1)
 	}
+	classificationHint := ""
+	if !postgres {
+		// Evaluate diagnostic membership once per joined row, not per aggregate.
+		classificationHint = " MATERIALIZED"
+	}
 	query := fmt.Sprintf(`
-			WITH classified AS (
+			WITH classified AS%s (
 				SELECT
 					e.event_id,
 					NOT (%s) AS diagnostic,
@@ -2894,7 +2899,7 @@ func summarizePipelineRun(ctx context.Context, q pipelineQueryer, runID string, 
 				COALESCE(SUM(CASE WHEN NOT classified.diagnostic AND classified.route_id IS NOT NULL AND classified.route_status = 'pending' AND classified.receipt_outcome = 'success' THEN 1 ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN classified.diagnostic THEN 1 ELSE 0 END), 0)
 			FROM classified`,
-		diagnosticPredicate, runPlaceholder)
+		classificationHint, diagnosticPredicate, runPlaceholder)
 	err := q.QueryRowContext(ctx, query, args...).Scan(
 		&out.Replayable, &out.Acknowledged, &out.TerminalNonSuccess, &out.Deferred,
 		&out.ProcessedDeferred, &out.DiagnosticExcluded)
