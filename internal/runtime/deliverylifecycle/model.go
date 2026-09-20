@@ -875,6 +875,7 @@ type Store interface {
 	ScanDeliveryContinuations(context.Context, ExecutionAuthority, ContinuationCursor, int) (ContinuationPage, error)
 	ObserveDeliveryContinuation(context.Context, ExecutionAuthority, string) (ContinuationObservation, error)
 	RenewClaim(context.Context, Claim) (Snapshot, error)
+	AdmitInlineClaim(context.Context, Claim) (time.Duration, error)
 	BindAgentSession(context.Context, Claim, string) (Snapshot, error)
 	SettleSuccess(context.Context, Claim, []string, time.Duration, HandlerRuleSelectionFact) (Snapshot, error)
 	SettleFailure(context.Context, Claim, Settlement) (Snapshot, error)

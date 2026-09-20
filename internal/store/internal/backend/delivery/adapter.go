@@ -2441,7 +2441,22 @@ func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, eff
 }
 
 func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
-	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), true)
+	return a.observeCurrentClaim(ctx, tx, claim, true)
+}
+
+func (a *Adapter) AdmitInlineClaim(ctx context.Context, tx *sql.Tx, claim Claim) (time.Duration, error) {
+	if tx == nil || claim.Validate() != nil || claim.SubscriberClass() != SubscriberNode {
+		return 0, fmt.Errorf("inline admission requires an exact system-node claim")
+	}
+	record, now, err := a.observeCurrentClaim(ctx, tx, claim, false)
+	if err != nil {
+		return 0, err
+	}
+	return record.ClaimExpiresAt.Sub(now), nil
+}
+
+func (a *Adapter) observeCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim, lock bool) (deliveryRecord, time.Time, error) {
+	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), lock)
 	if err != nil {
 		return deliveryRecord{}, time.Time{}, err
 	}

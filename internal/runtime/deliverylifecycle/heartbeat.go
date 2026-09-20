@@ -26,6 +26,7 @@ type ClaimHeartbeat struct {
 	claim     Claim
 	startedAt time.Time
 	settled   bool
+	inline    bool
 }
 
 type claimHeartbeatContextKey struct{}
@@ -81,6 +82,19 @@ func StartClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 }
 
 func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, store Store, claim Claim, interval time.Duration) (*ClaimHeartbeat, error) {
+	return startClaimHeartbeatMode(ctx, owner, store, claim, interval, false)
+}
+
+// StartInlineClaimHeartbeat is an isolated lifecycle prototype. Admission reads
+// current authority; the eventual mutation must independently fence settlement.
+func StartInlineClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, store Store, claim Claim) (*ClaimHeartbeat, error) {
+	if claim.SubscriberClass() != SubscriberNode {
+		return nil, fmt.Errorf("inline delivery heartbeat requires a system-node claim")
+	}
+	return startClaimHeartbeatMode(ctx, owner, store, claim, 0, true)
+}
+
+func startClaimHeartbeatMode(ctx context.Context, owner worklifetime.Occurrence, store Store, claim Claim, interval time.Duration, inline bool) (*ClaimHeartbeat, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -97,12 +111,22 @@ func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 	if err != nil {
 		return nil, fmt.Errorf("admit delivery claim heartbeat: %w", err)
 	}
-	snapshot, err := store.RenewClaim(workLease.Context(), claim)
+	var leaseTTL time.Duration
+	if inline {
+		admissionStarted := time.Now()
+		leaseTTL, err = store.AdmitInlineClaim(workLease.Context(), claim)
+		// Local elapsed time only shortens renewal scheduling. It never grants
+		// authority; the store clock and current claim still fence mutations.
+		leaseTTL -= time.Since(admissionStarted)
+	} else {
+		var snapshot Snapshot
+		snapshot, err = store.RenewClaim(workLease.Context(), claim)
+		leaseTTL = snapshot.ClaimExpiresAt.Sub(snapshot.UpdatedAt)
+	}
 	if err != nil {
 		_ = workLease.Done()
 		return nil, fmt.Errorf("renew delivery claim before execution: %w", err)
 	}
-	leaseTTL := snapshot.ClaimExpiresAt.Sub(snapshot.UpdatedAt)
 	if leaseTTL <= 0 {
 		_ = workLease.Done()
 		return nil, fmt.Errorf("renewed delivery claim did not report a positive lease")
@@ -117,7 +141,7 @@ func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 	heartbeatCtx, cancel := context.WithCancelCause(worklifetime.WithOccurrence(workLease.Context(), owner))
 	h := &ClaimHeartbeat{
 		ctx: heartbeatCtx, cancel: cancel, stop: make(chan struct{}), done: make(chan struct{}), workLease: workLease,
-		store: store, claim: claim, startedAt: time.Now(),
+		store: store, claim: claim, startedAt: time.Now(), inline: inline,
 	}
 	h.ctx = WithClaim(context.WithValue(h.ctx, claimHeartbeatContextKey{}, h), claim)
 	go h.run(store, claim, interval)
@@ -192,10 +216,12 @@ func (h *ClaimHeartbeat) BeginSettlement() (*ClaimSettlementGuard, error) {
 		h.renewMu.Unlock()
 		return nil, fmt.Errorf("delivery claim heartbeat is already settled")
 	}
-	if _, err := h.store.RenewClaim(context.WithoutCancel(h.ctx), h.claim); err != nil {
-		h.recordRenewalFailure("renew delivery claim before settlement", err)
-		h.renewMu.Unlock()
-		return nil, h.currentRenewalError()
+	if !h.inline {
+		if _, err := h.store.RenewClaim(context.WithoutCancel(h.ctx), h.claim); err != nil {
+			h.recordRenewalFailure("renew delivery claim before settlement", err)
+			h.renewMu.Unlock()
+			return nil, h.currentRenewalError()
+		}
 	}
 	return &ClaimSettlementGuard{heartbeat: h}, nil
 }

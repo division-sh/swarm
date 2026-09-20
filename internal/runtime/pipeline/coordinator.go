@@ -719,7 +719,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		attemptCtx = withPipelineFlowScope(attemptCtx, nodeFlowID)
 		pc.notifyTestLifecycleHandlerStarted(attemptCtx, node.Key(), evt)
 		started := time.Now()
-		heartbeat, heartbeatErr := runtimedelivery.StartClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
+		heartbeat, heartbeatErr := runtimedelivery.StartInlineClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
 		if heartbeatErr != nil {
 			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}

@@ -260,6 +260,38 @@ func (s *DeliveryPostgresOwner) RenewClaim(ctx context.Context, claim runtimedel
 	})
 }
 
+func (s *DeliveryPostgresOwner) AdmitInlineClaim(ctx context.Context, claim runtimedelivery.Claim) (time.Duration, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return 0, err
+	}
+	var remaining time.Duration
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := runstate.RequirePostgresActiveQuery(txctx, tx, claim.RunID()); err != nil {
+			return err
+		}
+		var err error
+		remaining, err = postgresDeliveryAdapter.AdmitInlineClaim(txctx, tx, claim)
+		return err
+	})
+	return remaining, err
+}
+
+func (s *DeliverySQLiteOwner) AdmitInlineClaim(ctx context.Context, claim runtimedelivery.Claim) (time.Duration, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return 0, err
+	}
+	var remaining time.Duration
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
+			return err
+		}
+		var err error
+		remaining, err = sqliteDeliveryAdapter.AdmitInlineClaim(txctx, tx, claim)
+		return err
+	})
+	return remaining, err
+}
+
 func (s *DeliverySQLiteOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
 	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
