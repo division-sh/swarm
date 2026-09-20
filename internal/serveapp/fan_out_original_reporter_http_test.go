@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +37,11 @@ func TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores(t *testing.
 func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			// Serve fixtures replace process-global hooks. Only isolated copies of
+			// this test binary may overlap the delayed backend journeys.
+			if transactionOptions.Delay > 0 && runIssue2394DelayedHTTPProcess(t, backend) {
+				return
+			}
 			root := issue2394ServedReporterSource(t)
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
@@ -149,6 +157,44 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			assertIssue2394ReporterClients(t, rt, runID, final.FanOut)
 		})
 	}
+}
+
+func runIssue2394DelayedHTTPProcess(t *testing.T, backend string) bool {
+	t.Helper()
+	const childBackend = "TEST_2394_DELAYED_HTTP_BACKEND"
+	if selected := os.Getenv(childBackend); selected != "" {
+		if selected != backend {
+			t.Fatalf("isolated reporter backend %q does not match %q", selected, backend)
+		}
+		return false
+	}
+	t.Parallel()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	args := []string{"-test.v", "-test.count=1"}
+	if deadline, ok := t.Deadline(); ok {
+		var deadlineCancel context.CancelFunc
+		ctx, deadlineCancel = context.WithDeadline(ctx, deadline)
+		defer deadlineCancel()
+		args = append(args, "-test.timeout="+time.Until(deadline).String())
+	}
+	parts := strings.Split(t.Name(), "/")
+	for i, part := range parts {
+		parts[i] = "^" + regexp.QuoteMeta(part) + "$"
+	}
+	args = append(args, "-test.run="+strings.Join(parts, "/"))
+	command := exec.CommandContext(ctx, executable, args...)
+	command.Env = append(os.Environ(), childBackend+"="+backend)
+	output, err := command.CombinedOutput()
+	t.Logf("isolated %s reporter proof:\n%s", backend, output)
+	if err != nil {
+		t.Fatalf("isolated %s reporter failed: %v", backend, err)
+	}
+	return true
 }
 
 // A longer transport timeout admits injected commit latency; it does not change

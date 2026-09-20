@@ -19,6 +19,9 @@ import (
 func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			if runIssue2394DelayedHTTPProcess(t, backend) {
+				return
+			}
 			root := issue2394ServedReporterSource(t)
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
