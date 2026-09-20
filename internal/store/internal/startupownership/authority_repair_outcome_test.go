@@ -86,7 +86,6 @@ func TestRepairAuthorityOutcomeAndJoinedRelease(t *testing.T) {
 				mock.ExpectBegin()
 				expectFence := func() {
 					if backendName == "postgres" {
-						mock.ExpectExec("INSERT INTO author_activity_order").WillReturnResult(sqlmock.NewResult(0, 1))
 						mock.ExpectQuery("SELECT last_sequence FROM author_activity_order").WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(0))
 					} else {
 						mock.ExpectExec("INSERT OR IGNORE INTO author_activity_order").WillReturnResult(sqlmock.NewResult(0, 1))
