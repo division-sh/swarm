@@ -222,25 +222,22 @@ func NewOutputConsumerResolver(source semanticview.Source) *OutputConsumerResolv
 }
 
 func (r *OutputConsumerResolver) Classify(eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
-	return classifyOutputConsumerWithCompilation(r.source, routingSource.Route().FlowID, eventType, routingSource, func() (CompiledConnectGraph, semanticview.AuthoredEventEndpointCensus) {
-		r.once.Do(func() { r.graph, r.census = compileConnectGraphWithCensus(r.source) })
-		return r.graph, r.census
-	})
+	return r.classify(routingSource.Route().FlowID, eventType, routingSource)
 }
 
 func classifyOutputConsumer(source semanticview.Source, flowID, eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
-	return classifyOutputConsumerWithCompilation(source, flowID, eventType, routingSource, func() (CompiledConnectGraph, semanticview.AuthoredEventEndpointCensus) {
-		return compileConnectGraphWithCensus(source)
-	})
+	return NewOutputConsumerResolver(source).classify(flowID, eventType, routingSource)
 }
 
-func classifyOutputConsumerWithCompilation(source semanticview.Source, flowID, eventType string, routingSource events.RoutingSource, compile func() (CompiledConnectGraph, semanticview.AuthoredEventEndpointCensus)) OutputConsumerClassification {
+func (r *OutputConsumerResolver) classify(flowID, eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
+	source := r.source
 	classification := OutputConsumerClassification{classes: map[OutputConsumerClass]struct{}{}}
 	if source == nil {
 		return classification
 	}
 	outputPins := outputPinsForEvent(source, flowID, eventType)
-	graph, census := compile()
+	r.once.Do(func() { r.graph, r.census = compileConnectGraphWithCensus(source) })
+	graph, census := r.graph, r.census
 	for _, pin := range outputPins {
 		if !pin.Sink().Valid() {
 			classification.invalidSink = true

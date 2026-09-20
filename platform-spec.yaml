@@ -1099,8 +1099,11 @@ contract_formats:
         These handles retain no rows, absence decisions, snapshots, or execution authority. Every call
         executes its unchanged read and strict decoding at the original observation boundary. Failed or
         canceled preparation is not retained; pool shutdown closes all owned handles and cannot reopen
-        them. Transaction-local route and barrier loops may likewise reuse statement handles only within
-        that invocation, without removing any fresh lookup, validation, write, or rollback obligation.
+        them. Transaction-local route, barrier, and fan-out outcome-insertion loops may likewise reuse
+        statement handles only within that invocation, without removing any fresh lookup, validation,
+        write, or rollback obligation. Every retried transaction creates and closes its own outcome
+        insertion handle before its callback returns; a close failure rejects an otherwise successful
+        callback and does not authorize uncertain-commit reconciliation.
       payload_admission:
         owner: internal/events.PayloadAdmission
         chronology: |
