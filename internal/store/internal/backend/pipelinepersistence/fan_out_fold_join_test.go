@@ -159,6 +159,18 @@ func TestFanOutFoldJoinDifferentialAndQueryBoundBothStores(t *testing.T) {
 					before, beforeErr := foldFanOutIntentTwoQueryBefore(ctx, beforeQ, backend == "postgres", key)
 					afterQ := &foldJoinQueryCount{pipelineQueryer: tx}
 					after, afterErr := foldFanOutIntentTerminalDispositions(ctx, afterQ, backend == "postgres", key)
+					prepared := &fanOutFoldStatement{Tx: tx}
+					defer prepared.close()
+					preparedQ := &foldJoinQueryCount{pipelineQueryer: prepared}
+					for range 2 {
+						got, gotErr := foldFanOutIntentTerminalDispositions(ctx, preparedQ, backend == "postgres", key)
+						if !reflect.DeepEqual(after, got) || fmt.Sprint(afterErr) != fmt.Sprint(gotErr) || reflect.TypeOf(afterErr) != reflect.TypeOf(gotErr) {
+							t.Fatalf("raw=%+v %v; prepared=%+v %v", after, afterErr, got, gotErr)
+						}
+					}
+					if preparedQ.compact != 2 || preparedQ.joined != 2 || preparedQ.maxArgs != 5 {
+						t.Fatalf("prepared query bound: %+v", preparedQ)
+					}
 					// Joined columns change only database/sql's numeric scan index.
 					normalize := func(err error) string {
 						if err == nil {

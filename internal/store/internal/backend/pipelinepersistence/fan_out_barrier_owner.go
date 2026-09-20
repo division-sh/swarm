@@ -27,6 +27,46 @@ import (
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
+const fanOutFoldJoinedQuery = `
+		SELECT i.cardinality, i.cursor, i.status, o.run_id IS NOT NULL,
+		       o.ordinal, o.outcome_kind, o.event_id, o.source_event_id, o.inherited_disposition
+		FROM fan_out_intents i
+		LEFT JOIN fan_out_outcomes o ON o.run_id=i.run_id
+		 AND o.triggering_delivery_id=i.triggering_delivery_id AND o.flow_path=i.flow_path
+		 AND o.declaration_family=i.declaration_family AND o.semantic_path=i.semantic_path
+		WHERE i.run_id=$1 AND i.triggering_delivery_id=$2 AND i.flow_path=$3 AND i.declaration_family=$4 AND i.semantic_path=$5
+		ORDER BY o.ordinal
+	`
+
+// fanOutFoldStatement retains only the fixed statement within one private
+// transaction loop. Preparation stays at the canonical fold's first SQL read,
+// after key and generation validation; every fold still reads fresh rows.
+type fanOutFoldStatement struct {
+	*sql.Tx
+	joined *sql.Stmt
+}
+
+func (q *fanOutFoldStatement) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if query != fanOutFoldJoinedQuery {
+		return q.Tx.QueryContext(ctx, query, args...)
+	}
+	if q.joined == nil {
+		stmt, err := q.Tx.PrepareContext(ctx, fanOutFoldJoinedQuery)
+		if err != nil {
+			return nil, err
+		}
+		q.joined = stmt
+	}
+	return q.joined.QueryContext(ctx, args...)
+}
+
+func (q *fanOutFoldStatement) close() error {
+	if q.joined == nil {
+		return nil
+	}
+	return q.joined.Close()
+}
+
 func foldFanOutIntentTerminalDispositions(
 	ctx context.Context,
 	db pipelineQueryer,
@@ -38,16 +78,7 @@ func foldFanOutIntentTerminalDispositions(
 	}
 	var cardinality, cursor int
 	var rawStatus string
-	rows, err := db.QueryContext(ctx, `
-		SELECT i.cardinality, i.cursor, i.status, o.run_id IS NOT NULL,
-		       o.ordinal, o.outcome_kind, o.event_id, o.source_event_id, o.inherited_disposition
-		FROM fan_out_intents i
-		LEFT JOIN fan_out_outcomes o ON o.run_id=i.run_id
-		 AND o.triggering_delivery_id=i.triggering_delivery_id AND o.flow_path=i.flow_path
-		 AND o.declaration_family=i.declaration_family AND o.semantic_path=i.semantic_path
-		WHERE i.run_id=$1 AND i.triggering_delivery_id=$2 AND i.flow_path=$3 AND i.declaration_family=$4 AND i.semantic_path=$5
-		ORDER BY o.ordinal
-	`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
+	rows, err := db.QueryContext(ctx, fanOutFoldJoinedQuery, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
 	if err != nil {
 		return fanoutbarrier.Fold{}, err
 	}
@@ -401,7 +432,7 @@ func advanceFanOutDeliveryBarriersTx(
 	genericSchedules GenericScheduleTxOwner,
 	runID string,
 	selectedNow time.Time,
-) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+) (activations []runtimerunlifecycle.CommittedGenericScheduleActivation, err error) {
 	if tx == nil || effects == nil || genericSchedules == nil || strings.TrimSpace(runID) == "" || selectedNow.IsZero() {
 		return nil, fmt.Errorf("fan-out barrier advancement requires transaction, owners, run, and selected-store time")
 	}
@@ -409,7 +440,18 @@ func advanceFanOutDeliveryBarriersTx(
 	if err != nil {
 		return nil, err
 	}
-	activations := make([]runtimerunlifecycle.CommittedGenericScheduleActivation, 0, len(registrations))
+	activations = make([]runtimerunlifecycle.CommittedGenericScheduleActivation, 0, len(registrations))
+	var foldDB pipelineQueryer = tx
+	if !postgres {
+		queries := &fanOutFoldStatement{Tx: tx}
+		defer func() {
+			if closeErr := queries.close(); closeErr != nil && err == nil {
+				activations = nil
+				err = fmt.Errorf("close sqlite fan-out fold statement: %w", closeErr)
+			}
+		}()
+		foldDB = queries
+	}
 	for _, registration := range registrations {
 		current, err := fanOutBarrierGenerationCurrent(ctx, tx, registration)
 		if err != nil {
@@ -421,7 +463,7 @@ func advanceFanOutDeliveryBarriersTx(
 			}
 			continue
 		}
-		fold, err := foldFanOutIntentTerminalDispositions(ctx, tx, postgres, registration.IntentKey)
+		fold, err := foldFanOutIntentTerminalDispositions(ctx, foldDB, postgres, registration.IntentKey)
 		if err != nil {
 			return nil, err
 		}
