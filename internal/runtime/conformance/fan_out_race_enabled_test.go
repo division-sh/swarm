@@ -2,6 +2,6 @@
 
 package conformance
 
-// Race qualification retains the complete workload and its existing correctness
-// deadline; the Gate A throughput target applies to normal builds.
+// Race qualification retains the complete workload. Only the two disputed waits
+// in Gate A 5749347759 use a 60-second race watchdog; normal bounds are unchanged.
 const fanOutRaceBuild = true

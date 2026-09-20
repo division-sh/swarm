@@ -17,7 +17,7 @@ import (
 func TestIssue2394NestedCapacityOneHandoffBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, false)
+			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, false, 5*time.Second)
 		})
 	}
 }
@@ -25,7 +25,7 @@ func TestIssue2394NestedCapacityOneHandoffBothStores(t *testing.T) {
 func TestIssue2394NestedDirectBarrierMembershipBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, true)
+			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, true, 5*time.Second)
 		})
 	}
 }
@@ -37,12 +37,17 @@ func TestIssue2394NestedManyIntentRetainedHandoffBothStores(t *testing.T) {
 			for i := range accounts {
 				accounts[i] = fmt.Sprintf("sibling-%02d", i)
 			}
-			proveNestedCapacityOneHandoff(t, backend, accounts, true)
+			childEntryTimeout := 5 * time.Second
+			if fanOutRaceBuild {
+				// Gate A 5749347759 preserves every subsequent phase deadline.
+				childEntryTimeout = time.Minute
+			}
+			proveNestedCapacityOneHandoff(t, backend, accounts, true, childEntryTimeout)
 		})
 	}
 }
 
-func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []string, holdChild bool, rejection ...*nestedPreparedRejection) {
+func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []string, holdChild bool, childEntryTimeout time.Duration, rejection ...*nestedPreparedRejection) {
 	t.Helper()
 	source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t))
 	probe := newNestedServingProbe(t)
@@ -92,9 +97,11 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	}
 	parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, db, runID, notifyID)
 	assertNotifyAllChildrenItemSequence(t, parents, accounts)
+	childEntryDeadline := time.Now().Add(childEntryTimeout)
 	probe.releaseHeld()
 	if holdChild {
-		signal := gates[0].wait(t)
+		signal := gates[0].waitUntil(t, childEntryDeadline)
+		t.Logf("parent release to held-child entry=%s bound=%s race=%t", childEntryTimeout-time.Until(childEntryDeadline), childEntryTimeout, fanOutRaceBuild)
 		deadline := time.Now().Add(5 * time.Second)
 		var parentStatus string
 		for time.Now().Before(deadline) {

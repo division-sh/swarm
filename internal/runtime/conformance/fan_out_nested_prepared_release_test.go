@@ -22,7 +22,7 @@ func TestIssue2394NestedPreparedReleaseBeforeRetryBothStores(t *testing.T) {
 				reached: make(chan nestedServingReceipt, 1), resume: make(chan struct{}),
 			}
 			t.Cleanup(r.open)
-			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, true, r)
+			proveNestedCapacityOneHandoff(t, backend, []string{"sibling-c", "sibling-a", "sibling-b"}, true, 5*time.Second, r)
 		})
 	}
 }
