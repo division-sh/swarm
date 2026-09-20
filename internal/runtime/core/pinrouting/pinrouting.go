@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -206,13 +207,40 @@ func ClassifyRoutingSourceOutputConsumer(source semanticview.Source, eventType s
 	return classifyOutputConsumer(source, routingSource.Route().FlowID, eventType, routingSource)
 }
 
+// OutputConsumerResolver belongs to one preparation operation against one
+// admitted source. Only compiled declaration evidence is shared, never the
+// event-dependent classification or any selected-store observation.
+type OutputConsumerResolver struct {
+	source semanticview.Source
+	once   sync.Once
+	graph  CompiledConnectGraph
+	census semanticview.AuthoredEventEndpointCensus
+}
+
+func NewOutputConsumerResolver(source semanticview.Source) *OutputConsumerResolver {
+	return &OutputConsumerResolver{source: source}
+}
+
+func (r *OutputConsumerResolver) Classify(eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
+	return classifyOutputConsumerWithCompilation(r.source, routingSource.Route().FlowID, eventType, routingSource, func() (CompiledConnectGraph, semanticview.AuthoredEventEndpointCensus) {
+		r.once.Do(func() { r.graph, r.census = compileConnectGraphWithCensus(r.source) })
+		return r.graph, r.census
+	})
+}
+
 func classifyOutputConsumer(source semanticview.Source, flowID, eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
+	return classifyOutputConsumerWithCompilation(source, flowID, eventType, routingSource, func() (CompiledConnectGraph, semanticview.AuthoredEventEndpointCensus) {
+		return compileConnectGraphWithCensus(source)
+	})
+}
+
+func classifyOutputConsumerWithCompilation(source semanticview.Source, flowID, eventType string, routingSource events.RoutingSource, compile func() (CompiledConnectGraph, semanticview.AuthoredEventEndpointCensus)) OutputConsumerClassification {
 	classification := OutputConsumerClassification{classes: map[OutputConsumerClass]struct{}{}}
 	if source == nil {
 		return classification
 	}
 	outputPins := outputPinsForEvent(source, flowID, eventType)
-	graph, census := compileConnectGraphWithCensus(source)
+	graph, census := compile()
 	for _, pin := range outputPins {
 		if !pin.Sink().Valid() {
 			classification.invalidSink = true

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -16,10 +17,11 @@ import (
 )
 
 type fanOutPublicationMember struct {
-	group    runtimepipelineobligation.PublicationGroup
-	claim    runtimepipelineobligation.Claim
-	context  context.Context
-	admitted events.AdmittedEvent
+	group           runtimepipelineobligation.PublicationGroup
+	claim           runtimepipelineobligation.Claim
+	context         context.Context
+	admitted        events.AdmittedEvent
+	outputConsumers *runtimepinrouting.OutputConsumerResolver
 }
 
 func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, requests []runtimepipeline.FanOutPublicationRequest) ([]runtimepipeline.FanOutPublicationPreparation, error) {
@@ -37,6 +39,7 @@ func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtime
 	claims := make([]runtimepipelineobligation.PublicationClaimRequest, 0, len(requests))
 	accepted := make([]int, 0, len(requests))
 	seen := make(map[int]bool, len(requests))
+	outputConsumers := runtimepinrouting.NewOutputConsumerResolver(eb.semanticSource)
 	for i, request := range requests {
 		if request.Ordinal < 0 || seen[request.Ordinal] {
 			return nil, errors.New("fan-out publication requests require distinct nonnegative ordinals")
@@ -48,7 +51,7 @@ func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtime
 			results[i].Err = err
 			continue
 		}
-		members[i] = fanOutPublicationMember{group: group, context: preparedCtx, admitted: admitted}
+		members[i] = fanOutPublicationMember{group: group, context: preparedCtx, admitted: admitted, outputConsumers: outputConsumers}
 		claims = append(claims, runtimepipelineobligation.PublicationClaimRequest{Ordinal: request.Ordinal, Event: admitted.Event()})
 		accepted = append(accepted, i)
 	}
