@@ -78,7 +78,8 @@ func (e *FanOutSafeAggregateError) Unwrap() error {
 
 func FanOutSafeAggregateFailure(err error) (*FanOutSafeAggregateError, bool) {
 	var failure *FanOutSafeAggregateError
-	return failure, errors.As(err, &failure)
+	matched := errors.As(err, &failure)
+	return failure, matched
 }
 
 func (o FanOutChunkOutcome) Validate() error {
