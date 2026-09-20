@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -33,6 +35,7 @@ func TestChannelOnboardingPendingResetLifecycleSelectedStoreParity(t *testing.T)
 										if err != nil {
 											t.Fatal(err)
 										}
+										sortPendingResetBindings(bindingsBefore)
 										observationErr := errors.New("observation interrupted")
 										rig.currentness.err = observationErr
 										if _, _, err := rig.service.ConfirmIdentity(ctx, claimed.OperationID, claimed.Revision, true, rig.now); !errors.Is(err, observationErr) {
@@ -64,6 +67,7 @@ func TestChannelOnboardingPendingResetLifecycleSelectedStoreParity(t *testing.T)
 										}
 										reset := rig.parent(t, before.OperationID)
 										bindingsAfter, err := fixture.store.ListOperatorChannelBindings(ctx, before.PrincipalID)
+										sortPendingResetBindings(bindingsAfter)
 										if err != nil || !reflect.DeepEqual(bindingsBefore, bindingsAfter) {
 											t.Fatalf("pending reset erased or changed preexisting bindings: %v", err)
 										}
@@ -99,6 +103,42 @@ func TestChannelOnboardingPendingResetLifecycleSelectedStoreParity(t *testing.T)
 						}
 					}
 				}
+			}
+		})
+	}
+}
+
+func sortPendingResetBindings(bindings []operatorchannel.Binding) {
+	// List order only covers interface ref and pack ID, which tie across these
+	// journeys. Compare every binding field in exact-identity order instead.
+	slices.SortFunc(bindings, func(a, b operatorchannel.Binding) int {
+		return strings.Compare(a.Interface.Key(), b.Interface.Key())
+	})
+}
+
+func TestChannelOnboardingPendingResetBindingSnapshotComparison(t *testing.T) {
+	a := operatorchannel.Binding{Interface: operatorchannel.InterfaceIdentity{SemanticGeneration: "a"}, Revision: 1}
+	b := operatorchannel.Binding{Interface: operatorchannel.InterfaceIdentity{SemanticGeneration: "b"}, Revision: 1}
+	changed := b
+	changed.Revision++
+	for _, tc := range []struct {
+		name      string
+		after     []operatorchannel.Binding
+		wantEqual bool
+	}{
+		{name: "unchanged", after: []operatorchannel.Binding{a, b}, wantEqual: true},
+		{name: "reordered", after: []operatorchannel.Binding{b, a}, wantEqual: true},
+		{name: "removed", after: []operatorchannel.Binding{a}},
+		{name: "added", after: []operatorchannel.Binding{a, b, changed}},
+		{name: "duplicated", after: []operatorchannel.Binding{a, a}},
+		{name: "changed field", after: []operatorchannel.Binding{changed, a}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := []operatorchannel.Binding{a, b}
+			sortPendingResetBindings(before)
+			sortPendingResetBindings(tc.after)
+			if equal := reflect.DeepEqual(before, tc.after); equal != tc.wantEqual {
+				t.Fatalf("binding snapshot equal=%t, want %t: before=%#v after=%#v", equal, tc.wantEqual, before, tc.after)
 			}
 		})
 	}
