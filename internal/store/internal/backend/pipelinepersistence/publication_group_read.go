@@ -22,10 +22,10 @@ func (g *publicationGroup) ReadPublicationSettlement(ctx context.Context, reques
 	}
 	operation := func(ctx context.Context, tx *sql.Tx) error {
 		out.ObservedAt = time.Now().UTC()
+		if err := g.validateCommittedMembersTx(ctx, tx, members); err != nil {
+			return err
+		}
 		for i, member := range members {
-			if err := g.validateCommittedMemberTx(ctx, tx, member); err != nil {
-				return err
-			}
 			request := requests[i]
 			row := pipelineobligation.PublicationSettlementObservation{Claim: member.claim}
 			exact, found, err := exactStoredPipelineDisposition(ctx, tx, member.event.ID(), request.Disposition, g.postgres != nil)
