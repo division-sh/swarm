@@ -16,6 +16,7 @@ import (
 func TestIssue2394SupplementalPressureFiniteProbeBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			t.Parallel() // Separate selected stores and pressure controls.
 			proveSupplementalPressureSoak(t, backend, 3, 3*time.Second, 200*time.Millisecond)
 		})
 	}
@@ -24,6 +25,7 @@ func TestIssue2394SupplementalPressureFiniteProbeBothStores(t *testing.T) {
 func TestIssue2394TwentyTwoIntentPressureStartupBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
 			// A22-commit refill at SQLite capacity1 needs more than4.4s
 			// even before actual transaction and handoff time.
 			proveSupplementalPressureSoak(t, backend, 22, 10*time.Second, 200*time.Millisecond)
@@ -37,6 +39,7 @@ func TestIssue2394TwentyTwoIntentPressureStartupBothStores(t *testing.T) {
 func TestIssue2394PressureDurableArrivalAccountingBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
 			for _, incremental := range []bool{false, true} {
 				t.Run(fmt.Sprintf("incremental=%t", incremental), func(t *testing.T) {
 					provePressureDurableArrivalAccounting(t, backend, incremental)

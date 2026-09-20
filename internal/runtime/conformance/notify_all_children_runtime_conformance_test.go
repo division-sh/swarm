@@ -540,16 +540,16 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 }
 
 func TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends(t *testing.T) {
-	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{}, 10*time.Second)
+	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{}, 10*time.Second, false)
 }
 
 func TestIssue2394ReporterFiveHundredDelayedCommitsBothStores(t *testing.T) {
 	runNumericFanOutReporterShape(t, storetest.TransactionProbeOptions{
 		Delay: 300 * time.Millisecond, DelayScope: storetest.DelayAllCommits,
-	}, 2*time.Minute)
+	}, 2*time.Minute, true)
 }
 
-func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration) {
+func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration, parallelBackends bool) {
 	for _, tc := range []struct {
 		name  string
 		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
@@ -571,6 +571,11 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if parallelBackends {
+				// Each backend owns its database, runtime and delay collector.
+				// Keep both complete workloads without serializing their injected waits.
+				t.Parallel()
+			}
 			selected, db := tc.setup(t)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 				NumericRegistrationRows: true,
