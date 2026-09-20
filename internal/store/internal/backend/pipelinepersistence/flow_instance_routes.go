@@ -183,7 +183,7 @@ const sqliteFlowInstanceRouteUpdateSQL = `
 			  AND subscriber_type = ?
 			  AND subscriber_id = ?
 			  AND run_id = ?
-			  AND COALESCE(flow_instance, '') = ?
+			  AND flow_instance = ?
 			  AND is_materialized = TRUE
 		`
 
