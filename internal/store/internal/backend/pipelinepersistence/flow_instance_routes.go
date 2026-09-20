@@ -100,7 +100,7 @@ func upsertPostgresFlowInstanceRoute(
 			  AND subscriber_type = $2
 			  AND subscriber_id = $3
 			  AND run_id = $4::uuid
-			  AND flow_instance IS NOT DISTINCT FROM NULLIF($5,'')
+			  AND flow_instance = $5
 			  AND is_materialized = true
 			RETURNING rule_id
 		)
@@ -839,7 +839,7 @@ func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptors(ctx context.Cont
 	if runID == "" {
 		return nil, fmt.Errorf("active flow instance descriptors require exact run_id")
 	}
-	rows, err := s.backend.QueryContext(ctx, `
+	rows, err := s.activeFlowDescriptors.QueryContext(ctx, s.backend, `
 		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
@@ -899,7 +899,7 @@ func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwners(ctx context.Context, r
 	if runID == "" {
 		return nil, fmt.Errorf("selected-run target owners require exact run_id")
 	}
-	rows, err := s.backend.QueryContext(ctx, `
+	rows, err := s.selectedRunTargetOwners.QueryContext(ctx, s.backend, `
 		SELECT es.entity_id, es.flow_instance, es.current_state,
  CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
 		FROM entity_state es

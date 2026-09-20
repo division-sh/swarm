@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -15,6 +16,11 @@ import (
 type Backend struct {
 	db               *sql.DB
 	testTransactions transactiontest.Slot
+	readStatements   struct {
+		sync.Mutex
+		closed bool
+		owned  []*sql.Stmt
+	}
 
 	mutationToken chan struct{}
 	mutationState struct {
@@ -53,7 +59,16 @@ func (b *Backend) Close() error {
 	if !b.Valid() {
 		return nil
 	}
-	return b.db.Close()
+	b.readStatements.Lock()
+	b.readStatements.closed = true
+	owned := b.readStatements.owned
+	b.readStatements.owned = nil
+	b.readStatements.Unlock()
+	var closeErr error
+	for _, stmt := range owned {
+		closeErr = errors.Join(closeErr, stmt.Close())
+	}
+	return errors.Join(closeErr, b.db.Close())
 }
 
 // ConstructionHandle returns the separately owned process-construction

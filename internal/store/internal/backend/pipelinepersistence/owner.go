@@ -163,8 +163,10 @@ type PipelinePostgresOwner struct {
 }
 
 type PipelineSQLiteOwner struct {
-	fanOutReadiness FanOutReadiness
-	apiIdempotency  *storeapiidempotency.SQLiteOwner
+	activeFlowDescriptors   sqlitebackend.FixedReadStatement
+	selectedRunTargetOwners sqlitebackend.FixedReadStatement
+	fanOutReadiness         FanOutReadiness
+	apiIdempotency          *storeapiidempotency.SQLiteOwner
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedecision.DecisionSQLiteOwner
 	*storedelivery.DeliverySQLiteOwner

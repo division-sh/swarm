@@ -1085,6 +1085,14 @@ contract_formats:
         remain mandatory; no caller-supplied replacement projection, cross-read cache, inferred authority,
         or weakened corruption rejection is permitted. This changes computation reuse, not event,
         settlement, completion, or persistence ownership.
+
+        SQLite may retain named, fixed read-statement handles for canonical single-event lookup,
+        active flow-instance descriptors, and selected-run target owners under its existing pool owner.
+        These handles retain no rows, absence decisions, snapshots, or execution authority. Every call
+        executes its unchanged read and strict decoding at the original observation boundary. Failed or
+        canceled preparation is not retained; pool shutdown closes all owned handles and cannot reopen
+        them. Transaction-local route and barrier loops may likewise reuse statement handles only within
+        that invocation, without removing any fresh lookup, validation, write, or rollback obligation.
       payload_admission:
         owner: internal/events.PayloadAdmission
         chronology: |
@@ -15780,6 +15788,8 @@ platform_tables:
           runs or transactions. PostgreSQL resolves each materialized source reference and upserts the route in one
           SQL statement, preserving source-match and absent-source semantics; this does not batch business mutations
           or remove exact-owner replacement and rollback checks.
+          Exact instance updates on both stores consume the admitted nonempty instance path directly,
+          allowing the existing run/instance index to serve the lookup without NULL-path normalization.
         terminate_flow_instance: In the same selected mutation as terminal lifecycle truth, derive topology without the
           terminal owner and exact-set replace every affected source/consumer owner plus the terminal owner's empty set.
           Every direct or composed caller must enter that selected mutation before terminal state changes; no two-transaction

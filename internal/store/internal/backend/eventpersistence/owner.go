@@ -20,6 +20,7 @@ import (
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storereplycontext "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
@@ -65,6 +66,7 @@ type EventPostgresOwner struct {
 }
 
 type EventSQLiteOwner struct {
+	preparedPublishEvent eventrecordsqlite.SingleEventReader
 	*storeactivityjournal.ActivitySQLiteOwner
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedelivery.DeliverySQLiteOwner
