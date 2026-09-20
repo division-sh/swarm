@@ -39,7 +39,7 @@ func TestIssue2394NestedManyIntentRetainedHandoffBothStores(t *testing.T) {
 			}
 			childEntryTimeout := 5 * time.Second
 			if fanOutRaceBuild {
-				// Gate A 5749347759 preserves every subsequent phase deadline.
+				// Gate A 5749347759 changes only the child-entry deadline.
 				childEntryTimeout = time.Minute
 			}
 			finalDrainTimeout := 30 * time.Second

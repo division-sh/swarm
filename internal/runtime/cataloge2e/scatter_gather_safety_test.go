@@ -41,20 +41,45 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 				h := newRuntimeHarnessForBackend(t, filepath.Join(canonicalrouting.RepoRoot(t), "internal/runtime/cataloge2e/testdata/scatter-gather-safety"), backend, true)
 				observePublication := scatterGatherTransactionDiagnostics(t, h)
 				var groups []catalogTranscriptGroup
+				var phaseStart, phaseDeadline time.Time
+				var phaseCtx context.Context
+				var phaseCancel context.CancelFunc
+				var phaseEvent string
+				readContext := func() context.Context {
+					if phaseCtx != nil {
+						return phaseCtx
+					}
+					return catalogRunContext(h, catalogRuntimeRunID)
+				}
+				finishPhase := func() {
+					t.Helper()
+					if phaseCtx == nil {
+						return
+					}
+					elapsed := time.Since(phaseStart)
+					t.Logf("%s complete phase elapsed=%s original_target=20s merge_ceiling=60s; original performance obligation remains open in #2394", phaseEvent, elapsed)
+					phaseCancel()
+					phaseCtx = nil
+					if !time.Now().Before(phaseDeadline) {
+						t.Fatalf("%s exceeded its non-resetting 60s phase ceiling: %s", phaseEvent, elapsed)
+					}
+				}
 				publish := func(event string, payload map[string]any) catalogTriggerStep {
 					t.Helper()
 					defer observePublication(event)()
 					step := catalogTriggerStep{Event: event, Payload: payload, eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
-					var phaseStart, phaseDeadline time.Time
 					publishTimeout := 20 * time.Second
 					if backend == catalogBackendPostgres && variant.hundred && (event == "batch.submitted" || event == "batch.finished") {
 						// Lead exception 5752572474: one budget, never reset on progress.
+						if phaseCtx != nil {
+							t.Fatal("previous phase was not fully checked")
+						}
 						phaseStart = time.Now()
 						phaseDeadline = phaseStart.Add(time.Minute)
+						phaseEvent = event
+						phaseCtx, phaseCancel = context.WithDeadline(catalogRunContext(h, catalogRuntimeRunID), phaseDeadline)
+						t.Cleanup(phaseCancel)
 						publishTimeout = time.Until(phaseDeadline)
-						defer func() {
-							t.Logf("%s phase elapsed=%s original_target=20s merge_ceiling=60s; original performance obligation remains open in #2394", event, time.Since(phaseStart))
-						}()
 					}
 					if err := h.publishRuntimeEventResultForStep(step, publishTimeout, false); err != nil {
 						t.Fatal(err)
@@ -80,7 +105,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 				ids := map[string]string{}
 				paths := map[string]string{}
 				timerIDs := map[string]string{}
-				registrations, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+				registrations, err := scatterGatherPublicEvents(h, phaseCtx)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -104,13 +129,13 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 				done := map[string]bool{}
 				check := func(completed int) {
 					t.Helper()
-					if counts := scatterGatherCounts(t, h); counts["entity_state"] != len(items)+2 {
+					if counts := scatterGatherCounts(t, h, readContext()); counts["entity_state"] != len(items)+2 {
 						t.Fatalf("unexpected entity set: %v", counts)
 					}
 					for _, raw := range items {
 						item := raw.(map[string]any)
 						key := item["item_id"].(string)
-						worker := scatterGatherLoad(t, h, paths[key])
+						worker := scatterGatherLoad(t, h, paths[key], readContext())
 						if old := ids[key]; old != "" && old != worker.EntityID {
 							t.Fatalf("%s rematerialized: %s -> %s", key, old, worker.EntityID)
 						}
@@ -125,14 +150,14 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 							t.Fatalf("worker %s: %+v", key, worker)
 						}
 						var timers int
-						if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM timers WHERE run_id=$1 AND entity_id=$2 AND task_type='workflow_timer' AND status='active'`, catalogRuntimeRunID, worker.EntityID).Scan(&timers); err != nil {
+						if err := h.db.QueryRowContext(readContext(), `SELECT COUNT(*) FROM timers WHERE run_id=$1 AND entity_id=$2 AND task_type='workflow_timer' AND status='active'`, catalogRuntimeRunID, worker.EntityID).Scan(&timers); err != nil {
 							t.Fatal(err)
 						}
 						if timers != active {
 							t.Fatalf("worker %s active timers=%d want %d", key, timers, active)
 						}
 						var timerID, timerStatus string
-						if err := h.db.QueryRowContext(h.ctx, `SELECT timer_id,status FROM timers WHERE run_id=$1 AND entity_id=$2 AND task_type='workflow_timer'`, catalogRuntimeRunID, worker.EntityID).Scan(&timerID, &timerStatus); err != nil {
+						if err := h.db.QueryRowContext(readContext(), `SELECT timer_id,status FROM timers WHERE run_id=$1 AND entity_id=$2 AND task_type='workflow_timer'`, catalogRuntimeRunID, worker.EntityID).Scan(&timerID, &timerStatus); err != nil {
 							t.Fatal(err)
 						}
 						if old := timerIDs[key]; old != "" && old != timerID {
@@ -147,7 +172,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 							t.Fatalf("worker %s timer=%s want %s", key, timerStatus, wantTimerStatus)
 						}
 					}
-					collector := scatterGatherLoad(t, h, "collector")
+					collector := scatterGatherLoad(t, h, "collector", readContext())
 					carrier, err := engine.StateCarrierFromPersisted(collector.Fields, collector.Bookkeeping, collector.Gates, collector.StateBuckets)
 					if err != nil {
 						t.Fatal(err)
@@ -164,13 +189,13 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 						t.Fatalf("premature gather completion: %+v", activation)
 					}
 					var reports int
-					if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name LIKE 'workers/%/item.reported'`, catalogRuntimeRunID).Scan(&reports); err != nil {
+					if err := h.db.QueryRowContext(readContext(), `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name LIKE 'workers/%/item.reported'`, catalogRuntimeRunID).Scan(&reports); err != nil {
 						t.Fatal(err)
 					}
 					if reports != completed {
 						t.Fatalf("reports=%d want %d", reports, completed)
 					}
-					public, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+					public, err := scatterGatherPublicEvents(h, phaseCtx)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -201,6 +226,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					}
 				}
 				check(0)
+				finishPhase()
 				if variant.hundred {
 					reversed := make([]any, len(items))
 					for i, item := range items {
@@ -211,9 +237,10 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 						done[item.(map[string]any)["item_id"].(string)] = true
 					}
 					check(len(items))
+					finishPhase()
 				}
 				if variant.reject {
-					before := scatterGatherCounts(t, h)
+					before := scatterGatherCounts(t, h, h.ctx)
 					states := scatterGatherStates(t, h, paths)
 					err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "batch.submitted", Payload: map[string]any{"batch_id": "invalid", "items": []any{map[string]any{"item_id": "bad", "value": true}}}}, 20*time.Second, false)
 					if err == nil {
@@ -225,7 +252,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					if after := scatterGatherStates(t, h, paths); !reflect.DeepEqual(states, after) {
 						t.Fatal("rejected input mutated persisted workflow state")
 					}
-					if after := scatterGatherCounts(t, h); !reflect.DeepEqual(before, after) {
+					if after := scatterGatherCounts(t, h, h.ctx); !reflect.DeepEqual(before, after) {
 						t.Fatalf("rejected input mutated domain: before=%v after=%v", before, after)
 					}
 					check(0)
@@ -251,12 +278,12 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 						}
 					}
 					if variant.repeat {
-						before := scatterGatherCounts(t, h)
+						before := scatterGatherCounts(t, h, h.ctx)
 						states := scatterGatherStates(t, h, paths)
 						if err := h.publishRuntimeEventResultForStep(step, 20*time.Second, false); err != nil {
 							t.Fatal(err)
 						}
-						if after := scatterGatherCounts(t, h); !reflect.DeepEqual(before, after) {
+						if after := scatterGatherCounts(t, h, h.ctx); !reflect.DeepEqual(before, after) {
 							t.Fatalf("duplicate changed domain: %v -> %v", before, after)
 						}
 						if after := scatterGatherStates(t, h, paths); !reflect.DeepEqual(states, after) {
@@ -363,16 +390,11 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep,
 		if cardinality == 100 {
 			t.Logf("%s exact durable frontier settled after %s", step.Event, time.Since(started))
 		}
-		public, err := func() (map[string]operatorread.OperatorEventFull, error) {
-			if phaseDeadline.IsZero() {
-				return catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
-			}
-			lister, err := h.catalogOperatorEventLister()
-			if err != nil {
-				return nil, err
-			}
-			return replayconformance.LoadOperatorEvents(testAuthorActivityContext(ctx), lister, catalogRuntimeRunID)
-		}()
+		var readCtx context.Context
+		if !phaseDeadline.IsZero() {
+			readCtx = ctx
+		}
+		public, err := scatterGatherPublicEvents(h, readCtx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -518,27 +540,38 @@ func scatterGatherDeliveryProgress(ctx context.Context, h *runtimeHarness, event
 	return result, rows.Close()
 }
 
-func scatterGatherLoad(t testing.TB, h *runtimeHarness, path string) pipeline.WorkflowInstance {
+func scatterGatherPublicEvents(h *runtimeHarness, ctx context.Context) (map[string]operatorread.OperatorEventFull, error) {
+	if ctx == nil {
+		return catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+	}
+	lister, err := h.catalogOperatorEventLister()
+	if err != nil {
+		return nil, err
+	}
+	return replayconformance.LoadOperatorEvents(testAuthorActivityContext(ctx), lister, catalogRuntimeRunID)
+}
+
+func scatterGatherLoad(t testing.TB, h *runtimeHarness, path string, ctx context.Context) pipeline.WorkflowInstance {
 	t.Helper()
-	instance, found, err := h.workflow.Load(catalogRunContext(h, catalogRuntimeRunID), flowidentity.RunScopedFlowInstance{RunID: catalogRuntimeRunID, Route: flowidentity.RouteForInstancePath(path)})
+	instance, found, err := h.workflow.Load(ctx, flowidentity.RunScopedFlowInstance{RunID: catalogRuntimeRunID, Route: flowidentity.RouteForInstancePath(path)})
 	if err != nil || !found {
 		t.Fatalf("load %s: found=%v err=%v", path, found, err)
 	}
 	return instance
 }
 
-func scatterGatherCounts(t testing.TB, h *runtimeHarness) map[string]int {
+func scatterGatherCounts(t testing.TB, h *runtimeHarness, ctx context.Context) map[string]int {
 	t.Helper()
 	counts := map[string]int{}
 	for _, table := range []string{"entity_state", "timers", "fan_out_intents"} {
 		var count int
-		if err := h.db.QueryRowContext(h.ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE run_id=$1", table), catalogRuntimeRunID).Scan(&count); err != nil {
+		if err := h.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE run_id=$1", table), catalogRuntimeRunID).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		counts[table] = count
 	}
 	var domainEvents int
-	if err := h.db.QueryRowContext(h.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND (event_name IN ('batch.submitted','batch.finished','item.registered','item.finished','collector/batch.opened') OR event_name LIKE 'workers/%/item.reported')`, catalogRuntimeRunID).Scan(&domainEvents); err != nil {
+	if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND (event_name IN ('batch.submitted','batch.finished','item.registered','item.finished','collector/batch.opened') OR event_name LIKE 'workers/%/item.reported')`, catalogRuntimeRunID).Scan(&domainEvents); err != nil {
 		t.Fatal(err)
 	}
 	counts["domain_events"] = domainEvents
@@ -549,10 +582,10 @@ func scatterGatherStates(t testing.TB, h *runtimeHarness, paths map[string]strin
 	t.Helper()
 	states := map[string]pipeline.WorkflowInstance{}
 	for _, path := range paths {
-		states[path] = scatterGatherLoad(t, h, path)
+		states[path] = scatterGatherLoad(t, h, path, catalogRunContext(h, catalogRuntimeRunID))
 	}
 	for _, path := range []string{catalogRuntimeRunID, "collector"} {
-		states[path] = scatterGatherLoad(t, h, path)
+		states[path] = scatterGatherLoad(t, h, path, catalogRunContext(h, catalogRuntimeRunID))
 	}
 	return states
 }
