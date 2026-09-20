@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/google/uuid"
@@ -34,14 +33,11 @@ func loadPostgresStandaloneRuntimePlatformRunRecord(ctx context.Context, q rowQu
 	if q == nil || eventID == "" {
 		return standaloneRuntimePlatformRunRecord{}, false, nil
 	}
-	durable, found, err := eventrecordpostgres.Load(ctx, q, eventID)
+	admitted, _, found, err := eventrecordpostgres.LoadAdmitted(ctx, q, eventID)
 	if err != nil || !found {
 		return standaloneRuntimePlatformRunRecord{}, found, err
 	}
-	record, err := standaloneRuntimeRecordFromEvent(durable)
-	if err != nil {
-		return standaloneRuntimePlatformRunRecord{}, false, fmt.Errorf("decode standalone runtime platform event: %w", err)
-	}
+	record := standaloneRuntimeRecordFromEvent(admitted)
 	snapshot, err := loadPostgresRunLifecycleSnapshot(ctx, q, record.RunID, false)
 	switch {
 	case errors.Is(err, runtimerunlifecycle.ErrRunNotFound):
@@ -60,14 +56,11 @@ func loadSQLiteStandaloneRuntimePlatformRunRecord(ctx context.Context, q rowQuer
 	if q == nil || eventID == "" {
 		return standaloneRuntimePlatformRunRecord{}, false, nil
 	}
-	durable, found, err := eventrecordsqlite.Load(ctx, q, eventID)
+	admitted, _, found, err := eventrecordsqlite.LoadAdmitted(ctx, q, eventID)
 	if err != nil || !found {
 		return standaloneRuntimePlatformRunRecord{}, found, err
 	}
-	record, err := standaloneRuntimeRecordFromEvent(durable)
-	if err != nil {
-		return standaloneRuntimePlatformRunRecord{}, false, fmt.Errorf("decode sqlite standalone runtime platform event: %w", err)
-	}
+	record := standaloneRuntimeRecordFromEvent(admitted)
 	snapshot, err := loadSQLiteRunLifecycleSnapshot(ctx, q, record.RunID)
 	switch {
 	case errors.Is(err, runtimerunlifecycle.ErrRunNotFound):
@@ -81,17 +74,13 @@ func loadSQLiteStandaloneRuntimePlatformRunRecord(ctx context.Context, q rowQuer
 	}
 }
 
-func standaloneRuntimeRecordFromEvent(durable eventrecord.Record) (standaloneRuntimePlatformRunRecord, error) {
-	admitted, err := durable.Decode()
-	if err != nil {
-		return standaloneRuntimePlatformRunRecord{}, err
-	}
+func standaloneRuntimeRecordFromEvent(admitted events.AdmittedEvent) standaloneRuntimePlatformRunRecord {
 	event := admitted.Event()
 	return standaloneRuntimePlatformRunRecord{
 		RunID: event.RunID(), EventID: event.ID(), EventClass: string(event.AdmissionClass()),
 		EventType: string(event.Type()), ProducedBy: event.SourceAgent(), ProducedByType: string(event.ProducerType()),
 		SourceEventID: event.ParentEventID(),
-	}, nil
+	}
 }
 
 func isStandaloneRuntimePlatformRunRecord(record standaloneRuntimePlatformRunRecord) bool {
