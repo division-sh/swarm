@@ -14,6 +14,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -60,6 +61,62 @@ func topologyOperationIdentity(t *testing.T, id string) runtimeflowidentity.RunS
 		t.Fatal(err)
 	}
 	return identity
+}
+
+func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.T) {
+	source, eb := topologyOperationFixture(t)
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eb.routeTable = table
+	lister := &topologyOperationDescriptors{}
+	eb.durable.ActiveFlows = lister
+	plans := make([]runtimepipeline.FlowInstanceActivationPlan, 0, 3)
+	for _, id := range []string{"alpha", "beta", "gamma"} {
+		plans = append(plans, runtimepipeline.FlowInstanceActivationPlan{
+			Identity:  runtimeflowidentity.Derive(source, "workers", id),
+			Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
+		})
+	}
+	source.censuses.Store(0)
+	got, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.censuses.Load() != 1 || lister.calls != 1 || len(got) != len(plans) {
+		t.Fatalf("publication work: censuses=%d reads=%d routes=%d", source.censuses.Load(), lister.calls, len(got))
+	}
+	independent, err := DeriveRouteTable(source.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identities []runtimeflowidentity.RunScopedFlowInstance
+	for _, plan := range plans {
+		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.Readiness.RunID, plan.Identity.Route())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := independent.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+			t.Fatal(err)
+		}
+		identities = append(identities, identity)
+		if table.HasFlowInstanceRoute(identity) {
+			t.Fatal("publication preparation mutated the live route table")
+		}
+	}
+	if want := flowInstanceRouteTopologyRecordSets(independent, identities); !reflect.DeepEqual(got, want) {
+		t.Fatalf("publication changed route evidence: got=%+v want=%+v", got, want)
+	}
+	// Another call must still reread and strictly admit the current descriptors.
+	lister.rows = []ActiveFlowInstanceDescriptor{{RunID: "foreign-run", FlowInstance: "workers/outsider"}}
+	source.censuses.Store(0)
+	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans); err == nil || !strings.Contains(err.Error(), "escaped selected run") {
+		t.Fatalf("foreign descriptor admitted: %v", err)
+	}
+	if source.censuses.Load() != 1 || lister.calls != 2 {
+		t.Fatalf("publication reused an earlier census/descriptor read: censuses=%d reads=%d", source.censuses.Load(), lister.calls)
+	}
 }
 
 func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T) {
