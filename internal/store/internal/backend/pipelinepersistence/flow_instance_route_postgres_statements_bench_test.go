@@ -9,6 +9,14 @@ import (
 )
 
 func BenchmarkPostgresRouteTopologyStatements(b *testing.B) {
+	benchmarkPostgresRouteTopologyStatements(b, 64)
+}
+
+func BenchmarkPostgresRouteTopologyStatementsSingleOwner(b *testing.B) {
+	benchmarkPostgresRouteTopologyStatements(b, 1)
+}
+
+func benchmarkPostgresRouteTopologyStatements(b *testing.B, owners int) {
 	ctx := context.Background()
 	setupCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -34,7 +42,7 @@ func BenchmarkPostgresRouteTopologyStatements(b *testing.B) {
 						}
 					})
 					db := sandbox.DB
-					sets := populatePostgresRouteStatementFixture(b, db, 64, false, false)
+					sets := populatePostgresRouteStatementFixture(b, db, owners, false, false)
 					// No audit/provenance-changing triggers in the timed workload;
 					// use the real random-key default rather than differential keys.
 					for _, ddl := range []string{
@@ -81,8 +89,8 @@ func BenchmarkPostgresRouteTopologyStatements(b *testing.B) {
 						}
 					}
 					b.StopTimer()
-					b.ReportMetric(64, "owners/op")
-					b.ReportMetric(128, "routes/op")
+					b.ReportMetric(float64(owners), "owners/op")
+					b.ReportMetric(float64(2*owners), "routes/op")
 				})
 			}
 		})
