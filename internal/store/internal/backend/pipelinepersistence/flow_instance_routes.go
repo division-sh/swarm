@@ -21,8 +21,12 @@ type flowInstanceDescriptorQueryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-type flowInstanceRouteExecutor interface {
+type flowInstanceRouteWriter interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+type flowInstanceRouteExecutor interface {
+	flowInstanceRouteWriter
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
@@ -73,10 +77,17 @@ func normalizeFlowInstanceRouteRecord(route runtimebus.FlowInstanceRouteRecord) 
 
 func upsertPostgresFlowInstanceRoute(
 	ctx context.Context,
-	exec flowInstanceRouteExecutor,
+	exec flowInstanceRouteWriter,
 	route runtimebus.FlowInstanceRouteRecord,
 ) error {
-	_, err := exec.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, postgresFlowInstanceRouteUpsertSQL, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath, route.SourceFlow)
+	if err != nil {
+		return fmt.Errorf("upsert flow instance route %s/%s: %w", route.Identity.Route.ScopeKey, route.Identity.Route.InstanceID, err)
+	}
+	return nil
+}
+
+const postgresFlowInstanceRouteUpsertSQL = `
 		WITH source AS MATERIALIZED (
 			SELECT (
 			SELECT rule_id
@@ -130,11 +141,51 @@ func upsertPostgresFlowInstanceRoute(
 				'active',
 				now()
 			WHERE NOT EXISTS (SELECT 1 FROM updated)
-		`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath, route.SourceFlow)
-	if err != nil {
-		return fmt.Errorf("upsert flow instance route %s/%s: %w", route.Identity.Route.ScopeKey, route.Identity.Route.InstanceID, err)
+		`
+
+const postgresFlowInstanceRouteInactivateSQL = `
+				UPDATE routing_rules
+				SET status = 'inactive'
+				WHERE run_id = $1::uuid AND flow_instance = $2
+				  AND is_materialized = true
+				  AND status = 'active'
+			`
+
+// Only topology replacement retains these two handles, for one invocation
+// under its existing transaction. Source lookup and mutations execute each time.
+type postgresFlowInstanceRouteExecutor struct {
+	tx         *sql.Tx
+	statements [2]*sql.Stmt
+}
+
+func (e *postgresFlowInstanceRouteExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	var index int
+	switch query {
+	case postgresFlowInstanceRouteInactivateSQL:
+		index = 0
+	case postgresFlowInstanceRouteUpsertSQL:
+		index = 1
+	default:
+		return nil, fmt.Errorf("unsupported postgres flow-instance route statement")
 	}
-	return nil
+	if e.statements[index] == nil {
+		stmt, err := e.tx.PrepareContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		e.statements[index] = stmt
+	}
+	return e.statements[index].ExecContext(ctx, args...)
+}
+
+func (e *postgresFlowInstanceRouteExecutor) close() error {
+	var result error
+	for _, stmt := range e.statements {
+		if stmt != nil {
+			result = errors.Join(result, stmt.Close())
+		}
+	}
+	return result
 }
 
 func (s *PipelineSQLiteOwner) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
@@ -414,7 +465,16 @@ func replaceFlowInstanceRouteTopologyTx(
 		return nil, nil
 	}
 	var sqliteExec *sqliteFlowInstanceRouteExecutor
-	if !postgres {
+	var postgresExec *postgresFlowInstanceRouteExecutor
+	if postgres {
+		postgresExec = &postgresFlowInstanceRouteExecutor{tx: tx}
+		defer func() {
+			if closeErr := postgresExec.close(); closeErr != nil && err == nil {
+				result = nil
+				err = fmt.Errorf("close postgres flow-instance route statements: %w", closeErr)
+			}
+		}()
+	} else {
 		sqliteExec = &sqliteFlowInstanceRouteExecutor{tx: tx, statements: &[4]*sql.Stmt{}}
 		defer func() {
 			if closeErr := sqliteExec.close(); closeErr != nil && err == nil {
@@ -440,17 +500,11 @@ func replaceFlowInstanceRouteTopologyTx(
 			admittedRuns[set.Identity.RunID] = true
 		}
 		if postgres {
-			if _, err := tx.ExecContext(ctx, `
-				UPDATE routing_rules
-				SET status = 'inactive'
-				WHERE run_id = $1::uuid AND flow_instance = $2
-				  AND is_materialized = true
-				  AND status = 'active'
-			`, set.Identity.RunID, set.Identity.Route.InstancePath); err != nil {
+			if _, err := postgresExec.ExecContext(ctx, postgresFlowInstanceRouteInactivateSQL, set.Identity.RunID, set.Identity.Route.InstancePath); err != nil {
 				return nil, fmt.Errorf("inactivate postgres flow-instance route owner %s: %w", set.Identity.Key(), err)
 			}
 			for _, route := range set.Routes {
-				if err := upsertPostgresFlowInstanceRoute(ctx, tx, route); err != nil {
+				if err := upsertPostgresFlowInstanceRoute(ctx, postgresExec, route); err != nil {
 					return nil, err
 				}
 			}
