@@ -3920,6 +3920,10 @@ handler_specification:
           the same semantic owners. Each ordinal still receives a fresh activation, immutable lineage and normal
           payload shaping/admission. Preparation must not cache mutable entity state or evaluation results, suppress
           ordinal failures, or let an input or output mutate another ordinal's captured state.
+          Within one ordinal, CEL-only output fields may share one private semantic projection of an isolated raw
+          context. Each field retains its own preparation and missing-entity checks, alias bindings and normalized
+          result; projection remains lazy so it cannot displace an earlier field diagnostic. Non-isolated carriers
+          and mixed reference/literal outputs use ordinary per-field evaluation. No projection survives the ordinal.
         semantic_value_projection: >-
           Event-payload, persisted and fork-projected fan-out capsules, exact entity-revision, and pinned resource-version sources enter deferred emit evaluation only
           through contract_formats.semantic_json.workflow_cel_projection. Eager and deferred evaluation consume the same
