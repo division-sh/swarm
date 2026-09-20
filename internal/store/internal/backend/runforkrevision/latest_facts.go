@@ -65,6 +65,17 @@ func readSelectedLatestFacts(ctx context.Context, q queryer, change declaredChan
 // A whole-family contribution in an exact transaction stays family-scoped even
 // when the exact keys require multiple reads. It must not become a run scan.
 func readAffectedLatestFacts(ctx context.Context, q queryer, change declaredChange) (ledgerFactsByFamily, error) {
+	allExact := len(change.families) != 0
+	for _, family := range change.families {
+		if _, exact := change.exact[family]; !exact {
+			allExact = false
+			break
+		}
+	}
+	return readAffectedLatestFactsWithSeeks(ctx, q, change, allExact)
+}
+
+func readAffectedLatestFactsWithSeeks(ctx context.Context, q queryer, change declaredChange, exactSeeks bool) (ledgerFactsByFamily, error) {
 	count := 0
 	for _, refs := range change.exact {
 		count += len(refs)
@@ -74,7 +85,7 @@ func readAffectedLatestFacts(ctx context.Context, q queryer, change declaredChan
 		for _, family := range change.families {
 			refs, exact := change.exact[family]
 			if !exact {
-				facts, err := readAffectedLatestFacts(ctx, q, declaredChange{runID: change.runID, families: []Family{family}})
+				facts, err := readAffectedLatestFactsWithSeeks(ctx, q, declaredChange{runID: change.runID, families: []Family{family}}, exactSeeks)
 				if err != nil {
 					return nil, err
 				}
@@ -85,7 +96,7 @@ func readAffectedLatestFacts(ctx context.Context, q queryer, change declaredChan
 			for start := 0; start < len(refs); start += exactFactReadBatch {
 				end := min(start+exactFactReadBatch, len(refs))
 				part := declaredChange{runID: change.runID, families: []Family{family}, exact: map[Family][]FactRef{family: refs[start:end]}}
-				facts, err := readAffectedLatestFacts(ctx, q, part)
+				facts, err := readAffectedLatestFactsWithSeeks(ctx, q, part, exactSeeks)
 				if err != nil {
 					return nil, err
 				}
@@ -102,6 +113,7 @@ func readAffectedLatestFacts(ctx context.Context, q queryer, change declaredChan
 	args := []any{change.runID}
 	wanted := make(map[Family]bool, len(change.families))
 	var selections []string
+	var coordinates []string
 	for _, family := range change.families {
 		if !ValidFamily(family) {
 			return nil, fmt.Errorf("unsupported revision projection family %q", family)
@@ -109,6 +121,7 @@ func readAffectedLatestFacts(ctx context.Context, q queryer, change declaredChan
 		wanted[family] = true
 		args = append(args, string(family))
 		condition := fmt.Sprintf("family=$%d", len(args))
+		familyBind := len(args)
 		if refs, exact := change.exact[family]; exact {
 			if len(refs) == 0 {
 				return nil, fmt.Errorf("exact ledger selection has no fact coordinates")
@@ -123,6 +136,9 @@ func readAffectedLatestFacts(ctx context.Context, q queryer, change declaredChan
 				}
 				args = append(args, ref.key)
 				binds[i] = fmt.Sprintf("$%d", len(args))
+				if exactSeeks {
+					coordinates = append(coordinates, fmt.Sprintf("($%d,$%d)", familyBind, len(args)))
+				}
 			}
 			condition += " AND fact_key IN (" + strings.Join(binds, ",") + ")"
 		}
@@ -137,6 +153,18 @@ func readAffectedLatestFacts(ctx context.Context, q queryer, change declaredChan
 		GROUP BY family,fact_key) latest CROSS JOIN run_fork_fact_revisions r
 		WHERE r.run_id=$1 AND r.family=latest.family
 		AND r.fact_key=latest.fact_key AND r.revision=latest.revision`
+	if exactSeeks {
+		// Seek the latest revision for each bounded exact coordinate instead of
+		// grouping the run's history. DISTINCT retains IN/OR duplicate semantics;
+		// joining the winning revision still exposes duplicate stored rows.
+		query = `WITH requested(family,fact_key) AS (VALUES ` + strings.Join(coordinates, ",") + `),
+		wanted AS (SELECT DISTINCT family,fact_key FROM requested)
+		SELECT r.family,r.fact_key,r.fact,r.present
+		FROM wanted CROSS JOIN run_fork_fact_revisions r
+		WHERE r.run_id=$1 AND r.family=wanted.family AND r.fact_key=wanted.fact_key
+		AND r.revision=(SELECT MAX(newest.revision) FROM run_fork_fact_revisions newest
+		 WHERE newest.run_id=$1 AND newest.family=wanted.family AND newest.fact_key=wanted.fact_key)`
+	}
 	return readLedgerFacts(ctx, q, query, args, wanted)
 }
 
