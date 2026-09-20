@@ -270,7 +270,7 @@ units:
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
   # Issue2394: the original aggregate exhausted240s with37 passing roots.
-  # Preserve whole roots:132 =112 general +14 core +5 pressure +1 reporter.
+  # Preserve whole roots:133 =113 general +14 core +5 pressure +1 reporter.
   # Reservation controls alone take80s; delayed500 keeps its own240s envelope.
   conformance-2394-core:
     packages:
