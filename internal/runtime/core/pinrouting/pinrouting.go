@@ -212,7 +212,7 @@ func classifyOutputConsumer(source semanticview.Source, flowID, eventType string
 		return classification
 	}
 	outputPins := outputPinsForEvent(source, flowID, eventType)
-	graph := CompileConnectGraph(source)
+	graph, census := compileConnectGraphWithCensus(source)
 	for _, pin := range outputPins {
 		if !pin.Sink().Valid() {
 			classification.invalidSink = true
@@ -230,7 +230,7 @@ func classifyOutputConsumer(source semanticview.Source, flowID, eventType string
 			classification.connects = append(classification.connects, graph.MatchingSourceEvent(sourceEvent)...)
 		}
 	}
-	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, eventType) {
+	for _, endpoint := range census.MatchingConsumers(flowID, eventType) {
 		if endpoint.Kind != semanticview.EventEndpointExternal {
 			classification.classes[OutputConsumerSameFlow] = struct{}{}
 			break
