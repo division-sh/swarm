@@ -19,6 +19,7 @@ import (
 func TestChannelOnboardingBoundBeforeParentCheckpointSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
 			fixture := openChannelOnboardingConfirmationFixture(t, backend)
 			for _, verb := range []channelonboarding.Verb{channelonboarding.VerbConnect, channelonboarding.VerbReconnect, channelonboarding.VerbRebind} {
 				for _, publishing := range []bool{false, true} {
