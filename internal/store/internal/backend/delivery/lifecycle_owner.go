@@ -72,6 +72,6 @@ func NewDeliverySQLiteOwner(deadLetters *DeadLetterSQLiteOwner, candidates Compl
 	if now == nil {
 		now = time.Now
 	}
-	adapter := &Adapter{dialect: DialectSQLite, receiverExecution: receiver}
+	adapter := &Adapter{dialect: DialectSQLite, receiverExecution: receiver, sqliteReads: &sqliteDeliveryReads{backend: deadLetters.backend}}
 	return &DeliverySQLiteOwner{DeadLetterSQLiteOwner: deadLetters, backend: deadLetters.backend, candidateRequests: candidates, nowFn: now, receiverAdapter: adapter}, nil
 }

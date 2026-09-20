@@ -43,6 +43,7 @@ type Adapter struct {
 	dialect           Dialect
 	receiverExecution ReceiverExecutionAdmission
 	receiverTarget    ReceiverTargetPersistence
+	sqliteReads       *sqliteDeliveryReads
 }
 
 func NewAdapter(dialect Dialect) (*Adapter, error) {
