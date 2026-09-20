@@ -551,6 +551,12 @@ func unmarshalRoute(label string, raw []byte) (events.RouteIdentity, error) {
 }
 
 func jsonEqual(left, right []byte) bool {
+	// Equality is not admission: identical malformed bytes already compare equal.
+	// Numbers still require the exact-rational path, which can reject even an
+	// identical lexeme. Do not trim here: malformed-whitespace equality is asymmetric.
+	if bytes.Equal(left, right) && !jsonMayContainNumber(left) {
+		return true
+	}
 	leftValue, err := decodeJSON(left)
 	if err != nil {
 		return bytes.Equal(bytes.TrimSpace(left), bytes.TrimSpace(right))
@@ -588,8 +594,8 @@ func decodeJSON(raw []byte) (any, error) {
 	return value, nil
 }
 
-// This only selects a decoder; it never admits JSON. Both paths still validate
-// the complete document. Skip quoted spans without interpreting their contents.
+// Select numeric decoding/equality without admitting JSON. Skip quoted spans
+// without interpreting their contents; numeric values still need exact decoding.
 func jsonMayContainNumber(raw []byte) bool {
 	for i := 0; i < len(raw); i++ {
 		c := raw[i]
