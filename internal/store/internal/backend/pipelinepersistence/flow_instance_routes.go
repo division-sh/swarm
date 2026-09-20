@@ -159,9 +159,10 @@ func upsertSQLiteFlowInstanceRoute(
 	tx *sql.Tx,
 	route runtimebus.FlowInstanceRouteRecord,
 ) error {
-	var materializedFrom sql.NullString
-	if route.EventPattern != "" && route.SubscriberType != "" && route.SubscriberID != "" {
-		err := tx.QueryRowContext(ctx, `
+	return upsertSQLiteFlowInstanceRouteWithExecutor(ctx, &sqliteFlowInstanceRouteExecutor{tx: tx}, route)
+}
+
+const sqliteFlowInstanceRouteSourceSQL = `
 				SELECT rule_id
 				FROM routing_rules
 				WHERE event_pattern = ?
@@ -173,12 +174,9 @@ func upsertSQLiteFlowInstanceRoute(
 				  AND status = 'active'
 				ORDER BY created_at ASC
 				LIMIT 1
-			`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.SourceFlow).Scan(&materializedFrom)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("load sqlite flow instance route source: %w", err)
-		}
-	}
-	result, err := tx.ExecContext(ctx, `
+			`
+
+const sqliteFlowInstanceRouteUpdateSQL = `
 			UPDATE routing_rules
 			SET source_flow = NULLIF(?, ''), materialized_from = ?, status = 'active'
 			WHERE event_pattern = ?
@@ -187,7 +185,102 @@ func upsertSQLiteFlowInstanceRoute(
 			  AND run_id = ?
 			  AND COALESCE(flow_instance, '') = ?
 			  AND is_materialized = TRUE
-		`, route.SourceFlow, materializedFrom, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath)
+		`
+
+const sqliteFlowInstanceRouteInsertSQL = `
+			INSERT INTO routing_rules (
+				event_pattern, subscriber_type, subscriber_id, run_id, flow_instance, source_flow,
+				is_wildcard, is_materialized, materialized_from, status, created_at
+			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), FALSE, TRUE, ?, 'active', ?)
+		`
+
+const sqliteFlowInstanceRouteInactivateSQL = `
+			UPDATE routing_rules
+			SET status = 'inactive'
+			WHERE run_id = ? AND flow_instance = ?
+			  AND is_materialized = TRUE
+			  AND status = 'active'
+		`
+
+// Only topology replacement retains these four native handles, for one call
+// under its existing transaction. Every execution still observes current rows.
+type sqliteFlowInstanceRouteExecutor struct {
+	tx         *sql.Tx
+	statements *[4]*sql.Stmt
+}
+
+func (e *sqliteFlowInstanceRouteExecutor) prepare(ctx context.Context, query string) (*sql.Stmt, error) {
+	var index int
+	switch query {
+	case sqliteFlowInstanceRouteSourceSQL:
+		index = 0
+	case sqliteFlowInstanceRouteUpdateSQL:
+		index = 1
+	case sqliteFlowInstanceRouteInsertSQL:
+		index = 2
+	case sqliteFlowInstanceRouteInactivateSQL:
+		index = 3
+	default:
+		return nil, fmt.Errorf("unsupported sqlite flow-instance route statement")
+	}
+	if e.statements[index] == nil {
+		stmt, err := e.tx.PrepareContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		e.statements[index] = stmt
+	}
+	return e.statements[index], nil
+}
+
+func (e *sqliteFlowInstanceRouteExecutor) close() error {
+	var result error
+	if e.statements != nil {
+		for _, stmt := range e.statements {
+			if stmt != nil {
+				result = errors.Join(result, stmt.Close())
+			}
+		}
+	}
+	return result
+}
+
+func (e *sqliteFlowInstanceRouteExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if e.statements == nil {
+		return e.tx.ExecContext(ctx, query, args...)
+	}
+	stmt, err := e.prepare(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return stmt.ExecContext(ctx, args...)
+}
+
+func (e *sqliteFlowInstanceRouteExecutor) scanSource(ctx context.Context, route runtimebus.FlowInstanceRouteRecord, target *sql.NullString) error {
+	args := []any{route.EventPattern, route.SubscriberType, route.SubscriberID, route.SourceFlow}
+	if e.statements == nil {
+		return e.tx.QueryRowContext(ctx, sqliteFlowInstanceRouteSourceSQL, args...).Scan(target)
+	}
+	stmt, err := e.prepare(ctx, sqliteFlowInstanceRouteSourceSQL)
+	if err != nil {
+		return err
+	}
+	return stmt.QueryRowContext(ctx, args...).Scan(target)
+}
+
+func upsertSQLiteFlowInstanceRouteWithExecutor(
+	ctx context.Context,
+	exec *sqliteFlowInstanceRouteExecutor,
+	route runtimebus.FlowInstanceRouteRecord,
+) error {
+	var materializedFrom sql.NullString
+	if route.EventPattern != "" && route.SubscriberType != "" && route.SubscriberID != "" {
+		err := exec.scanSource(ctx, route, &materializedFrom)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("load sqlite flow instance route source: %w", err)
+		}
+	}
+	result, err := exec.ExecContext(ctx, sqliteFlowInstanceRouteUpdateSQL, route.SourceFlow, materializedFrom, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath)
 	if err != nil {
 		return fmt.Errorf("update sqlite flow instance route %s/%s: %w", route.Identity.Route.ScopeKey, route.Identity.Route.InstanceID, err)
 	}
@@ -198,12 +291,7 @@ func upsertSQLiteFlowInstanceRoute(
 	if updated > 0 {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `
-			INSERT INTO routing_rules (
-				event_pattern, subscriber_type, subscriber_id, run_id, flow_instance, source_flow,
-				is_wildcard, is_materialized, materialized_from, status, created_at
-			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), FALSE, TRUE, ?, 'active', ?)
-		`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath, route.SourceFlow,
+	if _, err := exec.ExecContext(ctx, sqliteFlowInstanceRouteInsertSQL, route.EventPattern, route.SubscriberType, route.SubscriberID, route.Identity.RunID, route.Identity.Route.InstancePath, route.SourceFlow,
 		materializedFrom, time.Now().UTC()); err != nil {
 		return fmt.Errorf("insert sqlite flow instance route %s/%s: %w", route.Identity.Route.ScopeKey, route.Identity.Route.InstanceID, err)
 	}
@@ -314,7 +402,7 @@ func replaceFlowInstanceRouteTopologyTx(
 	tx *sql.Tx,
 	postgres bool,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
-) ([]runtimebus.FlowInstanceRouteRecordSet, error) {
+) (result []runtimebus.FlowInstanceRouteRecordSet, err error) {
 	if tx == nil {
 		return nil, fmt.Errorf("flow-instance route topology replacement requires private transaction ownership")
 	}
@@ -324,6 +412,16 @@ func replaceFlowInstanceRouteTopologyTx(
 	}
 	if len(normalized) == 0 {
 		return nil, nil
+	}
+	var sqliteExec *sqliteFlowInstanceRouteExecutor
+	if !postgres {
+		sqliteExec = &sqliteFlowInstanceRouteExecutor{tx: tx, statements: &[4]*sql.Stmt{}}
+		defer func() {
+			if closeErr := sqliteExec.close(); closeErr != nil && err == nil {
+				result = nil
+				err = fmt.Errorf("close sqlite flow-instance route statements: %w", closeErr)
+			}
+		}()
 	}
 	// This transaction changes only routes. The active-run lock (or SQLite
 	// writer snapshot) remains held while all of that run's owners are replaced.
@@ -358,17 +456,11 @@ func replaceFlowInstanceRouteTopologyTx(
 			}
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE routing_rules
-			SET status = 'inactive'
-			WHERE run_id = ? AND flow_instance = ?
-			  AND is_materialized = TRUE
-			  AND status = 'active'
-		`, set.Identity.RunID, set.Identity.Route.InstancePath); err != nil {
+		if _, err := sqliteExec.ExecContext(ctx, sqliteFlowInstanceRouteInactivateSQL, set.Identity.RunID, set.Identity.Route.InstancePath); err != nil {
 			return nil, fmt.Errorf("inactivate sqlite flow-instance route owner %s: %w", set.Identity.Key(), err)
 		}
 		for _, route := range set.Routes {
-			if err := upsertSQLiteFlowInstanceRoute(ctx, tx, route); err != nil {
+			if err := upsertSQLiteFlowInstanceRouteWithExecutor(ctx, sqliteExec, route); err != nil {
 				return nil, err
 			}
 		}
