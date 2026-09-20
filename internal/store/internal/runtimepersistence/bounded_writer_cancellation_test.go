@@ -28,8 +28,12 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 	} {
 		for _, phase := range []string{"before_admission", "during_sql", "independent_error"} {
 			t.Run(name+"/"+phase, func(t *testing.T) {
-				_, db, cleanup := testutil.StartPostgres(t)
+				dsn, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
+				var orderRead *boundedOrderReadProbe
+				if name == "quiescence_preview" {
+					db, orderRead = openBoundedOrderReadDB(t, dsn)
+				}
 				pg := newTestPostgresStore(t, db)
 				db.SetMaxOpenConns(1)
 				base := testAuthorActivityContext()
@@ -110,9 +114,6 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 					runID := uuid.NewString()
 					requireRunFixtureForTest(t, base, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now.Add(-time.Hour)})
 					table, event = "runs", "UPDATE"
-					if name == "quiescence_preview" {
-						table, event = "author_activity_order", "INSERT"
-					}
 					observe = `SELECT COALESCE(string_agg(status, ',' ORDER BY run_id), '') FROM runs`
 					invoke = func(ctx context.Context) error {
 						out, err := pg.ApplyActiveRunQuiescence(ctx, runquiescence.Request{OperationName: "bounded-writer", DryRun: name == "quiescence_preview", RunIDs: []string{runID}, RequestedAt: now, ReasonCode: runquiescence.ServeAbandonReasonCode, ControlledBy: "test"})
@@ -136,6 +137,12 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 						}
 					}
 				}
+				if orderRead != nil {
+					var count int
+					if err := db.QueryRow(`SELECT count(*) FROM author_activity_order WHERE singleton_id = 1`).Scan(&count); err != nil || count != 1 {
+						t.Fatalf("preview requires the existing ordering row: count=%d err=%v", count, err)
+					}
+				}
 				var before string
 				if err := db.QueryRow(observe).Scan(&before); err != nil {
 					t.Fatal(err)
@@ -151,13 +158,21 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 					t.Fatal(err)
 				}
 				notices := 0
-				if err := conn.Raw(func(raw any) error {
-					pq.SetNoticeHandler(raw.(driver.Conn), func(n *pq.Error) {
-						if n.Message == "bounded-writer-stop" {
-							notices++
-							cancel()
+				onNotice := func(message string) {
+					if message == "bounded-writer-stop" {
+						notices++
+						cancel()
+					}
+				}
+				if orderRead != nil {
+					orderRead.graceful.set(func(phase, query string) error {
+						if phase == "notice" {
+							onNotice(query)
 						}
+						return nil
 					})
+				} else if err := conn.Raw(func(raw any) error {
+					pq.SetNoticeHandler(raw.(driver.Conn), func(n *pq.Error) { onNotice(n.Message) })
 					return nil
 				}); err != nil {
 					t.Fatal(err)
@@ -172,14 +187,36 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 					if phase == "independent_error" {
 						failure = "RAISE EXCEPTION 'bounded-writer-independent-error';"
 					}
-					if _, err := db.Exec(`CREATE FUNCTION bounded_writer_stop() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'bounded-writer-stop'; PERFORM pg_sleep(0.02); ` + failure + ` RETURN NULL; END $$`); err != nil {
-						t.Fatal(err)
-					}
-					if _, err := db.Exec(`CREATE TRIGGER bounded_writer_stop BEFORE ` + event + ` ON ` + table + ` FOR EACH STATEMENT EXECUTE FUNCTION bounded_writer_stop()`); err != nil {
-						t.Fatal(err)
+					if orderRead != nil {
+						if _, err := db.Exec(`CREATE FUNCTION bounded_writer_stop_read(value bigint) RETURNS bigint LANGUAGE plpgsql VOLATILE AS $$ BEGIN RAISE NOTICE 'bounded-writer-stop'; PERFORM pg_sleep(0.02); ` + failure + ` RETURN value; END $$`); err != nil {
+							t.Fatal(err)
+						}
+						orderRead.armed.Store(true)
+					} else {
+						if _, err := db.Exec(`CREATE FUNCTION bounded_writer_stop() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE NOTICE 'bounded-writer-stop'; PERFORM pg_sleep(0.02); ` + failure + ` RETURN NULL; END $$`); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := db.Exec(`CREATE TRIGGER bounded_writer_stop BEFORE ` + event + ` ON ` + table + ` FOR EACH STATEMENT EXECUTE FUNCTION bounded_writer_stop()`); err != nil {
+							t.Fatal(err)
+						}
 					}
 				}
 				err = invoke(ctx)
+				if orderRead != nil {
+					wantQueries := int32(1)
+					if phase == "before_admission" {
+						wantQueries = 0
+					}
+					if got := orderRead.queries.Load(); got != wantQueries {
+						t.Fatalf("preview fault read count=%d want=%d", got, wantQueries)
+					}
+					if phase == "independent_error" {
+						var native *pq.Error
+						if !errors.As(err, &native) || native.Code != "P0001" || native.Message != "bounded-writer-independent-error" {
+							t.Fatalf("native preview SQL error lost: %v", err)
+						}
+					}
+				}
 				if !errors.Is(err, context.Canceled) {
 					t.Fatalf("logical cancellation lost: %v", err)
 				}
@@ -200,7 +237,10 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 				if before != after || beforePID != afterPID {
 					t.Fatalf("rollback state %q -> %q; healthy PID %d -> %d", before, after, beforePID, afterPID)
 				}
-				if phase != "before_admission" {
+				if orderRead != nil {
+					orderRead.armed.Store(false)
+					orderRead.graceful.set(nil)
+				} else if phase != "before_admission" {
 					if _, err := db.Exec(`DROP TRIGGER bounded_writer_stop ON ` + table); err != nil {
 						t.Fatal(err)
 					}
