@@ -125,7 +125,7 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: instance, Identity: req.Instance, Readiness: readiness,
-		OccurredAt: req.OccurredAt,
+		OccurredAt: req.OccurredAt, ActivationVariables: connectRoutePlanActivationVariables(req),
 	}
 	if err := plan.Validate(); err != nil {
 		return runtimepipeline.FlowInstanceActivationPlan{}, err
