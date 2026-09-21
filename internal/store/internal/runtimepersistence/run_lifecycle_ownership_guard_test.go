@@ -236,7 +236,7 @@ func TestReceiverHistoryMinimalRunFixtureClassificationIsExact(t *testing.T) {
 		{"semantic-schema", path, strings.Replace(source, "run_id TEXT PRIMARY KEY)", "run_id TEXT PRIMARY KEY, status TEXT)", 1), false},
 		{"duplicate-schema", path, strings.Replace(source, "use(", "use("+strconv.Quote(schema)+"); use(", 1), false},
 		{"duplicate-insert", path, strings.Replace(source, "use(", "use("+strconv.Quote(insert)+"); use(", 1), false},
-		{"changed-insert", path, strings.Replace(source, insert, "INSERT INTO runs (run_id) VALUES ($1)", 1), false},
+		{"changed-insert", path, strings.Replace(source, insert, "INSERT INTO runs (run_id,bundle_hash) VALUES ($1,$2)", 1), false},
 		{"same-function-extra", path, strings.Replace(source, "use(", "use("+strconv.Quote(extra)+"); use(", 1), false},
 		{"sibling-function", path, source + "func other() { use(" + strconv.Quote(insert) + ") }", false},
 	} {
