@@ -2453,9 +2453,11 @@
         "templateInstanceEmpireStyleFixtureFiles",
         "templateInstanceActivationConfigSubscriberFixtureFiles"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "action_fixtures_migrated_to_typed_connected_creation_exact_file_maps_moved_to_closed_canonicalrouting_owners_assertions_preserved",
       "proofs": [
-        "R37"
+        "TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect",
+        "TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows",
+        "TestCanonicalRoutingRepositoryUsesClosedConstructionAPI"
       ]
     },
     {
