@@ -94,3 +94,26 @@ func validateCatalogSuccessfulDeliveries(full map[string]operatorread.OperatorEv
 	}
 	return nil
 }
+
+func validateCatalogCreationDeliveries(full map[string]operatorread.OperatorEventFull, required map[string]int, conflictEventID string) error {
+	if conflictEventID == "" {
+		return validateCatalogSuccessfulDeliveries(full, required)
+	}
+	conflict, found := full[conflictEventID]
+	if !found || conflict.EventName != "flow.spawn_requested" || len(conflict.Deliveries) != 1 || conflict.Deliveries[0].Status != "dead_letter" || !conflict.Deliveries[0].Terminal {
+		return fmt.Errorf("exact conflicting second root %s did not settle as a dead letter", conflictEventID)
+	}
+	event, err := conflict.EventSnapshot()
+	if err != nil || event.AdmissionClass() != events.EventAdmissionRootIngress {
+		return fmt.Errorf("conflict exception is not an admitted root: %s: %v", conflictEventID, err)
+	}
+	// Receipt assertions independently require the declared conflicting-duplicate
+	// class/detail. Only that exact root may fail, never the creation's children.
+	successful := make(map[string]operatorread.OperatorEventFull, len(full)-1)
+	for id, event := range full {
+		if id != conflictEventID {
+			successful[id] = event
+		}
+	}
+	return validateCatalogSuccessfulDeliveries(successful, required)
+}

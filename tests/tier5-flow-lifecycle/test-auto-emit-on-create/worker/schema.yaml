@@ -3,7 +3,7 @@ mode: template
 instance: instance_id
 initial_state: idle
 terminal_states: [done]
-states: [idle, started, done]
+states: [idle, requested, started, requested_started, awaiting_requested, done]
 auto_emit_on_create:
   event: auto.started
 pins:

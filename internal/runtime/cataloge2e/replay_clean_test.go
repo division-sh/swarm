@@ -372,7 +372,7 @@ func executeCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, backend
 	h.waitForExpectedEmittedEvents(transcript.expected, catalogRuntimePublishTimeout)
 	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
 	assertCatalogRuntimeOutcome(t, h, transcript.expected)
-	assertCatalogReplayFixtureOutcome(t, fixture, h)
+	assertCatalogReplayFixtureOutcome(t, fixture, h, transcript)
 	h.shutdown()
 	projection, err := h.catalogCanonicalProjection(transcript)
 	if err != nil {
@@ -424,7 +424,7 @@ func reopenCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, transcri
 	reopened.waitForExpectedEmittedEvents(transcript.expected, catalogRuntimePublishTimeout)
 	reopened.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
 	assertCatalogRuntimeOutcome(t, reopened, transcript.expected)
-	assertCatalogReplayFixtureOutcome(t, fixture, reopened)
+	assertCatalogReplayFixtureOutcome(t, fixture, reopened, transcript)
 	reopened.shutdown()
 	projection, err := reopened.catalogCanonicalProjection(transcript)
 	if err != nil {
@@ -436,28 +436,51 @@ func reopenCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, transcri
 	transcript.requireUnchanged(t)
 }
 
-func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture, h *runtimeHarness) {
+func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture, h *runtimeHarness, transcript *catalogExecutionTranscript) {
 	t.Helper()
 	var required map[string]int
+	var childPath, childState, conflictEventID string
 	switch fixture.RelativePath {
 	case "tests/tier5-flow-lifecycle/test-create-flow-instance-config":
 		required = map[string]int{"flow.spawn_with_config": 1, "flow.spawned": 1, "worker-flow/ti-5c59b413ad4dd4f8d1321e7a/worker.ready": 1}
-		child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, "worker-flow/ti-5c59b413ad4dd4f8d1321e7a", false)
-		if err != nil || !found {
-			t.Fatalf("load configured worker completion: found=%t err=%v", found, err)
+		childPath, childState = "worker-flow/ti-5c59b413ad4dd4f8d1321e7a", "complete"
+	case "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate":
+		required = map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1, "worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready": 1}
+		childPath, childState = "worker-flow/ti-bc9c6acffc914a7ed5a2793b", "complete"
+		if len(transcript.groups) != 2 || len(transcript.groups[1].steps) != 1 || transcript.groups[1].steps[0].ReceiptFailureClass != "platform.conflicting_duplicate" {
+			t.Fatal("duplicate creation proof lost its exact conflicting second root")
 		}
-		if child.CurrentState != "complete" {
-			t.Fatalf("configured worker state = %q, want complete", child.CurrentState)
-		}
+		conflictEventID = transcript.groups[1].steps[0].eventID
+	case "tests/tier5-flow-lifecycle/test-create-flow-instance":
+		childPath, childState = "worker-flow/ti-878653cc40fdc8ad8e9c2d85", "complete"
+		required = map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1, childPath + "/worker.ready": 1, childPath + "/worker.observed": 1}
+	case "tests/tier5-flow-lifecycle/test-auto-emit-on-create":
+		childPath, childState = "worker/ti-7f54a49b1f8b8765cb7c40ef", "done"
+		required = map[string]int{"flow.created": 1, "worker.requested": 1, childPath + "/auto.started": 1, childPath + "/auto.processed": 1}
+	case "tests/tier11-flow-composition/test-dynamic-flow-instance":
+		childPath, childState = "worker/ti-7561254fcace846571c87052", "complete"
+		required = map[string]int{"spawn.requested": 1, "worker.requested": 1, childPath + "/work.setup": 1, "assign.requested": 1, "work.assign": 1}
+	case "tests/tier9-composition-patterns/test-compose-create-instance-config":
+		childPath, childState = "worker/ti-7561254fcace846571c87052", "ready"
+		required = map[string]int{"spawn.requested": 1, "spawn.done": 1}
 	case "tests/tier5-flow-lifecycle/test-timer-recurring":
 		required = map[string]int{"monitor.started": 1, "monitor.stopped": 1, "timer.tick": 2}
+	}
+	if childPath != "" {
+		child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, childPath, false)
+		if err != nil || !found {
+			t.Fatalf("load %s worker outcome: found=%t err=%v", fixture.Name, found, err)
+		}
+		if child.CurrentState != childState {
+			t.Fatalf("%s worker state = %q, want %q", fixture.Name, child.CurrentState, childState)
+		}
 	}
 	if required != nil {
 		full, err := h.catalogOperatorEvents()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := validateCatalogSuccessfulDeliveries(full, required); err != nil {
+		if err := validateCatalogCreationDeliveries(full, required, conflictEventID); err != nil {
 			t.Fatalf("%s expected-success delivery proof: %v", fixture.Name, err)
 		}
 	}

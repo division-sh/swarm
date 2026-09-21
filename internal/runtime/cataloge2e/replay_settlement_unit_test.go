@@ -132,3 +132,39 @@ func TestCatalogSuccessfulDeliveriesRejectsEquivalentDeadLetters(t *testing.T) {
 		t.Fatal("missing required event accepted")
 	}
 }
+
+func TestCatalogCreationDeliveriesOnlyExemptsExactConflictingRoot(t *testing.T) {
+	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, change := range []string{"exact_conflict", "failed_child", "failed_first_root", "missing_conflict", "conflict_delivered", "child_exception"} {
+		t.Run(change, func(t *testing.T) {
+			root := createdRootEvent(eventtest.UUID("creation-first"), "flow.spawn_requested", "author", "task", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, created)
+			first := replayOperatorEvent(t, root)
+			first.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
+			conflict := replayOperatorEvent(t, createdRootEvent(eventtest.UUID("creation-conflict"), "flow.spawn_requested", "author", "task", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, created.Add(time.Second)))
+			conflict.Deliveries = []operatorread.OperatorEventDelivery{replayProjectionDelivery(t, "conflict")}
+			child := replayOperatorEvent(t, eventtest.Child(eventtest.UUID("creation-child"), events.EventType("flow.spawned"), "worker", "task", json.RawMessage(`{}`), 1, root, events.EventEnvelope{}, created.Add(time.Second)))
+			child.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
+			full := map[string]operatorread.OperatorEventFull{first.EventID: first, conflict.EventID: conflict, child.EventID: child}
+			exception := conflict.EventID
+			switch change {
+			case "failed_child":
+				child.Deliveries[0] = replayProjectionDelivery(t, "unexpected-child-failure")
+			case "failed_first_root":
+				first.Deliveries[0] = replayProjectionDelivery(t, "unexpected-first-root-failure")
+			case "missing_conflict":
+				delete(full, conflict.EventID)
+			case "conflict_delivered":
+				conflict.Deliveries[0] = catalogSettledUnitDelivery()
+			case "child_exception":
+				child.EventName = "flow.spawn_requested"
+				child.Deliveries[0] = replayProjectionDelivery(t, "child")
+				full[child.EventID] = child
+				exception = child.EventID
+			}
+			err := validateCatalogCreationDeliveries(full, map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1}, exception)
+			if (err == nil) != (change == "exact_conflict") {
+				t.Fatalf("creation success obligation: %v, want success=%t", err, change == "exact_conflict")
+			}
+		})
+	}
+}
