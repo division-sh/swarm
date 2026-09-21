@@ -33,8 +33,9 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				ExecutionMode: "live", Role: "worker", Type: "worker", Model: "regular", LLMBackend: "claude_cli",
 				Memory: agentmemory.Authored(true), FlowPath: "review/item",
 				Config:         json.RawMessage(`{"opaque":[7,7.0,null]}`),
-				ReceiverConfig: json.RawMessage(`{"flow_path":"business-path","model":"business-model","mode":"business-mode","constraints":{"memory":"business-memory"},"nested":{"archived_record":{"system_prompt":"business"}},"list":[{"system_prompt":"business"},7,7.0,null]}`),
+				ReceiverConfig: json.RawMessage(`{"flow_path":"business-path","model":"business-model","mode":"business-mode","constraints":{"memory":"business-memory"},"nested":{"archived_record":{"system_prompt":"business"}},"list":[{"system_prompt":"business"},7,7.0,null],"exponent":7e0}`),
 			})
+			wantReceiver := json.RawMessage(`{"flow_path":"business-path","model":"business-model","mode":"business-mode","constraints":{"memory":"business-memory"},"nested":{"archived_record":{"system_prompt":"business"}},"list":[{"system_prompt":"business"},7,7.0,null],"exponent":7.0}`)
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{Config: cfg, Status: "active"}); err != nil {
 				t.Fatal(err)
 			}
@@ -58,7 +59,7 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				}
 				got := agents[0].Config
 				assertJSON(got.Config, cfg.Config)
-				assertJSON(got.ReceiverConfig, cfg.ReceiverConfig)
+				assertJSON(got.ReceiverConfig, wantReceiver)
 				if got.Model != cfg.Model || got.Memory != cfg.Memory || got.FlowPath != cfg.FlowPath || !reflect.DeepEqual(got.Intent, cfg.Intent) || !got.Prompt.Empty() {
 					t.Fatalf("read %d changed runtime authority: %+v", read, got)
 				}
@@ -76,7 +77,7 @@ func TestAgentReceiverConfigNativeNamespacesBothStores(t *testing.T) {
 				t.Fatalf("config envelope keys=%v", fields)
 			}
 			assertJSON(fields["config"], cfg.Config)
-			assertJSON(fields["receiver_config"], cfg.ReceiverConfig)
+			assertJSON(fields["receiver_config"], wantReceiver)
 			for _, tc := range []struct{ name, raw, want string }{
 				{"flattened", `{"flow_path":"business"}`, "requires exactly config and receiver_config"},
 				{"unknown", `{"config":{},"receiver_config":null,"extra":true}`, "requires exactly config and receiver_config"},

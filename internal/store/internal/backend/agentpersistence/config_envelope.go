@@ -26,7 +26,13 @@ func encodeAgentConfigEnvelope(config, receiver json.RawMessage) ([]byte, error)
 	if _, _, err := decodeAgentConfigEnvelope(raw); err != nil {
 		return nil, err
 	}
-	return raw, nil
+	// JSONB normalizes exponent-only doubles to integer tokens. Use the existing
+	// kind-preserving wire owner after strict admission, including both namespaces.
+	var values map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &values); err != nil {
+		return nil, err
+	}
+	return canonicaljson.MarshalPreservingNumberKinds(values)
 }
 
 func decodeAgentConfigEnvelope(raw []byte) (json.RawMessage, json.RawMessage, error) {

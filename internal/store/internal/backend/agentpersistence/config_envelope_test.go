@@ -6,7 +6,35 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 )
+
+func receiverConfigWire(t *testing.T, raw json.RawMessage) json.RawMessage {
+	t.Helper()
+	if len(raw) == 0 {
+		return nil
+	}
+	wire, err := canonicaljson.MarshalPreservingNumberKinds(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wire
+}
+
+func TestPersistedAgentNamespacesNormalizeDoubleTokensBeforeStorage(t *testing.T) {
+	cfg := persistedIntentTestAgent(t)
+	cfg.Config = json.RawMessage(`{"number":7e0}`)
+	cfg.ReceiverConfig = json.RawMessage(`{"number":7e0,"integer":7}`)
+	row, err := ProjectPersistedAgentConfig(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"config":{"number":7.0},"receiver_config":{"integer":7,"number":7.0}}`
+	if string(row.ConfigJSON) != want {
+		t.Fatalf("storage wire can lose double kind in JSONB: got %s want %s", row.ConfigJSON, want)
+	}
+}
 
 func TestPersistedAgentReceiverNamespaceIsInert(t *testing.T) {
 	cases := map[string]string{
@@ -48,7 +76,7 @@ func TestPersistedAgentReceiverNamespaceIsInert(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(got.ReceiverConfig) != raw || string(got.Config) != `{}` {
+			if string(got.ReceiverConfig) != string(receiverConfigWire(t, json.RawMessage(raw))) || string(got.Config) != `{}` {
 				t.Fatalf("namespace or numeric drift: receiver=%s config=%s want=%s", got.ReceiverConfig, got.Config, raw)
 			}
 			if got.Model != cfg.Model || got.Memory != cfg.Memory || got.FlowPath != cfg.FlowPath ||
@@ -157,6 +185,7 @@ func TestPersistedAgentReceiverAdmissionAndOwnedBytes(t *testing.T) {
 		}
 	}
 	for _, receiver := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(`{"nested":[7,7.0,7e0,null,{"system_prompt":"business"}]}`)} {
+		wantReceiver := receiverConfigWire(t, receiver)
 		cfg := persistedIntentTestAgent(t)
 		cfg.Config = json.RawMessage(`{"opaque":[7,7.0,null]}`)
 		cfg.ReceiverConfig = append(json.RawMessage(nil), receiver...)
@@ -180,18 +209,18 @@ func TestPersistedAgentReceiverAdmissionAndOwnedBytes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(second.ReceiverConfig, receiver) || string(second.Config) != `{"opaque":[7,7.0,null]}` {
+		if !bytes.Equal(second.ReceiverConfig, wantReceiver) || string(second.Config) != `{"opaque":[7,7.0,null]}` {
 			t.Fatalf("read changed namespaces: config=%s receiver=%s", second.Config, second.ReceiverConfig)
 		}
 		first.Config[0] = '['
 		if len(first.ReceiverConfig) > 0 {
 			first.ReceiverConfig[0] = '['
 		}
-		if !bytes.Equal(saved, row.ConfigJSON) || !bytes.Equal(second.ReceiverConfig, receiver) || second.Config[0] != '{' {
+		if !bytes.Equal(saved, row.ConfigJSON) || !bytes.Equal(second.ReceiverConfig, wantReceiver) || second.Config[0] != '{' {
 			t.Fatal("hydration aliases row or another read")
 		}
 		row.ConfigJSON[0] = '['
-		if second.Config[0] != '{' || !bytes.Equal(second.ReceiverConfig, receiver) {
+		if second.Config[0] != '{' || !bytes.Equal(second.ReceiverConfig, wantReceiver) {
 			t.Fatal("hydration aliases mutated row")
 		}
 		if _, err := HydratePersistedAgentConfig(row); err == nil {
