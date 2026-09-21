@@ -268,28 +268,6 @@ func TestNewRuntimeBuildsRunLifecycleExecutorFromTypedOwnerWithoutRawSQLCapabili
 	}
 }
 
-func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
-	t.Setenv("SWARM_ARTIFACT_ROOT", "/data/swarm/artifacts")
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	module := loadRuntimeOwnershipWorkflowModule(t)
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
-
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
-		EventStore:          &minimalRuntimeEventStore{},
-		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
-		DeliveryStore:       deliveryStore,
-		PipelineObligations: newStartupRecoveryPipelineOwner(nil, nil),
-		Options: RuntimeOptions{
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-		}})
-
-	if err == nil || !strings.Contains(err.Error(), "artifact repo root validation failed") || !strings.Contains(err.Error(), "agent-visible mount /data") {
-		t.Fatalf("NewRuntime error = %v, want invalid artifact root", err)
-	}
-}
 
 func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)

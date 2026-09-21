@@ -10,7 +10,7 @@ import (
 // ReceiverInitializationConfig preserves the producer's typed key and values.
 // Route-match strings are address evidence, not configuration values.
 func (p ConnectRoutePlan) ReceiverInitializationConfig(source semanticview.Source, payload map[string]any, eventID string) (map[string]any, error) {
-	if p.instanceKey == nil {
+	if p.instanceKey == nil || source == nil {
 		return nil, fmt.Errorf("receiver initialization requires an instance key")
 	}
 	pin, ok := source.FlowInputEventPin(p.receiver.flowID.value, p.receiver.pin.value)

@@ -517,10 +517,9 @@ func assertEventBusTerminalRunRefusal(
 }
 
 type fixtureWorkflowModule struct {
-	source         semanticview.Source
-	workflowNodes  []runtimepipeline.WorkflowNode
-	guardRegistry  runtimepipeline.GuardRegistry
-	actionRegistry runtimepipeline.ActionRegistry
+	source        semanticview.Source
+	workflowNodes []runtimepipeline.WorkflowNode
+	guardRegistry runtimepipeline.GuardRegistry
 }
 
 func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
@@ -535,10 +534,6 @@ func (m *fixtureWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guardRegistry
 }
 
-func (m *fixtureWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return m.actionRegistry
-}
-
 func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.WorkflowModule {
 	t.Helper()
 	source := semanticview.Wrap(bundle)
@@ -547,10 +542,9 @@ func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowCon
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	return &fixtureWorkflowModule{
-		source:         source,
-		workflowNodes:  workflowNodes,
-		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
-		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+		source:        source,
+		workflowNodes: workflowNodes,
+		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}
 }
 
@@ -3689,8 +3683,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 				},
 			},
 		},
-		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
-		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}, bundle
 }
 

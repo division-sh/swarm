@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -52,6 +53,12 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 			}
 			store.bus = bus
 			if tc.reuse {
+				store.setTargetOwnerRoutes(plan.ReceiverRoute(instance.InstancePath, instance.EntityID))
+				store.workflowInstances = []runtimepipeline.WorkflowInstance{{
+					EntityID: instance.EntityID, WorkflowName: "account", InstanceID: instance.InstanceID,
+					StorageRef: instance.InstancePath, EntityType: "account_state", CurrentState: "active", Status: "active",
+					Fields: map[string]any{"account_id": "acct-1"},
+				}}
 				if err := bus.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route())}); err != nil {
 					t.Fatal(err)
 				}

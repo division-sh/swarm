@@ -432,21 +432,7 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 	}
 	relevantEventIDs := catalogCausalEventIDs(t, db, since, publishedIDs)
 	relevantEntityIDs := catalogCausalEntityIDs(t, db, since, publishedIDs, entityID)
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
-		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
-		FROM events
-		WHERE created_at >= $1
-		ORDER BY created_at ASC, event_id ASC
-	`, `
-		SELECT event_id, event_name, COALESCE(NULLIF(json_extract(payload, '$.entity_id'), ''), COALESCE(entity_id, ''))
-		FROM events
-		WHERE created_at >= ?
-		ORDER BY created_at ASC, event_id ASC
-	`), since)
-	if err != nil {
-		t.Fatalf("query emitted events: %v", err)
-	}
-	defer rows.Close()
+	rows := catalogCausalOrder(t, catalogEventsSince(t, db, since))
 	got := make([]string, 0, 8)
 	dedup := !hasDuplicateStrings(want)
 	seen := make(map[string]struct{}, 8)
@@ -457,11 +443,8 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 			wantNames[name] = struct{}{}
 		}
 	}
-	for rows.Next() {
-		var eventID, eventName, payloadEntityID string
-		if err := rows.Scan(&eventID, &eventName, &payloadEntityID); err != nil {
-			t.Fatalf("scan emitted event: %v", err)
-		}
+	for _, row := range rows {
+		eventID, eventName, payloadEntityID := row.ID, row.Name, row.PayloadEntityID
 		if _, ok := publishedIDs[strings.TrimSpace(eventID)]; ok {
 			continue
 		}
@@ -490,9 +473,6 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 		}
 		got = append(got, eventName)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read emitted events: %v", err)
-	}
 	if fmt.Sprintf("%q", got) != fmt.Sprintf("%q", want) {
 		t.Fatalf("emitted_events = %v, want %v", got, want)
 	}
@@ -503,6 +483,41 @@ type catalogStoredEvent struct {
 	Name            string
 	SourceEventID   string
 	PayloadEntityID string
+}
+
+// Creation occurrences retain their trigger's logical timestamp. UUID ordering
+// therefore cannot establish parent-before-child execution order.
+func catalogCausalOrder(t testing.TB, rows []catalogStoredEvent) []catalogStoredEvent {
+	t.Helper()
+	byID := make(map[string]catalogStoredEvent, len(rows))
+	for _, row := range rows {
+		if _, duplicate := byID[row.ID]; duplicate {
+			t.Fatalf("duplicate catalog event %s", row.ID)
+		}
+		byID[row.ID] = row
+	}
+	out := make([]catalogStoredEvent, 0, len(rows))
+	visiting, visited := map[string]bool{}, map[string]bool{}
+	var visit func(catalogStoredEvent)
+	visit = func(row catalogStoredEvent) {
+		if visited[row.ID] {
+			return
+		}
+		if visiting[row.ID] {
+			t.Fatalf("cyclic catalog causality at %s", row.ID)
+		}
+		visiting[row.ID] = true
+		if parent, exists := byID[row.SourceEventID]; exists {
+			visit(parent)
+		}
+		delete(visiting, row.ID)
+		visited[row.ID] = true
+		out = append(out, row)
+	}
+	for _, row := range rows {
+		visit(row)
+	}
+	return out
 }
 
 func catalogEventsSince(t testing.TB, db *sql.DB, since time.Time) []catalogStoredEvent {

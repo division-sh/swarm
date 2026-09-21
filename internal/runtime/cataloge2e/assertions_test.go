@@ -26,6 +26,28 @@ import (
 
 type catalogPersistenceBus struct{}
 
+func TestCatalogCausalOrderPreservesParentsAndIndependentOrder(t *testing.T) {
+	rows := []catalogStoredEvent{
+		{ID: "a-child", SourceEventID: "z-parent"},
+		{ID: "b-independent"},
+		{ID: "z-parent", SourceEventID: "outside-window"},
+		{ID: "grandchild", SourceEventID: "a-child"},
+	}
+	got := catalogCausalOrder(t, rows)
+	want := []string{"z-parent", "a-child", "b-independent", "grandchild"}
+	if len(got) != len(want) {
+		t.Fatalf("event count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].ID != want[i] {
+			t.Fatalf("event[%d] = %s, want %s", i, got[i].ID, want[i])
+		}
+	}
+	if rows[0].ID != "a-child" {
+		t.Fatal("causal ordering mutated input")
+	}
+}
+
 func (catalogPersistenceBus) Publish(context.Context, events.Event) error { return nil }
 func (catalogPersistenceBus) PublishDirect(context.Context, events.Event, []string) error {
 	return nil

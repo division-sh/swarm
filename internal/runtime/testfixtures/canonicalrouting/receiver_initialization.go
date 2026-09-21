@@ -19,7 +19,9 @@ instance_variables:
     active: boolean
     attributes: json
 `)
-	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "          mode: select-or-create\n", `          mode: select-or-create
+	applyClosedReplacement(t, filepath.Join(root, "account/schema.yaml"), "      - event: account.ready\n        resolution:\n          mode: select-or-create\n", `      - event: account.ready
+        resolution:
+          mode: select-or-create
         initialize:
           count: payload.count
           label: payload.label
@@ -27,7 +29,8 @@ instance_variables:
           active: payload.active
           attributes: payload.attributes
 `)
-	applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", `account.ready:
+	for _, event := range []string{"account.setup", "account.ready"} {
+		applyClosedReplacement(t, filepath.Join(root, "producer/events.yaml"), event+":\n  key: account_id\n  account_id: text\n", event+`:
   key: account_id
   account_id: text
   count: integer?
@@ -36,5 +39,6 @@ instance_variables:
   active: boolean?
   attributes: json?
 `)
+	}
 	return root
 }
