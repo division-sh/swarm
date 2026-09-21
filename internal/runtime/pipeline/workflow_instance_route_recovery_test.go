@@ -59,7 +59,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				"parent_flow_id":       "parent",
 				"parent_flow_instance": "parent/root",
 				"parent_entity_id":     parentEntityID,
-				"vertical_id":          "vertical-1",
+				"config":               map[string]any{"vertical_id": "vertical-1"},
 			}
 			configRaw, err := json.Marshal(config)
 			if err != nil {
@@ -181,7 +181,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				}
 			})
 
-			badConfig := `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"` + instancePath + `","flow_path":7}`
+			badConfig := `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"` + instancePath + `","flow_path":7}`
 			updateConfig := "UPDATE flow_instances SET config = "
 			if tc.name == "sqlite" {
 				updateConfig += "? WHERE run_id = ? AND instance_path = ?"
@@ -234,7 +234,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjectionRejectsTerminatedTimest
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	route := runtimeflowidentity.StoredRoute("review", "inst-1", "review/inst-1")
 	flowIdentity := testRunScopedWorkflowRoute(ctx, route)
-	config := `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"review/inst-1","flow_path":"review/inst-1"}`
+	config := `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"review/inst-1","flow_path":"review/inst-1"}`
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
