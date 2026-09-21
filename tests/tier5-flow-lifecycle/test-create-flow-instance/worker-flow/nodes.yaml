@@ -1,9 +1,23 @@
 worker-node:
   execution_type: system_node
   subscribes_to: [worker.observed, flow.spawned]
+  # The agent's observed event may arrive before the creating node delivery.
   event_handlers:
     flow.spawned:
       guard:
         check: payload.worker_id != ''
+      rules:
+        - id: observed_already_settled
+          condition: "_entity.current_state == 'awaiting_spawned'"
+          advances_to: complete
+        - id: await_observed
+          condition: "else"
+          advances_to: awaiting_observed
     worker.observed:
-      advances_to: complete
+      rules:
+        - id: spawned_already_settled
+          condition: "_entity.current_state == 'awaiting_observed'"
+          advances_to: complete
+        - id: await_spawned
+          condition: "else"
+          advances_to: awaiting_spawned

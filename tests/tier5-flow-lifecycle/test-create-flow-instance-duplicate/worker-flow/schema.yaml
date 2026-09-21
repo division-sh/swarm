@@ -3,7 +3,7 @@ mode: template
 instance: worker_id
 initial_state: idle
 terminal_states: [complete]
-states: [idle, complete]
+states: [idle, awaiting_ready, awaiting_spawned, complete]
 auto_emit_on_create:
   event: worker.ready
 pins:
