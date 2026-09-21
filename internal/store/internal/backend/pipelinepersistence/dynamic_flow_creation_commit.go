@@ -26,7 +26,7 @@ func prepareDynamicFlowCreationOccurrenceCommit(
 	if err != nil {
 		return false, err
 	}
-	expectedJSON, err := runtimecanonicaljson.Bytes(expected)
+	expectedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(expected)
 	if err != nil {
 		return false, fmt.Errorf("encode expected dynamic flow readiness %s: %w", req.InstancePath, err)
 	}
@@ -82,11 +82,11 @@ func prepareDynamicFlowCreationOccurrenceCommit(
 	if !topologyReady {
 		return false, fmt.Errorf("dynamic flow runtime creation occurrence requires topology readiness: %s", req.InstancePath)
 	}
-	actual, err := runtimecanonicaljson.Decode(actualJSON)
-	if err != nil {
+	var actual any
+	if err := runtimecanonicaljson.DecodePreservingNumberLexemes(actualJSON, &actual); err != nil {
 		return false, fmt.Errorf("decode persisted dynamic flow readiness %s: %w", req.InstancePath, err)
 	}
-	actualJSON, err = runtimecanonicaljson.Encode(actual)
+	actualJSON, err = runtimecanonicaljson.MarshalPreservingNumberKinds(actual)
 	if err != nil {
 		return false, fmt.Errorf("canonicalize persisted dynamic flow readiness %s: %w", req.InstancePath, err)
 	}
