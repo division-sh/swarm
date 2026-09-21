@@ -51,38 +51,3 @@ func (g GuardInstruction) Kind() InstructionKind {
 func (g GuardInstruction) Executable() bool {
 	return g.Kind() != InstructionUnknown
 }
-
-type ActionInstruction struct {
-	Key         identity.ActionKey
-	Category    string
-	Description string
-	PolicyRef   string
-	Builtin     string
-	Effect      string
-}
-
-func ActionFromContract(entry runtimecontracts.GuardActionEntry) ActionInstruction {
-	return ActionInstruction{
-		Key:         identity.NormalizeActionKey(entry.ID),
-		Category:    strings.TrimSpace(entry.Category),
-		Description: strings.TrimSpace(entry.Description),
-		PolicyRef:   strings.TrimSpace(entry.PolicyRef),
-		Builtin:     strings.TrimSpace(entry.PlatformBuiltin),
-		Effect:      strings.TrimSpace(entry.Effect),
-	}
-}
-
-func (a ActionInstruction) Kind() InstructionKind {
-	switch {
-	case a.Builtin != "":
-		return InstructionBuiltin
-	case a.Effect != "":
-		return InstructionCEL
-	default:
-		return InstructionUnknown
-	}
-}
-
-func (a ActionInstruction) Executable() bool {
-	return a.Kind() != InstructionUnknown
-}

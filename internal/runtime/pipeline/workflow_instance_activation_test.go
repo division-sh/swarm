@@ -145,6 +145,9 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 				Config: map[string]any{
 					"attempt_limit": 3,
 					"policy":        map[string]any{"weights": []any{1, 2, 3}},
+					"nullable":      nil,
+					"instance_id":   "business-key",
+					"flow_path":     "business/path",
 				},
 				StateBuckets: map[string]any{
 					"totals": map[string]any{"accepted": 1},
@@ -208,6 +211,24 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			}
 			if afterReplay.CurrentState != "active" || asInt(afterReplay.Fields["priority"]) != 9 {
 				t.Fatalf("creation replay rewrote progressed workflow: %#v", afterReplay)
+			}
+
+			if !workflowJSONValuesEqual(afterReplay.Config, instance.Config) {
+				t.Fatalf("creation replay changed business config: got %#v, want %#v", afterReplay.Config, instance.Config)
+			}
+			for _, field := range []string{"attempt_limit", "policy", "nullable", "instance_id", "flow_path"} {
+				configConflict := instance
+				configConflict.Config = cloneStringAnyMap(instance.Config)
+				configConflict.Config[field] = "changed"
+				if _, err := store.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef), configConflict, occurredAt); err == nil {
+					t.Fatalf("creation replay accepted changed config field %s", field)
+				} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
+					t.Fatalf("changed config field %s failure = %#v, want conflicting duplicate", field, failure)
+				}
+			}
+			unchanged, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef))
+			if err != nil || !found || !workflowJSONValuesEqual(unchanged.Config, instance.Config) {
+				t.Fatalf("conflicting creation replay rewrote config: found=%v config=%#v error=%v", found, unchanged.Config, err)
 			}
 
 			conflict := instance
