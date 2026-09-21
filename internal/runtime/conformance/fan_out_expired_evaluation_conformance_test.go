@@ -8,7 +8,10 @@ import (
 	"testing"
 	"time"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -18,6 +21,43 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type m35PublicationReceipt struct {
+	eventID string
+	err     error
+}
+
+type m35PublicationLogger struct {
+	conformanceRuntimeLoggerHook
+	receipts chan m35PublicationReceipt
+}
+
+func (l *m35PublicationLogger) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlated map[string]string, detail any, failure *failures.Envelope, durationUS int) error {
+	err := l.conformanceRuntimeLoggerHook.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlated, detail, failure, durationUS)
+	if component == "eventbus" && action == "published" && (eventType == "portfolio/portfolio.opened" || eventType == "portfolio/portfolio.accounts.register.requested") {
+		l.receipts <- m35PublicationReceipt{eventID: eventID, err: err}
+	}
+	return err
+}
+
+func (l *m35PublicationLogger) wait(t *testing.T, ctx context.Context, eventIDs ...string) {
+	t.Helper()
+	pending := make(map[string]bool, len(eventIDs))
+	for _, id := range eventIDs {
+		pending[id] = true
+	}
+	for len(pending) > 0 {
+		select {
+		case receipt := <-l.receipts:
+			if !pending[receipt.eventID] || receipt.err != nil {
+				t.Fatalf("M35 ingress publication diagnostic: event=%s pending=%v err=%v", receipt.eventID, pending, receipt.err)
+			}
+			delete(pending, receipt.eventID)
+		case <-ctx.Done():
+			t.Fatalf("M35 ingress publication diagnostics did not persist: pending=%v err=%v", pending, ctx.Err())
+		}
+	}
+}
 
 // This executor decorates only the exact owner supplied by shared serving. It
 // neither chooses candidates nor acquires claims outside the production caller.
@@ -160,13 +200,18 @@ func TestFanOutProductionCallerM35ExpiredEvaluationOnBothBackends(t *testing.T) 
 				},
 			})
 			runID := uuid.NewString()
+			logger := &m35PublicationLogger{
+				conformanceRuntimeLoggerHook: conformanceRuntimeLoggerHook{logger: runtimepkg.NewRuntimeLogger(selected.(runtimepkg.RuntimeLogPersistence), runtime.posture, runtimepkg.NewRuntimePayloadAdmitter(nil, source, runtime.sourceArtifactFact))},
+				receipts:                     make(chan m35PublicationReceipt, 2),
+			}
+			runtime.bus.SetLoggerHook(logger)
 			ctx, cancel := context.WithTimeout(correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), runID), 15*time.Second)
 			defer cancel()
 			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-m35", runtime.sourceArtifactFact)); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
-			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "m35", "threshold": 75})
-			publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
+			openedID := publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "m35", "threshold": 75})
+			triggerID := publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
 				"portfolio_id": "m35", "account_ids": []map[string]any{{"account_id": "expired-then-fresh", "eng_roles": 7, "gem_score": 7.25}},
 			})
 			var claim fanoutobligation.Claim
@@ -178,6 +223,10 @@ func TestFanOutProductionCallerM35ExpiredEvaluationOnBothBackends(t *testing.T) 
 				t.Fatal("production caller did not reach evaluation gate")
 			}
 			assertExpiredEvaluationState(t, ctx, db, claim, true)
+			// Acknowledged ingress dispatch can still be writing its publication
+			// diagnostic after admitting fan-out work. Join those exact writes
+			// before measuring whether the expired evaluator changes ANY event.
+			logger.wait(t, ctx, openedID, triggerID)
 			var eventsBefore int
 			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, runID).Scan(&eventsBefore); err != nil {
 				t.Fatal(err)
