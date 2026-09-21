@@ -146,21 +146,6 @@ func (s bundleSource) GuardInstructionByID(id string) (runtimeregistry.GuardInst
 	}
 	return runtimeregistry.GuardFromContract(entry), true
 }
-func (s bundleSource) ActionInstructions() []runtimeregistry.ActionInstruction {
-	entries := s.bundle.ActionEntries()
-	out := make([]runtimeregistry.ActionInstruction, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, runtimeregistry.ActionFromContract(entry))
-	}
-	return out
-}
-func (s bundleSource) ActionInstructionByID(id string) (runtimeregistry.ActionInstruction, bool) {
-	entry, ok := s.bundle.ActionEntryByID(id)
-	if !ok {
-		return runtimeregistry.ActionInstruction{}, false
-	}
-	return runtimeregistry.ActionFromContract(entry), true
-}
 func (s bundleSource) FlowSchemaEntries() map[string]runtimecontracts.FlowSchemaDocument {
 	if s.bundle == nil {
 		return nil
