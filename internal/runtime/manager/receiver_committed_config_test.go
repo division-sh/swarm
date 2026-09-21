@@ -45,8 +45,8 @@ func TestTemplateFlowMaterializationValidatesCompleteCommittedConfig(t *testing.
 			if err != nil || plan.Config == nil || !reflect.DeepEqual(plan.Config, tc.config) || len(plan.Agents) != 1 {
 				t.Fatalf("valid committed config changed: %#v %v", plan, err)
 			}
-			if string(plan.Agents[0].Config.Config) != "{}" {
-				t.Fatalf("empty config acquired defaults: %s", plan.Agents[0].Config.Config)
+			if string(plan.Agents[0].Config.ReceiverConfig) != "{}" {
+				t.Fatalf("empty config acquired defaults: %s", plan.Agents[0].Config.ReceiverConfig)
 			}
 		})
 	}
@@ -177,8 +177,8 @@ func TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation(t *testing.T
 				}
 				cfg, found := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/one")
 				want, err := canonicaljson.MarshalPreservingNumberKinds(stored.Config)
-				if err != nil || !found || string(cfg.Config) != string(want) {
-					t.Fatalf("retry lost exact config: %s want %s, %v", cfg.Config, want, err)
+				if err != nil || !found || string(cfg.ReceiverConfig) != string(want) {
+					t.Fatalf("retry lost exact config: %s want %s, %v", cfg.ReceiverConfig, want, err)
 				}
 			})
 		}
@@ -219,8 +219,8 @@ func TestEnsureReceiverConfigPreservesEmptyVersusMissingEvidence(t *testing.T) {
 				t.Fatalf("valid empty evidence: created=%v err=%v", created, err)
 			}
 			cfg, found := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/one")
-			if !found || string(cfg.Config) != "{}" {
-				t.Fatalf("empty evidence changed: %s", cfg.Config)
+			if !found || string(cfg.ReceiverConfig) != "{}" {
+				t.Fatalf("empty evidence changed: %s", cfg.ReceiverConfig)
 			}
 		})
 	}

@@ -299,7 +299,7 @@ func TestSelectedContractReceiverReadinessRejectsUnsupportedConfigDependencyAuth
 	}
 	for _, blueprint := range flow.Agents {
 		var config map[string]any
-		if err := json.Unmarshal(blueprint.Config.Config, &config); err != nil {
+		if err := json.Unmarshal(blueprint.Config.ReceiverConfig, &config); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(config, map[string]any{"worker_id": "one"}) {
