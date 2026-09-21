@@ -3435,6 +3435,28 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	}
 }
 
+type concurrentPlanFinalizationBarrier struct {
+	*testFlowInstanceActivationOwner
+	mu       sync.Mutex
+	arrivals int
+	ready    chan struct{}
+}
+
+func (o *concurrentPlanFinalizationBarrier) FinalizeCommittedFlowInstanceActivation(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+	o.mu.Lock()
+	o.arrivals++
+	if o.arrivals == 2 {
+		close(o.ready)
+	}
+	o.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-o.ready:
+	}
+	return o.testFlowInstanceActivationOwner.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+}
+
 func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameKeyConverges(t *testing.T) {
 	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
 	base := &connectRoutePlanLifecycleStore{
@@ -3443,14 +3465,20 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 		},
 	}
 	store := &connectRoutePlanConcurrentLifecycleStore{connectRoutePlanLifecycleStore: base}
+	// Hold local installation until both publications have committed their
+	// future-owner plans. Otherwise scheduler order may legitimately make the
+	// second publication a reuse rather than exercise this concurrency case.
+	owner := &concurrentPlanFinalizationBarrier{testFlowInstanceActivationOwner: newTestFlowInstanceActivationOwner(store.Activate), ready: make(chan struct{})}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:          source,
-		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		TemplateInstancePlanner: owner,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store.bus = eb
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	eventIDs := []string{uuid.NewString(), uuid.NewString()}
 	errs := make(chan error, len(eventIDs))
 	var wg sync.WaitGroup
@@ -3461,7 +3489,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 			defer wg.Done()
 			evt := connectRoutePlanStaticProducerEvent(eventID,
 				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-race"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-			errs <- eb.Publish(context.Background(), evt)
+			errs <- eb.Publish(ctx, evt)
 		}()
 	}
 	wg.Wait()
