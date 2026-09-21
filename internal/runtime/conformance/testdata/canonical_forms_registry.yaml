@@ -749,7 +749,8 @@ registry_result:
 action_retirement:
   issue: 2307
   ruling: "5754202888"
-  status: grammar_retired_corpus_pending
+  status: grammar_retired_source_dispositions_reviewed
+  proof_boundary: "Source classification only; the action-retirement ledger records exact removed/migrated/preserved authority and any stale test-only classifier explicitly. Named proof roots are not execution receipts; final PR audit owns qualification."
   rows: [handler.container, handler.rules_shape, handler.emit_action_activity, handler.expression, handler.collection_compute, handler.join, handler.mailbox_artifact_repo]
   retired_fields: [action, evidence_target, template, instance_id_from, config_from]
   retired_decoders: [ActionSpec, MailboxWriteSpec, ArtifactRepoSpec, ArtifactRepoFileSpec, ArtifactRepoSchemaSpec, ArtifactRepoOutputSpec, ArtifactRepoLimitsSpec]
