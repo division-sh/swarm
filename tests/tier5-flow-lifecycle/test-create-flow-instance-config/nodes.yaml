@@ -4,12 +4,9 @@ test-node:
   produces: [flow.spawned]
   event_handlers:
     flow.spawn_with_config:
-      action: create_flow_instance
-      template: worker-flow
-      instance_id_from: payload.instance_id
-      config_from:
-        max_retries: payload.config.max_retries
-        timeout_ms: payload.config.timeout_ms
       emit:
         event: flow.spawned
+        fields:
+          worker_id: payload.instance_id
+          config: payload.config
       advances_to: spawned

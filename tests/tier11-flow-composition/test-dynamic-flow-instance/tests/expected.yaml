@@ -15,7 +15,7 @@ expected:
   entity_state: done
   flow_instance_created:
     template: worker
-    instance_id: w-001
+    instance_id: ti-7561254fcace846571c87052
     config:
       worker_id: w-001
       task_label: route-me

@@ -3,4 +3,8 @@ spawn.requested:
   name: string
   priority: integer
   owner: string
-spawn.done: {}
+spawn.done:
+  worker_id: text
+  name: text
+  priority: integer
+  owner: text

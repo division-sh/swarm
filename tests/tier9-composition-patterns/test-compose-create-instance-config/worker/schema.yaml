@@ -1,15 +1,22 @@
 name: worker
 mode: template
-instance: name
+instance: worker_id
 initial_state: ready
 terminal_states: [done]
 states: [ready, done]
 instance_variables:
-  name: Worker name
-  priority: Priority level
-  owner: Owner
+  variables:
+    name: text
+    priority: integer
+    owner: text
 pins:
   inputs:
     events:
+      - event: spawn.done
+        resolution: {mode: create}
+        initialize:
+          name: payload.name
+          priority: payload.priority
+          owner: payload.owner
       - event: task.assign
         source: external

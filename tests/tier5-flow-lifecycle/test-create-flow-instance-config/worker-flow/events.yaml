@@ -1,3 +1,4 @@
 worker.ready:
+  worker_id: text
   max_retries: integer?
   timeout_ms: integer?

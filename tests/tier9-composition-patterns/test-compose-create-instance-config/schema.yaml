@@ -7,5 +7,8 @@ pins:
     events: [spawn.requested]
   outputs:
     events:
-      - event: spawn.done
-        sink: harness
+      - spawn.done
+connect:
+  - event: spawn.done
+    from: .
+    to: worker

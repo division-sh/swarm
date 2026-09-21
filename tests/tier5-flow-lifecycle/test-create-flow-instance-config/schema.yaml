@@ -6,5 +6,8 @@ pins:
     events: [flow.spawn_with_config]
   outputs:
     events:
-      - event: flow.spawned
-        sink: harness
+      - flow.spawned
+connect:
+  - event: flow.spawned
+    from: .
+    to: worker-flow

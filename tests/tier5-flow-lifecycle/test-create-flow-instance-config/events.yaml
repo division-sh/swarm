@@ -1,4 +1,6 @@
 flow.spawn_with_config:
   instance_id: string
   config: WorkerConfig
-flow.spawned: {}
+flow.spawned:
+  worker_id: text
+  config: WorkerConfig

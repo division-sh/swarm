@@ -12,10 +12,10 @@ expected:
     - flow.spawned
   flow_instance_created:
     template: worker-flow
-    instance_id: worker-001
+    instance_id: ti-878653cc40fdc8ad8e9c2d85
     config:
       worker_id: worker-001
-    auto_emitted: worker-flow/worker-001/worker.ready
+    auto_emitted: worker-flow/ti-878653cc40fdc8ad8e9c2d85/worker.ready
 
 conformance:
   disposition: runtime

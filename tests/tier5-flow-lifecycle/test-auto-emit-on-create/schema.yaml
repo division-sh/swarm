@@ -2,7 +2,13 @@ initial_state: idle
 terminal_states: [spawned]
 states: [idle, spawned]
 pins:
+  outputs:
+    events: [worker.requested]
   inputs:
     events:
       - event: flow.created
         source: external
+connect:
+  - event: worker.requested
+    from: .
+    to: worker

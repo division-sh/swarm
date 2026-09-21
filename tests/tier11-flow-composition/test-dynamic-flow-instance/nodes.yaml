@@ -1,15 +1,14 @@
 orchestrator:
   execution_type: system_node
   subscribes_to: [spawn.requested]
-  produces: []
+  produces: [worker.requested]
   event_handlers:
     spawn.requested:
-      action: create_flow_instance
-      template: worker
-      instance_id_from: payload.worker_id
-      config_from:
-        worker_id: payload.worker_id
-        task_label: payload.task_label
+      emit:
+        event: worker.requested
+        fields:
+          worker_id: payload.worker_id
+          task_label: payload.task_label
       advances_to: spawned
 
 assigner:

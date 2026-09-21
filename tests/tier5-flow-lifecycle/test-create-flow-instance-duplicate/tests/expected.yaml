@@ -12,7 +12,7 @@ trigger:
       receipt_failure_class: platform.conflicting_duplicate
       receipt_failure_detail: flow_instance_already_exists
       receipt_failure_attributes:
-        flow_instance: worker-flow/worker-dup
+        flow_instance: worker-flow/ti-bc9c6acffc914a7ed5a2793b
 
 expected:
 
@@ -22,10 +22,10 @@ expected:
     - flow.spawned
   flow_instance_created:
     template: worker-flow
-    instance_id: worker-dup
+    instance_id: ti-bc9c6acffc914a7ed5a2793b
     config:
       worker_id: worker-dup
-    auto_emitted: worker-flow/worker-dup/worker.ready
+    auto_emitted: worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready
 
 conformance:
   disposition: runtime

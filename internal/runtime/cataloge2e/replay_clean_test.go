@@ -464,7 +464,7 @@ func reopenCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, transcri
 func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture, h *runtimeHarness) {
 	t.Helper()
 	if fixture.HasClaim("catalog.runtime.flow_composition") {
-		assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t, h, "work.assign", "worker/w-001", "task-handler")
+		assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t, h, "work.assign", "worker/ti-7561254fcace846571c87052", "task-handler")
 	}
 }
 

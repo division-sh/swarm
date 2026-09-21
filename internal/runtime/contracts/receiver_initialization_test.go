@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"math"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -239,5 +240,59 @@ func TestReceiverInitializationUsesNamedAndMapTypes(t *testing.T) {
 	values["settings"] = map[string]any{}
 	if _, err := config.Admit(values); err == nil {
 		t.Fatal("missing named field admitted")
+	}
+}
+
+func TestReceiverInitializationCreationCorpusLoads(t *testing.T) {
+	root := repoRootForContractsTest(t)
+	for _, fixture := range []string{
+		"tier5-flow-lifecycle/test-create-flow-instance",
+		"tier5-flow-lifecycle/test-create-flow-instance-config",
+		"tier5-flow-lifecycle/test-create-flow-instance-duplicate",
+		"tier5-flow-lifecycle/test-auto-emit-on-create",
+		"tier11-flow-composition/test-dynamic-flow-instance",
+		"tier9-composition-patterns/test-compose-create-instance-config",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			bundle, err := LoadWorkflowContractBundleWithOverrides(root, filepath.Join(root, "tests", fixture), DefaultPlatformSpecFile(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			creates := 0
+			for flowID := range bundle.FlowSchemas {
+				for _, pin := range bundle.FlowInputEventPins(flowID) {
+					if pin.Resolution().Mode == FlowInputResolutionModeCreate {
+						creates++
+					}
+				}
+			}
+			if creates != 1 {
+				t.Fatalf("creating receiver pins=%d, want1", creates)
+			}
+		})
+	}
+}
+
+func TestReceiverVariableAliasesKeepPresenceAndRejectDuplicateDefaults(t *testing.T) {
+	for _, text := range []string{
+		"variables:\n  a: &integer {type: integer, default: 3}\n  b: *integer\n",
+		"variables:\n  a: &integer {type: integer, default: 3}\n  b: {<<: *integer}\n",
+	} {
+		var variables FlowInstanceVariables
+		if err := yaml.Unmarshal([]byte(text), &variables); err != nil {
+			t.Fatal(err)
+		}
+		c, err := CompileReceiverConfiguration(variables, TypeCatalogDocument{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := c.Admit(nil)
+		if err != nil || got["a"] != int64(3) || got["b"] != int64(3) {
+			t.Fatalf("alias default %#v %v", got, err)
+		}
+	}
+	var variables FlowInstanceVariables
+	if err := yaml.Unmarshal([]byte("variables:\n  a: &integer {type: integer, default: 3}\n  b: {<<: *integer, default: 4}\n"), &variables); err == nil {
+		t.Fatal("duplicate merged default accepted")
 	}
 }
